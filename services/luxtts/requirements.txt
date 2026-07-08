@@ -1,0 +1,7 @@
+fastapi>=0.115.0
+uvicorn[standard]>=0.32.0
+soundfile>=0.12.1
+numpy>=1.26.0
+# LuxTTS — install repo after pip install -r requirements.txt:
+#   pip install git+https://github.com/ysharma3501/LuxTTS.git
+# Or clone into services/luxtts/vendor/LuxTTS and pip install -e vendor/LuxTTS

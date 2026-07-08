@@ -1,0 +1,303 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --nx9-bg: #fafaf8;
+  --nx9-ink: #222222;
+  --nx9-brand: #a13d63;
+  --nx9-accent: #5e4d8a;
+  --nx9-ok: #2e8b57;
+  --nx9-warn: #d97706;
+  --nx9-line: #e6e6e6;
+  --nx9-glass: rgba(255, 255, 255, 0.72);
+  --nx9-glass-blur: 16px;
+  --nx9-lane-character: rgba(94, 77, 138, 0.06);
+  --nx9-lane-scene: rgba(161, 61, 99, 0.06);
+  --nx9-lane-gen: rgba(217, 119, 6, 0.06);
+  --nx9-lane-output: rgba(46, 139, 87, 0.06);
+  --nx9-deck-height: 168px;
+  --nx9-dock-width: 48px;
+  --nx9-rail-width: 280px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--nx9-bg);
+  color: var(--nx9-ink);
+  font-family: 'DM Sans', system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* React Flow performance overrides */
+.nx9-flow.intensive .react-flow__edge-path {
+  animation: none !important;
+  stroke-dasharray: none !important;
+}
+
+.nx9-flow.intensive.is-dragging .nx9-socket,
+.nx9-flow.intensive.is-dragging .nx9-block-toolbar {
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* 滚轮在节点内（.nowheel）时由 React Flow 跳过缩放，交给节点内 overflow 区域滚动 */
+.nx9-flow .nowheel .nx9-scroll,
+.nx9-flow .nowheel [class*='overflow-y-auto'] {
+  overscroll-behavior: contain;
+}
+
+.nx9-flow .react-flow__pane {
+  cursor: grab;
+}
+
+.nx9-flow .react-flow__pane:active {
+  cursor: grabbing;
+}
+
+.nx9-flow .react-flow__pane.selection {
+  cursor: crosshair;
+}
+
+.nx9-flow .react-flow__edge.selectable:hover .react-flow__edge-path,
+.nx9-flow .react-flow__edge.selected .react-flow__edge-path {
+  stroke: var(--nx9-brand);
+  stroke-width: 2;
+}
+
+.nx9-flow .react-flow__edge.selectable {
+  cursor: pointer;
+}
+
+.nx9-flow .react-flow__minimap {
+  border-radius: 12px;
+  overflow: hidden;
+  border: 1px solid var(--nx9-line);
+}
+
+.nx9-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: #ccc transparent;
+}
+
+.nx9-scroll::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.nx9-scroll::-webkit-scrollbar-thumb {
+  background: #ccc;
+  border-radius: 999px;
+}
+
+/* Canvas context menus */
+.nx9-context-menu {
+  background: #fff;
+  border: 1px solid var(--nx9-line);
+  border-radius: 12px;
+  box-shadow: 0 16px 40px rgba(34, 34, 34, 0.12);
+  overflow: hidden;
+}
+
+.nx9-context-menu__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 12px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #fff;
+  background: linear-gradient(90deg, var(--nx9-brand), var(--nx9-accent));
+  border-bottom: 1px solid var(--nx9-line);
+}
+
+.nx9-context-menu__item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 12px;
+  border: none;
+  background: transparent;
+  color: var(--nx9-ink);
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.nx9-context-menu__item:hover:not(:disabled),
+.nx9-context-menu__item:focus-visible:not(:disabled) {
+  background: color-mix(in srgb, var(--nx9-brand) 10%, #fff);
+}
+
+.nx9-context-menu__item:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.nx9-context-menu__item--compact {
+  padding: 6px 8px;
+  font-size: 11px;
+}
+
+.nx9-context-menu__item--danger {
+  color: #b42318;
+}
+
+.nx9-context-menu__item--danger:hover:not(:disabled) {
+  background: color-mix(in srgb, #b42318 10%, #fff);
+}
+
+.nx9-context-menu__divider {
+  height: 1px;
+  margin: 4px 0;
+  background: var(--nx9-line);
+}
+
+.nx9-menu-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 6px;
+  background: color-mix(in srgb, currentColor 12%, #fff);
+  flex-shrink: 0;
+}
+
+/* Stage Deck Canvas namespace */
+.nx9-stage-deck {
+  transition: opacity 300ms ease, transform 300ms ease;
+}
+
+.nx9-stage-deck--explore,
+.nx9-stage-deck--produce,
+.nx9-stage-deck--review {
+  opacity: 1;
+}
+
+.nx9-stage-deck--review .react-flow__edge-path {
+  opacity: 0.2;
+}
+
+.nx9-take-rail {
+  pointer-events: auto;
+}
+
+.nx9-card-highlight {
+  animation: nx9-card-highlight-fade 3s ease-out forwards;
+}
+
+.nx9-card-stale {
+  border-color: var(--nx9-warn, #d97706) !important;
+  box-shadow: inset 3px 0 0 var(--nx9-warn, #d97706);
+}
+
+@keyframes nx9-tour-enter {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.nx9-pipeline-capsule button:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--nx9-brand) 40%, transparent);
+  outline-offset: 2px;
+}
+
+@keyframes nx9-card-highlight-fade {
+  0%,
+  20% {
+    box-shadow: 0 0 0 4px color-mix(in srgb, var(--nx9-brand, #5e4d8a) 50%, transparent);
+  }
+  100% {
+    box-shadow: 0 0 0 0 transparent;
+  }
+}
+
+.nx9-stage-deck.intensive .react-flow__edge-path {
+  animation: none !important;
+}
+
+.nx9-stage-deck.intensive.is-dragging .nx9-socket {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.nx9-stage-deck .nowheel .nx9-scroll,
+.nx9-stage-deck .nowheel [class*='overflow-y-auto'] {
+  overscroll-behavior: contain;
+}
+
+.nx9-stage-deck .react-flow__pane {
+  cursor: grab;
+}
+
+.nx9-stage-deck .react-flow__pane:active {
+  cursor: grabbing;
+}
+
+.nx9-stage-deck .react-flow__edge.selectable:hover .react-flow__edge-path,
+.nx9-stage-deck .react-flow__edge.selected .react-flow__edge-path {
+  stroke-width: 3;
+}
+
+.nx9-stage-deck .react-flow__minimap {
+  border-radius: 12px;
+  overflow: hidden;
+  border: 1px solid var(--nx9-line);
+}
+
+.nx9-deck-enter {
+  animation: nx9-deck-slide-up 200ms ease-out;
+}
+
+.nx9-card-pending {
+  animation: nx9-card-pulse 1.2s ease-in-out infinite;
+}
+
+.nx9-mode-capsule {
+  transition: all 300ms ease;
+}
+
+@keyframes nx9-cascade-flow {
+  to {
+    stroke-dashoffset: -28;
+  }
+}
+
+@keyframes nx9-deck-slide-up {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes nx9-card-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(161, 61, 99, 0.2);
+  }
+  50% {
+    box-shadow: 0 0 0 6px rgba(161, 61, 99, 0.08);
+  }
+}

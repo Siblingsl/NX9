@@ -1,0 +1,7 @@
+加skills功能 https://github.com/Emily2040/seedance-2.0/blob/main/docs/README.zh.md
+加ai配音 https://github.com/jamiepine/voicebox
+
+参考这个，https://github.com/calesthio/OpenMontage，牛逼
+
+
+故事板功能要做

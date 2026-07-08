@@ -1,0 +1,46 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id         String      @id @default(cuid())
+  name       String
+  email      String?     @unique
+  createdAt  DateTime    @default(now())
+  workspaces Workspace[]
+  usage      UsageEvent[]
+}
+
+model Workspace {
+  id        String   @id
+  title     String
+  ownerId   String
+  owner     User     @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  payload   String
+  blockCount Int     @default(0)
+  shotCount  Int     @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([ownerId])
+}
+
+model UsageEvent {
+  id        String   @id @default(cuid())
+  userId    String?
+  user      User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  kind      String
+  model     String?
+  units     Float    @default(1)
+  metadata  String?
+  createdAt DateTime @default(now())
+
+  @@index([kind])
+  @@index([createdAt])
+  @@index([userId])
+}

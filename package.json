@@ -1,0 +1,26 @@
+{
+  "name": "nx9",
+  "private": true,
+  "version": "0.1.0",
+  "description": "NX9 — AI node workflow studio (Web-first, Electron-ready)",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "dev": "npm run build -w @nx9/shared && concurrently -n server,web -c magenta,cyan \"npm run dev -w @nx9/server\" \"npm run dev -w @nx9/web\"",
+    "dev:server": "npm run dev -w @nx9/server",
+    "dev:web": "npm run dev -w @nx9/web",
+    "build": "npm run build -w @nx9/shared && npm run build -w @nx9/server && npm run build -w @nx9/web",
+    "typecheck": "npm run typecheck -w @nx9/shared && npm run typecheck -w @nx9/server && npm run typecheck -w @nx9/web",
+    "luxtts:install": "powershell -ExecutionPolicy Bypass -File services/luxtts/install.ps1",
+    "luxtts:start": "powershell -ExecutionPolicy Bypass -File services/luxtts/start.ps1"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.0",
+    "typescript": "^5.7.0"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
