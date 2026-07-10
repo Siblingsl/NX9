@@ -98,7 +98,7 @@ export function PlaybookLauncherOverlay({ onStartPlaybook, onOpenLibrary, onDism
             <Sparkles size={20} />
           </span>
           <div>
-            <h2 className="text-base font-semibold text-ink">选择生产剧本</h2>
+            <h2 className="text-base font-semibold text-ink">开始创作你的 AI 漫剧</h2>
             <p className="text-sm text-ink/55 mt-0.5">
               按步骤引导完成创作流程，无需操心模块搭建
             </p>

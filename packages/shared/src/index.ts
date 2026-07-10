@@ -368,3 +368,9 @@ export {
   layoutPipeline,
   autoFitBounds,
 } from './engine/layout-pipeline';
+
+export {
+  translate,
+  LEXICON,
+  BANNED_TERMS,
+} from './i18n/user-lexicon';

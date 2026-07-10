@@ -1,6 +1,7 @@
 import { X, Key, Save, Radio, Image as ImageIcon } from 'lucide-react';
 import { useEffect, useState, useCallback, useRef } from 'react';
 import type { AppSettings, CanvasAppearance, CanvasGridStyle, CanvasThemeMode } from '@nx9/shared';
+import { translate } from '@nx9/shared';
 import { useCredentialVault } from '../stores/credential-vault';
 import { useStageDeckFlag } from '../stores/stage-deck-flag';
 import { useWorkspaceDocument } from '../stores/workspace-document';
@@ -48,9 +49,9 @@ export function SettingsDrawer() {
         {/* 分区 Tab */}
         <div className="flex border-b border-line">
           {([
-            { id: 'connection' as const, label: '连接' },
-            { id: 'canvas' as const, label: '画布' },
-            { id: 'prefs' as const, label: '偏好' },
+            { id: 'connection' as const, label: translate('连接') },
+            { id: 'canvas' as const, label: translate('画布') },
+            { id: 'prefs' as const, label: translate('偏好') },
           ]).map(({ id, label }) => (
             <button
               key={id}
@@ -440,27 +441,56 @@ function PrefsSettings({
 }) {
   return (
     <>
-      <label className="flex items-center gap-2 text-sm">
-        <input
-          type="checkbox"
-          checked={draft.preferences?.reduceMotion ?? false}
-          onChange={(e) =>
-            setDraft({
-              ...draft,
-              preferences: {
-                snapToGrid: draft.preferences?.snapToGrid ?? true,
-                gridSize: draft.preferences?.gridSize ?? 20,
-                autoSaveIntervalMs: draft.preferences?.autoSaveIntervalMs ?? 700,
-                showBlockIndex: draft.preferences?.showBlockIndex ?? true,
-                reduceMotion: e.target.checked,
-                stageDeckCanvas: draft.preferences?.stageDeckCanvas,
-              },
-            })
-          }
-        />
-        减少动画（提升大图性能）
-      </label>
+      <PrefsCheckbox
+        draft={draft} setDraft={setDraft}
+        field="autoAdvanceEnabled" defaultVal={true}
+        label="步骤完成自动前进"
+      />
+      <PrefsCheckbox
+        draft={draft} setDraft={setDraft}
+        field="reduceMotion" defaultVal={false}
+        label="减少动画（提升大图性能）"
+      />
+      <PrefsCheckbox
+        draft={draft} setDraft={setDraft}
+        field="taskNotificationsEnabled" defaultVal={true}
+        label="生成任务通知"
+      />
+      <PrefsCheckbox
+        draft={draft} setDraft={setDraft}
+        field="showEngineDebug" defaultVal={false}
+        label="显示 Engine 调试信息"
+      />
     </>
+  );
+}
+
+function PrefsCheckbox({ draft, setDraft, field, defaultVal, label }: {
+  draft: AppSettings;
+  setDraft: (v: AppSettings) => void;
+  field: keyof NonNullable<AppSettings['preferences']>;
+  defaultVal: boolean;
+  label: string;
+}) {
+  const prefs = draft.preferences;
+  const checked = Boolean(prefs?.[field] ?? defaultVal);
+  return (
+    <label className="flex items-center gap-2 text-sm mt-3">
+      <input
+        type="checkbox"
+        checked={checked}
+        onChange={(e) =>
+          setDraft({
+            ...draft,
+            preferences: {
+              ...draft.preferences!,
+              [field]: e.target.checked,
+            },
+          })
+        }
+      />
+      {label}
+    </label>
   );
 }
 

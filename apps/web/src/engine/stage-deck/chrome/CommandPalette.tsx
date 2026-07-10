@@ -364,8 +364,9 @@ export function CommandPalette({ open, onClose, onAlign }: CommandPaletteProps) 
   );
 }
 
-export function useCommandPaletteHotkey(onOpen: () => void) {
+export function useCommandPaletteHotkey(onOpen: () => void, enabled?: boolean) {
   useEffect(() => {
+    if (enabled === false) return;
     const onKey = (e: KeyboardEvent) => {
       const tag = (e.target as HTMLElement)?.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
@@ -380,5 +381,5 @@ export function useCommandPaletteHotkey(onOpen: () => void) {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [onOpen]);
+  }, [onOpen, enabled]);
 }

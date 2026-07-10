@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { useWorkspaceDocument } from './workspace-document';
 
 export type RunPhase = 'idle' | 'running' | 'cancelled';
 
@@ -32,8 +33,9 @@ export const useExecutionQueue = create<ExecutionQueueState>((set, get) => ({
   activeBlockIds: new Set(),
   taskId: null,
 
-  startBatch: (blockIds, taskId = null) =>
-    set({
+  startBatch: (blockIds, taskId = null) => {
+    useWorkspaceDocument.getState().setProjectStatus('generating');
+    return set({
       phase: 'running',
       progress: { done: 0, total: blockIds.length },
       currentBlockId: null,
@@ -41,7 +43,8 @@ export const useExecutionQueue = create<ExecutionQueueState>((set, get) => ({
       error: null,
       activeBlockIds: new Set(blockIds),
       taskId,
-    }),
+    });
+  },
 
   reportProgress: (patch) =>
     set((s) => ({

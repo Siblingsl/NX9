@@ -7,9 +7,11 @@ import { useWorkspaceDocument } from '../stores/workspace-document';
 import { useFlowRuntime } from '../stores/flow-runtime';
 import { useContextRailUi } from '../engine/stage-deck/stores/context-rail-ui';
 import { useToast } from '../stores/toast';
+import { useCredentialVault } from '../stores/credential-vault';
 
 export function usePlaybookAutoAdvance() {
   const session = useWorkspaceDocument((s) => s.playbookSession);
+  const autoAdvanceEnabled = useCredentialVault((s) => s.settings?.preferences?.autoAdvanceEnabled ?? true);
   const storyboard = useWorkspaceDocument((s) => s.storyboard);
   const voice = useWorkspaceDocument((s) => s.voice);
   const scriptPlan = useWorkspaceDocument((s) => s.scriptPlan);
@@ -23,7 +25,7 @@ export function usePlaybookAutoAdvance() {
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
-    if (!session || session.dismissed) return;
+    if (!session || session.dismissed || !autoAdvanceEnabled) return;
     if (timerRef.current) clearTimeout(timerRef.current);
 
     timerRef.current = setTimeout(() => {
@@ -58,12 +60,13 @@ export function usePlaybookAutoAdvance() {
         playbookSession: session,
       };
 
-      const prevSession = { ...session };
       advance(ctx);
       prevStepRef.current = curId;
 
+      const latestSession = useWorkspaceDocument.getState().playbookSession;
+      const latestStatus = useWorkspaceDocument.getState().projectStatus;
       const def = PLAYBOOK_DEFINITIONS.find((p) => p.id === session.playbookId);
-      if (def) {
+      if (def && latestSession) {
         const oldIdx = def.steps.findIndex((s) => s.id === prevId);
         const newIdx = def.steps.findIndex((s) => s.id === curId);
         if (newIdx > oldIdx && oldIdx >= 0) {
@@ -90,11 +93,17 @@ export function usePlaybookAutoAdvance() {
               : undefined);
           }
         }
+        const lastStepIdx = def.steps.length - 1;
+        const lastDone = latestSession.completedStepIds.includes(def.steps[lastStepIdx].id);
+        if (lastDone && latestStatus !== 'exported') {
+          const isExportStep = def.steps[lastStepIdx].readinessKey === 'export_ready';
+          useWorkspaceDocument.getState().setProjectStatus(isExportStep ? 'exported' : 'completed');
+        }
       }
     }, 500);
 
     return () => {
       if (timerRef.current) clearTimeout(timerRef.current);
     };
-  }, [session, storyboard, voice, scriptPlan, environments, characters, runtime, advance, requestRailTab, pushToast]);
+  }, [session, storyboard, voice, scriptPlan, environments, characters, runtime, advance, requestRailTab, pushToast, autoAdvanceEnabled]);
 }

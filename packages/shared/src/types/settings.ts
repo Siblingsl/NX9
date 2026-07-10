@@ -20,6 +20,10 @@ export interface AppPreferences {
   autoSaveIntervalMs: number;
   showBlockIndex: boolean;
   reduceMotion: boolean;
+  workflowEnabled?: boolean;
+  autoAdvanceEnabled?: boolean;
+  taskNotificationsEnabled?: boolean;
+  showEngineDebug?: boolean;
   /** Use Stage Deck Canvas instead of legacy FlowSurface */
   stageDeckCanvas?: boolean;
   /** 默认图像质量 */

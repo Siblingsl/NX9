@@ -36,7 +36,8 @@ function MotionStoryBlock(props: NodeProps) {
   const storyboardTitle = useWorkspaceDocument((s) => s.storyboard.title);
   const linkedShotId = props.data?.linkedShotId as string | undefined;
   const linkedShot = linkedShotId ? allShots.find((s) => s.id === linkedShotId) : undefined;
-  const shots = linkedShot ? [linkedShot] : allShots;
+  const scopeShots = props.data?.scopeShots as string[] | undefined;
+  const shots = linkedShot ? [linkedShot] : scopeShots ? allShots.filter((s) => scopeShots.includes(s.id)) : allShots;
 
   const bridgeSuffix = useMemo(() => {
     const bridgeRefs: string[] = [];

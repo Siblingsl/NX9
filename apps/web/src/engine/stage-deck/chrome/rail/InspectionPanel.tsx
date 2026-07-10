@@ -85,7 +85,7 @@ export function InspectionPanel() {
         label: '镜头关联机位',
         ok: has_camera_blocks(ctx),
         hint: '为镜头关联导演台/3D 机位模块',
-        action: () => requestRailTab('inspector'),
+        action: () => requestRailTab('storyboard'),
       },
       ...(unlinkedShots.length > 0
         ? [{

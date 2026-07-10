@@ -28,11 +28,13 @@ export function ContextRail({ selectedBlockId }: ContextRailProps) {
   const isDark = theme === 'dark';
   const railBg = isDark ? 'bg-[#222]' : 'bg-white';
   const railBorder = isDark ? 'border-white/10' : 'border-line';
+
+  const hiddenTabs: ContextRailTab[] = ['inspect', 'tasks'];
+
   const dragRef = useRef(false);
   const startXRef = useRef(0);
   const startWidthRef = useRef(RAIL_DEFAULT);
 
-  // 拖拽逻辑
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
     dragRef.current = true;
@@ -59,6 +61,12 @@ export function ContextRail({ selectedBlockId }: ContextRailProps) {
     document.body.style.cursor = '';
     document.body.style.userSelect = '';
   }, [handleMouseMove]);
+
+  useEffect(() => {
+    if (hiddenTabs.includes(tab)) {
+      setTab('inspector');
+    }
+  }, [hiddenTabs, tab]);
 
   useEffect(() => {
     if (!requestedTab) return;
@@ -90,7 +98,6 @@ export function ContextRail({ selectedBlockId }: ContextRailProps) {
       className={`nx9-context-rail shrink-0 border-l ${railBorder} ${railBg} flex flex-col h-full overflow-hidden relative ${isDark ? 'nx9-rail-dark' : ''}`}
       style={{ width: railWidth }}
     >
-      {/* 拖拽手柄 */}
       <div
         className="absolute left-0 top-0 bottom-0 w-2 cursor-col-resize z-10 group"
         onMouseDown={handleMouseDown}
@@ -101,7 +108,7 @@ export function ContextRail({ selectedBlockId }: ContextRailProps) {
       <RailShell
         tabs={
           <div className={`flex min-w-0 items-center border-b ${railBorder}`}>
-            <RailTabs active={tab} onChange={setTab} />
+            <RailTabs active={tab} onChange={setTab} hiddenTabs={hiddenTabs} />
             <button
               type="button"
               onClick={() => {

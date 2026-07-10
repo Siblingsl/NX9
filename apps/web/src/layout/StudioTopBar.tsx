@@ -11,6 +11,7 @@ import {
 import { ModeCapsule } from '../engine/stage-deck/chrome/ModeCapsule';
 import { ProductionWall } from '../engine/stage-deck/chrome/ProductionWall';
 import { useWorkspaceDocument } from '../stores/workspace-document';
+import { useTranslate } from '../hooks/use-translate';
 import { StudioOverflowMenu } from './StudioOverflowMenu';
 import { StudioDropdownPanel } from './StudioDropdownPanel';
 import { isDesktop } from '../platform/runtime-bridge';
@@ -90,6 +91,8 @@ export function StudioTopBar({
   const running = batchPhase === 'running';
   const playbookSession = useWorkspaceDocument((s) => s.playbookSession);
   const hasActivePlaybook = playbookSession && !playbookSession.dismissed;
+  const projectStatus = useWorkspaceDocument((s) => s.projectStatus);
+  const t = useTranslate();
 
   return (
     <header className="nx9-topbar shrink-0 border-b border-line/80 bg-white/90 backdrop-blur-md">
@@ -104,7 +107,7 @@ export function StudioTopBar({
               NX9 Studio
             </h1>
             <p className="text-[10px] text-ink/45 mt-0.5 leading-none">
-              {isDesktop() ? 'Desktop' : 'Web'} · AI Workflow
+              {t(isDesktop() ? 'Desktop' : 'Web')} · {t('AI Workflow')}
             </p>
           </div>
         </div>
@@ -120,9 +123,12 @@ export function StudioTopBar({
         {/* Project status badge */}
         {hasActivePlaybook && (
           <span className="hidden md:inline-flex items-center gap-1 rounded-full bg-brand/10 text-brand px-2 py-0.5 text-[10px] font-medium">
-            {playbookSession!.workflowStatus === 'done' ? '已完成' :
-             playbookSession!.workflowStatus === 'error' ? '异常' :
-             playbookSession!.workflowStatus === 'running' ? '生成中' :
+            {projectStatus === 'draft' ? '草稿' :
+             projectStatus === 'generating' ? '生成中' :
+             projectStatus === 'paused' ? '已暂停' :
+             projectStatus === 'completed' ? '已完成' :
+             projectStatus === 'exported' ? '已导出' :
+             projectStatus === 'archived' ? '已归档' :
              '进行中'}
           </span>
         )}

@@ -95,8 +95,6 @@ import { computeGroupBounds } from './stage-deck/canvas/SceneGroup';
 import { StageDeckInteractionBridge } from './stage-deck/StageDeckInteractionBridge';
 import { normalizeDirectorProject } from '@nx9/director3d';
 import { useDirector3dUi } from '../stores/director3d-ui';
-import { useCanvasView } from './stage-deck/stores/canvas-view';
-import { StoryboardCanvasView } from './stage-deck/canvas/StoryboardCanvasView';
 
 export interface FlowSurfaceProps {
   workspaceId: string;
@@ -206,15 +204,13 @@ const FlowSurfaceInner = memo(function FlowSurfaceInner({
 
   const viewMode = useViewMode((s) => s.mode);
   const hydrateViewMode = useViewMode((s) => s.hydrate);
-  const canvasView = useCanvasView((s) => s.view);
-  const setCanvasView = useCanvasView((s) => s.setView);
   const setDeckSelection = useDeckUi((s) => s.setSelection);
   const hydrateTakes = useTakeStore((s) => s.hydrate);
   const stageDeckNodeTypes = useStageDeckNodeTypes();
 
   useCommandPaletteHotkey(() => {
     if (isStageDeck) setCommandOpen(true);
-  });
+  }, isStageDeck);
 
   nodesRef.current = nodes;
   edgesRef.current = edges;
@@ -1639,11 +1635,15 @@ const FlowSurfaceInner = memo(function FlowSurfaceInner({
             const def = PLAYBOOK_DEFINITIONS.find((p) => p.id === playbookId);
             if (!def) return;
             useWorkspaceDocument.getState().startPlaybook(playbookId);
+            useWorkspaceDocument.getState().setProjectStatus('draft');
             if (def.bootstrapTemplates.length > 0) {
               void loadWorkflowTemplate(def.bootstrapTemplates[0].templateId, 'replace');
             }
+            const first = def.steps[0];
+            if (first?.primaryAction.type === 'open_rail') {
+              useContextRailUi.getState().requestTab(first.primaryAction.tab, first.primaryAction.sub ? { librarySub: first.primaryAction.sub as any } : undefined);
+            }
             setRecipePickerDismissed(true);
-            useCanvasView.getState().autoSwitch();
             setTimeout(() => {
               void fitView({ duration: 300, padding: 0.2 });
             }, 200);
@@ -1656,22 +1656,6 @@ const FlowSurfaceInner = memo(function FlowSurfaceInner({
       )}
       {isStageDeck && ready && <CanvasFlowRail />}
 
-      {isStageDeck && ready && (
-        <button
-          type="button"
-          onClick={() => setCanvasView(canvasView === 'flow' ? 'storyboard' : 'flow')}
-          className="absolute top-14 right-4 z-20 flex items-center gap-1 rounded-xl border border-line bg-white/90 px-3 py-1.5 text-[11px] text-ink/60 shadow-sm hover:border-brand/30 hover:text-brand transition-colors"
-          title={canvasView === 'flow' ? '切换到故事板视图' : '切换到流程图视图'}
-        >
-          {canvasView === 'flow' ? '📋 故事板' : '🔀 流程图'}
-        </button>
-      )}
-
-      {isStageDeck && ready && canvasView === 'storyboard' && (
-        <StoryboardCanvasView />
-      )}
-
-      {!isStageDeck || canvasView !== 'storyboard' ? (
       <ReactFlow
         nodes={nodes}
         edges={edges}
@@ -1749,7 +1733,6 @@ const FlowSurfaceInner = memo(function FlowSurfaceInner({
             />
         )}
       </ReactFlow>
-      ) : null}
 
       {isStageDeck && lensMenu && (
         <LensMenu

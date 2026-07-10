@@ -11,6 +11,7 @@ import type {
   EnvironmentProfile,
   PlaybookId,
   PlaybookSession,
+  ProjectStatus,
   ScriptPlanPayload,
   StoryboardPayload,
   StoryboardShot,
@@ -47,6 +48,7 @@ interface WorkspaceDocumentState {
   scriptPlan: ScriptPlanPayload | null;
   environments: EnvironmentLibraryPayload | null;
   playbookSession: PlaybookSession | null;
+  projectStatus: ProjectStatus;
   hydrated: boolean;
   hydrate: (workspaceId: string, payload: WorkspacePayload) => void;
   reset: () => void;
@@ -74,7 +76,9 @@ interface WorkspaceDocumentState {
   skipStep: (stepId: string) => void;
   markStepFailed: (stepId: string) => void;
   markStepWaiting: (stepId: string) => void;
+  setProjectStatus: (status: ProjectStatus) => void;
   dismissPlaybook: () => void;
+  jumpPlaybookStep: (stepId: string) => void;
   getSnapshotForSave: () => {
     storyboard: StoryboardPayload;
     voice: VoicePayload;
@@ -100,6 +104,7 @@ export const useWorkspaceDocument = create<WorkspaceDocumentState>((set, get) =>
   scriptPlan: null,
   environments: null,
   playbookSession: null,
+  projectStatus: 'draft' as ProjectStatus,
   hydrated: false,
 
   hydrate: (workspaceId, payload) =>
@@ -119,6 +124,7 @@ export const useWorkspaceDocument = create<WorkspaceDocumentState>((set, get) =>
           }
         : null,
       playbookSession: (payload as any).playbookSession ?? null,
+      projectStatus: (payload as any).projectStatus ?? ('draft' as ProjectStatus),
       hydrated: true,
     }),
 
@@ -133,6 +139,7 @@ export const useWorkspaceDocument = create<WorkspaceDocumentState>((set, get) =>
       scriptPlan: null,
       environments: null,
       playbookSession: null,
+      projectStatus: 'draft' as ProjectStatus,
       hydrated: false,
     }),
 
@@ -360,6 +367,8 @@ export const useWorkspaceDocument = create<WorkspaceDocumentState>((set, get) =>
       };
     }),
 
+  setProjectStatus: (status) => set({ projectStatus: status }),
+
   advancePlaybookStep: (ctxOverride?: PlaybookReadinessContext) =>
     set((s) => {
       const session = s.playbookSession;
@@ -376,7 +385,13 @@ export const useWorkspaceDocument = create<WorkspaceDocumentState>((set, get) =>
         playbookSession: session,
       };
       const nextStep = resolveNextStep(def, session, ctx);
-      if (nextStep.allDone) return {};
+      if (nextStep.allDone) {
+        const isExport = def.steps[def.steps.length - 1]?.readinessKey === 'export_ready';
+        return {
+          projectStatus: isExport ? 'exported' : 'completed',
+          playbookSession: { ...session, workflowStatus: 'done' },
+        };
+      }
       const completed = [...new Set([...session.completedStepIds, session.currentStepId])];
       if (nextStep.step.id === session.currentStepId) {
         return { playbookSession: { ...session, completedStepIds: completed } };
@@ -396,14 +411,22 @@ export const useWorkspaceDocument = create<WorkspaceDocumentState>((set, get) =>
       return { playbookSession: { ...s.playbookSession, dismissed: true } };
     }),
 
+  jumpPlaybookStep: (stepId) =>
+    set((s) => {
+      const session = s.playbookSession;
+      if (!session) return {};
+      return { playbookSession: { ...session, currentStepId: stepId } };
+    }),
+
   getSnapshotForSave: () => {
-    const { storyboard, voice, characters, scriptPlan, environments, backlotCustom, backlotWorkspace, canvasAppearance, playbookSession } = get();
+    const { storyboard, voice, characters, scriptPlan, environments, backlotCustom, backlotWorkspace, canvasAppearance, playbookSession, projectStatus } = get();
     return {
       storyboard, voice, characters,
       scriptPlan: scriptPlan ?? undefined,
       environments: environments ?? undefined,
       backlotCustom, backlotWorkspace, canvasAppearance,
       playbookSession: playbookSession ?? undefined,
+      projectStatus,
     } as any;
   },
 }));

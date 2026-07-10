@@ -226,9 +226,9 @@ export function NextStepBanner() {
           <button
             type="button"
             onClick={handleCTA}
-            className="flex items-center gap-1.5 rounded-lg bg-brand px-3 py-1.5 text-xs font-medium text-white hover:bg-brand/90 transition-colors shadow-sm"
+            className="flex items-center gap-1.5 rounded-lg bg-brand/10 border border-brand/20 px-3 py-1.5 text-xs font-medium text-brand hover:bg-brand/20 transition-colors"
           >
-            执行下一步
+            {resolved.allDone ? '完成' : '查看详情'}
             <ArrowRight size={14} />
           </button>
         </div>

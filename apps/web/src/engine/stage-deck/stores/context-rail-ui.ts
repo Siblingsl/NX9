@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 
-export type ContextRailTab = 'inspector' | 'storyboard' | 'script' | 'library';
+export type ContextRailTab = 'inspector' | 'storyboard' | 'script' | 'library' | 'inspect' | 'tasks';
 
 export type LibrarySubTab = 'templates' | 'history' | 'workflow';
 

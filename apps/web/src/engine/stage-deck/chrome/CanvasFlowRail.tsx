@@ -12,6 +12,7 @@ import { useWorkspaceDocument } from '../../../stores/workspace-document';
 import { useFlowRuntime } from '../../../stores/flow-runtime';
 import { useContextRailUi } from '../stores/context-rail-ui';
 import { focusStepNodes } from '../../playbook-focus';
+import { translate } from '@nx9/shared';
 import '../../../styles/canvas-flow-rail.css';
 
 interface TooltipData {
@@ -86,8 +87,8 @@ export function CanvasFlowRail() {
     const key = step.readinessKey;
     if (key === 'has_environment_bibles') {
       const envs = environments?.environments ?? [];
-      if (envs.length === 0) reasons.push('没有环境卡，请先生成环境');
-      else if (!envs.some((e) => (e.referenceUrls?.length ?? 0) >= 1)) reasons.push('环境卡都缺少参考图，请上传');
+      if (envs.length === 0) reasons.push('缺少场景参考图，请先生成环境卡');
+      else if (!envs.some((e) => (e.referenceUrls?.length ?? 0) >= 1)) reasons.push('缺少场景参考图，请上传场景参考图片');
     } else if (key === 'has_source_text') {
       reasons.push('请先在左侧 Rail › Script 中粘贴剧本');
     } else if (key === 'has_scene_split') {
@@ -122,6 +123,7 @@ export function CanvasFlowRail() {
     if (!playbook) return '去修复';
     const step = playbook.steps.find((s) => s.id === stepId);
     if (!step) return '去修复';
+    if (step.readinessKey === 'has_environment_bibles') return '打开环境卡面板';
     const action = step.primaryAction;
     switch (action.type) {
       case 'open_rail': return '打开 Rail 面板';
@@ -293,7 +295,7 @@ export function CanvasFlowRail() {
                   <span className={`nx9-flow-rail-free-dot-indicator nx9-flow-rail-free-dot-indicator--${state}`}>
                     {state === 'done' ? <Check size={8} /> : null}
                   </span>
-                  {stage.label}
+                  {translate(stage.label)}
                   {!ready && state !== 'done' && (
                     <span className="nx9-flow-rail-free-dot-warn">!</span>
                   )}
@@ -319,13 +321,13 @@ export function CanvasFlowRail() {
             onMouseEnter={() => setHoveredStepId(step.id)}
             onMouseLeave={() => setHoveredStepId(null)}
             className={`nx9-flow-rail-step nx9-flow-rail-step--${state} ${flashStepId === step.id ? 'nx9-flow-rail-step--flash' : ''}`}
-            title={`${step.label}: ${step.description}`}
+            title={translate(`${step.label}: ${step.description}`)}
           >
             <span className={`nx9-flow-rail-step-badge nx9-flow-rail-step-badge--${state}`}>
               {state === 'done' ? <Check size={10} /> : state === 'error' ? <span>!</span> : state === 'skipped' ? <span>—</span> : index + 1}
             </span>
             <span className={`nx9-flow-rail-label ${state === 'skipped' ? 'nx9-flow-rail-step-label--skipped' : ''}`}>
-              {step.shortLabel ?? step.label.replace(/^[①-⑬]\s*/, '')}
+              {translate(step.shortLabel ?? step.label.replace(/^[①-⑬]\s*/, ''))}
             </span>
             {state === 'blocked' && (
               <span className="nx9-flow-rail-step-warn">!</span>
@@ -339,7 +341,7 @@ export function CanvasFlowRail() {
           {tooltip && tooltip.stepId === step.id && (
             <div className="nx9-flow-rail-tooltip">
               <div className="nx9-flow-rail-tooltip-header">
-                <span className="nx9-flow-rail-tooltip-title">{tooltip.label}</span>
+                <span className="nx9-flow-rail-tooltip-title">{translate(tooltip.label)}</span>
                 <button
                   type="button"
                   onClick={() => setTooltip(null)}
@@ -350,7 +352,7 @@ export function CanvasFlowRail() {
               </div>
               <div className="nx9-flow-rail-tooltip-body">
                 {tooltip.reasons.map((r, j) => (
-                  <div key={j} className="nx9-flow-rail-tooltip-reason">{r}</div>
+                  <div key={j} className="nx9-flow-rail-tooltip-reason">{translate(r)}</div>
                 ))}
               </div>
               <button
@@ -358,7 +360,7 @@ export function CanvasFlowRail() {
                 onClick={tooltip.onFix}
                 className="nx9-flow-rail-tooltip-action"
               >
-                {tooltip.primaryActionLabel}
+                {translate(tooltip.primaryActionLabel)}
               </button>
             </div>
           )}

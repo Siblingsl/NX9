@@ -5,6 +5,7 @@ import type { CanvasAppearance } from '../utils/canvas-theme';
 import type { ScriptPlanPayload } from './script-plan';
 import type { EnvironmentLibraryPayload } from './environment';
 import type { PlaybookId } from '../data/playbook-definitions';
+import type { ProjectMeta, ProjectStatus } from './project';
 import { emptyStoryboard, emptyVoice, migrateStoryboardPayload } from './storyboard';
 import { emptyCharacterLibrary } from './character';
 import { emptyBacklotCustom, emptyBacklotWorkspace } from '../data/backlot-templates';
@@ -100,6 +101,8 @@ export interface WorkspacePayloadV3 extends Omit<WorkspacePayloadV2, 'version'> 
   scriptPlan?: ScriptPlanPayload;
   environments?: import('./environment').EnvironmentLibraryPayload;
   playbookSession?: PlaybookSession | null;
+  projectStatus?: ProjectStatus;
+  projectMeta?: ProjectMeta;
 }
 
 /** Workspace on disk — v1/v2 legacy or v3 Stage Deck */
