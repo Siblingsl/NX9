@@ -1,5 +1,5 @@
 import { useCallback, useState } from 'react';
-import { Sparkles, Edit3, Save, X } from 'lucide-react';
+import { Sparkles, Save, X } from 'lucide-react';
 import type { EnvironmentProfile, EnvironmentLibraryPayload } from '@nx9/shared';
 import { compileScenePrompt, MAX_ENV_REFERENCE_IMAGES } from '@nx9/shared';
 import { api } from '../../../../api/client';
@@ -8,6 +8,7 @@ import { useActivityLog } from '../../../../stores/activity-log';
 import { useFlowRuntime } from '../../../../stores/flow-runtime';
 import { useToast } from '../../../../stores/toast';
 import ImageUploadSlot from '../../../../blocks/shared/ImageUploadSlot';
+import { EntityCard } from '../../../../components/EntityCard';
 
 function handleAgentError(e: unknown, label: string): string {
   const raw = String(e);
@@ -138,112 +139,68 @@ export function EnvironmentBiblePanel() {
               };
               const compiled = compileScenePrompt(cardData);
 
+              const envLayers = [
+                {
+                  label: '场景描述',
+                  content: isEditing ? (
+                    <div className="space-y-2">
+                      <input value={env.descriptionZh} onChange={(e) => handleUpdateEnv(env.id, { descriptionZh: e.target.value })} placeholder="场景描述" className="w-full rounded-lg border border-line bg-white px-2 py-1 text-xs" />
+                      <input value={env.lighting ?? ''} onChange={(e) => handleUpdateEnv(env.id, { lighting: e.target.value })} placeholder="光线" className="w-full rounded-lg border border-line bg-white px-2 py-1 text-xs" />
+                      <input value={(env.props ?? []).join(', ')} onChange={(e) => handleUpdateEnv(env.id, { props: e.target.value.split(',').map((s) => s.trim()).filter(Boolean) })} placeholder="道具（逗号分隔）" className="w-full rounded-lg border border-line bg-white px-2 py-1 text-xs" />
+                    </div>
+                  ) : (
+                    <div className="space-y-1">
+                      <p className="text-xs text-ink/70">{env.descriptionZh}</p>
+                      {env.lighting && <p className="text-[11px] text-ink/50">光线：{env.lighting}</p>}
+                      {env.props && env.props.length > 0 && <p className="text-[11px] text-ink/50">道具：{env.props.join('、')}</p>}
+                    </div>
+                  ),
+                },
+                {
+                  label: `参考图（{(env.referenceUrls ?? []).length}/${MAX_ENV_REFERENCE_IMAGES}）`,
+                  content: (
+                    <div className="space-y-2">
+                      {(env.referenceUrls ?? []).length < MAX_ENV_REFERENCE_IMAGES && (
+                        <ImageUploadSlot url="" label="上传参考图" compact onUploaded={(url) => addEnvRef(env.id, url)} />
+                      )}
+                      {(env.referenceUrls ?? []).length > 0 && (
+                        <div className="grid grid-cols-3 gap-1.5">
+                          {(env.referenceUrls ?? []).map((url, idx) => (
+                            <div key={idx} className="relative group">
+                              <img src={url} alt="" className="w-full aspect-square rounded-lg object-cover border border-line" />
+                              <button type="button" onClick={() => removeEnvRef(env.id, idx)} className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-ink/60 text-white flex items-center justify-center text-[10px] opacity-0 group-hover:opacity-100"><X size={8} /></button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ),
+                },
+                {
+                  label: 'AI 描述预览',
+                  content: (
+                    <pre className="rounded-lg bg-ink/5 p-2 text-[10px] text-ink/70 whitespace-pre-wrap max-h-24 overflow-y-auto">{compiled}</pre>
+                  ),
+                },
+              ];
+
               return (
-                <div key={env.id} className="rounded-xl bg-surface border border-line p-2.5 space-y-2">
-                  <div className="flex items-center justify-between">
-                    <span className="text-sm font-medium text-ink">{env.name}</span>
-                    <div className="flex items-center gap-1">
-                      <button
-                        type="button"
-                        onClick={() => setEditingId(isEditing ? null : env.id)}
-                        className="rounded p-1 hover:bg-brand/10 text-ink/50 hover:text-brand"
-                      >
-                        <Edit3 size={14} />
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleSpawnSceneCard(env)}
-                        disabled={!spawnBlockForShot}
-                        className="rounded-xl border border-line px-2 py-0.5 text-[10px] text-ink/70 hover:border-brand/40 disabled:opacity-40"
-                      >
-                        spawn scene-card 到画布
-                      </button>
-                    </div>
-                  </div>
-
-                  <div className="space-y-1.5">
-                    {isEditing ? (
-                      <>
-                        <input
-                          value={env.descriptionZh}
-                          onChange={(e) => handleUpdateEnv(env.id, { descriptionZh: e.target.value })}
-                          placeholder="场景描述"
-                          className="w-full rounded-lg border border-line bg-white px-2 py-1 text-xs"
-                        />
-                        <input
-                          value={env.lighting ?? ''}
-                          onChange={(e) => handleUpdateEnv(env.id, { lighting: e.target.value })}
-                          placeholder="光线"
-                          className="w-full rounded-lg border border-line bg-white px-2 py-1 text-xs"
-                        />
-                        <input
-                          value={(env.props ?? []).join(', ')}
-                          onChange={(e) =>
-                            handleUpdateEnv(env.id, {
-                              props: e.target.value.split(',').map((s) => s.trim()).filter(Boolean),
-                            })
-                          }
-                          placeholder="道具（逗号分隔）"
-                          className="w-full rounded-lg border border-line bg-white px-2 py-1 text-xs"
-                        />
-                      </>
-                    ) : (
-                      <>
-                        <p className="text-[10px] text-ink/70 leading-relaxed">{env.descriptionZh}</p>
-                        {env.lighting && (
-                          <p className="text-[10px] text-ink/50">光线：{env.lighting}</p>
-                        )}
-                        {env.props && env.props.length > 0 && (
-                          <p className="text-[10px] text-ink/50">道具：{env.props.join('、')}</p>
-                        )}
-                      </>
-                    )}
-                  </div>
-
-                  <div className="space-y-1.5">
-                    <div className="flex items-center justify-between">
-                      <span className="text-[10px] text-ink/40">参考图（{(env.referenceUrls ?? []).length}/{MAX_ENV_REFERENCE_IMAGES}）</span>
-                    </div>
-                    {(env.referenceUrls ?? []).length < MAX_ENV_REFERENCE_IMAGES && (
-                      <ImageUploadSlot url="" label="上传参考图" compact onUploaded={(url) => addEnvRef(env.id, url)} />
-                    )}
-                    {(env.referenceUrls ?? []).length > 0 && (
-                      <div className="grid grid-cols-3 gap-1.5">
-                        {(env.referenceUrls ?? []).map((url, idx) => (
-                          <div key={idx} className="relative group">
-                            <img
-                              src={url}
-                              alt={`${env.name} 参考图 ${idx + 1}`}
-                              className="w-full aspect-square rounded-lg object-cover border border-line"
-                            />
-                            <button
-                              type="button"
-                              onClick={() => removeEnvRef(env.id, idx)}
-                              className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-ink/60 text-white flex items-center justify-center text-[10px] opacity-0 group-hover:opacity-100"
-                            >
-                              <X size={8} />
-                            </button>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-
-                  <div>
+                <EntityCard
+                  title={env.name}
+                  subtitle={env.descriptionZh}
+                  layers={envLayers}
+                  onOptimize={() => setEditingId(isEditing ? null : env.id)}
+                  actions={
                     <button
                       type="button"
-                      onClick={() => setPreviewId(showPreview ? null : env.id)}
-                      className="text-[10px] text-brand/60 hover:text-brand"
+                      onClick={() => handleSpawnSceneCard(env)}
+                      disabled={!spawnBlockForShot}
+                      className="flex-1 rounded-xl bg-brand text-white py-1.5 text-[11px] disabled:opacity-50"
                     >
-                      {showPreview ? '收起 prompt' : '编译 prompt 预览'}
+                      spawn scene-card 到画布
                     </button>
-                    {showPreview && (
-                      <pre className="mt-1 rounded-lg bg-ink/5 p-2 text-[10px] text-ink/70 whitespace-pre-wrap max-h-24 overflow-y-auto">
-                        {compiled}
-                      </pre>
-                    )}
-                  </div>
-                </div>
+                  }
+                />
               );
             })}
           </div>

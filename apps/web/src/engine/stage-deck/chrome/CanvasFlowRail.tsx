@@ -194,6 +194,10 @@ export function CanvasFlowRail() {
       }
       return;
     }
+    if (state === 'error') {
+      requestRailTab('inspector');
+      return;
+    }
     if (state === 'blocked') {
       const reasons = getBlockReasons(stepId);
       setTooltip({
@@ -318,11 +322,16 @@ export function CanvasFlowRail() {
             title={`${step.label}: ${step.description}`}
           >
             <span className={`nx9-flow-rail-step-badge nx9-flow-rail-step-badge--${state}`}>
-              {state === 'done' ? <Check size={10} /> : index + 1}
+              {state === 'done' ? <Check size={10} /> : state === 'error' ? <span>!</span> : state === 'skipped' ? <span>—</span> : index + 1}
             </span>
-            <span className="nx9-flow-rail-label">{step.shortLabel ?? step.label.replace(/^[①-⑬]\s*/, '')}</span>
+            <span className={`nx9-flow-rail-label ${state === 'skipped' ? 'nx9-flow-rail-step-label--skipped' : ''}`}>
+              {step.shortLabel ?? step.label.replace(/^[①-⑬]\s*/, '')}
+            </span>
             {state === 'blocked' && (
               <span className="nx9-flow-rail-step-warn">!</span>
+            )}
+            {state === 'waiting' && (
+              <span className="nx9-flow-rail-step-waiting" />
             )}
           </button>
           {i < stepStates.length - 1 && <span className="nx9-flow-rail-step-sep" aria-hidden />}

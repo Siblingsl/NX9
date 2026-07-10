@@ -4,7 +4,7 @@
 > **读者**：你（选流程、验收）+ 实现代码的 AI（按 `PIPE-xxx` 任务 ID 施工）。  
 > **审计基线**：2026-07-09 · 基于仓库实际代码  
 > **实施状态**：**全部完成** — 13 步强制功能 + 6 项可拓展功能均已实现  
-> **关联**：`docs/NX9-WORKFLOW-ORCHESTRATION-SPEC.md` · `docs/NX9-CAPABILITY-AUDIT-SPEC.md` · `docs/NX9-PIPELINE-CANVAS-FLOW-SPEC.md`（环境多参考图 · 画布中央步骤条 · 13 步有序模板）· `packages/shared/src/data/playbook-definitions.ts`
+> **关联**：`docs/NX9-WORKFLOW-ORCHESTRATION-SPEC.md` · `docs/NX9-CAPABILITY-AUDIT-SPEC.md` · `docs/NX9-PIPELINE-CANVAS-FLOW-SPEC.md`（环境多参考图 · 画布中央步骤条 · 13 步有序模板）· `docs/NX9-PRODUCT-REFACTOR-SPEC.md` · `Product Optimization.md` · `packages/shared/src/data/playbook-definitions.ts`
 
 ---
 

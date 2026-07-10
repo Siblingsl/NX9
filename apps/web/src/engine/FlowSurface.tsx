@@ -28,7 +28,7 @@ import {
   type OnNodeDrag,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import { PERF, validateLink, WORKFLOW_TEMPLATES, lookupBlock } from '@nx9/shared';
+import { PERF, validateLink, WORKFLOW_TEMPLATES, lookupBlock, canExecuteNode } from '@nx9/shared';
 import { blockTypes, preloadBlockTypes } from '../blocks/registry';
 import { api } from '../api/client';
 import { useFlowHistory, type FlowSnapshot } from '../hooks/use-flow-history';
@@ -95,6 +95,8 @@ import { computeGroupBounds } from './stage-deck/canvas/SceneGroup';
 import { StageDeckInteractionBridge } from './stage-deck/StageDeckInteractionBridge';
 import { normalizeDirectorProject } from '@nx9/director3d';
 import { useDirector3dUi } from '../stores/director3d-ui';
+import { useCanvasView } from './stage-deck/stores/canvas-view';
+import { StoryboardCanvasView } from './stage-deck/canvas/StoryboardCanvasView';
 
 export interface FlowSurfaceProps {
   workspaceId: string;
@@ -204,6 +206,8 @@ const FlowSurfaceInner = memo(function FlowSurfaceInner({
 
   const viewMode = useViewMode((s) => s.mode);
   const hydrateViewMode = useViewMode((s) => s.hydrate);
+  const canvasView = useCanvasView((s) => s.view);
+  const setCanvasView = useCanvasView((s) => s.setView);
   const setDeckSelection = useDeckUi((s) => s.setSelection);
   const hydrateTakes = useTakeStore((s) => s.hydrate);
   const stageDeckNodeTypes = useStageDeckNodeTypes();
@@ -567,6 +571,20 @@ const FlowSurfaceInner = memo(function FlowSurfaceInner({
   const updateNodeDataStable = useCallback(
     (id: string, data: Record<string, unknown>) => {
       const patch = isStageDeck ? withPendingTake(data) : data;
+      const statusMap: Record<string, string> = {
+        success: 'success',
+        error: 'error',
+        running: 'running',
+        idle: 'idle',
+        blocked: 'waiting',
+        done: 'success',
+      };
+      const execStatus = patch.status
+        ? (statusMap[String(patch.status)] ?? 'idle')
+        : undefined;
+      if (execStatus && !patch.executionStatus) {
+        patch.executionStatus = execStatus;
+      }
       setNodes((nds) =>
         nds.map((n) => {
           if (n.id !== id) return n;
@@ -625,6 +643,23 @@ const FlowSurfaceInner = memo(function FlowSurfaceInner({
     async (onlyIds?: Set<string>, label = '画布批量运行') => {
       const currentNodes = nodesRef.current;
       const currentEdges = edgesRef.current;
+      const session = useWorkspaceDocument.getState().playbookSession;
+      const ctx: import('@nx9/shared').PlaybookReadinessContext = {
+        storyboard: {
+          title: useWorkspaceDocument.getState().storyboard.title,
+          shots: useWorkspaceDocument.getState().storyboard.shots.map((sh) => ({
+            id: sh.id,
+            status: sh.status as string,
+            firstFrameAssetId: sh.firstFrameAssetId ?? undefined,
+            keyframeStatus: sh.keyframeStatus,
+            videoStatus: sh.videoStatus,
+            linkedBlockId: sh.linkedBlockId ?? undefined,
+          })),
+        },
+        voice: useWorkspaceDocument.getState().voice,
+        nodes: currentNodes.map((n) => ({ id: n.id, type: n.type ?? '', data: n.data as Record<string, unknown> })),
+        playbookSession: session,
+      };
       let taskId: string | null = null;
       cancelRunRef.current = false;
       try {
@@ -636,9 +671,16 @@ const FlowSurfaceInner = memo(function FlowSurfaceInner({
       const runnableIds = onlyIds
         ? [...onlyIds].filter((id) => {
             const n = currentNodes.find((node) => node.id === id);
-            return n?.type && RUNNABLE_BLOCKS.has(n.type);
+            return n?.type && RUNNABLE_BLOCKS.has(n.type) && canExecuteNode(n.type, ctx).ok;
           })
-        : currentNodes.filter((n) => n.type && RUNNABLE_BLOCKS.has(n.type)).map((n) => n.id);
+        : currentNodes.filter((n) => {
+            if (!n.type || !RUNNABLE_BLOCKS.has(n.type)) return false;
+            const execCheck = canExecuteNode(n.type, ctx);
+            if (!execCheck.ok) {
+              appendLog(`跳过 ${n.type}：${execCheck.reason}`);
+            }
+            return execCheck.ok;
+          }).map((n) => n.id);
       startBatch(runnableIds, taskId);
       appendLog(onlyIds ? '运行选中模块' : '批量运行开始');
 
@@ -1601,6 +1643,10 @@ const FlowSurfaceInner = memo(function FlowSurfaceInner({
               void loadWorkflowTemplate(def.bootstrapTemplates[0].templateId, 'replace');
             }
             setRecipePickerDismissed(true);
+            useCanvasView.getState().autoSwitch();
+            setTimeout(() => {
+              void fitView({ duration: 300, padding: 0.2 });
+            }, 200);
           }}
           onOpenLibrary={() => {
             setRecipePickerDismissed(true);
@@ -1609,6 +1655,23 @@ const FlowSurfaceInner = memo(function FlowSurfaceInner({
         />
       )}
       {isStageDeck && ready && <CanvasFlowRail />}
+
+      {isStageDeck && ready && (
+        <button
+          type="button"
+          onClick={() => setCanvasView(canvasView === 'flow' ? 'storyboard' : 'flow')}
+          className="absolute top-14 right-4 z-20 flex items-center gap-1 rounded-xl border border-line bg-white/90 px-3 py-1.5 text-[11px] text-ink/60 shadow-sm hover:border-brand/30 hover:text-brand transition-colors"
+          title={canvasView === 'flow' ? '切换到故事板视图' : '切换到流程图视图'}
+        >
+          {canvasView === 'flow' ? '📋 故事板' : '🔀 流程图'}
+        </button>
+      )}
+
+      {isStageDeck && ready && canvasView === 'storyboard' && (
+        <StoryboardCanvasView />
+      )}
+
+      {!isStageDeck || canvasView !== 'storyboard' ? (
       <ReactFlow
         nodes={nodes}
         edges={edges}
@@ -1686,6 +1749,7 @@ const FlowSurfaceInner = memo(function FlowSurfaceInner({
             />
         )}
       </ReactFlow>
+      ) : null}
 
       {isStageDeck && lensMenu && (
         <LensMenu

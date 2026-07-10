@@ -3,7 +3,7 @@
 > **文档性质**：针对 `需求.txt` 三项反馈，给出 **强制实现方案、测试、Bug 修复、完成定义、可拓展性、使用说明**。  
 > **读者**：你（验收体验）+ 实现代码的 AI（按 `PIPE-UX-xxx` 任务 ID 施工）。  
 > **审计基线**：2026-07-10 · 基于仓库实际代码  
-> **关联**：`docs/NX9-13STEP-PRODUCTION-PIPELINE-SPEC.md` · `docs/NX9-WORKFLOW-ORCHESTRATION-SPEC.md` · `packages/shared/src/data/playbook-definitions.ts` · `packages/shared/src/data/workflow-templates.ts`
+> **关联**：`docs/NX9-13STEP-PRODUCTION-PIPELINE-SPEC.md` · `docs/NX9-WORKFLOW-ORCHESTRATION-SPEC.md` · `docs/NX9-CAPABILITY-AUDIT-SPEC.md` · `docs/NX9-PRODUCT-REFACTOR-SPEC.md` · `packages/shared/src/data/playbook-definitions.ts` · `packages/shared/src/data/workflow-templates.ts`
 
 ---
 

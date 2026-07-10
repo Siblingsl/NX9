@@ -508,4 +508,54 @@ export const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
       return { blocks, links };
     },
   },
+  {
+    id: 'tpl-pipeline-11-anime',
+    label: '11 步动漫管线',
+    description: '剧本→场次→分镜→角色→环境→关键帧→审阅→视频→连贯→门控→导出（动漫 11 步）',
+    category: 'story',
+    build() {
+      const PIPELINE_DX = 280;
+      const PIPELINE_Y = 200;
+      const node = (type: string, stepIndex: number, extra: Record<string, unknown> = {}) => {
+        const col = stepIndex - 1;
+        return {
+          id: uid(`pipe-${type}`),
+          type,
+          position: { x: 80 + col * PIPELINE_DX, y: PIPELINE_Y },
+          data: {
+            blockIndex: stepIndex,
+            status: 'idle',
+            playbookStepIndex: stepIndex,
+            ...extra,
+          },
+        } as FlowBlock;
+      };
+      const edge = (source: FlowBlock, target: FlowBlock): FlowLink => ({
+        id: uid('pipe-e'),
+        source: source.id,
+        target: target.id,
+        sourceHandle: 'out',
+        targetHandle: 'in',
+      });
+
+      const s1 = node('shot-script', 1, { playbookStepId: 'script' });
+      const s2 = node('text-chunker', 2, { playbookStepId: 'scene-split' });
+      const s3 = node('story-grid', 3, { playbookStepId: 'storyboard' });
+      const s4 = node('character-sheet', 4, { playbookStepId: 'character-bible' });
+      const s5 = node('scene-card', 5, { playbookStepId: 'environment-bible' });
+      const s6 = node('picture-gen', 6, { playbookStepId: 'keyframe-gen' });
+      const s7 = node('review-gate', 7, { playbookStepId: 'keyframe-review', gateMode: 'keyframe', label: '关键帧审阅' });
+      const s8 = node('clip-gen', 8, { playbookStepId: 'video-gen' });
+      const s9 = node('continuity-check', 9, { playbookStepId: 'consistency' });
+      const s10 = node('review-gate', 10, { playbookStepId: 'review-gate', gateMode: 'video', label: '成片审阅' });
+      const s11 = node('export-pack', 11, { playbookStepId: 'export' });
+
+      const blocks = [s1, s2, s3, s4, s5, s6, s7, s8, s9, s10, s11];
+      const links = [
+        edge(s1, s2), edge(s2, s3), edge(s3, s4), edge(s4, s5), edge(s5, s6),
+        edge(s6, s7), edge(s7, s8), edge(s8, s9), edge(s9, s10), edge(s10, s11),
+      ];
+      return { blocks, links };
+    },
+  },
 ];

@@ -150,6 +150,7 @@ export function NextStepBanner() {
   const stepNumber = resolved.index + 1;
 
   const handleCTA = () => {
+    if (!ctx) return;
     executeStepAction(step.primaryAction, ctx);
     advanceStore(ctx);
   };
@@ -214,7 +215,7 @@ export function NextStepBanner() {
           {step.optional && (
             <button
               type="button"
-              onClick={() => advanceStore(ctx)}
+              onClick={() => ctx && advanceStore(ctx)}
               className="flex items-center gap-1 rounded-lg border border-line px-2.5 py-1.5 text-xs text-ink/50 hover:text-ink/80 hover:border-brand/30 transition-colors"
               title="跳过此步"
             >

@@ -1,7 +1,8 @@
-import { useState } from 'react';
-import { BLOCK_GROUPS, type BlockCategory, type BlockDefinition } from '@nx9/shared';
-import { Search, User, Image, Sparkles, Package } from 'lucide-react';
+import { useState, useEffect, useMemo } from 'react';
+import { BLOCK_GROUPS, PLAYBOOK_DEFINITIONS, type BlockCategory, type BlockDefinition } from '@nx9/shared';
+import { Search, User, Image, Sparkles, Package, LayoutGrid } from 'lucide-react';
 import * as Icons from 'lucide-react';
+import { useWorkspaceDocument } from '../../../stores/workspace-document';
 import { LogDockButton } from '../../../panels/LogPanel';
 
 type LaneId = 'character' | 'scene' | 'generate' | 'output';
@@ -41,11 +42,66 @@ function blocksForLane(lane: LaneId, query: string): BlockDefinition[] {
     );
 }
 
+const STEP_KINDS: Record<string, string[]> = {
+  script: ['shot-script'],
+  'scene-split': ['text-chunker'],
+  storyboard: ['story-grid'],
+  'character-bible': ['character-sheet'],
+  'environment-bible': ['scene-card'],
+  'camera-3d': ['director-3d'],
+  'camera-live': ['director-desk'],
+  'keyframe-gen': ['picture-gen'],
+  'keyframe-review': ['review-gate'],
+  'video-gen': ['motion-story', 'clip-gen'],
+  consistency: ['continuity-check'],
+  'episode-studio': ['clip-editor'],
+  'review-gate': ['review-gate'],
+  export: ['export-pack'],
+};
+
 export function ModuleDock({ onPick }: ModuleDockProps) {
   const [activeLane, setActiveLane] = useState<LaneId | null>(null);
   const [query, setQuery] = useState('');
+  const [expanded, setExpanded] = useState(false);
+  const session = useWorkspaceDocument((s) => s.playbookSession);
+  const hasActivePlaybook = session && !session.dismissed && session.playbookId !== 'pb-blank-advanced';
+
+  const currentStepKinds = useMemo(() => {
+    if (!session || session.dismissed) return null;
+    const def = PLAYBOOK_DEFINITIONS.find((p) => p.id === session.playbookId);
+    if (!def) return null;
+    const step = def.steps.find((s) => s.id === session.currentStepId);
+    if (!step) return null;
+    return new Set(step.canvasNodeKinds ?? STEP_KINDS[step.id] ?? []);
+  }, [session]);
+
+  useEffect(() => {
+    if (hasActivePlaybook) setExpanded(false);
+  }, [hasActivePlaybook]);
 
   const panelItems = activeLane ? blocksForLane(activeLane, query) : [];
+  const filteredItems = currentStepKinds && !expanded
+    ? panelItems.filter((b) => currentStepKinds.has(b.kind))
+    : panelItems;
+
+  if (!expanded) {
+    return (
+      <aside className="nx9-module-dock shrink-0 border-r border-line bg-white/80 flex items-start justify-center pt-3 relative z-20"
+        style={{ width: 'var(--nx9-dock-width)' }}>
+        <button
+          type="button"
+          onClick={() => setExpanded(true)}
+          className="w-9 h-9 rounded-xl flex items-center justify-center hover:bg-surface text-ink/60"
+          title="展开模块面板（⌘K 搜索）"
+        >
+          <LayoutGrid size={18} />
+        </button>
+        <div className="absolute bottom-2">
+          <LogDockButton />
+        </div>
+      </aside>
+    );
+  }
 
   return (
     <aside
@@ -53,25 +109,31 @@ export function ModuleDock({ onPick }: ModuleDockProps) {
       style={{ width: 'var(--nx9-dock-width)' }}
     >
       <div className="flex flex-col items-center py-3 gap-2 w-full h-full">
-        <div className="flex flex-col items-center gap-2">
-          {(Object.keys(LANE_META) as LaneId[]).map((lane) => {
-            const Icon = LANE_META[lane].icon;
-            return (
-              <button
-                key={lane}
-                type="button"
-                title={LANE_META[lane].label}
-                className={`w-9 h-9 rounded-xl flex items-center justify-center transition-colors ${
-                  activeLane === lane ? 'bg-brand/10 text-brand' : 'hover:bg-surface text-ink/60'
-                }`}
-                onMouseEnter={() => setActiveLane(lane)}
-                onFocus={() => setActiveLane(lane)}
-              >
-                <Icon size={18} />
-              </button>
-            );
-          })}
-        </div>
+        <button
+          type="button"
+          onClick={() => setExpanded(false)}
+          className="w-9 h-9 rounded-xl flex items-center justify-center hover:bg-surface text-ink/60 mb-1"
+          title="收起模块面板"
+        >
+          <LayoutGrid size={18} />
+        </button>
+        {(Object.keys(LANE_META) as LaneId[]).map((lane) => {
+          const Icon = LANE_META[lane].icon;
+          return (
+            <button
+              key={lane}
+              type="button"
+              title={LANE_META[lane].label}
+              className={`w-9 h-9 rounded-xl flex items-center justify-center transition-colors ${
+                activeLane === lane ? 'bg-brand/10 text-brand' : 'hover:bg-surface text-ink/60'
+              }`}
+              onMouseEnter={() => setActiveLane(lane)}
+              onFocus={() => setActiveLane(lane)}
+            >
+              <Icon size={18} />
+            </button>
+          );
+        })}
         <div className="mt-auto pb-1">
           <LogDockButton />
         </div>
@@ -98,7 +160,13 @@ export function ModuleDock({ onPick }: ModuleDockProps) {
             </div>
           </div>
           <div className="flex-1 overflow-y-auto nx9-scroll p-2 space-y-1">
-            {panelItems.map((def) => (
+            {!expanded && currentStepKinds && (
+              <p className="text-[10px] text-brand/60 px-2 pb-1">当前步相关模块</p>
+            )}
+            {filteredItems.length === 0 && currentStepKinds && !expanded ? (
+              <p className="text-[10px] text-ink/40 px-2">该步无需额外模块</p>
+            ) : null}
+            {(filteredItems.length > 0 || expanded ? filteredItems : panelItems).map((def) => (
               <button
                 key={def.kind}
                 type="button"

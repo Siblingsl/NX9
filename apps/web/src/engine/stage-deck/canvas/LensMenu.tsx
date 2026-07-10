@@ -1,6 +1,8 @@
+import { useMemo } from 'react';
 import { createPortal } from 'react-dom';
-import { getDockBlocks, lookupBlock, type BlockDefinition } from '@nx9/shared';
+import { getDockBlocks, lookupBlock, PLAYBOOK_DEFINITIONS, type BlockDefinition } from '@nx9/shared';
 import * as Icons from 'lucide-react';
+import { useWorkspaceDocument } from '../../../stores/workspace-document';
 
 export interface LensMenuProps {
   x: number;
@@ -25,7 +27,18 @@ function filterBlocks(filterKinds?: string[]): BlockDefinition[] {
 }
 
 export function LensMenu({ x, y, filterKinds, onPick, onClose }: LensMenuProps) {
-  const items = filterBlocks(filterKinds);
+  const session = useWorkspaceDocument((s) => s.playbookSession);
+  const currentStepKinds = useMemo(() => {
+    if (!session || session.dismissed) return null;
+    const def = PLAYBOOK_DEFINITIONS.find((p) => p.id === session.playbookId);
+    if (!def) return null;
+    const step = def.steps.find((s) => s.id === session.currentStepId);
+    if (!step) return null;
+    return new Set(step.canvasNodeKinds ?? []);
+  }, [session]);
+
+  const baseItems = filterBlocks(filterKinds);
+  const items = currentStepKinds ? baseItems.filter((b) => currentStepKinds.has(b.kind)) : baseItems;
   const radius = 72;
   const startAngle = -150;
   const span = 120;

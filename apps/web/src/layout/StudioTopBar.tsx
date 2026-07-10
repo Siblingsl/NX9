@@ -10,6 +10,7 @@ import {
 } from 'lucide-react';
 import { ModeCapsule } from '../engine/stage-deck/chrome/ModeCapsule';
 import { ProductionWall } from '../engine/stage-deck/chrome/ProductionWall';
+import { useWorkspaceDocument } from '../stores/workspace-document';
 import { StudioOverflowMenu } from './StudioOverflowMenu';
 import { StudioDropdownPanel } from './StudioDropdownPanel';
 import { isDesktop } from '../platform/runtime-bridge';
@@ -87,6 +88,8 @@ export function StudioTopBar({
   }, [userMenuOpen]);
 
   const running = batchPhase === 'running';
+  const playbookSession = useWorkspaceDocument((s) => s.playbookSession);
+  const hasActivePlaybook = playbookSession && !playbookSession.dismissed;
 
   return (
     <header className="nx9-topbar shrink-0 border-b border-line/80 bg-white/90 backdrop-blur-md">
@@ -113,6 +116,16 @@ export function StudioTopBar({
           <ModeCapsule />
           <ProductionWall />
         </div>
+
+        {/* Project status badge */}
+        {hasActivePlaybook && (
+          <span className="hidden md:inline-flex items-center gap-1 rounded-full bg-brand/10 text-brand px-2 py-0.5 text-[10px] font-medium">
+            {playbookSession!.workflowStatus === 'done' ? '已完成' :
+             playbookSession!.workflowStatus === 'error' ? '异常' :
+             playbookSession!.workflowStatus === 'running' ? '生成中' :
+             '进行中'}
+          </span>
+        )}
 
         <div className="w-px h-7 bg-line/80 shrink-0 hidden md:block" aria-hidden />
 

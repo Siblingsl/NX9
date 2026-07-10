@@ -3,7 +3,7 @@
 > **文档性质**：对 NX9 **当前全部功能**做一次代码级审计——标出「已完善 / 简易逻辑 / 需大幅加强」的边界，并为每一项给出 **强制实现方案、验收测试、Bug 修复、完成定义、可拓展性、使用说明**。  
 > **读者**：你（排期与验收）+ 实现代码的 AI Agent（按任务 ID 施工）。  
 > **审计基线**：2026-07-09 · 基于仓库实际代码（非旧文档宣称）  
-> **关联**：`docs/NX9-PRD.md` · `docs/P0–P7-PROGRESS.md` · `docs/STAGE-DECK-NODES-INTERACTIONS.md` · `docs/NX9-WORKFLOW-ORCHESTRATION-SPEC.md` · `docs/NX9-13STEP-PRODUCTION-PIPELINE-SPEC.md` · `docs/NX9-PIPELINE-CANVAS-FLOW-SPEC.md` · `scripts/nx9-test-all.ps1`  
+> **关联**：`docs/NX9-PRD.md` · `docs/P0–P7-PROGRESS.md` · `docs/STAGE-DECK-NODES-INTERACTIONS.md` · `docs/NX9-PRODUCT-REFACTOR-SPEC.md` · `docs/NX9-WORKFLOW-ORCHESTRATION-SPEC.md` · `docs/NX9-13STEP-PRODUCTION-PIPELINE-SPEC.md` · `docs/NX9-PIPELINE-CANVAS-FLOW-SPEC.md` · `scripts/nx9-test-all.ps1`  
 > **说明**：历史上曾有多份专项 Spec（FIX / NODE-EXPANSION / LINE-ART / REMOTION 等），**当前 `docs/` 目录仅保留 PRD 与阶段进度**；本文档作为 **总索引 + 审计 SSOT**，专项细节可在实施时拆分子文档。
 
 ---

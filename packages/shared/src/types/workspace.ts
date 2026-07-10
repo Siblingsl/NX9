@@ -15,6 +15,10 @@ export interface PlaybookSession {
   startedAt: string;
   currentStepId: string;
   completedStepIds: string[];
+  skippedStepIds?: string[];
+  failedStepIds?: string[];
+  waitingStepIds?: string[];
+  workflowStatus?: 'idle' | 'running' | 'blocked' | 'done' | 'error';
   dismissed?: boolean;
 }
 

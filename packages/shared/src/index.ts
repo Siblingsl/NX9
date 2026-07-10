@@ -343,3 +343,28 @@ export type {
   StoryboardTableRow,
   ScriptPlanPayload,
 } from './types/script-plan';
+
+export type { AssetRecord, AssetKind, AssetLibraryPayload } from './types/asset';
+export type { ProjectStatus, ProjectMeta } from './types/project';
+export type { WorkflowSchemaV1 } from './schema/workflow-schema';
+export { playbookDefToSchema, schemaToJson, jsonToSchema } from './schema/convert-def-to-schema';
+export {
+  PROVIDER_REGISTRY,
+  resolveDefaultModel,
+  DEFAULT_PICTURE_MODEL,
+  DEFAULT_VIDEO_MODEL,
+  DEFAULT_TTS_MODEL,
+  type ProviderDef,
+} from './data/provider-registry';
+
+export {
+  canExecuteNode,
+  NODE_CONTRACTS,
+  type NodeContract,
+  type CanExecuteResult,
+} from './engine/node-dependency';
+
+export {
+  layoutPipeline,
+  autoFitBounds,
+} from './engine/layout-pipeline';

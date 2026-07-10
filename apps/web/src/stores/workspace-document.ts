@@ -71,6 +71,9 @@ interface WorkspaceDocumentState {
   setEnvironments: (envs: EnvironmentLibraryPayload) => void;
   startPlaybook: (playbookId: PlaybookId) => void;
   advancePlaybookStep: (ctxOverride?: PlaybookReadinessContext) => void;
+  skipStep: (stepId: string) => void;
+  markStepFailed: (stepId: string) => void;
+  markStepWaiting: (stepId: string) => void;
   dismissPlaybook: () => void;
   getSnapshotForSave: () => {
     storyboard: StoryboardPayload;
@@ -301,7 +304,58 @@ export const useWorkspaceDocument = create<WorkspaceDocumentState>((set, get) =>
           startedAt: new Date().toISOString(),
           currentStepId: def.steps[0].id,
           completedStepIds: [],
+          skippedStepIds: [],
+          failedStepIds: [],
+          waitingStepIds: [],
+          workflowStatus: 'idle',
           dismissed: false,
+        },
+      };
+    }),
+
+  skipStep: (stepId: string) =>
+    set((s) => {
+      const session = s.playbookSession;
+      if (!session) return {};
+      const skipped = new Set(session.skippedStepIds ?? []);
+      skipped.add(stepId);
+      const def = PLAYBOOK_DEFINITIONS.find((p) => p.id === session.playbookId);
+      if (!def) return {};
+      const idx = def.steps.findIndex((st) => st.id === stepId);
+      const nextIdx = idx + 1;
+      const nextStepId = nextIdx < def.steps.length ? def.steps[nextIdx].id : session.currentStepId;
+      return {
+        playbookSession: {
+          ...session,
+          currentStepId: nextStepId,
+          skippedStepIds: [...skipped],
+          completedStepIds: [...new Set([...session.completedStepIds, stepId])],
+        },
+      };
+    }),
+
+  markStepFailed: (stepId: string) =>
+    set((s) => {
+      const session = s.playbookSession;
+      if (!session) return {};
+      return {
+        playbookSession: {
+          ...session,
+          failedStepIds: [...new Set([...(session.failedStepIds ?? []), stepId])],
+          workflowStatus: 'error',
+        },
+      };
+    }),
+
+  markStepWaiting: (stepId: string) =>
+    set((s) => {
+      const session = s.playbookSession;
+      if (!session) return {};
+      return {
+        playbookSession: {
+          ...session,
+          waitingStepIds: [...new Set([...(session.waitingStepIds ?? []), stepId])],
+          workflowStatus: 'blocked',
         },
       };
     }),

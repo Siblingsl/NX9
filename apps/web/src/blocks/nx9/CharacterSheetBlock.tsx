@@ -18,6 +18,7 @@ import { useWorkspaceDocument } from '../../stores/workspace-document';
 import { useActivityLog } from '../../stores/activity-log';
 import { toastSuccess } from '../../stores/toast';
 import { api } from '../../api/client';
+import { EntityCard } from '../../components/EntityCard';
 
 type SheetTab = 'sheet' | 'profile' | 'turnaround' | 'variant' | 'bible';
 
@@ -477,25 +478,31 @@ function CharacterSheetBlock(props: NodeProps) {
         )}
 
         {tab === 'bible' && (
-          <div className="space-y-2 max-h-56 overflow-y-auto nx9-scroll">
-            <p className="text-[10px] text-ink/45">
-              Character Bible 六层锚点：逐层填写，保存到角色库后作为一致性强约束。
-            </p>
-            {CHARACTER_BIBLE_LAYERS.map((layer) => (
-              <div key={layer.key}>
-                <p className="text-[10px] text-ink/55 mb-0.5">{layer.label}</p>
+          <EntityCard
+            title="六层角色锚点"
+            subtitle="逐层填写，保存后作为一致性强约束"
+            layers={CHARACTER_BIBLE_LAYERS.map((layer) => ({
+              label: layer.label,
+              content: (
                 <textarea
                   value={(sheet.bible?.[layer.key] as string) ?? ''}
-                  onChange={(e) =>
-                    commit({ bible: { ...sheet.bible, [layer.key]: e.target.value } })
-                  }
+                  onChange={(e) => commit({ bible: { ...sheet.bible, [layer.key]: e.target.value } })}
                   placeholder={layer.placeholder}
-                  rows={2}
-                  className="w-full rounded-lg border border-line px-2 py-1 resize-y text-[10px]"
+                  rows={3}
+                  className="w-full rounded-lg border border-line px-2 py-1 resize-y text-[11px]"
                 />
-              </div>
-            ))}
-          </div>
+              ),
+            }))}
+            actions={
+              <button
+                type="button"
+                onClick={saveToBacklot}
+                className="w-full rounded-xl bg-brand text-white py-2 text-[11px] font-medium"
+              >
+                AI 生成描述
+              </button>
+            }
+          />
         )}
 
         <button

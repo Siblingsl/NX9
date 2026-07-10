@@ -1,0 +1,13 @@
+:root {
+  --nx9-btn-h: 36px;
+  --nx9-radius: 12px;
+  --nx9-card-padding: 16px;
+  --nx9-status-ok: #2E8B57;
+  --nx9-status-warn: #D97706;
+  --nx9-status-error: #DC2626;
+  --nx9-brand: #A13D63;
+  --nx9-accent: #7C3AED;
+  --nx9-ink: #1A1A1A;
+  --nx9-line: rgba(0, 0, 0, 0.08);
+  --nx9-surface: rgba(0, 0, 0, 0.03);
+}

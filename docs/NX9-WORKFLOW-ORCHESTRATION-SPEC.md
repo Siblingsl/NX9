@@ -3,7 +3,7 @@
 > **文档性质**：诊断当前「节点执行不连贯、不知道下一步干什么、入口冗余」三大问题，提出 **Playbook（生产剧本）** 编排体系，并给出强制实现方案、验收测试、Bug 修复、完成定义、可拓展性与使用说明。  
 > **读者**：你（选流程、验收体验）+ 实现代码的 AI Agent（按 `WF-xxx` 任务 ID 施工）。  
 > **审计基线**：2026-07-09 · 基于仓库实际代码  
-> **关联**：`docs/NX9-CAPABILITY-AUDIT-SPEC.md` · `docs/NX9-13STEP-PRODUCTION-PIPELINE-SPEC.md` · `docs/NX9-PIPELINE-CANVAS-FLOW-SPEC.md` · `packages/shared/src/data/workflow-templates.ts` · `packages/shared/src/utils/stage-readiness.ts`
+> **关联**：`docs/NX9-CAPABILITY-AUDIT-SPEC.md` · `docs/NX9-13STEP-PRODUCTION-PIPELINE-SPEC.md` · `docs/NX9-PIPELINE-CANVAS-FLOW-SPEC.md` · `docs/NX9-PRODUCT-REFACTOR-SPEC.md` · `packages/shared/src/data/workflow-templates.ts` · `packages/shared/src/utils/stage-readiness.ts`
 
 ---
 

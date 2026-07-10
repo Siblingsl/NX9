@@ -483,6 +483,46 @@ export function EpisodeStudioPanel({ open, onClose }: EpisodeStudioPanelProps) {
             </div>
           </div>
 
+          {/* Scene 轨 */}
+          <div className="px-2 pt-2">
+            <div className="flex items-center gap-2 mb-1">
+              <span className="text-[10px] font-semibold text-ink/60">场景轨</span>
+            </div>
+            {(() => {
+              const sceneMap = new Map<string, { label: string; startSec: number; durationSec: number }>();
+              for (const shot of storyboard.shots) {
+                const code = shot.sceneCode ?? 'default';
+                if (!sceneMap.has(code)) {
+                  sceneMap.set(code, { label: `S${code}`, startSec: (shot.index - 1) * (shot.durationSec || 4), durationSec: 0 });
+                }
+                const s = sceneMap.get(code)!;
+                s.durationSec += shot.durationSec || 4;
+              }
+              const sorted = [...sceneMap.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+              return (
+                <div className="flex items-start gap-1.5 mb-2">
+                  <span className="w-5 shrink-0 font-mono font-bold text-ink/40 mt-1">S</span>
+                  <div className="flex-1 flex gap-0.5">
+                    {sorted.map(([code, scene]) => {
+                      const widthPct = timeline.durationSec > 0 ? (scene.durationSec / timeline.durationSec) * 100 : 0;
+                      const leftPct = timeline.durationSec > 0 ? (scene.startSec / timeline.durationSec) * 100 : 0;
+                      return (
+                        <div
+                          key={code}
+                          className="h-4 rounded border border-brand/20 bg-brand/5 flex items-center px-1 text-[8px] text-brand/60 font-medium truncate"
+                          style={{ width: `${widthPct}%`, marginLeft: `${leftPct}%` }}
+                          title={`${scene.label} · ${scene.durationSec.toFixed(1)}s`}
+                        >
+                          {scene.label}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })()}
+          </div>
+
           {/* 多轨时间线 */}
           <div className="flex-1 overflow-y-auto p-2 min-h-0 text-[10px] space-y-1">
             {timeline.tracks.map((track) => {
