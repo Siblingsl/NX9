@@ -1,8 +1,8 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { existsSync, readdirSync, statSync } from 'fs';
 import { join } from 'path';
-import type { WorkspacePayload, WorkspaceSummary } from '@nx9/shared';
-import { normalizeWorkspacePayload } from '@nx9/shared';
+import type { WorkspacePayload, WorkspaceSummary, WorkspaceVisibility } from '@nx9/shared';
+import { computeWorkspaceAssetCount, normalizeWorkspacePayload } from '@nx9/shared';
 import { JsonStoreService } from '../../common/json-store.service';
 import { PATHS } from '../../config/app.config';
 import { PrismaWorkspaceStore } from './prisma-workspace.store';
@@ -44,6 +44,8 @@ export class WorkspaceService {
           title: id,
           blockCount: payload.blocks.length,
           shotCount: payload.storyboard?.shots?.length ?? 0,
+          assetCount: computeWorkspaceAssetCount(payload),
+          visibility: 'private',
           createdAt: this.createdAtFromId(id, stat.mtimeMs),
           updatedAt: Math.round(stat.mtimeMs),
         });
@@ -73,7 +75,7 @@ export class WorkspaceService {
     return this.listJson(ownerId);
   }
 
-  async create(title?: string, ownerId?: string): Promise<WorkspaceSummary> {
+  async create(title?: string, ownerId?: string, visibility: WorkspaceVisibility = 'private'): Promise<WorkspaceSummary> {
     if (this.usePrisma()) return this.prismaStore.create(title, ownerId);
     const now = Date.now();
     const id = `ws-${now}-${Math.random().toString(36).slice(2, 8)}`;
@@ -81,6 +83,8 @@ export class WorkspaceService {
       id,
       title: title?.trim() || '未命名工作区',
       blockCount: 0,
+      assetCount: 0,
+      visibility,
       createdAt: now,
       updatedAt: now,
       ownerId,
@@ -140,6 +144,8 @@ export class WorkspaceService {
       title: idx >= 0 ? list[idx].title : id,
       blockCount: normalized.blocks.length,
       shotCount: normalized.storyboard?.shots?.length ?? 0,
+      assetCount: computeWorkspaceAssetCount(normalized),
+      visibility: idx >= 0 ? list[idx].visibility ?? 'private' : 'private',
       createdAt: idx >= 0 ? list[idx].createdAt : this.createdAtFromId(id, now),
       updatedAt: now,
       ownerId: idx >= 0 ? list[idx].ownerId : undefined,

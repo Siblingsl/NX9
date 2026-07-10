@@ -7,7 +7,7 @@ import { newBacklotWorkspaceItem } from '@nx9/shared';
 import { useDirector3dUi } from '../stores/director3d-ui';
 import { useFlowRuntime } from '../stores/flow-runtime';
 import { useWorkspaceDocument } from '../stores/workspace-document';
-import { useBacklotLibraryUi } from '../stores/backlot-library-ui';
+import { useAssetLibraryModalUi } from '../stores/asset-library-modal-ui';
 import { useActivityLog } from '../stores/activity-log';
 import { api } from '../api/client';
 import { useTakeStore } from '../engine/stage-deck/stores/take-store';
@@ -35,7 +35,7 @@ export function Director3dPanel() {
   const runtime = useFlowRuntime((s) => s.runtime);
   const updateShot = useWorkspaceDocument((s) => s.updateShot);
   const upsertBacklotWorkspace = useWorkspaceDocument((s) => s.upsertBacklotWorkspace);
-  const openWorkspace = useBacklotLibraryUi((s) => s.openWorkspace);
+  const openAssetAt = useAssetLibraryModalUi((s) => s.openAt);
   const appendLog = useActivityLog((s) => s.append);
   const intensive = runtime?.intensive ?? false;
   const webglOk = useMemo(() => isWebGLAvailable(), [open]);
@@ -134,11 +134,11 @@ export function Director3dPanel() {
         stageDeckScene: sceneProject,
       };
       upsertBacklotWorkspace(item);
-      openWorkspace({ tab: 'scene', itemId: item.id, expandSave: true });
-      appendLog('场景已载入工作区，请在 Backlot 选择分组保存');
+      openAssetAt({ tab: 'scene', itemId: item.id, scope: 'private' });
+      appendLog('场景已载入工作区，请在素材库中编辑保存');
       toastSuccess('场景已载入工作区，请选择分组保存');
     },
-    [upsertBacklotWorkspace, openWorkspace, appendLog],
+    [upsertBacklotWorkspace, openAssetAt, appendLog],
   );
 
   const handleClose = useCallback(() => {

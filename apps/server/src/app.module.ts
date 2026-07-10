@@ -20,11 +20,13 @@ import { ImageOpsModule } from './modules/image-ops/image-ops.module';
 import { ToolsModule } from './modules/tools/tools.module';
 import { TopazModule } from './modules/topaz/topaz.module';
 import { WorkspaceModule } from './modules/workspace/workspace.module';
+import { PublicLibraryModule } from './modules/public-library/public-library.module';
 
 @Module({
   imports: [
     HealthModule,
     WorkspaceModule,
+    PublicLibraryModule,
     SettingsModule,
     AssetsModule,
     GatewayModule,

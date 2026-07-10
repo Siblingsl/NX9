@@ -338,6 +338,15 @@ body {
   cursor: grabbing;
 }
 
+/* 节点下方 Prompt Bar 不被裁剪 */
+.nx9-stage-deck .react-flow__node {
+  overflow: visible !important;
+}
+
+.nx9-node-with-prompt {
+  overflow: visible;
+}
+
 .nx9-stage-deck .react-flow__edge.selectable:hover .react-flow__edge-path,
 .nx9-stage-deck .react-flow__edge.selected .react-flow__edge-path {
   stroke-width: 3;

@@ -22,7 +22,7 @@ import {
 import { buildTimelineFromShots, buildTimelineFromShotsV2, type TranscribeCue, parseStoryboardMarkdown, parseChineseScript, scenesToStoryboardShots, suggestShotGroups, type StoryboardShot } from '@nx9/shared';
 import { useWorkspaceDocument } from '../stores/workspace-document';
 import { useStoryboardUi, useFlowRuntime, useRemotionUi } from '../stores/flow-runtime';
-import { useBacklotLibraryUi } from '../stores/backlot-library-ui';
+import { useAssetLibraryModalUi } from '../stores/asset-library-modal-ui';
 import { useActivityLog } from '../stores/activity-log';
 import { useTakeStore } from '../engine/stage-deck/stores/take-store';
 import { api } from '../api/client';
@@ -74,8 +74,8 @@ export function StoryboardPanel() {
   const setOpen = useStoryboardUi((s) => s.setOpen);
   const scrollToShotId = useStoryboardUi((s) => s.scrollToShotId);
   const requestScrollToShot = useStoryboardUi((s) => s.requestScrollToShot);
-  const setBacklotOpen = useBacklotLibraryUi((s) => s.setOpen);
-  const backlotOpen = useBacklotLibraryUi((s) => s.open);
+  const openAssetLib = useAssetLibraryModalUi((s) => s.setOpen);
+  const assetLibOpen = useAssetLibraryModalUi((s) => s.open);
 
   const storyboard = useWorkspaceDocument((s) => s.storyboard);
   const characters = useWorkspaceDocument((s) => s.characters);
@@ -91,13 +91,13 @@ export function StoryboardPanel() {
   const focusBlock = useFlowRuntime((s) => s.runtime?.focusBlock);
   const spawnBlockForShot = useFlowRuntime((s) => s.runtime?.spawnBlockForShot);
 
-  const openBacklotForSelectedShot = useCallback(() => {
+  const openAssetLibForSelectedShot = useCallback(() => {
     if (!selectedShotId) {
       appendLog('请先在故事板选中一个镜头');
       return;
     }
-    setBacklotOpen(true);
-  }, [selectedShotId, setBacklotOpen, appendLog]);
+    openAssetLib(true);
+  }, [selectedShotId, openAssetLib, appendLog]);
 
   const [importText, setImportText] = useState('');
   const [importMode, setImportMode] = useState<'markdown' | 'script'>('markdown');
@@ -549,15 +549,15 @@ export function StoryboardPanel() {
             )}
             <button
               type="button"
-              onClick={openBacklotForSelectedShot}
+              onClick={openAssetLibForSelectedShot}
               className={`flex items-center gap-1 text-xs px-2 py-1 rounded-lg border ${
-                backlotOpen && selectedShotId
+                assetLibOpen && selectedShotId
                   ? 'border-brand bg-brand/10 text-brand'
                   : selectedShotId
                     ? 'border-brand/40 text-brand hover:bg-brand/5'
                     : 'border-line text-ink/40'
               }`}
-              title={selectedShotId ? '打开 Backlot 模板库' : '请先选中镜头'}
+              title={selectedShotId ? '打开素材库' : '请先选中镜头'}
             >
               <Layers size={14} />
               模板库

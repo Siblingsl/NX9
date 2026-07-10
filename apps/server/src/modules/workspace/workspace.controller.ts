@@ -9,7 +9,7 @@ import {
   Put,
   Query,
 } from '@nestjs/common';
-import type { WorkspacePayload } from '@nx9/shared';
+import type { WorkspacePayload, WorkspaceVisibility } from '@nx9/shared';
 import { VoiceWorkspaceService } from './voice-workspace.service';
 import { WorkspaceService } from './workspace.service';
 
@@ -26,8 +26,8 @@ export class WorkspaceController {
   }
 
   @Post()
-  create(@Body() body: { title?: string; ownerId?: string }) {
-    return this.workspaces.create(body?.title, body?.ownerId);
+  create(@Body() body: { title?: string; ownerId?: string; visibility?: WorkspaceVisibility }) {
+    return this.workspaces.create(body?.title, body?.ownerId, body?.visibility);
   }
 
   @Post('import')

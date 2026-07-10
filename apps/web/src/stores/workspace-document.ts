@@ -13,6 +13,8 @@ import type {
   PlaybookSession,
   ProjectStatus,
   ScriptPlanPayload,
+  SoundAssetProfile,
+  SoundLibraryPayload,
   StoryboardPayload,
   StoryboardShot,
   TimelinePayload,
@@ -27,6 +29,7 @@ import {
   emptyBacklotCustom,
   emptyBacklotWorkspace,
   emptyCharacterLibrary,
+  emptySoundLibrary,
   emptyStoryboard,
   emptyVoice,
   PLAYBOOK_DEFINITIONS,
@@ -41,6 +44,7 @@ interface WorkspaceDocumentState {
   storyboard: StoryboardPayload;
   voice: VoicePayload;
   characters: CharacterLibraryPayload;
+  soundLibrary: SoundLibraryPayload;
   backlotCustom: BacklotCustomPayload;
   backlotWorkspace: BacklotWorkspacePayload;
   canvasAppearance: CanvasAppearance;
@@ -63,6 +67,8 @@ interface WorkspaceDocumentState {
   addVoiceLines: (lines: VoiceLine[]) => void;
   upsertCharacter: (profile: CharacterProfile) => void;
   removeCharacter: (id: string) => void;
+  upsertSound: (sound: SoundAssetProfile) => void;
+  removeSound: (id: string) => void;
   addBacklotCustom: (item: BacklotCustomTemplate) => void;
   removeBacklotCustom: (id: string) => void;
   upsertBacklotWorkspace: (item: BacklotWorkspaceItem) => void;
@@ -83,6 +89,7 @@ interface WorkspaceDocumentState {
     storyboard: StoryboardPayload;
     voice: VoicePayload;
     characters: CharacterLibraryPayload;
+    soundLibrary: SoundLibraryPayload;
     scriptPlan?: ScriptPlanPayload;
     environments?: EnvironmentLibraryPayload;
     backlotCustom: BacklotCustomPayload;
@@ -97,6 +104,7 @@ export const useWorkspaceDocument = create<WorkspaceDocumentState>((set, get) =>
   storyboard: emptyStoryboard(),
   voice: emptyVoice(),
   characters: emptyCharacterLibrary(),
+  soundLibrary: emptySoundLibrary(),
   backlotCustom: emptyBacklotCustom(),
   backlotWorkspace: emptyBacklotWorkspace(),
   canvasAppearance: DEFAULT_CANVAS_APPEARANCE,
@@ -113,6 +121,7 @@ export const useWorkspaceDocument = create<WorkspaceDocumentState>((set, get) =>
       storyboard: payload.storyboard ?? emptyStoryboard(),
       voice: payload.voice ?? emptyVoice(),
       characters: payload.characters ?? emptyCharacterLibrary(),
+      soundLibrary: payload.soundLibrary ?? emptySoundLibrary(),
       backlotCustom: payload.backlotCustom ?? emptyBacklotCustom(),
       backlotWorkspace: payload.backlotWorkspace ?? emptyBacklotWorkspace(),
       canvasAppearance: (payload as any).canvasAppearance ?? DEFAULT_CANVAS_APPEARANCE,
@@ -134,6 +143,7 @@ export const useWorkspaceDocument = create<WorkspaceDocumentState>((set, get) =>
       storyboard: emptyStoryboard(),
       voice: emptyVoice(),
       characters: emptyCharacterLibrary(),
+      soundLibrary: emptySoundLibrary(),
       backlotCustom: emptyBacklotCustom(),
       backlotWorkspace: emptyBacklotWorkspace(),
       scriptPlan: null,
@@ -255,6 +265,22 @@ export const useWorkspaceDocument = create<WorkspaceDocumentState>((set, get) =>
       characters: {
         ...s.characters,
         characters: s.characters.characters.filter((c) => c.id !== id),
+      },
+    })),
+
+  upsertSound: (sound) =>
+    set((s) => ({
+      soundLibrary: {
+        ...s.soundLibrary,
+        sounds: [...s.soundLibrary.sounds.filter((x) => x.id !== sound.id), sound],
+      },
+    })),
+
+  removeSound: (id) =>
+    set((s) => ({
+      soundLibrary: {
+        ...s.soundLibrary,
+        sounds: s.soundLibrary.sounds.filter((x) => x.id !== id),
       },
     })),
 
@@ -419,9 +445,9 @@ export const useWorkspaceDocument = create<WorkspaceDocumentState>((set, get) =>
     }),
 
   getSnapshotForSave: () => {
-    const { storyboard, voice, characters, scriptPlan, environments, backlotCustom, backlotWorkspace, canvasAppearance, playbookSession, projectStatus } = get();
+    const { storyboard, voice, characters, soundLibrary, scriptPlan, environments, backlotCustom, backlotWorkspace, canvasAppearance, playbookSession, projectStatus } = get();
     return {
-      storyboard, voice, characters,
+      storyboard, voice, characters, soundLibrary,
       scriptPlan: scriptPlan ?? undefined,
       environments: environments ?? undefined,
       backlotCustom, backlotWorkspace, canvasAppearance,

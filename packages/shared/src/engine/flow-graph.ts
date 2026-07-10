@@ -1,6 +1,7 @@
 import type { FlowBlock, FlowLink } from '../types/workspace';
 import type { PromptBatchItem, PromptBatchJob, PromptDispatchMeta } from '../types/prompt-batch';
 import { promptItemsToBatch } from '../types/prompt-batch';
+import { resolveAssetImportItems } from '../utils/asset-import';
 
 export interface UpstreamOutputs {
   prompts: string[];
@@ -117,8 +118,17 @@ export function gatherUpstream(
       continue;
     }
     if (kind === 'asset-import' || kind === 'render-slot') {
-      const url = (d.previewUrl as string) || (d.assetUrl as string) || (d.filledUrl as string);
-      if (url) out.pictures.push(url);
+      if (kind === 'asset-import') {
+        for (const item of resolveAssetImportItems(d)) {
+          if (item.mediaKind === 'picture') out.pictures.push(item.url);
+          else if (item.mediaKind === 'clip') out.clips.push(item.url);
+          else if (item.mediaKind === 'sound') out.sounds.push(item.url);
+        }
+      } else {
+        const url = (d.previewUrl as string) || (d.assetUrl as string) || (d.filledUrl as string);
+        if (url) out.pictures.push(url);
+      }
+      continue;
     }
     if (kind === 'preview-sink') {
       const pics = (d.previewPictures as string[]) ?? [];

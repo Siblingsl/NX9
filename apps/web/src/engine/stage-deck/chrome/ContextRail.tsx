@@ -1,7 +1,8 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
-import { ChevronLeft, ChevronRight, GripVertical } from 'lucide-react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { useContextRailUi, type ContextRailTab } from '../stores/context-rail-ui';
 import { useWorkspaceDocument } from '../../../stores/workspace-document';
+import { isSurfaceEnabled } from '../../../config/product-surface';
 import { RailShell } from './rail/primitives/RailShell';
 import { RailTabs } from './rail/primitives/RailTabs';
 import { InspectorRailPanel } from './rail/InspectorRailPanel';
@@ -29,7 +30,13 @@ export function ContextRail({ selectedBlockId }: ContextRailProps) {
   const railBg = isDark ? 'bg-[#222]' : 'bg-white';
   const railBorder = isDark ? 'border-white/10' : 'border-line';
 
-  const hiddenTabs: ContextRailTab[] = ['inspect', 'tasks'];
+  const hiddenTabs = useMemo((): ContextRailTab[] => {
+    const hidden: ContextRailTab[] = ['inspect', 'tasks'];
+    if (!isSurfaceEnabled('storyboard')) hidden.push('storyboard');
+    if (!isSurfaceEnabled('scriptStudio')) hidden.push('script');
+    if (!isSurfaceEnabled('libraryRail')) hidden.push('library');
+    return hidden;
+  }, []);
 
   const dragRef = useRef(false);
   const startXRef = useRef(0);
@@ -70,10 +77,11 @@ export function ContextRail({ selectedBlockId }: ContextRailProps) {
 
   useEffect(() => {
     if (!requestedTab) return;
+    if (hiddenTabs.includes(requestedTab)) return;
     setTab(requestedTab);
     setCollapsed(false);
     clearRailRequest();
-  }, [requestedTab, clearRailRequest]);
+  }, [requestedTab, clearRailRequest, hiddenTabs]);
 
   if (collapsed) {
     return (
@@ -123,11 +131,13 @@ export function ContextRail({ selectedBlockId }: ContextRailProps) {
           </div>
         }
       >
-        <NextStepBanner />
+        {isSurfaceEnabled('playbookWizard') && <NextStepBanner />}
         {tab === 'inspector' && <InspectorRailPanel selectedBlockId={selectedBlockId} />}
-        {tab === 'storyboard' && <StoryboardRailPanel selectedBlockId={selectedBlockId} />}
-        {tab === 'script' && <ScriptStudioPanel />}
-        {tab === 'library' && <LibraryRailPanel />}
+        {tab === 'storyboard' && isSurfaceEnabled('storyboard') && (
+          <StoryboardRailPanel selectedBlockId={selectedBlockId} />
+        )}
+        {tab === 'script' && isSurfaceEnabled('scriptStudio') && <ScriptStudioPanel />}
+        {tab === 'library' && isSurfaceEnabled('libraryRail') && <LibraryRailPanel />}
       </RailShell>
     </aside>
   );

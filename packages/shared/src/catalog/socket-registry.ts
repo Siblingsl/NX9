@@ -1,4 +1,5 @@
 import type { SocketKind, SocketProfile } from '../types/block';
+import { resolveAssetImportItems } from '../utils/asset-import';
 
 const DEV_SOCKETS: Record<string, SocketProfile> = {};
 
@@ -139,12 +140,16 @@ export const SOCKET_LABELS: Record<SocketKind, string> = {
 
 export function resolveEmits(kind: string, data?: Record<string, unknown>): SocketKind[] {
   if (kind === 'asset-import') {
-    const media = data?.mediaKind as string | undefined;
-    if (media === 'picture') return ['picture'];
-    if (media === 'clip') return ['clip'];
-    if (media === 'sound') return ['sound'];
-    if (media === 'mesh') return ['mesh'];
-    return [];
+    const items = resolveAssetImportItems(data);
+    if (items.length === 0) return [];
+    const kinds = new Set<SocketKind>();
+    for (const item of items) {
+      if (item.mediaKind === 'picture') kinds.add('picture');
+      else if (item.mediaKind === 'clip') kinds.add('clip');
+      else if (item.mediaKind === 'sound') kinds.add('sound');
+      else if (item.mediaKind === 'mesh') kinds.add('mesh');
+    }
+    return [...kinds];
   }
   if (kind === 'asset-bundle') {
     const bundleKind = data?.bundleKind as string | undefined;

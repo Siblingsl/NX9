@@ -15,6 +15,7 @@ import { useTranslate } from '../hooks/use-translate';
 import { StudioOverflowMenu } from './StudioOverflowMenu';
 import { StudioDropdownPanel } from './StudioDropdownPanel';
 import { isDesktop } from '../platform/runtime-bridge';
+import { isSurfaceEnabled } from '../config/product-surface';
 import type { UserSummary } from '@nx9/shared';
 
 export interface StudioTopBarProps {
@@ -38,7 +39,6 @@ export interface StudioTopBarProps {
   onCreateUser: (name: string) => void;
   onToggleRemotion: () => void;
   onToggleUsage: () => void;
-  onOpenBacklot: () => void;
   onOpenWorkflowTemplates: () => void;
   onOpenHistory: () => void;
   onToggleAssetLib: () => void;
@@ -68,7 +68,6 @@ export function StudioTopBar({
   onCreateUser,
   onToggleRemotion,
   onToggleUsage,
-  onOpenBacklot,
   onOpenWorkflowTemplates,
   onOpenHistory,
   onToggleAssetLib,
@@ -90,14 +89,14 @@ export function StudioTopBar({
 
   const running = batchPhase === 'running';
   const playbookSession = useWorkspaceDocument((s) => s.playbookSession);
-  const hasActivePlaybook = playbookSession && !playbookSession.dismissed;
+  const hasActivePlaybook =
+    isSurfaceEnabled('playbookWizard') && playbookSession && !playbookSession.dismissed;
   const projectStatus = useWorkspaceDocument((s) => s.projectStatus);
   const t = useTranslate();
 
   return (
     <header className="nx9-topbar shrink-0 border-b border-line/80 bg-white/90 backdrop-blur-md">
       <div className="flex h-12 items-center gap-3 px-4">
-        {/* Brand */}
         <div className="flex items-center gap-2.5 shrink-0 min-w-0">
           <div className="w-8 h-8 rounded-[10px] bg-gradient-to-br from-brand to-accent flex items-center justify-center text-white font-bold text-xs shadow-sm">
             N9
@@ -114,13 +113,11 @@ export function StudioTopBar({
 
         <div className="w-px h-7 bg-line/80 shrink-0 hidden sm:block" aria-hidden />
 
-        {/* Mode + status */}
         <div className="flex items-center gap-2 min-w-0 flex-1 justify-center overflow-x-auto nx9-scroll">
-          <ModeCapsule />
-          <ProductionWall />
+          {isSurfaceEnabled('viewModeCapsule') && <ModeCapsule />}
+          {isSurfaceEnabled('productionWall') && <ProductionWall />}
         </div>
 
-        {/* Project status badge */}
         {hasActivePlaybook && (
           <span className="hidden md:inline-flex items-center gap-1 rounded-full bg-brand/10 text-brand px-2 py-0.5 text-[10px] font-medium">
             {projectStatus === 'draft' ? '草稿' :
@@ -135,65 +132,72 @@ export function StudioTopBar({
 
         <div className="w-px h-7 bg-line/80 shrink-0 hidden md:block" aria-hidden />
 
-        {/* Primary actions */}
         <div className="flex items-center gap-1 shrink-0 overflow-visible">
-          <div className="hidden sm:flex items-center gap-0.5 mr-0.5">
+          {isSurfaceEnabled('undoRedo') && (
+            <div className="hidden sm:flex items-center gap-0.5 mr-0.5">
+              <button
+                type="button"
+                onClick={onUndo}
+                disabled={!canUndo}
+                className="nx9-topbar-icon-btn disabled:opacity-30"
+                title="撤销 Ctrl+Z"
+              >
+                <Undo2 size={16} />
+              </button>
+              <button
+                type="button"
+                onClick={onRedo}
+                disabled={!canRedo}
+                className="nx9-topbar-icon-btn disabled:opacity-30"
+                title="重做 Ctrl+Y"
+              >
+                <Redo2 size={16} />
+              </button>
+            </div>
+          )}
+
+          {isSurfaceEnabled('storyboard') && (
             <button
               type="button"
-              onClick={onUndo}
-              disabled={!canUndo}
-              className="nx9-topbar-icon-btn disabled:opacity-30"
-              title="撤销 Ctrl+Z"
+              onClick={onToggleStoryboard}
+              className={`nx9-topbar-pill ${storyboardOpen ? 'nx9-topbar-pill--active' : ''}`}
+              title="故事板 (B)"
             >
-              <Undo2 size={16} />
+              <Clapperboard size={14} />
+              <span className="hidden xl:inline">故事板</span>
             </button>
+          )}
+
+          {isSurfaceEnabled('director3d') && (
             <button
               type="button"
-              onClick={onRedo}
-              disabled={!canRedo}
-              className="nx9-topbar-icon-btn disabled:opacity-30"
-              title="重做 Ctrl+Y"
+              onClick={onOpenDirector3d}
+              className="nx9-topbar-pill hidden lg:flex"
+              title="3D 导演台"
             >
-              <Redo2 size={16} />
+              <Box size={14} />
+              <span className="hidden xl:inline">3D 导演台</span>
             </button>
-          </div>
+          )}
 
-          <button
-            type="button"
-            onClick={onToggleStoryboard}
-            className={`nx9-topbar-pill ${storyboardOpen ? 'nx9-topbar-pill--active' : ''}`}
-            title="故事板 (B)"
-          >
-            <Clapperboard size={14} />
-            <span className="hidden xl:inline">故事板</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={onOpenDirector3d}
-            className="nx9-topbar-pill hidden lg:flex"
-            title="3D 导演台"
-          >
-            <Box size={14} />
-            <span className="hidden xl:inline">3D 导演台</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={onBatchRun}
-            disabled={running}
-            className="nx9-topbar-cta"
-            title="批量运行"
-          >
-            <Zap size={14} />
-            <span className="hidden sm:inline">批量运行</span>
-            {running && (
-              <span className="text-[10px] opacity-80 tabular-nums">
-                {batchProgress.done}/{batchProgress.total}
-                {batchTaskProgress != null && batchTaskProgress > 0 && ` · ${batchTaskProgress}%`}
-              </span>
-            )}
-          </button>
+          {isSurfaceEnabled('batchRun') && (
+            <button
+              type="button"
+              onClick={onBatchRun}
+              disabled={running}
+              className="nx9-topbar-cta"
+              title="批量运行"
+            >
+              <Zap size={14} />
+              <span className="hidden sm:inline">批量运行</span>
+              {running && (
+                <span className="text-[10px] opacity-80 tabular-nums">
+                  {batchProgress.done}/{batchProgress.total}
+                  {batchTaskProgress != null && batchTaskProgress > 0 && ` · ${batchTaskProgress}%`}
+                </span>
+              )}
+            </button>
+          )}
 
           <StudioOverflowMenu
             remotionOpen={remotionOpen}
@@ -201,7 +205,6 @@ export function StudioTopBar({
             assetLibOpen={assetLibOpen}
             onToggleRemotion={onToggleRemotion}
             onToggleUsage={onToggleUsage}
-            onOpenBacklot={onOpenBacklot}
             onOpenWorkflowTemplates={onOpenWorkflowTemplates}
             onOpenHistory={onOpenHistory}
             onToggleAssetLib={onToggleAssetLib}
@@ -210,7 +213,6 @@ export function StudioTopBar({
             onOpenSettings={onOpenSettings}
           />
 
-          {/* User */}
           <div className="relative ml-0.5">
             <button
               ref={userAnchorRef}

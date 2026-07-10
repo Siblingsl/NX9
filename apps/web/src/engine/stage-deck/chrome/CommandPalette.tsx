@@ -12,6 +12,7 @@ import { useFlowRuntime, useStoryboardUi } from '../../../stores/flow-runtime';
 import { useViewMode } from '../stores/view-mode';
 import { useContextRailUi } from '../stores/context-rail-ui';
 import { useWorkspaceDocument } from '../../../stores/workspace-document';
+import { isSurfaceEnabled } from '../../../config/product-surface';
 import type { NodeAlignAction } from '../../node-align';
 
 type CommandSection = 'playbook' | 'recipe' | 'dock' | 'advanced' | 'action';
@@ -233,7 +234,21 @@ export function CommandPalette({ open, onClose, onAlign }: CommandPaletteProps) 
       },
     ];
 
-    return [...playbookCommands, ...recipeCommands, ...moduleCommands, ...alignCommands, ...actionCommands];
+    return [...playbookCommands, ...recipeCommands, ...moduleCommands, ...alignCommands, ...actionCommands].filter(
+      (item) => {
+        if (item.section === 'playbook' && !isSurfaceEnabled('playbookWizard')) return false;
+        if (item.section === 'recipe' && !isSurfaceEnabled('workflowTemplates')) return false;
+        if (
+          (item.id === 'open-storyboard' || item.id === 'open-storyboard-grid') &&
+          !isSurfaceEnabled('storyboard')
+        ) {
+          return false;
+        }
+        if (item.id === 'open-workflow-rail' && !isSurfaceEnabled('libraryRail')) return false;
+        if (item.id === 'run-batch' && !isSurfaceEnabled('batchRun')) return false;
+        return true;
+      },
+    );
   }, [
     requestSpawn,
     requestLoadTemplate,

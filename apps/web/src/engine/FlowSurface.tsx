@@ -28,7 +28,7 @@ import {
   type OnNodeDrag,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import { PERF, validateLink, WORKFLOW_TEMPLATES, lookupBlock, canExecuteNode } from '@nx9/shared';
+import { PERF, validateLink, WORKFLOW_TEMPLATES, lookupBlock, canExecuteNode, resolveNodeInteraction, isPromptBarKind, syncAssetImportNodeFields } from '@nx9/shared';
 import { blockTypes, preloadBlockTypes } from '../blocks/registry';
 import { api } from '../api/client';
 import { useFlowHistory, type FlowSnapshot } from '../hooks/use-flow-history';
@@ -61,6 +61,8 @@ import { LensMenu } from './stage-deck/canvas/LensMenu';
 import { useStageDeckNodeTypes } from './stage-deck/canvas/stage-deck-node-types';
 import { CommandPalette, useCommandPaletteHotkey } from './stage-deck/chrome/CommandPalette';
 import { useDeckUi } from './stage-deck/stores/deck-ui';
+import { useContextRailUi } from './stage-deck/stores/context-rail-ui';
+import { isSurfaceEnabled } from '../config/product-surface';
 import { useViewMode } from './stage-deck/stores/view-mode';
 import { useTakeStore } from './stage-deck/stores/take-store';
 import { useAliasStore } from './stage-deck/stores/alias-store';
@@ -78,7 +80,6 @@ import { SmartGuides } from './stage-deck/canvas/SmartGuides';
 import { computeSmartSnap } from './stage-deck/utils/smart-guides';
 import { applyUpstreamHighlight } from './stage-deck/utils/upstream-graph';
 import { openReviewGateSession } from './stage-deck/utils/review-gate-session';
-import { useContextRailUi } from './stage-deck/stores/context-rail-ui';
 import { runCascadeFromBlock, runDownstreamFromBlock } from './stage-deck/execution/cascade-runner';
 import { withPendingTake } from './stage-deck/execution/pending-take';
 import {
@@ -89,6 +90,7 @@ import {
 import { TakeRail } from './stage-deck/chrome/TakeRail';
 import { TakeLightboxHost } from './stage-deck/chrome/CompareLightbox';
 import { PlaybookLauncherOverlay } from './stage-deck/chrome/PlaybookLauncherOverlay';
+import { RecipePickerOverlay } from './stage-deck/chrome/RecipePickerOverlay';
 import { CanvasFlowRail } from './stage-deck/chrome/CanvasFlowRail';
 import { filterBlocksForWireDrop } from './stage-deck/interaction/wire-drop';
 import { computeGroupBounds } from './stage-deck/canvas/SceneGroup';
@@ -209,8 +211,8 @@ const FlowSurfaceInner = memo(function FlowSurfaceInner({
   const stageDeckNodeTypes = useStageDeckNodeTypes();
 
   useCommandPaletteHotkey(() => {
-    if (isStageDeck) setCommandOpen(true);
-  }, isStageDeck);
+    if (isStageDeck && isSurfaceEnabled('commandPalette')) setCommandOpen(true);
+  }, isStageDeck && isSurfaceEnabled('commandPalette'));
 
   nodesRef.current = nodes;
   edgesRef.current = edges;
@@ -863,9 +865,11 @@ const FlowSurfaceInner = memo(function FlowSurfaceInner({
       syncSelectedBlockId(id);
       if (isStageDeck) {
         if (!id) {
-          setDeckSelection(null, false);
+          setDeckSelection(null, null);
         } else {
-          setDeckSelection(id, false);
+          const node = selected[0];
+          const kind = node.type ?? 'prompt';
+          setDeckSelection(id, kind);
         }
       }
       if (!id) return;
@@ -1301,7 +1305,7 @@ const FlowSurfaceInner = memo(function FlowSurfaceInner({
         e.preventDefault();
         handleRedo();
       }
-      if (e.key === 'b' && !e.ctrlKey && !e.metaKey) {
+      if (isSurfaceEnabled('storyboard') && e.key === 'b' && !e.ctrlKey && !e.metaKey) {
         e.preventDefault();
         void import('../stores/flow-runtime').then(({ useStoryboardUi }) => {
           useStoryboardUi.getState().toggle();
@@ -1546,9 +1550,13 @@ const FlowSurfaceInner = memo(function FlowSurfaceInner({
           position: dropAt,
           data: {
             blockIndex: nextIndexRef.current++,
-            assetUrl,
-            mediaKind: isPic ? 'picture' : 'clip',
-            status: 'done',
+            ...syncAssetImportNodeFields([
+              {
+                id: `drop-${Date.now()}`,
+                url: assetUrl,
+                mediaKind: isPic ? 'picture' : 'clip',
+              },
+            ]),
           },
         },
       ]);
@@ -1603,6 +1611,16 @@ const FlowSurfaceInner = memo(function FlowSurfaceInner({
         appendLog('打开 Stage Deck 预演');
         return;
       }
+      if (isStageDeck && isSurfaceEnabled('canvasFirst')) {
+        const kind = node.type ?? 'prompt';
+        if (isPromptBarKind(kind)) {
+          setDeckSelection(node.id, kind);
+          useDeckUi.getState().focusPromptBar();
+          appendLog('在 Prompt Bar 中编辑');
+          return;
+        }
+        // 非 Prompt Bar 节点：继续走下方展开/Inspector 逻辑
+      }
       if (isStageDeck && (isProduceMode(viewMode) || viewMode === 'review')) {
         const expanded = Boolean(node.data?.expanded);
         updateNodeDataStable(node.id, { expanded: !expanded });
@@ -1612,7 +1630,7 @@ const FlowSurfaceInner = memo(function FlowSurfaceInner({
       focusBlockRef.current(node.id);
       appendLog(`聚焦模块 · ${node.type ?? 'unknown'}`);
     },
-    [setNodes, appendLog, isStageDeck, openDirector3dForBlock, viewMode, updateNodeDataStable, syncSelectedBlockId],
+    [setNodes, appendLog, isStageDeck, openDirector3dForBlock, viewMode, updateNodeDataStable, syncSelectedBlockId, setDeckSelection],
   );
 
   return (
@@ -1630,6 +1648,7 @@ const FlowSurfaceInner = memo(function FlowSurfaceInner({
         </div>
       )}
       {isStageDeck && ready && nodes.length === 0 && !recipePickerDismissed && (
+        isSurfaceEnabled('playbookWizard') ? (
         <PlaybookLauncherOverlay
           onStartPlaybook={(playbookId) => {
             const def = PLAYBOOK_DEFINITIONS.find((p) => p.id === playbookId);
@@ -1653,8 +1672,20 @@ const FlowSurfaceInner = memo(function FlowSurfaceInner({
           }}
           onDismiss={() => setRecipePickerDismissed(true)}
         />
+        ) : isSurfaceEnabled('workflowTemplates') ? (
+        <RecipePickerOverlay
+          onPick={(templateId) => {
+            void loadWorkflowTemplate(templateId, 'replace');
+            setRecipePickerDismissed(true);
+            setTimeout(() => {
+              void fitView({ duration: 300, padding: 0.2 });
+            }, 200);
+          }}
+          onBlank={() => setRecipePickerDismissed(true)}
+        />
+        ) : null
       )}
-      {isStageDeck && ready && <CanvasFlowRail />}
+      {isStageDeck && ready && isSurfaceEnabled('playbookFlowRail') && <CanvasFlowRail />}
 
       <ReactFlow
         nodes={nodes}
@@ -1747,7 +1778,7 @@ const FlowSurfaceInner = memo(function FlowSurfaceInner({
         />
       )}
 
-      {isStageDeck && (
+      {isStageDeck && isSurfaceEnabled('commandPalette') && (
         <CommandPalette
           open={commandOpen}
           onClose={() => setCommandOpen(false)}
@@ -1755,7 +1786,7 @@ const FlowSurfaceInner = memo(function FlowSurfaceInner({
         />
       )}
 
-      {isStageDeck && isReviewMode(viewMode) && (
+      {isStageDeck && isReviewMode(viewMode) && isSurfaceEnabled('takeRail') && (
         <TakeRail blockId={selectedBlockId} onPickTake={handlePickTake} />
       )}
 

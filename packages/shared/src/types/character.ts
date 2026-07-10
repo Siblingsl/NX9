@@ -28,6 +28,8 @@ export interface CharacterProfile {
   sourceTemplateId?: string;
   /** Character Bible 六层锚点（EPIC-M01） */
   bible?: CharacterBible;
+  /** Creative Asset Center 扩展数据 */
+  creative?: import('./creative-asset-center').CharacterCreativeExtension;
 }
 
 export interface CharacterLibraryPayload {

@@ -4,6 +4,7 @@ import { Search, User, Image, Sparkles, Package, LayoutGrid } from 'lucide-react
 import * as Icons from 'lucide-react';
 import { useWorkspaceDocument } from '../../../stores/workspace-document';
 import { LogDockButton } from '../../../panels/LogPanel';
+import { isSurfaceEnabled } from '../../../config/product-surface';
 
 type LaneId = 'character' | 'scene' | 'generate' | 'output';
 
@@ -62,12 +63,16 @@ const STEP_KINDS: Record<string, string[]> = {
 export function ModuleDock({ onPick }: ModuleDockProps) {
   const [activeLane, setActiveLane] = useState<LaneId | null>(null);
   const [query, setQuery] = useState('');
-  const [expanded, setExpanded] = useState(false);
+  const [expanded, setExpanded] = useState(() => !isSurfaceEnabled('playbookWizard'));
   const session = useWorkspaceDocument((s) => s.playbookSession);
-  const hasActivePlaybook = session && !session.dismissed && session.playbookId !== 'pb-blank-advanced';
+  const hasActivePlaybook =
+    isSurfaceEnabled('playbookWizard') &&
+    session &&
+    !session.dismissed &&
+    session.playbookId !== 'pb-blank-advanced';
 
   const currentStepKinds = useMemo(() => {
-    if (!session || session.dismissed) return null;
+    if (!isSurfaceEnabled('playbookWizard') || !session || session.dismissed) return null;
     const def = PLAYBOOK_DEFINITIONS.find((p) => p.id === session.playbookId);
     if (!def) return null;
     const step = def.steps.find((s) => s.id === session.currentStepId);
@@ -96,8 +101,8 @@ export function ModuleDock({ onPick }: ModuleDockProps) {
         >
           <LayoutGrid size={18} />
         </button>
-        <div className="absolute bottom-2">
-          <LogDockButton />
+        <div className="mt-auto pb-1">
+          {isSurfaceEnabled('logPanel') && <LogDockButton />}
         </div>
       </aside>
     );
@@ -135,7 +140,7 @@ export function ModuleDock({ onPick }: ModuleDockProps) {
           );
         })}
         <div className="mt-auto pb-1">
-          <LogDockButton />
+          {isSurfaceEnabled('logPanel') && <LogDockButton />}
         </div>
       </div>
 

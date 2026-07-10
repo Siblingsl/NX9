@@ -16,6 +16,7 @@ import {
   characterSheetFromNodeData,
   syncCharacterSheetNodeOutput,
   resolveVideoGenParams,
+  resolveAssetImportItems,
   type ClipChainState,
   type FlowBlock,
   type FlowLink,
@@ -479,10 +480,13 @@ async function executeBlock(
   }
 
   if (kind === 'asset-import') {
+    const items = resolveAssetImportItems(d as Record<string, unknown>);
+    const pictures = items.filter((i) => i.mediaKind === 'picture').map((i) => i.url);
     updateNodeData(block.id, {
       status: 'success',
-      output: d.assetUrl,
-      previewUrl: d.mediaKind === 'picture' ? d.assetUrl : undefined,
+      output: items[0]?.url,
+      previewUrl: pictures[0] ?? (items[0]?.mediaKind === 'picture' ? items[0].url : undefined),
+      previewUrls: pictures,
     });
     return;
   }

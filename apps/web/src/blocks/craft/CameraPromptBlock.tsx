@@ -1,12 +1,8 @@
 import { memo, useCallback, useMemo } from 'react';
 import { type NodeProps, useReactFlow } from '@xyflow/react';
 import { CAMERA_PROMPT_PRESETS } from '@nx9/shared';
-import { applyBacklotText } from '../shared/apply-backlot-text';
-import {
-  BacklotTemplatePicker,
-  UpstreamPromptBanner,
-  type BacklotTemplateApplyResult,
-} from '../shared/backlot-template-picker';
+import { UpstreamPromptBanner } from '../shared/upstream-hints';
+import { AssetLinkField, assetRefFromData, patchWithAssetRef } from '../shared/AssetLinkField';
 import { BlockShell } from '../shared/BlockShell';
 import { DoubleClickText } from '../shared/DoubleClickText';
 
@@ -17,8 +13,7 @@ function CameraPromptBlock(props: NodeProps) {
   const content = (props.data?.content as string) ?? '';
   const upstream = props.data?.upstream as { prompts?: string[]; pictures?: string[] } | undefined;
   const upstreamPrompt = upstream?.prompts?.join(', ');
-  const backlotTemplateId = props.data?.backlotTemplateId as string | undefined;
-  const backlotTemplateLabel = props.data?.backlotTemplateLabel as string | undefined;
+  const assetRef = assetRefFromData(props.data as Record<string, unknown>);
 
   const composed = useMemo(() => {
     const parts = CAMERA_PROMPT_PRESETS.filter((p) => selectedIds.includes(p.id)).map((p) => p.text);
@@ -44,23 +39,6 @@ function CameraPromptBlock(props: NodeProps) {
     [selectedIds, extra, props.id, updateNodeData],
   );
 
-  const applyBacklot = useCallback(
-    (result: BacklotTemplateApplyResult) => {
-      const nextExtra = applyBacklotText(extra, result.prompt, result.mode);
-      const parts = CAMERA_PROMPT_PRESETS.filter((p) => selectedIds.includes(p.id)).map(
-        (p) => p.text,
-      );
-      if (nextExtra.trim()) parts.push(nextExtra.trim());
-      updateNodeData(props.id, {
-        extra: nextExtra,
-        content: parts.join(', '),
-        backlotTemplateId: result.templateId,
-        backlotTemplateLabel: result.templateLabel,
-      });
-    },
-    [extra, selectedIds, props.id, updateNodeData],
-  );
-
   const groups = useMemo(() => {
     const map = new Map<string, typeof CAMERA_PROMPT_PRESETS>();
     for (const p of CAMERA_PROMPT_PRESETS) {
@@ -74,17 +52,12 @@ function CameraPromptBlock(props: NodeProps) {
   return (
     <BlockShell {...props}>
       <div className="space-y-2 nodrag nopan text-xs max-h-64 overflow-y-auto nx9-scroll">
-        <BacklotTemplatePicker
-          kinds={['shot']}
-          selectedTemplateId={backlotTemplateId}
-          selectedTemplateLabel={backlotTemplateLabel}
-          hint="镜头/运镜模板写入补充说明，与本节点预设合并后流向下游。"
-          onApply={applyBacklot}
-          onClear={() =>
-            updateNodeData(props.id, {
-              backlotTemplateId: undefined,
-              backlotTemplateLabel: undefined,
-            })
+        <AssetLinkField
+          kind="shot"
+          assetRef={assetRef}
+          onChange={(ref) => updateNodeData(props.id, patchWithAssetRef(ref))}
+          onInsertMention={(token) =>
+            updateNodeData(props.id, { extra: `${extra}${extra ? ' ' : ''}${token}` })
           }
         />
         <UpstreamPromptBanner hasUpstream={Boolean(upstreamPrompt)} preview={upstreamPrompt} />

@@ -3,6 +3,7 @@ import { type NodeProps, useReactFlow } from '@xyflow/react';
 import { compileScenePrompt } from '@nx9/shared';
 import { BlockShell } from '../shared/BlockShell';
 import ImageUploadSlot from '../shared/ImageUploadSlot';
+import { AssetLinkField, assetRefFromData, patchWithAssetRef } from '../shared/AssetLinkField';
 
 function SceneCardBlock(props: NodeProps) {
   const { updateNodeData } = useReactFlow();
@@ -14,6 +15,7 @@ function SceneCardBlock(props: NodeProps) {
   const propsRaw = (props.data?.props as string[] | string) ?? [];
   const propsArr = Array.isArray(propsRaw) ? propsRaw : (propsRaw as string).split(/[,，、]\s*/).filter(Boolean);
   const referenceUrls = (props.data?.referenceUrls as string[]) ?? [];
+  const assetRef = assetRefFromData(props.data as Record<string, unknown>);
 
   const compiled = useMemo(
     () =>
@@ -54,6 +56,25 @@ function SceneCardBlock(props: NodeProps) {
   return (
     <BlockShell {...props}>
       <div className="space-y-2 nodrag nopan text-xs max-w-[300px]">
+        <AssetLinkField
+          kind="scene"
+          assetRef={assetRef}
+          onChange={(ref) => {
+            const patch = patchWithAssetRef(ref);
+            if (ref) {
+              commit({
+                ...patch,
+                sceneName: ref.label,
+                description: ref.label,
+              });
+            } else {
+              commit(patch);
+            }
+          }}
+          onInsertMention={(token) =>
+            commit({ description: `${description}${description ? ' ' : ''}${token}` })
+          }
+        />
         <input
           value={sceneName}
           onChange={(e) => commit({ sceneName: e.target.value })}

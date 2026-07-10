@@ -44,6 +44,8 @@ export interface BacklotCustomTemplate {
   characterArchetype?: BacklotCharacterArchetype;
   stageDeckScene?: unknown;
   createdAt: number;
+  /** Creative Asset Center 扩展数据 */
+  creative?: import('../types/creative-asset-center').WorkspaceCreativeExtension;
 }
 
 export interface BacklotCustomPayload {
@@ -64,6 +66,8 @@ export interface BacklotWorkspaceItem {
   stageDeckScene?: unknown;
   /** 从自定义模板导入时关联的模板 id，用于覆盖保存 */
   sourceTemplateId?: string;
+  /** Creative Asset Center 扩展数据 */
+  creative?: import('../types/creative-asset-center').WorkspaceCreativeExtension;
 }
 
 export interface BacklotWorkspacePayload {

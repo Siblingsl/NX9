@@ -2,12 +2,13 @@ import { memo, useCallback, useMemo, useRef } from 'react';
 import { type NodeProps, useEdges, useNodes, useReactFlow } from '@xyflow/react';
 import { gatherUpstream, AUDIO_FORMAT_OPTIONS, SPEECH_RATE_OPTIONS } from '@nx9/shared';
 import { BlockShell } from '../shared/BlockShell';
-import { GenUpstreamHint } from '../shared/backlot-template-picker';
-import { GenFallbackTemplate } from '../shared/gen-fallback-template';
+import { GenUpstreamHint } from '../shared/upstream-hints';
 import { useUpstreamPrompt } from '../shared/use-upstream-prompt';
 import { api } from '../../api/client';
 import { useActivityLog } from '../../stores/activity-log';
+import { useAllAssetLibraryItems } from '../../hooks/use-asset-library-items';
 import { MentionEditor } from '../../engine/stage-deck/chrome/MentionEditor';
+import { AssetLinkField, assetRefFromData, patchWithAssetRef } from '../shared/AssetLinkField';
 import { useWorkspaceDocument } from '../../stores/workspace-document';
 import GenSettingsPills from '../shared/GenSettingsPills';
 
@@ -28,12 +29,16 @@ function SoundGenBlock(props: NodeProps) {
   const speechRate = (props.data?.speechRate as number) ?? 1;
   const characterId = (props.data?.characterId as string) ?? '';
   const referenceAudioUrl = (props.data?.referenceAudioUrl as string) ?? '';
-  const backlotTemplateId = props.data?.backlotTemplateId as string | undefined;
-  const backlotTemplateLabel = props.data?.backlotTemplateLabel as string | undefined;
+  const soundAssetRef = assetRefFromData(
+    props.data?.soundAssetRef
+      ? ({ assetRef: props.data.soundAssetRef } as Record<string, unknown>)
+      : (props.data as Record<string, unknown>),
+  );
   const status = props.data?.status as string | undefined;
   const audioUrl = props.data?.audioUrl as string | undefined;
   const { hasUpstream, preview: upstreamPreview } = useUpstreamPrompt(props.id);
 
+  const { allItems } = useAllAssetLibraryItems('sound');
   const selectedChar = useMemo(
     () => characters.find((c) => c.id === characterId),
     [characters, characterId],
@@ -124,23 +129,26 @@ function SoundGenBlock(props: NodeProps) {
           当前为 <strong>AI 配音 (TTS)</strong>。背景音乐 / Suno 音乐生成尚未接入，请用外部工具或后续版本。
         </p>
         <GenUpstreamHint hasUpstream={hasUpstream} />
-        {!hasUpstream && (
-          <GenFallbackTemplate
-            kinds={['hook']}
-            hasUpstream={hasUpstream}
-            content={text}
-            contentKey="text"
-            templateId={backlotTemplateId}
-            templateLabel={backlotTemplateLabel}
-            hint="未连接上游时，可用钩子文案模板填入配音文本。"
-            onUpdate={(patch) => updateNodeData(props.id, patch)}
-          />
-        )}
         {(upstreamPrompt || upstreamPreview) && (
           <p className="text-[10px] text-ink/50 line-clamp-2" title={upstreamPrompt || upstreamPreview}>
             上游: {upstreamPrompt || upstreamPreview}
           </p>
         )}
+        <AssetLinkField
+          kind="sound"
+          assetRef={soundAssetRef}
+          onChange={(ref) => {
+            const patch: Record<string, unknown> = { soundAssetRef: ref, ...patchWithAssetRef(ref) };
+            if (ref) {
+              const item = allItems.find((i) => i.id === ref.id && i.scope === ref.scope);
+              if (item?.audioUrl) patch.referenceAudioUrl = item.audioUrl;
+            }
+            updateNodeData(props.id, patch);
+          }}
+          onInsertMention={(token) =>
+            updateNodeData(props.id, { text: `${text}${text ? ' ' : ''}${token}` })
+          }
+        />
         <MentionEditor
           blockId={props.id}
           value={text}

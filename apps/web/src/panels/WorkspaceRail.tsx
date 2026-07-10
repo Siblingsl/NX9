@@ -1,4 +1,4 @@
-import { Plus, Trash2, Pencil } from 'lucide-react';
+import { Plus, X, Pencil } from 'lucide-react';
 import type { WorkspaceSummary } from '@nx9/shared';
 
 interface WorkspaceRailProps {
@@ -7,7 +7,7 @@ interface WorkspaceRailProps {
   onSelect: (id: string) => void;
   onCreate: () => void;
   onRename: (id: string, title: string) => void;
-  onDelete: (id: string) => void;
+  onClose: (id: string) => void;
 }
 
 export function WorkspaceRail({
@@ -16,7 +16,7 @@ export function WorkspaceRail({
   onSelect,
   onCreate,
   onRename,
-  onDelete,
+  onClose,
 }: WorkspaceRailProps) {
   return (
     <div className="nx9-workspace-rail flex items-center gap-1.5 px-4 py-1.5 border-b border-line/60 bg-surface/30 overflow-x-auto nx9-scroll">
@@ -56,13 +56,19 @@ export function WorkspaceRail({
             {items.length > 1 && (
               <button
                 type="button"
-                title="删除"
+                title="从工作区栏关闭"
                 className="opacity-0 group-hover:opacity-100 p-0.5 hover:text-warn transition-opacity"
                 onClick={() => {
-                  if (window.confirm(`删除工作区「${ws.title}」？`)) onDelete(ws.id);
+                  if (
+                    window.confirm(
+                      `从工作区栏关闭「${ws.title}」？\n画布标签会移除，但项目素材仍保留在素材库中。`,
+                    )
+                  ) {
+                    onClose(ws.id);
+                  }
                 }}
               >
-                <Trash2 size={11} />
+                <X size={11} />
               </button>
             )}
           </div>

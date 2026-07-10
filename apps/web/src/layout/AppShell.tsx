@@ -1,50 +1,74 @@
-import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { BlockDefinition } from '@nx9/shared';
+import { isPrivateWorkspace } from '@nx9/shared';
 import { ModuleDock } from '../engine/stage-deck/chrome/ModuleDock';
-import { StageDeckTour } from '../engine/stage-deck/chrome/StageDeckTour';
 import { ContextRail } from '../engine/stage-deck/chrome/ContextRail';
 import { useContextRailUi } from '../engine/stage-deck/stores/context-rail-ui';
 import { StudioTopBar } from './StudioTopBar';
 import { WorkspaceRail } from '../panels/WorkspaceRail';
 import { SettingsDrawer } from '../panels/SettingsDrawer';
-import { SkillsDrawer } from '../panels/SkillsDrawer';
-import { StoryboardPanel } from '../panels/StoryboardPanel';
-import { AssetLibraryPanel } from '../panels/AssetLibraryPanel';
-import { EpisodeStudioPanel } from '../panels/EpisodeStudioPanel';
-import { UsagePanel } from '../panels/UsagePanel';
-import { GenerationHistoryPanel } from '../panels/GenerationHistoryPanel';
-
-import { BacklotLibraryPanel } from '../panels/BacklotLibraryPanel';
 import { ShortcutsModal } from '../panels/ShortcutsModal';
 import { LogPanel } from '../panels/LogPanel';
 import { ToastHost } from '../components/ToastHost';
-import { ProductionProgressWall } from '../components/ProductionProgressWall';
-import { Director3dPanel } from '../panels/Director3dPanel';
+import { toastSuccess, toastError } from '../stores/toast';
 import { useUserSession } from '../stores/user-session';
 import { useTaskStream } from '../hooks/use-task-stream';
 import { useWorkspaceCatalog } from '../stores/workspace-catalog';
 import { useCredentialVault } from '../stores/credential-vault';
 import { useActivityLog } from '../stores/activity-log';
 import { useFlowCommands } from '../stores/flow-commands';
-import { useSkillVault } from '../stores/skill-vault';
 import { useFlowRuntime, useStoryboardUi, useRemotionUi } from '../stores/flow-runtime';
 import { useExecutionQueue } from '../stores/execution-queue';
 import { useDirector3dUi } from '../stores/director3d-ui';
-import { useBacklotLibraryUi } from '../stores/backlot-library-ui';
+import { useAssetLibraryModalUi } from '../stores/asset-library-modal-ui';
+import { useCreateWorkspaceDialogUi } from '../stores/create-workspace-dialog-ui';
+import { useSkillVault } from '../stores/skill-vault';
+import { isSurfaceEnabled } from '../config/product-surface';
 
 const StageDeckSurface = lazy(() =>
   import('../engine/stage-deck/StageDeckSurface').then((m) => ({ default: m.StageDeckSurface })),
 );
 
+const StoryboardPanel = lazy(() =>
+  import('../panels/StoryboardPanel').then((m) => ({ default: m.StoryboardPanel })),
+);
+const AssetLibraryModal = lazy(() =>
+  import('../panels/AssetLibraryModal').then((m) => ({ default: m.AssetLibraryModal })),
+);
+const CreateWorkspaceDialog = lazy(() =>
+  import('../panels/CreateWorkspaceDialog').then((m) => ({ default: m.CreateWorkspaceDialog })),
+);
+const EpisodeStudioPanel = lazy(() =>
+  import('../panels/EpisodeStudioPanel').then((m) => ({ default: m.EpisodeStudioPanel })),
+);
+const UsagePanel = lazy(() =>
+  import('../panels/UsagePanel').then((m) => ({ default: m.UsagePanel })),
+);
+const GenerationHistoryPanel = lazy(() =>
+  import('../panels/GenerationHistoryPanel').then((m) => ({ default: m.GenerationHistoryPanel })),
+);
+const Director3dPanel = lazy(() =>
+  import('../panels/Director3dPanel').then((m) => ({ default: m.Director3dPanel })),
+);
+const SkillsDrawer = lazy(() =>
+  import('../panels/SkillsDrawer').then((m) => ({ default: m.SkillsDrawer })),
+);
+const StageDeckTour = lazy(() =>
+  import('../engine/stage-deck/chrome/StageDeckTour').then((m) => ({ default: m.StageDeckTour })),
+);
+const ProductionProgressWall = lazy(() =>
+  import('../components/ProductionProgressWall').then((m) => ({ default: m.ProductionProgressWall })),
+);
+
 export default function AppShell() {
   const {
-    items,
     activeId,
     fetchAll,
-    setActive,
     create,
     rename,
-    remove,
+    closeWorkspace,
+    selectWorkspace,
+    reloadToken,
   } = useWorkspaceCatalog();
   const toggleSettings = useCredentialVault((s) => s.toggleSettings);
   const toggleSkills = useSkillVault((s) => s.toggleDrawer);
@@ -59,12 +83,13 @@ export default function AppShell() {
   const batchTask = useTaskStream(batchTaskId);
   const appendLog = useActivityLog((s) => s.append);
   const [flowKey, setFlowKey] = useState(0);
-  const [assetLibOpen, setAssetLibOpen] = useState(false);
+  const [createSubmitting, setCreateSubmitting] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
-
-  const backlotOpen = useBacklotLibraryUi((s) => s.open);
-  const setBacklotOpen = useBacklotLibraryUi((s) => s.setOpen);
-
+  const assetLibModalOpen = useAssetLibraryModalUi((s) => s.open);
+  const toggleAssetLibModal = useAssetLibraryModalUi((s) => s.toggle);
+  const createDialogOpen = useCreateWorkspaceDialogUi((s) => s.open);
+  const openCreateDialog = useCreateWorkspaceDialogUi((s) => s.openDialog);
+  const closeCreateDialog = useCreateWorkspaceDialogUi((s) => s.closeDialog);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const remotionOpen = useRemotionUi((s) => s.open);
   const setRemotionOpen = useRemotionUi((s) => s.setOpen);
@@ -77,6 +102,7 @@ export default function AppShell() {
   const bootstrapped = useRef(false);
   const userBootstrapped = useRef(false);
   const requestRailTab = useContextRailUi((s) => s.requestTab);
+  const openDirector3d = useDirector3dUi((s) => s.openStandalone);
 
   useEffect(() => {
     if (userBootstrapped.current) return;
@@ -90,7 +116,7 @@ export default function AppShell() {
       const current = useWorkspaceCatalog.getState().items;
       if (current.length === 0 && !bootstrapped.current) {
         bootstrapped.current = true;
-        await create('默认工作区');
+        await create({ title: '默认工作区', visibility: 'private' });
       }
     })();
   }, [fetchAll, create]);
@@ -103,10 +129,46 @@ export default function AppShell() {
     [requestSpawn, appendLog],
   );
 
-  const handleCreate = useCallback(async () => {
-    await create(`工作区 ${items.length + 1}`);
-    setFlowKey((k) => k + 1);
-  }, [create, items.length]);
+  useEffect(() => {
+    if (reloadToken > 0) setFlowKey((k) => k + 1);
+  }, [reloadToken]);
+
+  const handleCreatePrivate = useCallback(
+    async (title: string) => {
+      setCreateSubmitting(true);
+      try {
+        await create({ title, visibility: 'private' });
+        closeCreateDialog();
+        toastSuccess(`私有项目「${title}」已创建`);
+        appendLog(`已创建私有项目：${title}`);
+      } catch (e) {
+        const msg = String(e);
+        appendLog(`创建私有项目失败: ${msg}`);
+        toastError('创建私有项目失败，请确认后端服务已启动');
+        throw e;
+      } finally {
+        setCreateSubmitting(false);
+      }
+    },
+    [create, closeCreateDialog, appendLog],
+  );
+
+  const handleSelectWorkspace = useCallback(
+    (id: string) => {
+      void selectWorkspace(id);
+    },
+    [selectWorkspace],
+  );
+
+  const catalogItems = useWorkspaceCatalog((s) => s.items);
+  const openWorkspaceIds = useWorkspaceCatalog((s) => s.openIds);
+  const railItems = useMemo(
+    () =>
+      catalogItems.filter(
+        (w) => isPrivateWorkspace(w) && openWorkspaceIds.includes(w.id),
+      ),
+    [catalogItems, openWorkspaceIds],
+  );
 
   const handleBatchRun = useCallback(async () => {
     if (!runtime) {
@@ -116,9 +178,8 @@ export default function AppShell() {
     await runtime.runBatch();
   }, [runtime, appendLog]);
 
-  const openDirector3d = useDirector3dUi((s) => s.openStandalone);
-
   useEffect(() => {
+    if (!isSurfaceEnabled('shortcuts')) return;
     const onKey = (e: KeyboardEvent) => {
       const tag = (e.target as HTMLElement)?.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
@@ -144,7 +205,7 @@ export default function AppShell() {
         users={users}
         remotionOpen={remotionOpen}
         usageOpen={usageOpen}
-        assetLibOpen={assetLibOpen}
+        assetLibOpen={assetLibModalOpen}
         onUndo={() => runtime?.undo()}
         onRedo={() => runtime?.redo()}
         onToggleStoryboard={() => {
@@ -158,37 +219,38 @@ export default function AppShell() {
         onToggleRemotion={() => {
           setRemotionOpen(!remotionOpen);
           setUsageOpen(false);
-          setAssetLibOpen(false);
         }}
         onToggleUsage={() => {
           setUsageOpen((v) => !v);
           setRemotionOpen(false);
         }}
-        onOpenBacklot={() => requestRailTab('library', { librarySub: 'templates' })}
         onOpenWorkflowTemplates={() => requestRailTab('library', { librarySub: 'workflow' })}
         onOpenHistory={() => requestRailTab('library', { librarySub: 'history' })}
-        onToggleAssetLib={() => setAssetLibOpen((v) => !v)}
+        onToggleAssetLib={() => toggleAssetLibModal()}
         onOpenSkills={() => toggleSkills(true)}
         onOpenShortcuts={() => setShortcutsOpen(true)}
         onOpenSettings={() => toggleSettings(true)}
       />
 
-      <ProductionProgressWall />
+      {isSurfaceEnabled('productionProgressWall') && (
+        <Suspense fallback={null}>
+          <ProductionProgressWall />
+        </Suspense>
+      )}
 
-      <WorkspaceRail
-        items={items}
-        activeId={activeId}
-        onSelect={(id) => {
-          setActive(id);
-          setFlowKey((k) => k + 1);
-        }}
-        onCreate={() => void handleCreate()}
-        onRename={(id, title) => void rename(id, title)}
-        onDelete={(id) => void remove(id)}
-      />
+      {isSurfaceEnabled('workspaceRail') && (
+        <WorkspaceRail
+          items={railItems}
+          activeId={activeId}
+          onSelect={handleSelectWorkspace}
+          onCreate={openCreateDialog}
+          onRename={(id, title) => void rename(id, title)}
+          onClose={(id) => void closeWorkspace(id)}
+        />
+      )}
 
       <div className="flex-1 flex min-h-0">
-        <ModuleDock onPick={onPickBlock} />
+        {isSurfaceEnabled('moduleDock') && <ModuleDock onPick={onPickBlock} />}
 
         <main className="flex-1 min-w-0 bg-surface relative flex">
           {activeId ? (
@@ -203,7 +265,7 @@ export default function AppShell() {
                 <div className="flex-1 min-w-0">
                   <StageDeckSurface key={`${activeId}-${flowKey}`} workspaceId={activeId} />
                 </div>
-                <ContextRail selectedBlockId={selectedBlockId} />
+                {isSurfaceEnabled('inspectorRail') && <ContextRail selectedBlockId={selectedBlockId} />}
               </div>
             </Suspense>
           ) : (
@@ -211,27 +273,42 @@ export default function AppShell() {
               选择或创建工作区
             </div>
           )}
-          <StoryboardPanel />
-          <AssetLibraryPanel open={assetLibOpen} onClose={() => setAssetLibOpen(false)} />
-          <BacklotLibraryPanel
-            open={backlotOpen}
-            onClose={() => setBacklotOpen(false)}
-            dockLeftOfStoryboard={storyboardOpen}
-          />
-          <GenerationHistoryPanel open={historyOpen} onClose={() => setHistoryOpen(false)} />
-          <EpisodeStudioPanel open={remotionOpen} onClose={() => setRemotionOpen(false)} />
-          <UsagePanel open={usageOpen} onClose={() => setUsageOpen(false)} />
+
+      <Suspense fallback={null}>
+        {isSurfaceEnabled('assetLibraryModal') && <AssetLibraryModal />}
+        <CreateWorkspaceDialog
+          open={createDialogOpen}
+          onClose={closeCreateDialog}
+          onConfirm={handleCreatePrivate}
+          submitting={createSubmitting}
+          defaultTitle={`私有项目 ${railItems.length + 1}`}
+        />
+        {isSurfaceEnabled('storyboard') && <StoryboardPanel />}
+            {isSurfaceEnabled('generationHistory') && (
+              <GenerationHistoryPanel open={historyOpen} onClose={() => setHistoryOpen(false)} />
+            )}
+            {isSurfaceEnabled('episodeStudio') && (
+              <EpisodeStudioPanel open={remotionOpen} onClose={() => setRemotionOpen(false)} />
+            )}
+            {isSurfaceEnabled('usageTracking') && (
+              <UsagePanel open={usageOpen} onClose={() => setUsageOpen(false)} />
+            )}
+          </Suspense>
         </main>
       </div>
 
-      <ShortcutsModal open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
+      {isSurfaceEnabled('shortcuts') && (
+        <ShortcutsModal open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
+      )}
 
-      <SettingsDrawer />
-      <SkillsDrawer />
-      <LogPanel />
+      {isSurfaceEnabled('settings') && <SettingsDrawer />}
+      <Suspense fallback={null}>
+        {isSurfaceEnabled('skillsDrawer') && <SkillsDrawer />}
+        {isSurfaceEnabled('director3d') && <Director3dPanel />}
+        {isSurfaceEnabled('stageDeckTour') && <StageDeckTour />}
+      </Suspense>
+      {isSurfaceEnabled('logPanel') && <LogPanel />}
       <ToastHost />
-      <Director3dPanel />
-      <StageDeckTour />
     </div>
   );
 }

@@ -19,6 +19,7 @@ import { useActivityLog } from '../../stores/activity-log';
 import { toastSuccess } from '../../stores/toast';
 import { api } from '../../api/client';
 import { EntityCard } from '../../components/EntityCard';
+import { AssetLinkField, assetRefFromData, patchWithAssetRef } from '../shared/AssetLinkField';
 
 type SheetTab = 'sheet' | 'profile' | 'turnaround' | 'variant' | 'bible';
 
@@ -85,6 +86,7 @@ function CharacterSheetBlock(props: NodeProps) {
   const upstream = props.data?.upstream as { pictures?: string[]; prompts?: string[] } | undefined;
   const characterId = props.data?.characterId as string | undefined;
   const syncedAt = props.data?.backlotSyncedAt as string | undefined;
+  const characterAssetRef = assetRefFromData(props.data as Record<string, unknown>);
   const [parsing, setParsing] = useState(false);
   const retryCountRef = useRef(0);
 
@@ -276,6 +278,17 @@ function CharacterSheetBlock(props: NodeProps) {
             )}
           </div>
         </div>
+
+        <AssetLinkField
+          kind="character"
+          assetRef={characterAssetRef}
+          onChange={(ref) => {
+            updateNodeData(props.id, {
+              ...patchWithAssetRef(ref),
+              characterId: ref?.id,
+            });
+          }}
+        />
 
         <div className="flex flex-wrap gap-1">
           {TAB_LABELS.map((t) => (

@@ -19,8 +19,7 @@ import {
 } from '@nx9/shared';
 import { BlockShell } from '../shared/BlockShell';
 import { CharacterBadge, CharacterSelect } from '../shared/CharacterSelect';
-import { GenUpstreamHint } from '../shared/backlot-template-picker';
-import { GenFallbackTemplate } from '../shared/gen-fallback-template';
+import { GenUpstreamHint } from '../shared/upstream-hints';
 import { useUpstreamPrompt } from '../shared/use-upstream-prompt';
 import { useActivityLog } from '../../stores/activity-log';
 import { MentionEditor } from '../../engine/stage-deck/chrome/MentionEditor';
@@ -48,8 +47,6 @@ function ClipGenBlock(props: NodeProps) {
   const characterId = (props.data?.characterId as string) ?? '';
   const linkedShotId = props.data?.linkedShotId as string | undefined;
   const localContent = (props.data?.content as string) ?? '';
-  const backlotTemplateId = props.data?.backlotTemplateId as string | undefined;
-  const backlotTemplateLabel = props.data?.backlotTemplateLabel as string | undefined;
   const { hasUpstream, preview: upstreamPreview } = useUpstreamPrompt(props.id);
 
   const activeCharacters = useMemo(() => {
@@ -169,17 +166,6 @@ function ClipGenBlock(props: NodeProps) {
     <BlockShell {...props}>
       <div className="space-y-2 text-sm">
         <GenUpstreamHint hasUpstream={hasUpstream} />
-        {!hasUpstream && (
-          <GenFallbackTemplate
-            kinds={['shot', 'emotion']}
-            hasUpstream={hasUpstream}
-            content={localContent}
-            templateId={backlotTemplateId}
-            templateLabel={backlotTemplateLabel}
-            hint="未连接提示词上游时，可用镜头/情绪模板作为兜底文案。"
-            onUpdate={(patch) => updateNodeData(props.id, patch)}
-          />
-        )}
         {(upstreamPrompt || upstreamPreview) && (
           <p className="text-[10px] text-ink/50 line-clamp-2" title={upstreamPrompt || upstreamPreview}>
             上游: {upstreamPrompt || upstreamPreview}

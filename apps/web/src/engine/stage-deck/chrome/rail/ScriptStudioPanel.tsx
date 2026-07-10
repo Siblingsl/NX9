@@ -167,13 +167,13 @@ export function ScriptStudioPanel() {
     finally { setGenerating(false); }
   }, [sourceText, appendLog]);
 
-  const handleWriteToBacklot = useCallback(async () => {
+  const handleWriteToLibrary = useCallback(async () => {
     let count = 0;
     for (const char of extractedCharacters) {
       upsertCharacter(char);
       count++;
     }
-    appendLog(`已写入 ${count} 角色到 Backlot`);
+    appendLog(`已写入 ${count} 角色到素材库`);
   }, [extractedCharacters, upsertCharacter, appendLog]);
 
   const handleOneClickShoot = useCallback(() => {
@@ -470,11 +470,11 @@ export function ScriptStudioPanel() {
           )}
           <button
             type="button"
-            onClick={handleWriteToBacklot}
+            onClick={handleWriteToLibrary}
             className="w-full flex items-center justify-center gap-1 rounded-xl bg-brand text-white py-1.5 text-xs"
           >
             <Plus size={12} />
-            写入 Backlot 库
+            写入素材库
           </button>
         </div>
       )}

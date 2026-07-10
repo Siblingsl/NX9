@@ -177,7 +177,7 @@ export const ImageEditModal = memo(function ImageEditModal({
 
           {error && <p className="text-xs text-warn">{error}</p>}
           <p className="text-[11px] text-ink/50">
-            产物不会修改原模块，会在右侧创建独立的结果预览模块（对齐 T8 双击编辑产物逻辑）。
+            产物不会修改原模块，会在右侧创建独立的结果预览模块。
           </p>
         </div>
 

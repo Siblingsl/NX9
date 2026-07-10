@@ -18,7 +18,7 @@ const STEPS = [
   },
   {
     title: 'Context Rail',
-    body: '右侧栏集中属性、分镜、Backlot、历史、工作流导出与 Agent 确认。',
+    body: '右侧栏集中属性、分镜、素材库、历史、工作流导出与 Agent 确认。',
   },
   {
     title: 'Playbook 引导',

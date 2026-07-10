@@ -1,4 +1,5 @@
-import { lookupBlock, resolveEmits, resolveAccepts, SOCKET_LABELS } from '@nx9/shared';
+import { useMemo, useCallback } from 'react';
+import { lookupBlock, resolveEmits, resolveAccepts, SOCKET_LABELS, resolveNodeInteraction, isPromptBarGenKind } from '@nx9/shared';
 import { useFlowRuntime, useStoryboardUi } from '../../../../stores/flow-runtime';
 import { useAliasStore } from '../../stores/alias-store';
 import { useContextRailUi } from '../../stores/context-rail-ui';
@@ -8,7 +9,7 @@ import { RailField } from './primitives/RailField';
 import { Clapperboard, Play, Crosshair, Trash2 } from 'lucide-react';
 import { useWorkspaceDocument } from '../../../../stores/workspace-document';
 import { useActivityLog } from '../../../../stores/activity-log';
-import { useMemo, useCallback } from 'react';
+import { InspectorGenFields } from './InspectorGenFields';
 
 interface InspectorRailPanelProps {
   selectedBlockId: string | null;
@@ -93,6 +94,9 @@ export function InspectorRailPanel({ selectedBlockId }: InspectorRailPanelProps)
     return null;
   }, [node]);
 
+  const interaction = node ? resolveNodeInteraction(node.type ?? '') : null;
+  const showGenFields = node && !isPromptBarGenKind(node.type ?? '');
+
   if (!selectedBlockId || !node) {
     return (
       <RailEmpty
@@ -153,6 +157,19 @@ export function InspectorRailPanel({ selectedBlockId }: InspectorRailPanelProps)
               在故事板打开
             </button>
           </div>
+        </RailSection>
+      )}
+
+      {/* 生成 / 配置参数 — Inspector 负责高级配置 */}
+      {showGenFields && (
+        <InspectorGenFields blockId={node.id} kind={node.type ?? ''} />
+      )}
+
+      {interaction?.class === 'config' && !showGenFields && (
+        <RailSection title="配置">
+          <p className="text-xs text-ink/50">
+            此节点的高级配置项将在此显示。模型、Provider、导出选项等请在此编辑。
+          </p>
         </RailSection>
       )}
 

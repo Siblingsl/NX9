@@ -55,7 +55,10 @@ export function characterPromptSuffix(characters: CharacterProfile[]): string {
 
   const parts = characters
     .map((c) => {
-      const desc = c.consistencyPrompt?.trim() || c.descriptionZh?.trim();
+      const desc =
+        c.creative?.prompts?.bible?.text?.trim() ||
+        c.consistencyPrompt?.trim() ||
+        c.descriptionZh?.trim();
       if (!desc) return null;
       return `[Character ${c.name}]: ${desc}`;
     })

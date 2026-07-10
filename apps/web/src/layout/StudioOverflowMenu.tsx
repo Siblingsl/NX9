@@ -3,7 +3,6 @@ import {
   BarChart3,
   BookOpen,
   Film,
-  FolderOpen,
   HelpCircle,
   History,
   Layers,
@@ -12,6 +11,7 @@ import {
   Settings,
 } from 'lucide-react';
 import { StudioDropdownPanel } from './StudioDropdownPanel';
+import { isSurfaceEnabled } from '../config/product-surface';
 
 export interface StudioOverflowMenuProps {
   remotionOpen: boolean;
@@ -19,7 +19,6 @@ export interface StudioOverflowMenuProps {
   assetLibOpen: boolean;
   onToggleRemotion: () => void;
   onToggleUsage: () => void;
-  onOpenBacklot: () => void;
   onOpenWorkflowTemplates: () => void;
   onOpenHistory: () => void;
   onToggleAssetLib: () => void;
@@ -50,7 +49,7 @@ export function StudioOverflowMenu(props: StudioOverflowMenuProps) {
   }, [open]);
 
   const items: MenuItem[] = [
-    {
+    isSurfaceEnabled('episodeStudio') && {
       id: 'remotion',
       label: '成片工作室',
       icon: Film,
@@ -60,16 +59,17 @@ export function StudioOverflowMenu(props: StudioOverflowMenuProps) {
         setOpen(false);
       },
     },
-    {
-      id: 'backlot',
-      label: 'Backlot 模板库',
+    isSurfaceEnabled('assetLibraryModal') && {
+      id: 'asset-library',
+      label: '素材库',
       icon: Layers,
+      active: props.assetLibOpen,
       onClick: () => {
-        props.onOpenBacklot();
+        props.onToggleAssetLib();
         setOpen(false);
       },
     },
-    {
+    isSurfaceEnabled('libraryRail') && {
       id: 'workflow',
       label: '进阶配方',
       icon: LayoutTemplate,
@@ -78,7 +78,7 @@ export function StudioOverflowMenu(props: StudioOverflowMenuProps) {
         setOpen(false);
       },
     },
-    {
+    isSurfaceEnabled('generationHistory') && {
       id: 'history',
       label: '生成历史',
       icon: History,
@@ -87,17 +87,7 @@ export function StudioOverflowMenu(props: StudioOverflowMenuProps) {
         setOpen(false);
       },
     },
-    {
-      id: 'assets',
-      label: '资源库',
-      icon: FolderOpen,
-      active: props.assetLibOpen,
-      onClick: () => {
-        props.onToggleAssetLib();
-        setOpen(false);
-      },
-    },
-    {
+    isSurfaceEnabled('usageTracking') && {
       id: 'usage',
       label: '用量追踪',
       icon: BarChart3,
@@ -107,7 +97,7 @@ export function StudioOverflowMenu(props: StudioOverflowMenuProps) {
         setOpen(false);
       },
     },
-    {
+    isSurfaceEnabled('skillsDrawer') && {
       id: 'skills',
       label: '技能库',
       icon: BookOpen,
@@ -116,7 +106,7 @@ export function StudioOverflowMenu(props: StudioOverflowMenuProps) {
         setOpen(false);
       },
     },
-    {
+    isSurfaceEnabled('shortcuts') && {
       id: 'shortcuts',
       label: '快捷键',
       icon: HelpCircle,
@@ -125,7 +115,7 @@ export function StudioOverflowMenu(props: StudioOverflowMenuProps) {
         setOpen(false);
       },
     },
-    {
+    isSurfaceEnabled('settings') && {
       id: 'settings',
       label: '设置',
       icon: Settings,
@@ -134,7 +124,7 @@ export function StudioOverflowMenu(props: StudioOverflowMenuProps) {
         setOpen(false);
       },
     },
-  ];
+  ].filter(Boolean) as MenuItem[];
 
   const activeCount = items.filter((i) => i.active).length;
 

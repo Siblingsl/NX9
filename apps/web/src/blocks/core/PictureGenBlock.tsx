@@ -19,8 +19,7 @@ import { EditableImage } from '../shared/EditableImage';
 import { ImageEditModal } from '../shared/ImageEditModal';
 import { useImageEditProduce } from '../shared/use-image-edit-produce';
 import { CharacterBadge, CharacterSelect } from '../shared/CharacterSelect';
-import { GenUpstreamHint } from '../shared/backlot-template-picker';
-import { GenFallbackTemplate } from '../shared/gen-fallback-template';
+import { GenUpstreamHint } from '../shared/upstream-hints';
 import { useUpstreamPrompt } from '../shared/use-upstream-prompt';
 import { useActivityLog } from '../../stores/activity-log';
 import { MentionEditor } from '../../engine/stage-deck/chrome/MentionEditor';
@@ -28,6 +27,7 @@ import { useWorkspaceDocument } from '../../stores/workspace-document';
 import { runPictureGenJob } from '../../engine/picture-gen-runner';
 import { api } from '../../api/client';
 import GenSettingsPills from '../shared/GenSettingsPills';
+import { AssetLinkField, assetRefFromData, patchWithAssetRef } from '../shared/AssetLinkField';
 
 function PictureGenBlock(props: NodeProps) {
   const { updateNodeData } = useReactFlow();
@@ -54,8 +54,16 @@ function PictureGenBlock(props: NodeProps) {
   const characterId = (props.data?.characterId as string) ?? '';
   const linkedShotId = props.data?.linkedShotId as string | undefined;
   const localContent = (props.data?.content as string) ?? '';
-  const backlotTemplateId = props.data?.backlotTemplateId as string | undefined;
-  const backlotTemplateLabel = props.data?.backlotTemplateLabel as string | undefined;
+  const sceneAssetRef = assetRefFromData(
+    props.data?.sceneAssetRef
+      ? ({ assetRef: props.data.sceneAssetRef } as Record<string, unknown>)
+      : (props.data as Record<string, unknown>),
+  );
+  const characterAssetRef = assetRefFromData(
+    props.data?.characterAssetRef
+      ? ({ assetRef: props.data.characterAssetRef } as Record<string, unknown>)
+      : undefined,
+  );
   const { hasUpstream, preview: upstreamPreview } = useUpstreamPrompt(props.id);
 
   const modelDef = lookupPictureModel(modelId);
@@ -217,17 +225,6 @@ function PictureGenBlock(props: NodeProps) {
     <BlockShell {...props}>
       <div className="space-y-2">
         <GenUpstreamHint hasUpstream={hasUpstream} />
-        {!hasUpstream && (
-          <GenFallbackTemplate
-            kinds={['scene', 'emotion']}
-            hasUpstream={hasUpstream}
-            content={localContent}
-            templateId={backlotTemplateId}
-            templateLabel={backlotTemplateLabel}
-            hint="未连接提示词上游时，可用场景/情绪模板作为兜底文案。"
-            onUpdate={(patch) => updateNodeData(props.id, patch)}
-          />
-        )}
         {(upstreamPrompt || upstreamPreview) && (
           <p className="text-[10px] text-ink/50 line-clamp-2" title={upstreamPrompt || upstreamPreview}>
             上游: {upstreamPrompt || upstreamPreview}
@@ -266,6 +263,24 @@ function PictureGenBlock(props: NodeProps) {
             ))}
           </div>
         )}
+        <div className="grid grid-cols-2 gap-2">
+          <AssetLinkField
+            kind="character"
+            assetRef={characterAssetRef}
+            onChange={(ref) => updateNodeData(props.id, { characterAssetRef: ref })}
+            onInsertMention={(token) =>
+              updateNodeData(props.id, { content: `${localContent}${localContent ? ' ' : ''}${token}` })
+            }
+          />
+          <AssetLinkField
+            kind="scene"
+            assetRef={sceneAssetRef}
+            onChange={(ref) => updateNodeData(props.id, { sceneAssetRef: ref })}
+            onInsertMention={(token) =>
+              updateNodeData(props.id, { content: `${localContent}${localContent ? ' ' : ''}${token}` })
+            }
+          />
+        </div>
         <MentionEditor
           blockId={props.id}
           value={localContent}

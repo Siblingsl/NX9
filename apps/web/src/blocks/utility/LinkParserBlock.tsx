@@ -99,7 +99,7 @@ function LinkParserBlock(props: NodeProps) {
         status: 'success',
         importedCount: imported,
       });
-      appendLog(`已导入 ${imported} 个 Backlot 模板（来源: GitHub）`);
+      appendLog(`已导入 ${imported} 个素材模板（来源: GitHub）`);
     } catch (e) {
       updateNodeData(props.id, { status: 'error', error: String(e) });
       appendLog(`导入失败: ${String(e)}`);
@@ -161,7 +161,7 @@ function LinkParserBlock(props: NodeProps) {
             disabled={status === 'running' || !url.trim()}
             className="rounded-xl border border-line py-2 text-[11px] disabled:opacity-40"
           >
-            导入 Backlot
+            导入素材库
           </button>
         </div>
         {capturedAssetUrl && (

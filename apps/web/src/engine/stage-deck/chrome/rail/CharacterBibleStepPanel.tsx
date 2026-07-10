@@ -44,14 +44,14 @@ export function CharacterBibleStepPanel() {
 
   const handleSaveCharacter = useCallback((char: CharacterProfile) => {
     upsertCharacter(char);
-    appendLog(`已保存角色「${char.name}」到 Backlot`);
+    appendLog(`已保存角色「${char.name}」到素材库`);
   }, [upsertCharacter, appendLog]);
 
   const handleSaveAll = useCallback(() => {
     for (const char of extracted) {
       upsertCharacter(char);
     }
-    appendLog(`已写入 ${extracted.length} 角色到 Backlot`);
+    appendLog(`已写入 ${extracted.length} 角色到素材库`);
     const session = useWorkspaceDocument.getState().playbookSession;
     if (session) {
       useWorkspaceDocument.getState().advancePlaybookStep();
@@ -159,7 +159,7 @@ export function CharacterBibleStepPanel() {
 
       {characters.characters.length > 0 && extracted.length === 0 && (
         <div className="rounded-xl bg-ok/10 border border-ok/20 p-3">
-          <p className="text-xs text-ok font-medium">已有 {characters.characters.length} 角色在 Backlot 库中</p>
+          <p className="text-xs text-ok font-medium">已有 {characters.characters.length} 角色在素材库中</p>
           <div className="mt-2 space-y-1">
             {characters.characters.map((char) => (
               <div key={char.id} className="flex items-center justify-between">

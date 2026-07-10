@@ -40,6 +40,14 @@ export type { EnvironmentProfile, EnvironmentLibraryPayload } from './types/envi
 export { migrateEnvironmentProfile } from './types/environment';
 
 export { parseStoryboardMarkdown } from './utils/storyboard-import';
+export {
+  resolveAssetImportItems,
+  syncAssetImportNodeFields,
+  guessMediaKindFromFile,
+  guessMediaKindFromUrl,
+  type ImportedAssetItem,
+  type ImportedAssetMediaKind,
+} from './utils/asset-import';
 export { splitText, type TextSplitMode } from './utils/text-split';
 export {
   PIPELINE_STAGES,
@@ -148,6 +156,35 @@ export type { SkillSummary, SkillDetail } from './types/skills';
 export { BLOCK_CATALOG, BLOCK_GROUPS, lookupBlock, isBlockSpawnable, isDockVisible, getSpawnableBlocks, getDockBlocks } from './catalog/block-catalog';
 
 export {
+  ATTACHED_WORKSPACE_REGISTRY,
+  resolveAttachedWorkspace,
+  shouldUseCompactNodeShell,
+  type AttachedWorkspaceType,
+  type NodeFunctionalClass,
+  type AttachedWorkspaceSpec,
+} from './catalog/attached-workspace';
+
+export {
+  resolveNodeInteraction,
+  resolveNodeInteractionClass,
+  normalizeNodeStatus,
+  resolveNodePromptText,
+  resolveNodePromptField,
+  truncatePromptPreview,
+  resolveNodeAssetTags,
+  resolveNodeThumbUrl,
+  resolveNodeOutputCount,
+  type NodeInteractionClass,
+  type NodeInteractionProfile,
+  type NodeRunStatus,
+  type NodeAssetTag,
+  PROMPT_BAR_KINDS,
+  PROMPT_BAR_GEN_KINDS,
+  isPromptBarKind,
+  isPromptBarGenKind,
+} from './catalog/node-interaction';
+
+export {
   BLOCK_KIND_MIGRATIONS,
   BLOCK_KIND_MIGRATION_PATCHES,
   DEPRECATED_BLOCK_KINDS,
@@ -168,8 +205,83 @@ export {
   validateLink,
 } from './catalog/socket-registry';
 
+export type { WorkspaceVisibility } from './utils/workspace-utils';
+export { isPrivateWorkspace, computeWorkspaceAssetCount } from './utils/workspace-utils';
 export type { CharacterProfile, CharacterLibraryPayload, CharacterBible } from './types/character';
 export { emptyCharacterLibrary } from './types/character';
+export type { SoundAssetProfile, SoundLibraryPayload } from './types/sound-library';
+export { emptySoundLibrary, newSoundAsset } from './types/sound-library';
+export type {
+  StructuredPrompt,
+  CreativeVariantEntry,
+  CharacterCreativeExtension,
+  SceneCreativeExtension,
+  ShotCreativeExtension,
+  EmotionCreativeExtension,
+  HookCreativeExtension,
+  VoiceCreativeExtension,
+} from './types/creative-asset-center';
+export { emptyStructuredPrompt, touchStructuredPrompt } from './types/creative-asset-center';
+export {
+  CAC_EXPRESSION_PRESETS,
+  CAC_POSE_PRESETS,
+  CAC_ANGLE_PRESETS,
+  CAC_HOOK_TYPES,
+  CAC_SHOT_SIZES,
+  CAC_VOICE_GENDERS,
+  CAC_VOICE_EMOTIONS,
+  defaultCharacterVariants,
+} from './data/creative-asset-presets';
+export {
+  CHARACTER_SHEET_PROMPT_TEMPLATE,
+  SCENE_SHEET_PROMPT_TEMPLATE,
+  buildCharacterBiblePrompt,
+  buildCharacterImagePrompt,
+  buildCharacterVideoPrompt,
+  buildCharacterSheetGenerationPrompt,
+  buildCharacterNegativePrompt,
+  buildSceneBiblePrompt,
+  buildSceneSheetGenerationPrompt,
+  buildShotPrompt,
+  buildEmotionPrompt,
+  buildHookPrompt,
+  buildVoicePrompt,
+  getCharacterCreative,
+  getSceneCreative,
+  getShotCreative,
+  getEmotionCreative,
+  getHookCreative,
+  getVoiceCreative,
+  resolveAssetPromptText,
+} from './utils/creative-asset-prompts';
+export {
+  newCharacterProfile,
+  normalizeCharacterProfile,
+  patchCharacterCreative,
+  patchWorkspaceCreative,
+  patchVoiceCreative,
+  refreshCharacterPrompts,
+  refreshWorkspacePrompts,
+  refreshVoicePrompts,
+} from './utils/creative-asset-factory';
+export type { PublicLibraryPayload } from './types/public-library';
+export { emptyPublicLibrary } from './types/public-library';
+export {
+  ASSET_LIBRARY_TABS,
+  ASSET_KIND_MENTION_PREFIX,
+  formatAssetMention,
+  parseAssetMentions,
+  characterToItem,
+  workspaceItemToAsset,
+  templateToAsset,
+  soundToItem,
+  resolveAssetRef,
+  enrichPromptWithAssets,
+  type AssetLibraryKind,
+  type AssetScope,
+  type AssetRef,
+  type AssetLibraryItem,
+} from './utils/asset-library';
 export {
   resolveBlockCharacters,
   enrichPromptWithCharacters,

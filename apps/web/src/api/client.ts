@@ -1,5 +1,6 @@
 import type {
   AppSettings,
+  PublicLibraryPayload,
   SkillDetail,
   SkillSummary,
   StoryboardShot,
@@ -45,10 +46,10 @@ export const api = {
     request<WorkspaceSummary[]>(
       ownerId ? `/api/workspaces?ownerId=${encodeURIComponent(ownerId)}` : '/api/workspaces',
     ),
-  createWorkspace: (title?: string, ownerId?: string) =>
+  createWorkspace: (title?: string, ownerId?: string, visibility?: import('@nx9/shared').WorkspaceVisibility) =>
     request<WorkspaceSummary>('/api/workspaces', {
       method: 'POST',
-      body: JSON.stringify({ title, ownerId }),
+      body: JSON.stringify({ title, ownerId, visibility }),
     }),
   loadWorkspace: (id: string) => request<WorkspacePayload>(`/api/workspaces/${id}`),
   saveWorkspace: (id: string, payload: WorkspacePayload) =>
@@ -79,8 +80,29 @@ export const api = {
         if (e.lengthComputable && onProgress) onProgress(e.loaded / e.total);
       };
       xhr.onload = () => {
-        if (xhr.status === 200) resolve(JSON.parse(xhr.responseText));
-        else reject(new Error(xhr.responseText || `Upload failed ${xhr.status}`));
+        if (xhr.status >= 200 && xhr.status < 300) {
+          try {
+            const body = JSON.parse(xhr.responseText) as {
+              ok?: boolean;
+              url?: string;
+              filename?: string;
+              thumbUrl?: string | null;
+            };
+            if (!body.url) {
+              reject(new Error('上传响应缺少 url'));
+              return;
+            }
+            resolve({
+              url: body.url,
+              filename: body.filename ?? file.name,
+              thumbUrl: body.thumbUrl ?? undefined,
+            });
+          } catch {
+            reject(new Error('上传响应解析失败'));
+          }
+          return;
+        }
+        reject(new Error(xhr.responseText || `Upload failed ${xhr.status}`));
       };
       xhr.onerror = () => reject(new Error('Network error'));
       xhr.send(form);
@@ -495,6 +517,13 @@ export const api = {
 
   listAssets: () =>
     request<{ name: string; size: number; updatedAt: number }[]>('/api/assets/uploads'),
+
+  loadPublicLibrary: () => request<PublicLibraryPayload>('/api/public-library'),
+  savePublicLibrary: (payload: PublicLibraryPayload) =>
+    request<PublicLibraryPayload>('/api/public-library', {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    }),
 
   createTask: (type: string, message?: string) =>
     request<{ id: string; status: string; progress: number }>('/api/tasks', {

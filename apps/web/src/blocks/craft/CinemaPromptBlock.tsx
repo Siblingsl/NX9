@@ -1,11 +1,7 @@
 import { memo, useCallback, useMemo } from 'react';
 import { type NodeProps, useReactFlow } from '@xyflow/react';
 import { CINEMA_PROMPT_PRESETS } from '@nx9/shared';
-import { applyBacklotText } from '../shared/apply-backlot-text';
-import {
-  BacklotTemplatePicker,
-  type BacklotTemplateApplyResult,
-} from '../shared/backlot-template-picker';
+import { AssetLinkField, assetRefFromData, patchWithAssetRef } from '../shared/AssetLinkField';
 import { BlockShell } from '../shared/BlockShell';
 import { DoubleClickText } from '../shared/DoubleClickText';
 
@@ -14,8 +10,7 @@ function CinemaPromptBlock(props: NodeProps) {
   const selectedIds = (props.data?.selectedPresetIds as string[]) ?? [];
   const extra = (props.data?.extra as string) ?? '';
   const content = (props.data?.content as string) ?? '';
-  const backlotTemplateId = props.data?.backlotTemplateId as string | undefined;
-  const backlotTemplateLabel = props.data?.backlotTemplateLabel as string | undefined;
+  const assetRef = assetRefFromData(props.data as Record<string, unknown>);
 
   const composed = useMemo(() => {
     const parts = CINEMA_PROMPT_PRESETS.filter((p) => selectedIds.includes(p.id)).map((p) => p.text);
@@ -40,23 +35,6 @@ function CinemaPromptBlock(props: NodeProps) {
     [selectedIds, extra, props.id, updateNodeData],
   );
 
-  const applyBacklot = useCallback(
-    (result: BacklotTemplateApplyResult) => {
-      const nextExtra = applyBacklotText(extra, result.prompt, result.mode);
-      const parts = CINEMA_PROMPT_PRESETS.filter((p) => selectedIds.includes(p.id)).map(
-        (p) => p.text,
-      );
-      if (nextExtra.trim()) parts.push(nextExtra.trim());
-      updateNodeData(props.id, {
-        extra: nextExtra,
-        content: parts.join(', '),
-        backlotTemplateId: result.templateId,
-        backlotTemplateLabel: result.templateLabel,
-      });
-    },
-    [extra, selectedIds, props.id, updateNodeData],
-  );
-
   const groups = useMemo(() => {
     const map = new Map<string, typeof CINEMA_PROMPT_PRESETS>();
     for (const p of CINEMA_PROMPT_PRESETS) {
@@ -70,17 +48,12 @@ function CinemaPromptBlock(props: NodeProps) {
   return (
     <BlockShell {...props}>
       <div className="space-y-2 nodrag nopan text-xs max-h-64 overflow-y-auto nx9-scroll">
-        <BacklotTemplatePicker
-          kinds={['emotion']}
-          selectedTemplateId={backlotTemplateId}
-          selectedTemplateLabel={backlotTemplateLabel}
-          hint="情绪/氛围模板写入补充说明，与本节点预设合并后流向下游。"
-          onApply={applyBacklot}
-          onClear={() =>
-            updateNodeData(props.id, {
-              backlotTemplateId: undefined,
-              backlotTemplateLabel: undefined,
-            })
+        <AssetLinkField
+          kind="emotion"
+          assetRef={assetRef}
+          onChange={(ref) => updateNodeData(props.id, patchWithAssetRef(ref))}
+          onInsertMention={(token) =>
+            updateNodeData(props.id, { extra: `${extra}${extra ? ' ' : ''}${token}` })
           }
         />
         {groups.map(([group, items]) => (
@@ -94,8 +67,8 @@ function CinemaPromptBlock(props: NodeProps) {
                   onClick={() => toggle(p.id)}
                   className={`px-2 py-0.5 rounded-full border text-[11px] ${
                     selectedIds.includes(p.id)
-                      ? 'border-brand bg-brand/10 text-brand'
-                      : 'border-line hover:border-brand/30'
+                      ? 'border-accent bg-accent/10 text-accent'
+                      : 'border-line hover:border-accent/30'
                   }`}
                 >
                   {p.label}
@@ -114,7 +87,7 @@ function CinemaPromptBlock(props: NodeProps) {
             if (val.trim()) parts.push(val.trim());
             updateNodeData(props.id, { extra: val, content: parts.join(', ') });
           }}
-          placeholder="补充电影感描述…"
+          placeholder="补充氛围说明…"
           className="w-full min-h-[48px] rounded-xl border border-line px-2 py-1.5 resize-y"
         />
         {display && (

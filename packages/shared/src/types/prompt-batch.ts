@@ -1,3 +1,5 @@
+import { resolveAssetImportItems } from '../utils/asset-import';
+
 export interface PromptBatchItem {
   id: string;
   text: string;
@@ -215,9 +217,13 @@ export function collectUpstreamForPromptMerge(
     const kind = block.type;
 
     if (kind === 'asset-import' || kind === 'render-slot') {
-      const url = (d.previewUrl as string) || (d.assetUrl as string) || (d.filledUrl as string);
-      if (url && (kind !== 'asset-import' || d.mediaKind === 'picture' || !d.mediaKind)) {
-        pictures.push(url);
+      if (kind === 'asset-import') {
+        for (const item of resolveAssetImportItems(d)) {
+          if (item.mediaKind === 'picture') pictures.push(item.url);
+        }
+      } else {
+        const url = (d.previewUrl as string) || (d.assetUrl as string) || (d.filledUrl as string);
+        if (url) pictures.push(url);
       }
       continue;
     }

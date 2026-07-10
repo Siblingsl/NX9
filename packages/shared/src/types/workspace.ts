@@ -1,5 +1,7 @@
 import type { StoryboardPayload, VoicePayload, WorkspacePreferences } from './storyboard';
 import type { CharacterLibraryPayload } from './character';
+import type { SoundLibraryPayload } from './sound-library';
+import type { WorkspaceVisibility } from '../utils/workspace-utils';
 import type { BacklotCustomPayload, BacklotWorkspacePayload } from '../data/backlot-templates';
 import type { CanvasAppearance } from '../utils/canvas-theme';
 import type { ScriptPlanPayload } from './script-plan';
@@ -8,6 +10,7 @@ import type { PlaybookId } from '../data/playbook-definitions';
 import type { ProjectMeta, ProjectStatus } from './project';
 import { emptyStoryboard, emptyVoice, migrateStoryboardPayload } from './storyboard';
 import { emptyCharacterLibrary } from './character';
+import { emptySoundLibrary } from './sound-library';
 import { emptyBacklotCustom, emptyBacklotWorkspace } from '../data/backlot-templates';
 import { DEFAULT_CANVAS_APPEARANCE } from '../utils/canvas-theme';
 
@@ -85,6 +88,7 @@ export interface WorkspacePayloadV2 {
   storyboard?: StoryboardPayload;
   voice?: VoicePayload;
   characters?: CharacterLibraryPayload;
+  soundLibrary?: SoundLibraryPayload;
   backlotCustom?: BacklotCustomPayload;
   backlotWorkspace?: BacklotWorkspacePayload;
   preferences?: WorkspacePreferences;
@@ -128,6 +132,8 @@ export interface WorkspaceSummary {
   title: string;
   blockCount: number;
   shotCount?: number;
+  assetCount?: number;
+  visibility?: WorkspaceVisibility;
   ownerId?: string;
   createdAt: number;
   updatedAt: number;
@@ -165,6 +171,7 @@ export function normalizeWorkspacePayload(raw: Partial<WorkspacePayload>): Works
     storyboard,
     voice: raw.voice ?? emptyVoice(),
     characters: raw.characters ?? emptyCharacterLibrary(),
+    soundLibrary: raw.soundLibrary ?? emptySoundLibrary(),
     backlotCustom: raw.backlotCustom ?? emptyBacklotCustom(),
     backlotWorkspace: raw.backlotWorkspace ?? emptyBacklotWorkspace(),
     preferences: raw.preferences ?? {},
