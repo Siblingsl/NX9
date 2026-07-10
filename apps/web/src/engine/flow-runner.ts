@@ -7,6 +7,7 @@ import {
   splitText,
   topologicalLayers,
   enrichPromptWithCharacters,
+  parseMentionsFromPrompt,
   buildCharacterContext,
   mergePromptBatchItems,
   promptItemsToBatch,
@@ -14,6 +15,7 @@ import {
   buildLightRigPrompt,
   characterSheetFromNodeData,
   syncCharacterSheetNodeOutput,
+  resolveVideoGenParams,
   type ClipChainState,
   type FlowBlock,
   type FlowLink,
@@ -23,6 +25,7 @@ import {
 import { buildCameraPrompt, normalizeDirectorProject } from '@nx9/director3d';
 import { api } from '../api/client';
 import { runClipChain } from './clip-chain-runner';
+import { pollVideoUntilDone } from './poll-task';
 import { useWorkspaceDocument } from '../stores/workspace-document';
 
 function linkedShotForBlock(blockId: string, data: Record<string, unknown>): StoryboardShot | undefined {
@@ -69,6 +72,7 @@ export const RUNNABLE_BLOCKS = new Set([
   'local-enhance',
   'model-market',
   'batch-runner',
+  'comfy-workflow',
   'grid-prompt-reverse',
   'photo-speak',
   'bg-remove',
@@ -78,6 +82,18 @@ export const RUNNABLE_BLOCKS = new Set([
   'shot-script',
   'reference-board',
   'character-sheet',
+  'scene-card',
+  'dialogue-sheet',
+  'voice-cast',
+  'bridge-clip',
+  'caption-asr',
+  'seedance-chain',
+  'thumbnail-maker',
+  'inpaint-edit',
+  'control-preprocess',
+  'reference-analyze',
+  'music-gen',
+  'lipsync-pass',
   'continuity-check',
   'export-pack',
   'subtitle-burn',
@@ -90,6 +106,7 @@ export const RUNNABLE_BLOCKS = new Set([
   'blocking-stage',
   'light-rig',
   'depth-pass',
+  'picture-diff',
 ]);
 
 function toBlocks(nodes: Node[]): FlowBlock[] {
@@ -130,20 +147,6 @@ export class ReviewGateBlockedError extends Error {
     this.name = 'ReviewGateBlockedError';
     this.pending = pending;
   }
-}
-
-async function waitForVideoUrl(
-  taskId: string,
-  attempts = 24,
-  intervalMs = 5000,
-): Promise<string | null> {
-  for (let i = 0; i < attempts; i++) {
-    const res = await api.pollVideo(taskId);
-    if (res.status === 'success' && res.url) return res.url;
-    if (res.status === 'failed') return null;
-    await new Promise((r) => setTimeout(r, intervalMs));
-  }
-  return null;
 }
 
 async function executeBlock(
@@ -205,7 +208,32 @@ async function executeBlock(
   }
 
   if (kind === 'picture-gen') {
+    const characters = useWorkspaceDocument.getState().characters.characters;
+    const environments = useWorkspaceDocument.getState().environments;
+    const scriptPlan = useWorkspaceDocument.getState().scriptPlan;
     const charCtx = characterContextForBlock(block, upstream.pictures);
+    const mentionedChars = parseMentionsFromPrompt(prompt || (d.content as string), characters);
+    const allChars = [...charCtx.characters];
+    for (const mc of mentionedChars) {
+      if (!allChars.some((c) => c.id === mc.id)) allChars.push(mc);
+    }
+    const enhancedCtx = { ...charCtx, characters: allChars, promptSuffix: enrichPromptWithCharacters('', allChars) };
+
+    const linkedShotId = d.linkedShotId as string | undefined;
+    let envPromptSuffix = '';
+    let envRefUrl: string | undefined;
+    if (linkedShotId && environments?.environments) {
+      const shot = useWorkspaceDocument.getState().storyboard.shots.find((s) => s.id === linkedShotId);
+      if (shot?.sceneCode) {
+        const env = environments.environments.find((e) => e.sceneCode === shot.sceneCode);
+        if (env) {
+          const { enrichPromptWithEnvironment } = require('@nx9/shared') as typeof import('@nx9/shared');
+          envPromptSuffix = enrichPromptWithEnvironment('', env);
+          envRefUrl = (env.referenceUrls ?? [])[0] ?? env.referenceImageUrl ?? undefined;
+        }
+      }
+    }
+
     const jobs = resolvePromptBatch(
       upstream.prompts,
       upstream.pictures,
@@ -216,14 +244,30 @@ async function executeBlock(
     const finalJobs = jobs.length > 0 ? jobs : [{ prompt: prompt || 'a scenic landscape' }];
     const composeAction = upstream.promptDispatch?.composeAction ?? 'generate';
     const modelId = (d.model as string) || 'dall-e-3';
-    const size = (d.size as string) || '1024x1024';
-    const charRef = charCtx.referenceImageUrl ?? upstream.pictures[0];
+    const { resolveImageRequestSize } = await import('@nx9/shared');
+    const quality = (d.quality as string) || 'auto';
+    const aspectRatio = (d.aspectRatio as string) || '1:1';
+    const imageCount = (d.imageCount as number) || 1;
+    const customW = (d.width as number) || 1024;
+    const customH = (d.height as number) || 1024;
+    const snapToStep = (d.snapToStep as boolean) ?? true;
+    const resolvedSize = resolveImageRequestSize({
+      quality,
+      aspectRatio: aspectRatio === 'custom' ? undefined : aspectRatio,
+      width: aspectRatio === 'custom' ? customW : undefined,
+      height: aspectRatio === 'custom' ? customH : undefined,
+      snapToStep,
+    });
+    const size = resolvedSize.size;
+    const shotRef = linkedShotId ? useWorkspaceDocument.getState().storyboard.shots.find((s) => s.id === linkedShotId)?.firstFrameAssetId : undefined;
+    const charRef = enhancedCtx.referenceImageUrl ?? upstream.pictures[0] ?? envRefUrl ?? shotRef;
 
     const urls: string[] = [];
     let lastPrompt = '';
 
     for (const job of finalJobs) {
-      let finalPrompt = enrichPromptWithCharacters(job.prompt, charCtx.characters);
+      let finalPrompt = enrichPromptWithCharacters(job.prompt, enhancedCtx.characters);
+      if (envPromptSuffix) finalPrompt = `${finalPrompt}\n${envPromptSuffix}`;
       lastPrompt = finalPrompt;
       let refImage = job.imageUrls?.[0] || charRef;
 
@@ -243,13 +287,14 @@ async function executeBlock(
       }
 
       const { runPictureGenJob } = await import('./picture-gen-runner');
-      const url = await runPictureGenJob({
+      const batchUrls = await runPictureGenJob({
         prompt: finalPrompt,
         modelId,
         size,
         referenceImageUrl: refImage,
+        n: imageCount,
       });
-      urls.push(url);
+      urls.push(...batchUrls);
     }
     if (urls.length === 0) throw new Error('图像生成失败');
 
@@ -259,7 +304,7 @@ async function executeBlock(
       previewUrl: urls[0],
       content: lastPrompt,
       batchCount: urls.length,
-      characterInjected: charCtx.characters.map((c) => c.id),
+      characterInjected: enhancedCtx.characters.map((c) => c.id),
       lastResult: { count: urls.length, urls },
     });
     return;
@@ -269,25 +314,35 @@ async function executeBlock(
     const charCtx = characterContextForBlock(block, upstream.pictures);
     const finalPrompt = enrichPromptWithCharacters(prompt || 'cinematic scene', charCtx.characters);
     const imageUrl = upstream.pictures[0] ?? charCtx.referenceImageUrl;
+    const videoParams = resolveVideoGenParams({
+      resolution: d.resolution as string | undefined,
+      orientation: d.orientation as string | undefined,
+      aspect: d.aspect as string | undefined,
+      durationSec: d.durationSec as number | undefined,
+    });
     const res = (await api.proxyVideo({
       prompt: finalPrompt,
       model: (d.model as string) || 'veo',
       imageUrl,
-    })) as { ok?: boolean; url?: string; status?: string; taskId?: string };
+      duration: videoParams.durationSec,
+      aspect_ratio: videoParams.aspect,
+      size: videoParams.size,
+      resolution: videoParams.resolution,
+    })) as { ok?: boolean; url?: string; status?: string; taskId?: string; message?: string };
     let videoUrl = res.url;
-    if (!videoUrl && res.taskId && res.status === 'processing') {
-      videoUrl = (await waitForVideoUrl(res.taskId)) ?? undefined;
+    if (!videoUrl && res.taskId && (res.status === 'processing' || res.status === 'queued')) {
+      videoUrl = await pollVideoUntilDone(res.taskId);
     }
     updateNodeData(block.id, {
-      status: videoUrl ? 'success' : res.status === 'processing' ? 'running' : 'error',
+      status: videoUrl ? 'success' : 'error',
       videoUrl,
       taskId: res.taskId,
       content: finalPrompt,
       characterInjected: charCtx.characters.map((c) => c.id),
       lastResult: res,
-      error: videoUrl ? undefined : '视频生成未完成或失败',
+      error: videoUrl ? undefined : res.message ?? '视频生成未完成或失败',
     });
-    if (!videoUrl && res.status !== 'processing') throw new Error('视频生成失败');
+    if (!videoUrl) throw new Error(res.message ?? '视频生成失败');
     return;
   }
 
@@ -296,17 +351,26 @@ async function executeBlock(
       ...(d.systemPrompt ? [{ role: 'system', content: d.systemPrompt as string }] : []),
       { role: 'user', content: prompt || (d.content as string) || 'Hello' },
     ];
-    const res = (await api.proxyLlm({
-      messages,
-      model: (d.model as string) || 'gpt-4o-mini',
-    })) as { choices?: { message?: { content?: string } }[] };
-    const reply = res.choices?.[0]?.message?.content ?? '';
-    updateNodeData(block.id, {
-      status: 'success',
-      lastReply: reply,
-      output: reply,
-      content: reply,
-    });
+    try {
+      const res = (await api.proxyLlm({
+        messages,
+        model: (d.model as string) || 'gpt-4o-mini',
+      })) as { choices?: { message?: { content?: string } }[] };
+      const reply = res.choices?.[0]?.message?.content ?? '';
+      updateNodeData(block.id, {
+        status: 'success',
+        lastReply: reply,
+        output: reply,
+        content: reply,
+      });
+    } catch (e) {
+      updateNodeData(block.id, { status: 'error', error: String(e) });
+    } finally {
+      const s = block.data?.status as string | undefined;
+      if (s === 'running') {
+        updateNodeData(block.id, { status: 'idle' });
+      }
+    }
     return;
   }
 
@@ -336,14 +400,31 @@ async function executeBlock(
 
   if (kind === 'director-desk') {
     const charCtx = characterContextForBlock(block, upstream.pictures);
-    const shotPrompt = enrichPromptWithCharacters(
+    let shotPrompt = enrichPromptWithCharacters(
       (d.content as string) || prompt || 'cinematic medium shot',
       charCtx.characters,
     );
-    const res = (await api.proxyImage({ prompt: shotPrompt, model: 'dall-e-3' })) as {
+    const linkedShotId = d.linkedShotId as string | undefined;
+    let envRefUrl: string | undefined;
+    if (linkedShotId) {
+      const environments = useWorkspaceDocument.getState().environments;
+      const shot = useWorkspaceDocument.getState().storyboard.shots.find((s) => s.id === linkedShotId);
+      if (shot?.sceneCode && environments?.environments) {
+        const env = environments.environments.find((e) => e.sceneCode === shot.sceneCode);
+        if (env) {
+          const { enrichPromptWithEnvironment } = require('@nx9/shared') as typeof import('@nx9/shared');
+          const envSuffix = enrichPromptWithEnvironment('', env);
+          if (envSuffix) shotPrompt = `${shotPrompt}\n${envSuffix}`;
+          envRefUrl = (env.referenceUrls ?? [])[0] ?? env.referenceImageUrl ?? undefined;
+        }
+      }
+    }
+    const refUrl = upstream.pictures[0] ?? envRefUrl;
+    const res = await api.proxyImage({ prompt: shotPrompt, model: 'dall-e-3', imageUrl: refUrl }) as {
       ok?: boolean;
       url?: string;
     };
+    if (!res.url) throw new Error('图像生成未返回 URL');
     updateNodeData(block.id, {
       status: 'success',
       previewUrl: res.url,
@@ -386,11 +467,13 @@ async function executeBlock(
     const gridPrompt = prompt || (d.content as string) || 'storyboard 9-panel grid';
     const rows = (d.rows as number) ?? 3;
     const cols = (d.cols as number) ?? 3;
-    const res = await api.gridGenerate({ prompt: gridPrompt, rows, cols });
+    const style = (d.style as 'cinematic' | 'line-art') ?? 'cinematic';
+    const res = await api.gridGenerate({ prompt: gridPrompt, rows, cols, style });
     updateNodeData(block.id, {
       status: 'success',
       previewUrl: res.url,
       content: gridPrompt,
+      style,
     });
     return;
   }
@@ -463,7 +546,8 @@ async function executeBlock(
   if (kind === 'clip-editor') {
     const clips = [...upstream.clips, ...((d.extraClips as string[]) ?? [])].filter(Boolean);
     if (clips.length === 0) throw new Error('缺少视频片段');
-    const res = await api.concatClips(clips, (d.title as string) || '画布剪辑');
+    const transition = (d.transition as string) ?? 'none';
+    const res = await api.concatClips(clips, (d.title as string) || '画布剪辑', transition === 'none' ? undefined : transition);
     if (!res.ok || !res.url) throw new Error(res.message ?? '剪辑失败');
     updateNodeData(block.id, {
       status: 'success',
@@ -510,6 +594,7 @@ async function executeBlock(
       frameUrls: res.frames,
       firstFrameUrl: res.frames[0],
       lastFrameUrl: res.frames[res.frames.length - 1],
+      pictures: res.frames,
       previewUrl: res.frames[0],
     });
     return;
@@ -680,6 +765,149 @@ async function executeBlock(
     return;
   }
 
+  if (kind === 'inpaint-edit') {
+    const img = upstream.pictures?.[0] || (d.imageUrl as string);
+    const mask = (d.maskUrl as string) || '';
+    const inpaintPrompt = prompt || (d.content as string) || '';
+    if (!img) throw new Error('局部重绘：需要上游图片');
+    if (!inpaintPrompt.trim()) throw new Error('局部重绘：请输入 prompt');
+    const res = (await api.proxyFal({
+      model: 'fal-ai/fast-sdxl/inpainting',
+      input: { image_url: img, mask_url: mask || undefined, prompt: inpaintPrompt.trim() },
+    })) as { ok?: boolean; url?: string };
+    if (!res.url) throw new Error('重绘失败');
+    updateNodeData(block.id, { status: 'success', previewUrl: res.url, output: res.url });
+    return;
+  }
+
+  if (kind === 'thumbnail-maker') {
+    const src = upstream.pictures?.[0] || (d.imageUrl as string);
+    if (!src) throw new Error('封面制作：需要上游图片');
+    const title = (d.title as string) || '';
+    const res = await api.thumbnailCompose({ imageUrl: src, title });
+    updateNodeData(block.id, {
+      status: 'success',
+      previewUrl: res.url,
+      output: res.url,
+      content: title,
+      pictures: [res.url],
+    });
+    return;
+  }
+
+  if (kind === 'seedance-chain') {
+    const linkedIds = (d.linkedShotIds as string[]) ?? [];
+    const allShots = useWorkspaceDocument.getState().storyboard.shots;
+    const targetShots = linkedIds.length > 0
+      ? allShots.filter((s) => linkedIds.includes(s.id)).sort((a, b) => a.index - b.index)
+      : allShots.filter((s) => s.videoPromptEn).sort((a, b) => a.index - b.index);
+    if (targetShots.length === 0) throw new Error('Seedance Chain：无可处理的镜头');
+    const projectGoal = (d.projectGoal as string) || '';
+    const chain = shotsToClipChain(targetShots, projectGoal);
+    updateNodeData(block.id, {
+      status: 'success',
+      clipChain: chain,
+      clipCount: chain.items.length,
+      content: chain.items.map((it: { label?: string; prompt?: string }) => `${it.label}: ${it.prompt}`).join('\n'),
+      output: chain.items.map((it: { label?: string; prompt?: string }) => `${it.label}: ${it.prompt}`).join('\n'),
+    });
+    return;
+  }
+
+  if (kind === 'caption-asr') {
+    const src = upstream.clips?.[0] || upstream.sounds?.[0] || (d.sourceUrl as string);
+    if (!src) throw new Error('语音转字幕：需要上游音频或视频');
+    const language = (d.language as string) || 'zh';
+    const res = await api.transcribeAudio(src, language);
+    updateNodeData(block.id, {
+      status: 'success',
+      srtContent: res.srtContent,
+      cues: res.cues,
+      language,
+      output: res.srtContent,
+    });
+    return;
+  }
+
+  if (kind === 'bridge-clip') {
+    const clipUrl = upstream.clips?.[0] || (d.sourceClipUrl as string);
+    if (!clipUrl) throw new Error('Bridge 续拍：需要上游视频');
+    const framesRes = await api.extractFrames(clipUrl as string, 1);
+    const endFrameUrl = framesRes.frames?.[0];
+    const nextPrompt = prompt || (d.content as string) || '';
+    const continuationPrompt = (await import('@nx9/shared')).buildBridgeContinuationPrompt({
+      sourcePrompt: (upstream.prompts?.[0] ?? d.content as string ?? ''),
+      nextPrompt,
+    });
+    updateNodeData(block.id, {
+      status: 'success',
+      sourceClipUrl: clipUrl,
+      endFrameUrl,
+      continuationPrompt,
+      output: continuationPrompt,
+      content: continuationPrompt,
+      previewUrl: endFrameUrl,
+      pictures: endFrameUrl ? [endFrameUrl] : undefined,
+    });
+    return;
+  }
+
+  if (kind === 'voice-cast') {
+    const lines = (d.lines as { speaker: string; text: string; emotion?: string }[]) ?? [];
+    const profileMap = (d.profileMap as Record<string, string>) ?? {};
+    const results: { speaker: string; text: string; audioUrl?: string; error?: string }[] = [];
+    for (const line of lines) {
+      try {
+        const voiceId = profileMap[line.speaker] ?? 'alloy';
+        const res = (await api.proxyTts({ input: line.text, voice: voiceId })) as {
+          ok?: boolean; url?: string;
+        };
+        results.push({ speaker: line.speaker, text: line.text, audioUrl: res.url });
+      } catch (e) {
+        results.push({ speaker: line.speaker, text: line.text, error: String(e) });
+      }
+    }
+    const audioUrls = results.map((r) => r.audioUrl).filter(Boolean) as string[];
+    updateNodeData(block.id, {
+      status: audioUrls.length > 0 ? 'success' : 'error',
+      results,
+      sounds: audioUrls,
+      meta: { total: results.length, failed: results.filter((r) => r.error).length },
+    });
+    return;
+  }
+
+  if (kind === 'dialogue-sheet') {
+    const lines = (d.lines as { speaker: string; text: string; emotion?: string }[]) ?? [];
+    updateNodeData(block.id, {
+      status: 'success',
+      lines,
+      output: lines.map((l) => `${l.speaker}：${l.text}`).join('\n'),
+      meta: { lineCount: lines.length },
+    });
+    return;
+  }
+
+  if (kind === 'scene-card') {
+    const sceneName = (d.sceneName as string) ?? '';
+    const description = (d.description as string) ?? '';
+    const era = (d.era as string) ?? '';
+    const lighting = (d.lighting as string) ?? '';
+    const props = (d.props as string[]) ?? [];
+    const referenceUrls = (d.referenceUrls as string[]) ?? [];
+    const compiledPrompt = [sceneName, description, era, lighting, ...props, ...referenceUrls]
+      .filter(Boolean)
+      .join(' | ');
+    updateNodeData(block.id, {
+      status: 'success',
+      content: compiledPrompt,
+      output: compiledPrompt,
+      meta: { sceneName, description, era, lighting, props, referenceUrls },
+      pictures: referenceUrls.length ? referenceUrls : undefined,
+    });
+    return;
+  }
+
   if (kind === 'continuity-check') {
     const images = upstream.pictures ?? [];
     if (images.length < 2) throw new Error('至少需要 2 张上游图像');
@@ -710,13 +938,54 @@ async function executeBlock(
   }
 
   if (kind === 'export-pack') {
+    const shots = useWorkspaceDocument.getState().storyboard.shots;
+    const { runExportPack } = await import('./export-pack-runner');
+    const mode = (d.exportMode as string) || 'zip';
+    const prefix = (d.exportPrefix as string) || 'nx9-shot';
+    const audioUrl = (d.episodeAudioUrl as string) || '';
+    try {
+      const res = await runExportPack({
+        mode: mode as 'zip' | 'ffmpeg-episode' | 'hyperframes-episode' | 'remotion-bundle',
+        prefix,
+        audioUrl,
+        pictures: upstream.pictures ?? [],
+        clips: upstream.clips ?? [],
+        sounds: upstream.sounds ?? [],
+        prompts: upstream.prompts ?? [],
+        shots,
+      });
+      updateNodeData(block.id, {
+        status: 'success',
+        exportReady: true,
+        episodeUrl: res.url,
+        exportCount: res.exportCount ?? 0,
+        message: res.message,
+      });
+    } catch (e) {
+      updateNodeData(block.id, { status: 'error', error: String(e), exportReady: false });
+    }
+    return;
+  }
+
+  if (kind === 'comfy-workflow') {
+    const workflowText = (d.workflowText as string) ?? '';
+    if (!workflowText.trim()) throw new Error('Comfy 工作流：未填写 Workflow JSON');
+    let workflow: Record<string, unknown>;
+    try {
+      workflow = JSON.parse(workflowText);
+    } catch {
+      throw new Error('Comfy 工作流：Workflow JSON 解析失败');
+    }
+    const res = (await api.proxyComfy({
+      workflow,
+      baseUrl: (d.baseUrl as string) || undefined,
+      prompt: (prompt || (d.content as string)) || undefined,
+    })) as { ok: boolean; url?: string; message?: string };
+    if (!res.ok || !res.url) throw new Error(res.message ?? 'Comfy 工作流运行失败');
     updateNodeData(block.id, {
       status: 'success',
-      exportReady: true,
-      exportCount:
-        (upstream.pictures?.length ?? 0) +
-        (upstream.clips?.length ?? 0) +
-        (upstream.sounds?.length ?? 0),
+      previewUrl: res.url,
+      content: prompt || (d.content as string) || '',
     });
     return;
   }
@@ -893,6 +1162,18 @@ async function executeBlock(
       normalUrl: res.normalUrl,
       pictures: [res.depthUrl, res.normalUrl].filter(Boolean) as string[],
       meta: { sourceUrl: source, method: res.method },
+    });
+    return;
+  }
+
+  if (kind === 'picture-diff') {
+    const imageA = upstream.pictures?.[0] || (d.imageA as string) || '';
+    const imageB = upstream.pictures?.[1] || (d.imageB as string) || '';
+    if (!imageA || !imageB) throw new Error('picture-diff 需要 2 张上游图片');
+    updateNodeData(block.id, {
+      status: 'success',
+      imageA,
+      imageB,
     });
     return;
   }
@@ -1094,8 +1375,11 @@ async function executeBlock(
     const projectGoal =
       (d.projectGoal as string) || useWorkspaceDocument.getState().storyboard.title || '';
     if (chain.items.length === 0) {
-      const shots = useWorkspaceDocument.getState().storyboard.shots;
-      if (shots.length === 0) throw new Error('故事板无镜头');
+      const allShots = useWorkspaceDocument.getState().storyboard.shots;
+      if (allShots.length === 0) throw new Error('故事板无镜头');
+      const linkedShotId = d.linkedShotId as string | undefined;
+      const shots = linkedShotId ? allShots.filter((s) => s.id === linkedShotId) : allShots;
+      if (shots.length === 0) throw new Error('未找到绑定的镜头');
       chain = shotsToClipChain(shots, projectGoal);
     }
     const finalChain = await runClipChain(
@@ -1106,7 +1390,7 @@ async function executeBlock(
         if (item.shotId) {
           useWorkspaceDocument.getState().updateShot(item.shotId, {
             videoAssetId: url,
-            status: 'review',
+            videoStatus: 'review',
           });
         }
       },
@@ -1153,6 +1437,37 @@ async function executeBlock(
       videoUrl: res.url,
       outputUrl: res.url,
     });
+    return;
+  }
+
+  if (kind === 'control-preprocess') {
+    const src = upstream.pictures[0] || (d.imageUrl as string);
+    if (!src) throw new Error('ControlNet 缺少上游图片');
+    const mode = (d.mode as string) ?? 'depth';
+    if (mode === 'depth') {
+      const r = await api.generateDepthPass({ sourceUrl: src });
+      updateNodeData(block.id, { status: 'success', previewUrl: r.depthUrl, output: r.depthUrl, meta: { mode } });
+    } else if (mode === 'canny') {
+      const r = await api.proxyFal({ model: 'fal-ai/image-to-canny', input: { image_url: src } });
+      updateNodeData(block.id, { status: 'success', previewUrl: r.url, output: r.url, meta: { mode } });
+    } else throw new Error(`未知 ControlNet 模式: ${mode}`);
+    return;
+  }
+
+  if (kind === 'music-gen') {
+    throw new Error('BGM 功能开发中，需接入 Suno/Udio 等专用音乐 API 后可用');
+  }
+
+  if (kind === 'lipsync-pass') {
+    throw new Error('口型同步功能已弃用，需部署 Wav2Lip / LivePortrait 等模型后方可用');
+  }
+
+  if (kind === 'reference-analyze') {
+    const url = upstream.clips[0] || (d.videoUrl as string);
+    if (!url) throw new Error('参考反推缺少上游视频');
+    const notes = (d.notes as string) ?? '';
+    const res = await api.analyzeReferenceVideo({ videoUrl: url, notes: notes || undefined, targetShotCount: 5 });
+    updateNodeData(block.id, { status: 'success', analyzeResult: res.markdown, output: res.markdown, content: res.markdown });
     return;
   }
 

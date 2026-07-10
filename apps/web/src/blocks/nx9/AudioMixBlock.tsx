@@ -10,6 +10,9 @@ function AudioMixBlock(props: NodeProps) {
   const upstream = props.data?.upstream as { sounds?: string[] } | undefined;
   const normalize = (props.data?.normalize as boolean | undefined) ?? true;
   const outputUrl = props.data?.outputSound as string | undefined;
+  const meta = props.data?.meta as { trackCount?: number; failedTracks?: number } | undefined;
+  const trackCount = meta?.trackCount ?? 0;
+  const failedTracks = meta?.failedTracks ?? 0;
 
   const run = useCallback(async () => {
     const tracks = upstream?.sounds ?? [];
@@ -25,9 +28,10 @@ function AudioMixBlock(props: NodeProps) {
         status: 'success',
         outputSound: res.url,
         sounds: [res.url],
-        meta: { trackCount: res.trackCount },
+        meta: { trackCount: res.trackCount, failedTracks: (res as { failedTracks?: number }).failedTracks ?? 0 },
       });
-      appendLog(`音频混音完成 · ${res.trackCount} 轨`);
+      const failMsg = (res as { failedTracks?: number }).failedTracks ? ` · ${(res as { failedTracks?: number }).failedTracks} 轨失败` : '';
+      appendLog(`音频混音完成 · ${res.trackCount} 轨${failMsg}`);
     } catch (e) {
       updateNodeData(props.id, { status: 'error', error: String(e) });
     }
@@ -37,6 +41,12 @@ function AudioMixBlock(props: NodeProps) {
     <BlockShell {...props}>
       <div className="space-y-2 nodrag nopan text-xs">
         <p className="text-[10px] text-ink/50">上游 {upstream?.sounds?.length ?? 0} 条音频</p>
+        {trackCount > 0 && (
+          <p className="text-[10px] text-ink/60">
+            混音 {trackCount} 轨
+            {failedTracks > 0 && <span className="text-red-600"> · {failedTracks} 轨失败</span>}
+          </p>
+        )}
         <label className="flex items-center gap-2 text-[10px]">
           <input
             type="checkbox"

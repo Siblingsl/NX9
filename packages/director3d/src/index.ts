@@ -1,6 +1,6 @@
 import type { DirectorProject } from './schema/directorProject';
 
-export type { Director3dHostOptions, Director3dMountHandle, Director3dCapturePayload } from './bridge/types';
+export type { Director3dHostOptions, Director3dMountHandle, Director3dCapturePayload, Director3dPerformanceMode } from './bridge/types';
 export type {
   DirectorProject,
   DirectorObject,

@@ -1,4 +1,5 @@
-import { Body, Controller, Headers, Post } from '@nestjs/common';
+import { Body, Controller, Headers, Post, Res } from '@nestjs/common';
+import { Response } from 'express';
 import { GatewayService } from './gateway.service';
 
 @Controller('api/gateway')
@@ -11,6 +12,25 @@ export class GatewayController {
     @Headers('x-nx9-user-id') userId?: string,
   ) {
     return this.gateway.proxyLlm(body, userId);
+  }
+
+  @Post('llm/stream')
+  async proxyLlmStream(
+    @Body() body: { messages: { role: string; content: string }[]; model?: string },
+    @Headers('x-nx9-user-id') userId?: string,
+    @Res() res?: Response,
+  ) {
+    if (!res) return;
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    const full = await this.gateway.proxyLlmStream(
+      body.messages || [],
+      userId,
+      (text: string) => { res.write(`data: ${JSON.stringify({ text })}\n\n`); },
+    );
+    res.write(`data: ${JSON.stringify({ done: true, full })}\n\n`);
+    res.end();
   }
 
   @Post('image')
@@ -53,6 +73,11 @@ export class GatewayController {
   @Post('luxtts/probe')
   probeLuxTts(@Body() body?: { baseUrl?: string }) {
     return this.gateway.probeLuxTts(body?.baseUrl);
+  }
+
+  @Post('providers/probe')
+  probeProviders() {
+    return this.gateway.probeProviders();
   }
 
   @Post('fal')

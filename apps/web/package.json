@@ -7,11 +7,14 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
-    "typecheck": "tsc -b --noEmit"
+    "typecheck": "tsc -b --noEmit",
+    "test:e2e": "playwright test"
   },
   "dependencies": {
     "@nx9/director3d": "*",
+    "@nx9/remotion-compositions": "*",
     "@nx9/shared": "*",
+    "@remotion/player": "^4.0.0",
     "@xyflow/react": "^12.10.0",
     "jszip": "^3.10.1",
     "lucide-react": "^0.468.0",
@@ -20,10 +23,12 @@
     "zustand": "^5.0.0"
   },
   "devDependencies": {
+    "@playwright/test": "^1.61.1",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@vitejs/plugin-react": "^4.3.0",
     "autoprefixer": "^10.4.0",
+    "playwright": "^1.61.1",
     "postcss": "^8.4.0",
     "tailwindcss": "^3.4.0",
     "typescript": "^5.7.0",

@@ -18,7 +18,8 @@
     "baseUrl": ".",
     "paths": {
       "@/*": ["src/*"],
-      "@nx9/shared": ["../../packages/shared/dist/esm/index.d.ts"]
+      "@nx9/shared": ["../../packages/shared/dist/esm/index.d.ts"],
+      "@nx9/remotion-compositions": ["../../packages/remotion-compositions/dist/esm/index.d.ts"]
     }
   },
   "include": ["src"]

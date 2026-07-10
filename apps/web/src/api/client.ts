@@ -69,16 +69,49 @@ export const api = {
   saveSettings: (body: AppSettings) =>
     request<AppSettings>('/api/settings', { method: 'POST', body: JSON.stringify(body) }),
 
-  uploadAsset: async (file: File) => {
-    const form = new FormData();
-    form.append('file', file);
-    const res = await fetch('/api/assets/upload', { method: 'POST', body: form });
-    if (!res.ok) throw new Error(await res.text());
-    return res.json() as Promise<{ url: string; filename: string; thumbUrl?: string }>;
+  uploadAsset: (file: File, onProgress?: (pct: number) => void) => {
+    return new Promise<{ url: string; filename: string; thumbUrl?: string }>((resolve, reject) => {
+      const form = new FormData();
+      form.append('file', file);
+      const xhr = new XMLHttpRequest();
+      xhr.open('POST', '/api/assets/upload');
+      xhr.upload.onprogress = (e) => {
+        if (e.lengthComputable && onProgress) onProgress(e.loaded / e.total);
+      };
+      xhr.onload = () => {
+        if (xhr.status === 200) resolve(JSON.parse(xhr.responseText));
+        else reject(new Error(xhr.responseText || `Upload failed ${xhr.status}`));
+      };
+      xhr.onerror = () => reject(new Error('Network error'));
+      xhr.send(form);
+    });
   },
 
-  proxyLlm: (body: Record<string, unknown>) =>
-    request<unknown>('/api/gateway/llm', { method: 'POST', body: JSON.stringify(body) }),
+  proxyLlm: (body: Record<string, unknown>, signal?: AbortSignal) =>
+    request<unknown>('/api/gateway/llm', { method: 'POST', body: JSON.stringify(body), signal }),
+  proxyLlmStream: (body: { messages: { role: string; content: string }[]; model?: string }, onChunk: (text: string) => void, signal?: AbortSignal): Promise<string> =>
+    fetch('/api/gateway/llm/stream', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+      signal,
+    }).then(async (res) => {
+      if (!res.ok) throw new Error(`LLM stream error: ${res.status}`);
+      const reader = res.body!.getReader();
+      const decoder = new TextDecoder();
+      let full = '';
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        const text = decoder.decode(value, { stream: true });
+        for (const line of text.split('\n').filter((l) => l.startsWith('data: '))) {
+          const json = JSON.parse(line.slice(6));
+          if (json.done) return json.full as string;
+          if (json.text) { full += json.text; onChunk(json.text); }
+        }
+      }
+      return full;
+    }),
   proxyImage: (body: Record<string, unknown>) =>
     request<unknown>('/api/gateway/image', { method: 'POST', body: JSON.stringify(body) }),
   proxyVideo: (body: Record<string, unknown>) =>
@@ -134,6 +167,18 @@ export const api = {
   deleteSkill: (id: string) =>
     request<{ ok: boolean }>(`/api/skills/${id}`, { method: 'DELETE' }),
 
+  agentShotScript: (text: string) =>
+    request<{
+      ok: boolean;
+      rows: { durationSec: number; shotType: string; dialogue: string; action: string }[];
+    }>('/api/agent/shot-script', { method: 'POST', body: JSON.stringify({ text }) }),
+
+  dialogueParse: (text: string) =>
+    request<{
+      ok: boolean;
+      lines: { speaker: string; text: string; emotion?: string }[];
+    }>('/api/agent/dialogue-parse', { method: 'POST', body: JSON.stringify({ text }) }),
+
   seedSeedanceSkills: () =>
     request<{ imported: number; skipped: number }>('/api/skills/seed/seedance', {
       method: 'POST',
@@ -161,8 +206,14 @@ export const api = {
       body: JSON.stringify(body),
     }),
 
-  gridGenerate: (body: { prompt: string; rows?: number; cols?: number }) =>
-    request<{ ok: boolean; url: string; message?: string }>('/api/grid/generate', {
+  gridGenerate: (body: { prompt: string; rows?: number; cols?: number; style?: 'cinematic' | 'line-art' }) =>
+    request<{ ok: boolean; url: string; message?: string; style?: string }>('/api/grid/generate', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+
+  gridShotSketch: (body: { descriptionZh: string; promptEn?: string; shotType?: string; artStylePrompt?: string }) =>
+    request<{ ok: boolean; url: string; prompt: string; message?: string }>('/api/grid/shot-sketch', {
       method: 'POST',
       body: JSON.stringify(body),
     }),
@@ -190,10 +241,10 @@ export const api = {
       body: JSON.stringify({ taskId, baseUrl }),
     }),
 
-  concatClips: (videoUrls: string[], title?: string) =>
+  concatClips: (videoUrls: string[], title?: string, transition?: string) =>
     request<{ ok: boolean; url?: string; status: string; message?: string; segmentCount?: number }>(
       '/api/montage/concat-clips',
-      { method: 'POST', body: JSON.stringify({ videoUrls, title }) },
+      { method: 'POST', body: JSON.stringify({ videoUrls, title, transition }) },
     ),
 
   extractFrames: (videoUrl: string, count?: number) =>
@@ -297,7 +348,7 @@ export const api = {
     }),
 
   proxyFal: (body: { model: string; input: Record<string, unknown> }) =>
-    request<{ ok: boolean; url?: string; output?: Record<string, unknown> }>('/api/gateway/fal', {
+    request<{ ok: boolean; url?: string; taskId?: string; output?: Record<string, unknown> }>('/api/gateway/fal', {
       method: 'POST',
       body: JSON.stringify(body),
     }),
@@ -323,6 +374,24 @@ export const api = {
     }>('/api/tools/parse-link', {
       method: 'POST',
       body: JSON.stringify({ url, hint }),
+    }),
+
+  captureUrl: (url: string) =>
+    request<{ ok: boolean; url: string; filename: string }>('/api/tools/capture-url', {
+      method: 'POST',
+      body: JSON.stringify({ url }),
+    }),
+
+  importPromptPackage: (url: string) =>
+    request<{ ok: boolean; count: number; items: { id: string; label: string; kind: string; prompt: string; tags: string[] }[] }>('/api/tools/import-prompt-package', {
+      method: 'POST',
+      body: JSON.stringify({ url }),
+    }),
+
+  proxyDownload: (url: string) =>
+    request<{ ok: boolean; url: string; filename: string }>('/api/tools/proxy-download', {
+      method: 'POST',
+      body: JSON.stringify({ url }),
     }),
 
   reversePrompt: (imageUrl: string) =>
@@ -366,10 +435,10 @@ export const api = {
       body: JSON.stringify({ shots, cols }),
     }),
 
-  checkReviewGate: (shots: StoryboardShot[]) =>
+  checkReviewGate: (shots: StoryboardShot[], gateMode?: string) =>
     request<{ ok: boolean; pending: number[] }>('/api/montage/review-gate', {
       method: 'POST',
-      body: JSON.stringify({ shots }),
+      body: JSON.stringify({ shots, gateMode }),
     }),
 
   renderShotMp4: (body: {
@@ -386,7 +455,7 @@ export const api = {
     ),
 
   mixAudio: (audioUrls: string[], normalize?: boolean) =>
-    request<{ ok: boolean; url?: string; status: string; message?: string; trackCount?: number }>(
+    request<{ ok: boolean; url?: string; status: string; message?: string; trackCount?: number; failedTracks?: number }>(
       '/api/montage/mix-audio',
       { method: 'POST', body: JSON.stringify({ audioUrls, normalize }) },
     ),
@@ -397,11 +466,20 @@ export const api = {
       { method: 'POST', body: JSON.stringify(body) },
     ),
 
+  thumbnailCompose: (body: { imageUrl: string; title?: string; safeZone?: string }) =>
+    request<{ ok: boolean; url: string }>('/api/image-ops/thumbnail-compose', { method: 'POST', body: JSON.stringify(body) }),
+
   probeMediaDuration: (sourceUrl: string) =>
     request<{ ok: boolean; durationSec: number }>('/api/montage/probe-duration', {
       method: 'POST',
       body: JSON.stringify({ sourceUrl }),
     }),
+
+  transcribeAudio: (sourceUrl: string, language?: string) =>
+    request<{ ok: boolean; srtContent: string; cues: { start: number; end: number; text: string }[] }>(
+      '/api/montage/transcribe',
+      { method: 'POST', body: JSON.stringify({ sourceUrl, language }) },
+    ),
 
   generateDepthPass: (body: { sourceUrl: string }) =>
     request<{
@@ -449,6 +527,66 @@ export const api = {
       body: JSON.stringify({ payload, title }),
     }),
 
+  scriptSkeleton: (body: { sourceText: string }) =>
+    request<{ ok: boolean; skeleton: import('@nx9/shared').StorySkeleton }>('/api/agent/script/skeleton', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+
+  scriptAdaptation: (body: { sourceText: string }) =>
+    request<{ ok: boolean; adaptation: string }>('/api/agent/script/adaptation', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+
+  scriptScreenplay: (body: { sourceText: string }) =>
+    request<{ ok: boolean; screenplay: string }>('/api/agent/script/screenplay', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+
+  directorPlan: (body: { sourceText: string }) =>
+    request<{ ok: boolean; plan: string }>('/api/agent/production/director-plan', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+
+  storyboardTable: (body: { sourceText: string }) =>
+    request<{ ok: boolean; table: import('@nx9/shared').StoryboardTableRow[] }>('/api/agent/production/storyboard-table', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+
+  materializeShots: (body: { table: import('@nx9/shared').StoryboardTableRow[] }) =>
+    request<{ ok: boolean; shots: StoryboardShot[] }>('/api/agent/production/materialize-shots', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+
+  extractAssets: (body: { sourceText: string }) =>
+    request<{ ok: boolean; characters: import('@nx9/shared').CharacterProfile[]; scenes: { id: string; name: string; description: string }[] }>('/api/agent/extract-assets', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+
+  sceneSplit: (body: { sourceText: string; mode?: 'llm' | 'rule' }) =>
+    request<{ ok: boolean; scenes: import('@nx9/shared').SceneSplitRecord[] }>('/api/agent/scene-split', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+
+  extractEnvironments: (body: { scenes: import('@nx9/shared').SceneSplitRecord[] }) =>
+    request<{ ok: boolean; environments: import('@nx9/shared').EnvironmentProfile[] }>('/api/agent/extract-environments', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+
+  novelEvents: (body: { sourceText: string }) =>
+    request<{ ok: boolean; events: { id: string; name: string; description: string; order: number }[] }>('/api/agent/novel-events', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+
   analyzeReferenceVideo: (body: {
     videoUrl: string;
     notes?: string;
@@ -471,6 +609,7 @@ export const api = {
     shots: StoryboardShot[];
     requireApproved?: boolean;
     title?: string;
+    audioUrl?: string;
   }) =>
     request<{
       ok: boolean;
@@ -478,6 +617,7 @@ export const api = {
       status: string;
       message?: string;
       segmentCount?: number;
+      vertical?: boolean;
     }>('/api/montage/concat-episode', { method: 'POST', body: JSON.stringify(body) }),
 
   probeVoicebox: (baseUrl?: string) =>
@@ -506,6 +646,17 @@ export const api = {
       effectiveStrategy?: string;
     }>('/api/gateway/luxtts/probe', { method: 'POST', body: JSON.stringify({ baseUrl }) }),
 
+  probeProviders: () =>
+    request<{
+      providers: {
+        id: string;
+        label: string;
+        available: boolean;
+        models?: string[];
+        message?: string;
+      }[];
+    }>('/api/gateway/providers/probe', { method: 'POST' }),
+
   listUsers: () => request<UserSummary[]>('/api/users'),
   bootstrapUser: () => request<UserSummary>('/api/users/bootstrap'),
   createUser: (name: string, email?: string) =>
@@ -519,6 +670,24 @@ export const api = {
     request<{ id: string; kind: string; model?: string | null; units: number; createdAt: number }[]>(
       `/api/usage/recent?limit=${limit}${userId ? `&userId=${encodeURIComponent(userId)}` : ''}`,
     ),
+
+  renderHyperframes: (body: { timeline: unknown; templateId?: string; transitionPack?: string }) =>
+    request<{ ok: boolean; taskId?: string; status: string }>('/api/montage/render-hyperframes', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+
+  getTaskStatus: (taskId: string) =>
+    request<{ ok: boolean; status: string; url?: string; message?: string }>(`/api/montage/tasks/${taskId}`),
+
+  renderRemotion: (body: { timeline: unknown; codec?: string }) =>
+    request<{ ok: boolean; taskId: string; status: string; message: string }>('/api/montage/render-remotion', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+
+  getRemotionTaskStatus: (taskId: string) =>
+    request<{ ok: boolean; status: string; progress: number; message?: string; url?: string }>(`/api/montage/remotion-tasks/${taskId}`),
 
   storageMode: () => request<{ mode: string }>('/api/admin/storage'),
   migrateToPrisma: (ownerId?: string) =>

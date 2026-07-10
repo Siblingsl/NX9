@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=1920,height=1080" />
+  <title>NX9 镜头+字幕条</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; overflow: hidden; background: #000; }
+    #stage { width: 1920px; height: 1080px; position: relative; background: #000; overflow: hidden; }
+    #video-layer { position: absolute; inset: 0; }
+    #video-layer video, #video-layer img { width: 100%; height: 100%; object-fit: contain; }
+    #lower-third { position: absolute; bottom: 60px; left: 0; right: 0; padding: 0 40px; opacity: 0; transition: opacity 0.3s; }
+    #lower-third.active { opacity: 1; }
+    #lower-third .bar { background: linear-gradient(90deg, #a13d63, transparent); padding: 12px 24px; border-radius: 0 8px 8px 0; }
+    #lower-third .title { color: #fff; font-size: 32px; font-weight: bold; }
+    #lower-third .subtitle { color: rgba(255,255,255,0.8); font-size: 20px; margin-top: 4px; }
+  </style>
+</head>
+<body>
+  <div id="stage" data-fps="30" data-duration="10">
+    <div id="video-layer"></div>
+    <div id="lower-third">
+      <div class="bar">
+        <div class="title" id="lt-title">角色名</div>
+        <div class="subtitle" id="lt-subtitle">台词/描述</div>
+      </div>
+    </div>
+  </div>
+  <script>
+    window.__NX9_TIMELINE__ = /* INJECT_JSON */ {};
+  </script>
+  <script>
+    (function() {
+      var timeline = window.__NX9_TIMELINE__;
+      if (!timeline || !timeline.clips) return;
+      var stage = document.getElementById('stage');
+      var videoLayer = document.getElementById('video-layer');
+      var lowerThird = document.getElementById('lower-third');
+      var ltTitle = document.getElementById('lt-title');
+      var ltSubtitle = document.getElementById('lt-subtitle');
+      var fps = timeline.fps || 30;
+      stage.dataset.duration = timeline.durationSec || 0;
+
+      timeline.clips.forEach(function(clip) {
+        if (clip.type === 'video' || clip.type === 'image') {
+          var el;
+          if (clip.type === 'video') {
+            el = document.createElement('video');
+            el.src = clip.assetUrl;
+            el.muted = true;
+            el.style.width = '100%';
+            el.style.height = '100%';
+            el.style.objectFit = 'contain';
+          } else {
+            el = document.createElement('img');
+            el.src = clip.assetUrl;
+            el.style.width = '100%';
+            el.style.height = '100%';
+            el.style.objectFit = 'contain';
+          }
+          videoLayer.appendChild(el);
+        }
+        if (clip.type === 'overlay' && clip.text) {
+          ltTitle.textContent = clip.label || '镜头';
+          ltSubtitle.textContent = clip.text;
+        }
+      });
+
+      window.__HF_UPDATE__ = function(timeSec) {
+        var clips = videoLayer.querySelectorAll('video, img');
+        clips.forEach(function(el, i) {
+          var start = (timeline.clips[i] && timeline.clips[i].startSec) || 0;
+          var dur = (timeline.clips[i] && timeline.clips[i].durationSec) || 4;
+          el.style.display = (timeSec >= start && timeSec < start + dur) ? 'block' : 'none';
+          if (el.tagName === 'VIDEO' && timeSec >= start && timeSec < start + dur) {
+            el.currentTime = timeSec - start;
+            el.play().catch(function(){});
+          } else if (el.tagName === 'VIDEO') {
+            el.pause();
+          }
+        });
+        lowerThird.classList.toggle('active', timeSec > 0.5);
+      };
+      window.__HF_DURATION__ = timeline.durationSec || 0;
+      window.__HF_FPS__ = fps;
+    })();
+  </script>
+</body>
+</html>

@@ -8,7 +8,13 @@ const FEATURED_RECIPE_IDS = [
   'tpl-text-to-picture',
   'tpl-image-to-clip',
   'tpl-storyboard-grid',
+  'tpl-line-art-storyboard',
+  'tpl-3d-preview',
+  'tpl-toonflow-lite',
   'tpl-photo-speak',
+  'tpl-sclass-seedance',
+  'tpl-novel-import',
+  'tpl-link-replicate',
 ] as const;
 
 function featuredRecipes(): WorkflowTemplate[] {

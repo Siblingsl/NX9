@@ -24,6 +24,17 @@ function BeatSyncBlock(props: NodeProps) {
       appendLog('节拍对齐：需要上游音频');
       return;
     }
+    const hasClipUpstream = (upstream?.clips?.length ?? 0) > 0;
+    if (!hasClipUpstream) {
+      updateNodeData(props.id, {
+        status: 'skipped',
+        cutPoints: [],
+        meta: { skipped: true, reason: '无 clip 上游，跳过节拍切点' },
+        content: '跳过 — 仅 sound 上游',
+      });
+      appendLog('节拍对齐 · 无 clip 上游，已跳过');
+      return;
+    }
     updateNodeData(props.id, { status: 'running' });
     try {
       const probe = await api.probeMediaDuration(sound);
@@ -48,28 +59,36 @@ function BeatSyncBlock(props: NodeProps) {
     }
   }, [upstream, bpm, props.id, updateNodeData, appendLog]);
 
+  const status = props.data?.status as string | undefined;
+
   return (
     <BlockShell {...props}>
       <div className="space-y-2 nodrag nopan text-xs">
-        <label className="flex items-center gap-2 text-[10px] text-ink/50">
-          BPM
-          <input
-            type="number"
-            min={30}
-            max={240}
-            value={bpm}
-            onChange={(e) => updateNodeData(props.id, { bpm: Number(e.target.value) || 120 })}
-            className="w-20 rounded border border-line px-1 py-0.5"
-          />
-        </label>
-        {cutPoints.length > 0 && (
-          <p className="text-[10px] text-ink/60 font-mono truncate">
-            切点: {cutPoints.slice(0, 8).join('s, ')}s{cutPoints.length > 8 ? '…' : ''}
-          </p>
+        {status === 'skipped' ? (
+          <p className="text-[10px] text-ink/40 italic">已跳过 — 无 clip 上游</p>
+        ) : (
+          <>
+            <label className="flex items-center gap-2 text-[10px] text-ink/50">
+              BPM
+              <input
+                type="number"
+                min={30}
+                max={240}
+                value={bpm}
+                onChange={(e) => updateNodeData(props.id, { bpm: Number(e.target.value) || 120 })}
+                className="w-20 rounded border border-line px-1 py-0.5"
+              />
+            </label>
+            {cutPoints.length > 0 && (
+              <p className="text-[10px] text-ink/60 font-mono truncate">
+                切点: {cutPoints.slice(0, 8).join('s, ')}s{cutPoints.length > 8 ? '…' : ''}
+              </p>
+            )}
+            <button type="button" onClick={() => void run()} className="w-full rounded-xl bg-brand text-white py-2">
+              检测节拍切点
+            </button>
+          </>
         )}
-        <button type="button" onClick={() => void run()} className="w-full rounded-xl bg-brand text-white py-2">
-          检测节拍切点
-        </button>
       </div>
     </BlockShell>
   );

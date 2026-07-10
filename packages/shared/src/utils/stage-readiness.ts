@@ -69,6 +69,20 @@ export function computeStageReadiness(input: ReadinessInput): StageReadiness {
   };
 }
 
+export interface PipelineStageFix {
+  templateId?: string;
+  spawnKind?: string;
+  label: string;
+}
+
+export const PIPELINE_STAGE_FIXES: Record<PipelineStageId, PipelineStageFix> = {
+  script: { templateId: 'tpl-novel-import', label: '加载「小说拆镜 → 开拍」配方' },
+  storyboard: { spawnKind: 'shot-script', label: '添加 shot-script 模块' },
+  generate: { templateId: 'tpl-nx9-character-pipeline', label: '加载「角色设定 → 出图」配方' },
+  voice: { spawnKind: 'sound-gen', label: '添加 sound-gen 模块' },
+  export: { templateId: 'tpl-nx9-review-pipeline', label: '加载「分镜 → 审阅 → 交付」配方' },
+};
+
 export type PipelineStageState = 'done' | 'active' | 'pending';
 
 /** 阶段 dot 颜色：已完成 / 当前 / 未开始 */

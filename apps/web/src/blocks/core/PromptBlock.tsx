@@ -95,8 +95,11 @@ function PromptBlock(props: NodeProps) {
         data: (n.data ?? {}) as Record<string, unknown>,
       }));
       const flowLinks = edges.map((e) => ({ source: e.source, target: e.target }));
-      const { pictures, texts } = collectUpstreamForPromptMerge(props.id, flowBlocks, flowLinks);
-      return mergePromptBatchItems(baseItems, pictures, texts);
+      const { pictures, texts, items: upstreamItems } = collectUpstreamForPromptMerge(props.id, flowBlocks, flowLinks);
+      upstreamItems.sort((a, b) => (a.rowIndex ?? 0) - (b.rowIndex ?? 0));
+      const sortedPics = upstreamItems.map((i) => i.imageUrl).filter(Boolean) as string[];
+      const sortedTexts = upstreamItems.map((i) => i.text).filter(Boolean);
+      return mergePromptBatchItems(baseItems, sortedPics.length > 0 ? sortedPics : pictures, sortedTexts.length > 0 ? sortedTexts : texts);
     },
     [edges, nodes, props.id],
   );

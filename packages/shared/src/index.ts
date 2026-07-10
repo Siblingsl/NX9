@@ -13,6 +13,7 @@ export type {
   TakeRecord,
   SceneGroupRecord,
   LaneConfig,
+  PlaybookSession,
 } from './types/workspace';
 export {
   normalizeWorkspacePayload,
@@ -23,6 +24,7 @@ export {
 export type {
   ShotStatus,
   ShotType,
+  SketchSource,
   StoryboardShot,
   StoryboardPayload,
   VoiceProfile,
@@ -31,7 +33,11 @@ export type {
   VoiceLineStatus,
   WorkspacePreferences,
 } from './types/storyboard';
-export { emptyStoryboard, emptyVoice } from './types/storyboard';
+export { emptyStoryboard, emptyVoice, migrateStoryboardPayload } from './types/storyboard';
+
+export type { SceneSplitRecord, SceneSplitPayload } from './types/scene-split';
+export type { EnvironmentProfile, EnvironmentLibraryPayload } from './types/environment';
+export { migrateEnvironmentProfile } from './types/environment';
 
 export { parseStoryboardMarkdown } from './utils/storyboard-import';
 export { splitText, type TextSplitMode } from './utils/text-split';
@@ -43,6 +49,8 @@ export {
   type PipelineStage,
   type StageReadiness,
   type PipelineStageState,
+  PIPELINE_STAGE_FIXES,
+  type PipelineStageFix,
   type ReadinessInput,
 } from './utils/stage-readiness';
 export {
@@ -50,6 +58,16 @@ export {
   type ShotGroupSuggestion,
   type ShotGroupingConfig,
 } from './utils/shot-grouping';
+export {
+  groupSClassShots,
+  validateSClassReferences,
+  compileSClassPrompt,
+  SCLASS_MAX_DURATION_SEC,
+  SCLASS_MAX_REF_IMAGES,
+  SCLASS_MAX_REF_VIDEOS,
+  type SClassGroup,
+  type SClassCompileResult,
+} from './utils/sclass-compiler';
 
 export {
   emptyClipChain,
@@ -58,14 +76,31 @@ export {
   summarizeClipResult,
 } from './utils/clip-chain';
 export type { ClipChainItem, ClipChainState } from './utils/clip-chain';
+export { bridgePromptSuffix, defaultBridge, type BridgeShotMeta, type BridgeRef } from './utils/bridge-shot-meta';
+export { compileScenePrompt, type SceneCardData } from './utils/scene-card-prompt';
+export { enrichPromptWithEnvironment, buildEnvironmentContextPrompt } from './utils/environment-prompt';
+export type { ConsistencyIssue, ConsistencyReport } from './utils/consistency-repair';
+export { buildBridgeContinuationPrompt, type ContinuationInput } from './utils/seedance-continuation';
 
-export { buildTimelineFromShots } from './utils/timeline-export';
-export type { TimelineClip, TimelineTrack, TimelinePayload } from './types/timeline';
+export { buildTimelineFromShots, buildTimelineFromShotsV2, type TranscribeCue, type ShotInput } from './utils/timeline-export';
+export type { TimelineClip, TimelineTrack, TimelinePayload, TimelineAspect, TimelineTransition } from './types/timeline';
+export { migrateTimelinePayload } from './utils/timeline-migrate';
+export { FIXTURE_TIMELINE_V2, FIXTURE_SHOTS_FOR_TIMELINE } from './utils/fixtures-timeline';
+export {
+  timelineToHyperFramesVars,
+  timelineToHyperFramesHtml,
+  listHyperFramesTemplates,
+} from './utils/hyperframes-export';
+export type { HyperFramesTemplate } from './utils/hyperframes-export';
+export { timelineToFcpxml } from './utils/fcpxml-export';
 
 export {
   timelineToRemotion,
   shotsToRemotion,
   clipAtTime,
+  timelineToRemotionInputProps,
+  timelineToRemotionStudioBundle,
+  validateRemotionTimeline,
 } from './utils/remotion-export';
 export type {
   RemotionComposition,
@@ -133,7 +168,7 @@ export {
   validateLink,
 } from './catalog/socket-registry';
 
-export type { CharacterProfile, CharacterLibraryPayload } from './types/character';
+export type { CharacterProfile, CharacterLibraryPayload, CharacterBible } from './types/character';
 export { emptyCharacterLibrary } from './types/character';
 export {
   resolveBlockCharacters,
@@ -141,10 +176,54 @@ export {
   characterPromptSuffix,
   pickReferenceImage,
   buildCharacterContext,
+  parseMentionsFromPrompt,
   type CharacterPromptContext,
 } from './utils/character-prompt';
 export { parseChineseScript, scenesToStoryboardShots } from './utils/script-import';
 export type { ParsedScriptBackground, ParsedScriptScene } from './utils/script-import';
+export { parseFountain, parseFinalDraft } from './utils/fountain-import';
+export { exportPlaybookSessionJson } from './utils/playbook-export';
+export {
+  PLAYBOOK_DEFINITIONS,
+  type PlaybookId,
+  type PlaybookStepAction,
+  type PlaybookStepDef,
+  type PlaybookDefinition,
+} from './data/playbook-definitions';
+
+export {
+  evaluateStepVisualState,
+  evaluateAllStepVisualStates,
+  type StepVisualState,
+} from './utils/playbook-step-visual';
+export { MAX_ENV_REFERENCE_IMAGES } from './types/environment';
+
+export {
+  evaluatePlaybookStep,
+  resolveNextStep,
+  readinessRegistry,
+  type PlaybookReadinessContext,
+  has_source_text,
+  has_storyboard_shots,
+  has_line_art_thumbnails,
+  all_shots_approved,
+  all_keyframes_approved,
+  all_videos_approved,
+  has_video_takes,
+  has_video_assets,
+  canvas_node_done,
+  review_gate_passed,
+  has_character_refs,
+  has_voice_lines,
+  has_generate_assets,
+  has_scene_split,
+  has_environment_bibles,
+  has_character_bibles,
+  has_camera_blocks,
+  has_keyframes,
+  consistency_resolved,
+  export_ready,
+} from './utils/playbook-readiness';
 export { WORKFLOW_TEMPLATES, type WorkflowTemplate } from './data/workflow-templates';
 export {
   PROMPT_TEMPLATES,
@@ -212,9 +291,11 @@ export {
   syncCharacterSheetNodeOutput,
   applyCharacterSheetPatch,
   pickCharacterSheetReference,
+  CHARACTER_BIBLE_LAYERS,
   type CharacterSheetInput,
   type CharacterSheetProfile,
   type CharacterSheetVariant,
+  type CharacterBibleLayer,
 } from './utils/character-sheet-prompt';
 export {
   PICTURE_GEN_MODELS,
@@ -226,3 +307,39 @@ export {
 } from './data/gen-models';
 export { PERF, resolvePerfTier } from './constants/perf-thresholds';
 export type { PerfTier } from './constants/perf-thresholds';
+export {
+  LINE_ART_SUFFIX,
+  buildLineArtGridPrompt,
+  buildLineArtShotPrompt,
+} from './utils/line-art-prompt';
+export {
+  IMAGE_QUALITY_OPTIONS,
+  IMAGE_ASPECT_OPTIONS,
+  resolveImageRequestSize,
+} from './utils/image-gen-params';
+export {
+  VIDEO_DURATION_OPTIONS,
+  VIDEO_RESOLUTION_OPTIONS,
+  VIDEO_ORIENTATION_OPTIONS,
+  VIDEO_SIZE_PRESETS,
+  resolveVideoGenParams,
+} from './utils/video-gen-params';
+export {
+  AUDIO_FORMAT_OPTIONS,
+  SPEECH_RATE_OPTIONS,
+  SPEECH_RATE_MIN,
+  SPEECH_RATE_MAX,
+} from './utils/audio-gen-params';
+export {
+  DEFAULT_CANVAS_APPEARANCE,
+  CANVAS_THEMES,
+  type CanvasThemeMode,
+  type CanvasGridStyle,
+  type CanvasAppearance,
+} from './utils/canvas-theme';
+export type {
+  StorySkeleton,
+  AdaptationStrategy,
+  StoryboardTableRow,
+  ScriptPlanPayload,
+} from './types/script-plan';

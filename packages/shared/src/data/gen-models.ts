@@ -6,6 +6,8 @@ export interface PictureGenModelDef {
   model: string;
   supportsReference?: boolean;
   defaultSize?: string;
+  /** Fal 模型分辨率上限（超过会报错），undefined 表示无限制 */
+  resolutionCap?: number;
 }
 
 export const PICTURE_GEN_MODELS: PictureGenModelDef[] = [

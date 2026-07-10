@@ -1,7 +1,7 @@
 import { useDirectorStore } from '../store/directorStore';
-import { LayersDrawer } from './LayersDrawer';
-import { AddDrawer } from './AddDrawer';
-import { EnvDrawer } from './EnvDrawer';
+import { LayersDrawer } from '../panels/LayersDrawer';
+import { AddDrawer } from '../panels/AddDrawer';
+import { EnvDrawer } from '../panels/EnvDrawer';
 import type { DirectorProject } from '../schema/directorProject';
 
 export function StageRail({

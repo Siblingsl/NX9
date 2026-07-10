@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { BLOCK_GROUPS, type BlockCategory, type BlockDefinition } from '@nx9/shared';
 import { Search, User, Image, Sparkles, Package } from 'lucide-react';
 import * as Icons from 'lucide-react';
+import { LogDockButton } from '../../../panels/LogPanel';
 
 type LaneId = 'character' | 'scene' | 'generate' | 'output';
 
@@ -51,24 +52,29 @@ export function ModuleDock({ onPick }: ModuleDockProps) {
       className="nx9-module-dock shrink-0 border-r border-line bg-white/80 backdrop-blur-[var(--nx9-glass-blur)] flex h-full relative z-20"
       style={{ width: 'var(--nx9-dock-width)' }}
     >
-      <div className="flex flex-col items-center py-3 gap-2 w-full">
-        {(Object.keys(LANE_META) as LaneId[]).map((lane) => {
-          const Icon = LANE_META[lane].icon;
-          return (
-            <button
-              key={lane}
-              type="button"
-              title={LANE_META[lane].label}
-              className={`w-9 h-9 rounded-xl flex items-center justify-center transition-colors ${
-                activeLane === lane ? 'bg-brand/10 text-brand' : 'hover:bg-surface text-ink/60'
-              }`}
-              onMouseEnter={() => setActiveLane(lane)}
-              onFocus={() => setActiveLane(lane)}
-            >
-              <Icon size={18} />
-            </button>
-          );
-        })}
+      <div className="flex flex-col items-center py-3 gap-2 w-full h-full">
+        <div className="flex flex-col items-center gap-2">
+          {(Object.keys(LANE_META) as LaneId[]).map((lane) => {
+            const Icon = LANE_META[lane].icon;
+            return (
+              <button
+                key={lane}
+                type="button"
+                title={LANE_META[lane].label}
+                className={`w-9 h-9 rounded-xl flex items-center justify-center transition-colors ${
+                  activeLane === lane ? 'bg-brand/10 text-brand' : 'hover:bg-surface text-ink/60'
+                }`}
+                onMouseEnter={() => setActiveLane(lane)}
+                onFocus={() => setActiveLane(lane)}
+              >
+                <Icon size={18} />
+              </button>
+            );
+          })}
+        </div>
+        <div className="mt-auto pb-1">
+          <LogDockButton />
+        </div>
       </div>
 
       {activeLane && (

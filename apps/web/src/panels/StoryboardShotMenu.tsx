@@ -1,5 +1,5 @@
 import { createPortal } from 'react-dom';
-import { Check, Clapperboard, MapPin, RefreshCw, Trash2, Video, XCircle } from 'lucide-react';
+import { Box, Check, Clapperboard, MapPin, Pencil, RefreshCw, Sparkles, Trash2, Upload, Video, XCircle } from 'lucide-react';
 import type { StoryboardShot } from '@nx9/shared';
 
 interface StoryboardShotMenuProps {
@@ -12,6 +12,10 @@ interface StoryboardShotMenuProps {
   onLocate: () => void;
   onRegenerate: (kind: string) => void;
   onDelete: () => void;
+  onAiSketch?: (shotId: string) => void;
+  onUploadSketch?: (shotId: string) => void;
+  onSpawnSketchPad?: (shotId: string) => void;
+  onSpawnDirector3d?: (shotId: string) => void;
 }
 
 export function StoryboardShotMenu({
@@ -24,6 +28,10 @@ export function StoryboardShotMenu({
   onLocate,
   onRegenerate,
   onDelete,
+  onAiSketch,
+  onUploadSketch,
+  onSpawnSketchPad,
+  onSpawnDirector3d,
 }: StoryboardShotMenuProps) {
   const left = Math.min(x, window.innerWidth - 220);
   const top = Math.min(y, window.innerHeight - 280);
@@ -33,7 +41,7 @@ export function StoryboardShotMenu({
       <div className="fixed inset-0 z-40" onClick={onClose} />
       <div
         className="nx9-context-menu fixed z-50"
-        style={{ left, top, width: 200 }}
+        style={{ left, top, width: 220 }}
       >
         <div className="nx9-context-menu__header">镜头 #{shot.index}</div>
         {shot.status === 'review' && (
@@ -49,6 +57,28 @@ export function StoryboardShotMenu({
         <button type="button" className="nx9-context-menu__item" onClick={() => { onLocate(); onClose(); }}>
           <MapPin size={13} /> 在画布定位
         </button>
+        <div className="nx9-context-menu__divider" />
+        {onUploadSketch && (
+          <button type="button" className="nx9-context-menu__item" onClick={() => { onUploadSketch(shot.id); onClose(); }}>
+            <Upload size={13} /> 上传线稿
+          </button>
+        )}
+        {onAiSketch && (
+          <button type="button" className="nx9-context-menu__item" onClick={() => { onAiSketch(shot.id); onClose(); }}>
+            <Sparkles size={13} /> AI 生成线稿
+          </button>
+        )}
+        {onSpawnSketchPad && (
+          <button type="button" className="nx9-context-menu__item" onClick={() => { onSpawnSketchPad(shot.id); onClose(); }}>
+            <Pencil size={13} /> 手绘分镜
+          </button>
+        )}
+        {onSpawnDirector3d && (
+          <button type="button" className="nx9-context-menu__item" onClick={() => { onSpawnDirector3d(shot.id); onClose(); }}>
+            <Box size={13} /> 3D 预演
+          </button>
+        )}
+        <div className="nx9-context-menu__divider" />
         <button type="button" className="nx9-context-menu__item" onClick={() => { onRegenerate('picture-gen'); onClose(); }}>
           <RefreshCw size={13} /> 重新生成首帧
         </button>

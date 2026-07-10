@@ -1,21 +1,18 @@
 import { Injectable } from '@nestjs/common';
 import { GatewayService } from '../gateway/gateway.service';
+import { extractUrlFromText, fetchRemote } from '../../common/url-utils';
 
 @Injectable()
 export class LinkParserService {
   constructor(private readonly gateway: GatewayService) {}
 
   async parseLink(url: string, hint?: string) {
-    const trimmed = url.trim();
-    if (!trimmed) throw new Error('链接为空');
+    const trimmed = extractUrlFromText(url);
 
     let title = '';
     let description = '';
     try {
-      const res = await fetch(trimmed, {
-        headers: { 'User-Agent': 'NX9-LinkParser/1.0' },
-        signal: AbortSignal.timeout(8000),
-      });
+      const res = await fetchRemote(trimmed, { timeoutMs: 8000 });
       const html = await res.text();
       const ogTitle = html.match(/property=["']og:title["']\s+content=["']([^"']+)["']/i)?.[1];
       const ogDesc = html.match(/property=["']og:description["']\s+content=["']([^"']+)["']/i)?.[1];

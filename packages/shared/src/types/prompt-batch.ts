@@ -4,6 +4,8 @@ export interface PromptBatchItem {
   imageUrl?: string;
   /** 单行备注（合成模式下标注每张素材角色，可选） */
   note?: string;
+  /** 行索引（迭代器并联排序用） */
+  rowIndex?: number;
 }
 
 export interface PromptBatchJob {
@@ -67,6 +69,7 @@ export function mergePromptBatchItems(
         id: prev?.id ?? newPromptBatchItem().id,
         text: upstreamTexts[i] ?? prev?.text ?? '',
         imageUrl: url,
+        rowIndex: prev?.rowIndex ?? i,
       };
     });
     for (let i = upstreamPictures.length; i < upstreamTexts.length; i++) {
@@ -75,6 +78,7 @@ export function mergePromptBatchItems(
         id: prev?.id ?? newPromptBatchItem().id,
         text: upstreamTexts[i] ?? '',
         imageUrl: prev?.imageUrl,
+        rowIndex: prev?.rowIndex ?? i,
       });
     }
     return rows.length > 0 ? rows : [newPromptBatchItem()];
@@ -89,11 +93,14 @@ export function mergePromptBatchItems(
     return existing.length > 0 ? existing : [newPromptBatchItem()];
   }
 
-  return texts.map((text, i) => ({
+  const sorted = texts.map((text, i) => ({
     id: existing[i]?.id ?? newPromptBatchItem().id,
     text,
     imageUrl: existing[i]?.imageUrl,
+    rowIndex: existing[i]?.rowIndex ?? i,
   }));
+  sorted.sort((a, b) => (a.rowIndex ?? 0) - (b.rowIndex ?? 0));
+  return sorted;
 }
 
 export function promptItemsToBatch(
@@ -194,11 +201,12 @@ export function collectUpstreamForPromptMerge(
   targetId: string,
   blocks: FlowBlockLike[],
   links: FlowLinkLike[],
-): { pictures: string[]; texts: string[] } {
+): { pictures: string[]; texts: string[]; items: PromptBatchItem[] } {
   const byId = new Map(blocks.map((b) => [b.id, b]));
   const incoming = links.filter((l) => l.target === targetId).map((l) => l.source);
   const pictures: string[] = [];
   const texts: string[] = [];
+  const items: PromptBatchItem[] = [];
 
   for (const srcId of incoming) {
     const block = byId.get(srcId);
@@ -215,15 +223,18 @@ export function collectUpstreamForPromptMerge(
     }
 
     if (kind === 'prompt') {
-      const items = (d.promptItems as PromptBatchItem[]) ?? [];
-      if (items.length > 0) {
-        for (const item of items) {
+      const upstreamItems = (d.promptItems as PromptBatchItem[]) ?? [];
+      if (upstreamItems.length > 0) {
+        for (const item of upstreamItems) {
           if (item.text?.trim()) texts.push(item.text.trim());
           if (item.imageUrl) pictures.push(item.imageUrl);
+          items.push(item);
         }
       } else {
         const text = (d.content as string) || (d.output as string);
-        if (text?.trim()) texts.push(text.trim());
+        if (text?.trim()) {
+          texts.push(text.trim());
+        }
       }
       continue;
     }
@@ -231,9 +242,11 @@ export function collectUpstreamForPromptMerge(
     if (kind === 'memo' || kind === 'chat-model' || kind === 'cinema-prompt' || kind === 'camera-prompt') {
       const text =
         (d.content as string) || (d.output as string) || (d.lastReply as string);
-      if (text?.trim()) texts.push(text.trim());
+      if (text?.trim()) {
+        texts.push(text.trim());
+      }
     }
   }
 
-  return { pictures, texts };
+  return { pictures, texts, items };
 }

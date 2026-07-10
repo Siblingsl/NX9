@@ -10,6 +10,10 @@ export function openReviewGateSession(pendingIndices?: number[]) {
   useStoryboardUi.getState().setView('grid');
   useContextRailUi.getState().requestTab('storyboard');
 
+  if (pendingIndices?.length) {
+    useContextRailUi.getState().setBanner({ kind: 'blocked', shotIds: pendingIndices.map(String) });
+  }
+
   if (!pendingIndices?.length) return;
 
   const shots = useWorkspaceDocument.getState().storyboard.shots;

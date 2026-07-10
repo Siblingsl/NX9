@@ -16,8 +16,21 @@ export class GridController {
   }
 
   @Post('generate')
-  generate(@Body() body: { prompt: string; rows?: number; cols?: number }) {
-    return this.grid.generateStoryGrid(body.prompt, body.rows ?? 3, body.cols ?? 3);
+  generate(@Body() body: { prompt: string; rows?: number; cols?: number; style?: 'cinematic' | 'line-art' }) {
+    return this.grid.generateStoryGrid(body.prompt, body.rows ?? 3, body.cols ?? 3, body.style ?? 'cinematic');
+  }
+
+  @Post('shot-sketch')
+  shotSketch(
+    @Body()
+    body: {
+      descriptionZh: string;
+      promptEn?: string;
+      shotType?: string;
+      artStylePrompt?: string;
+    },
+  ) {
+    return this.grid.generateShotSketch(body);
   }
 
   @Post('reverse-prompts')

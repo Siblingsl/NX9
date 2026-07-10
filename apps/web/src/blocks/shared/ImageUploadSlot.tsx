@@ -9,6 +9,7 @@ interface ImageUploadSlotProps {
   onUploaded: (url: string) => void;
   onClear?: () => void;
   compact?: boolean;
+  accept?: string;
 }
 
 function ImageUploadSlot({
@@ -18,13 +19,14 @@ function ImageUploadSlot({
   onUploaded,
   onClear,
   compact,
+  accept = 'image/*',
 }: ImageUploadSlotProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
+  const isAudio = accept.startsWith('audio');
 
   const onFile = useCallback(
     async (file: File) => {
-      if (!file.type.startsWith('image/')) return;
       setUploading(true);
       try {
         const res = await api.uploadAsset(file);
@@ -42,7 +44,7 @@ function ImageUploadSlot({
       <input
         ref={inputRef}
         type="file"
-        accept="image/*"
+        accept={accept}
         className="hidden"
         onChange={(e) => {
           const f = e.target.files?.[0];
@@ -58,7 +60,11 @@ function ImageUploadSlot({
         } ${uploading ? 'opacity-60' : ''}`}
       >
         {url ? (
-          <img src={url} alt="" className="w-full h-full object-cover" />
+          isAudio ? (
+            <span className="absolute inset-0 flex items-center justify-center text-ink/50 text-[10px] px-1">音频已上传</span>
+          ) : (
+            <img src={url} alt="" className="w-full h-full object-cover" />
+          )
         ) : (
           <span className="absolute inset-0 flex flex-col items-center justify-center gap-1 text-ink/35 px-1">
             <Upload size={compact ? 14 : 18} />

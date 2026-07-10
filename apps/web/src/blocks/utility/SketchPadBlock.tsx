@@ -4,15 +4,18 @@ import { Eraser, Download } from 'lucide-react';
 import { BlockShell } from '../shared/BlockShell';
 import { api } from '../../api/client';
 import { useActivityLog } from '../../stores/activity-log';
+import { useWorkspaceDocument } from '../../stores/workspace-document';
 
 function SketchPadBlock(props: NodeProps) {
   const { updateNodeData } = useReactFlow();
   const appendLog = useActivityLog((s) => s.append);
+  const updateShot = useWorkspaceDocument((s) => s.updateShot);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const drawing = useRef(false);
   const [color, setColor] = useState('#222222');
   const [brush, setBrush] = useState(4);
   const previewUrl = props.data?.previewUrl as string | undefined;
+  const linkedShotId = props.data?.linkedShotId as string | undefined;
 
   useEffect(() => {
     const c = canvasRef.current;
@@ -76,11 +79,16 @@ function SketchPadBlock(props: NodeProps) {
         mediaKind: 'picture',
         status: 'success',
       });
-      appendLog('画板已导出为素材');
+      if (linkedShotId) {
+        updateShot(linkedShotId, { firstFrameAssetId: res.url, sketchSource: 'hand-draw', status: 'review' });
+        appendLog('画板已导出并回写故事板');
+      } else {
+        appendLog('画板已导出为素材');
+      }
     } catch (e) {
       appendLog(`画板导出失败: ${String(e)}`);
     }
-  }, [props.id, updateNodeData, appendLog]);
+  }, [props.id, updateNodeData, appendLog, linkedShotId, updateShot]);
 
   return (
     <BlockShell {...props}>

@@ -44,4 +44,9 @@ export class ImageOpsController {
   stripMetadata(@Body() body: { sourceUrl: string }) {
     return this.imageOps.stripMetadata(body.sourceUrl);
   }
+
+  @Post('thumbnail-compose')
+  thumbnailCompose(@Body() body: { imageUrl: string; title?: string; safeZone?: string }) {
+    return this.imageOps.thumbnailCompose(body.imageUrl, body.title, body.safeZone);
+  }
 }

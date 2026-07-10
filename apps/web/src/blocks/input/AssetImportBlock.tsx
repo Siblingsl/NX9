@@ -11,8 +11,13 @@ function AssetImportBlock(props: NodeProps) {
   const produce = useImageEditProduce(props.id);
   const inputRef = useRef<HTMLInputElement>(null);
   const [editingUrl, setEditingUrl] = useState<string | null>(null);
+  const [pasteUrl, setPasteUrl] = useState('');
   const assetUrl = props.data?.assetUrl as string | undefined;
   const mediaKind = props.data?.mediaKind as string | undefined;
+  const status = props.data?.status as string | undefined;
+  const totalBytes = props.data?.totalBytes as number | undefined;
+  const uploadedBytes = props.data?.uploadedBytes as number | undefined;
+  const progress = totalBytes && uploadedBytes ? Math.round((uploadedBytes / totalBytes) * 100) : 0;
 
   const onFile = useCallback(
     async (file: File) => {
@@ -21,16 +26,42 @@ function AssetImportBlock(props: NodeProps) {
         : file.type.startsWith('audio')
           ? 'sound'
           : 'picture';
-      const res = await api.uploadAsset(file);
+      updateNodeData(props.id, { status: 'uploading', totalBytes: file.size, uploadedBytes: 0 });
+      try {
+        const res = await api.uploadAsset(file, (pct) => {
+          updateNodeData(props.id, { uploadedBytes: Math.round(file.size * pct) });
+        });
+        updateNodeData(props.id, {
+          assetUrl: res.url,
+          mediaKind: kind,
+          filename: res.filename,
+          status: 'done',
+        });
+      } catch {
+        updateNodeData(props.id, { status: 'error', error: '上传失败' });
+      }
+    },
+    [props.id, updateNodeData],
+  );
+
+  const downloadUrl = useCallback(async () => {
+    const url = pasteUrl.trim();
+    if (!url) return;
+    updateNodeData(props.id, { status: 'uploading' });
+    try {
+      const res = await api.captureUrl(url);
+      const kind = /\.(png|jpe?g|gif|webp)$/i.test(url) ? 'picture' : 'clip';
       updateNodeData(props.id, {
         assetUrl: res.url,
         mediaKind: kind,
         filename: res.filename,
         status: 'done',
+        capturedAssetUrl: res.url,
       });
-    },
-    [props.id, updateNodeData],
-  );
+    } catch (e) {
+      updateNodeData(props.id, { status: 'error', error: String(e) });
+    }
+  }, [pasteUrl, props.id, updateNodeData]);
 
   return (
     <BlockShell {...props}>
@@ -44,7 +75,15 @@ function AssetImportBlock(props: NodeProps) {
           if (f) void onFile(f);
         }}
       />
-      {assetUrl ? (
+      {status === 'uploading' && (
+        <div className="nodrag nopan space-y-1 px-2 py-4">
+          <div className="w-full bg-line/30 rounded-full h-2 overflow-hidden">
+            <div className="bg-brand h-full rounded-full transition-all" style={{ width: `${progress || 30}%` }} />
+          </div>
+          <p className="text-[10px] text-ink/50 text-center">上传中 {progress}%</p>
+        </div>
+      )}
+      {assetUrl && status !== 'uploading' ? (
         <div className="space-y-2 nodrag nopan">
           {mediaKind === 'picture' && (
             <EditableImage
@@ -64,15 +103,34 @@ function AssetImportBlock(props: NodeProps) {
             更换文件
           </button>
         </div>
-      ) : (
-        <button
-          type="button"
-          onClick={() => inputRef.current?.click()}
-          className="w-full rounded-xl border border-dashed border-line py-6 text-sm text-ink/60 hover:border-brand/40 hover:text-brand nodrag nopan"
-        >
-          点击或拖入素材
-        </button>
-      )}
+      ) : status !== 'uploading' ? (
+        <div className="space-y-2 nodrag nopan">
+          <button
+            type="button"
+            onClick={() => inputRef.current?.click()}
+            className="w-full rounded-xl border border-dashed border-line py-4 text-sm text-ink/60 hover:border-brand/40 hover:text-brand"
+          >
+            点击或拖入素材
+          </button>
+          <div className="flex gap-1">
+            <input
+              type="url"
+              value={pasteUrl}
+              onChange={(e) => setPasteUrl(e.target.value)}
+              placeholder="或粘贴 URL 采集…"
+              className="flex-1 text-[10px] rounded-lg border border-line px-2 py-1.5"
+            />
+            <button
+              type="button"
+              onClick={() => void downloadUrl()}
+              disabled={!pasteUrl.trim()}
+              className="rounded-lg bg-brand/10 text-brand text-[10px] px-3 py-1.5 disabled:opacity-40"
+            >
+              采集
+            </button>
+          </div>
+        </div>
+      ) : null}
 
       {editingUrl && (
         <ImageEditModal

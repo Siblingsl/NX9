@@ -7,10 +7,12 @@ interface Director3dUiState {
   blockId: string | null;
   linkedShotId: string | null;
   project: DirectorProject;
+  hostBridge: string | null;
   openForBlock: (blockId: string, project?: DirectorProject, linkedShotId?: string) => void;
   openStandalone: () => void;
   close: () => void;
   setProject: (project: DirectorProject) => void;
+  setHostBridge: (url: string | null) => void;
 }
 
 export const useDirector3dUi = create<Director3dUiState>((set) => ({
@@ -18,6 +20,7 @@ export const useDirector3dUi = create<Director3dUiState>((set) => ({
   blockId: null,
   linkedShotId: null,
   project: emptyDirectorProject(),
+  hostBridge: null,
 
   openForBlock: (blockId, project, linkedShotId) =>
     set({
@@ -38,4 +41,6 @@ export const useDirector3dUi = create<Director3dUiState>((set) => ({
   close: () => set({ open: false, blockId: null, linkedShotId: null }),
 
   setProject: (project) => set({ project }),
+
+  setHostBridge: (url) => set({ hostBridge: url }),
 }));

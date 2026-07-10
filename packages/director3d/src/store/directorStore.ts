@@ -49,6 +49,7 @@ export interface DirectorStoreState {
   activeDrawer: StageDrawer;
   project: DirectorProject;
   undoStack: DirectorProject[];
+  crowdMax: number;
   setViewMode: (mode: ViewMode) => void;
   setTransformMode: (mode: TransformMode) => void;
   setViewportAspectRatio: (ratio: ViewportAspectRatio) => void;
@@ -73,6 +74,7 @@ export interface DirectorStoreState {
   addGeometry: (type: GeometryPrimitiveType) => void;
   addCamera: () => void;
   addCrowd: (rows: number, cols: number) => void;
+  setCrowdMax: (max: number) => void;
   setActiveCamera: (id: string) => void;
   setPanorama: (settings: PanoramaSettings | null) => void;
   updatePanorama: (patch: Partial<PanoramaSettings>) => void;
@@ -93,6 +95,7 @@ export const useDirectorStore = create<DirectorStoreState>((set, get) => ({
   activeDrawer: null,
   project: emptyDirectorProject(),
   undoStack: [],
+  crowdMax: 20,
 
   setViewMode: (mode) => set({ viewMode: mode }),
   setTransformMode: (mode) => set({ transformMode: mode }),
@@ -296,9 +299,9 @@ export const useDirectorStore = create<DirectorStoreState>((set, get) => ({
   },
 
   addCrowd: (rows, cols) => {
-    const { project } = get();
+    const { project, crowdMax } = get();
     const existing = project.objects.filter((o) => o.kind === 'character').length;
-    const count = Math.min(rows * cols, CROWD_MAX - existing);
+    const count = Math.min(rows * cols, crowdMax - existing);
     if (count <= 0) return;
     pushUndo(get, set);
     const groupId = uid('crowd');
@@ -331,6 +334,8 @@ export const useDirectorStore = create<DirectorStoreState>((set, get) => ({
       project: { ...s.project, objects: [...s.project.objects, ...newObjects] },
     }));
   },
+
+  setCrowdMax: (max) => set({ crowdMax: Math.max(1, Math.min(max, 1000)) }),
 
   setActiveCamera: (id) =>
     set((s) => ({
@@ -401,6 +406,9 @@ export const useDirectorStore = create<DirectorStoreState>((set, get) => ({
       dataUrl,
       imageUrl,
       cameraPrompt: buildCameraPrompt(camera),
+      cameraPosition: camera.transform.position,
+      cameraRotation: camera.transform.rotation,
+      cameraFov: camera.fov,
       createdAt: Date.now(),
     };
     set((s) => ({

@@ -81,7 +81,15 @@ export interface SpawnPlacementOptions {
   gap?: number;
 }
 
-/** 在已有节点旁找不重叠的位置；preferred 作为搜索起点（如点击/拖放坐标） */
+/** 拖放落点：仅对齐网格，不做碰撞避让 */
+export function exactDropPosition(preferred: { x: number; y: number }): { x: number; y: number } {
+  return {
+    x: roundToGrid(preferred.x),
+    y: roundToGrid(preferred.y),
+  };
+}
+
+/** 在已有节点旁找不重叠的位置；preferred 作为搜索起点（如点击/菜单坐标） */
 export function findOpenPosition(
   existing: Node[],
   options: SpawnPlacementOptions = {},

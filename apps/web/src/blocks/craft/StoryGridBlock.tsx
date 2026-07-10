@@ -13,6 +13,7 @@ function StoryGridBlock(props: NodeProps) {
   const previewUrl = props.data?.previewUrl as string | undefined;
   const upstreamPrompt = props.data?.upstreamPrompt as string | undefined;
   const prompt = upstreamPrompt || (props.data?.content as string) || '';
+  const gridStyle = (props.data?.style as 'cinematic' | 'line-art') ?? 'cinematic';
 
   const run = useCallback(async () => {
     updateNodeData(props.id, { status: 'running' });
@@ -21,19 +22,22 @@ function StoryGridBlock(props: NodeProps) {
         prompt: prompt || 'storyboard grid, 9 panels, cinematic',
         rows,
         cols,
+        style: gridStyle,
       });
       updateNodeData(props.id, {
         status: 'success',
         previewUrl: res.url,
         content: prompt,
         message: res.message,
+        meta: { rows, cols, style: gridStyle },
+        style: gridStyle,
       });
-      appendLog('分镜网格生成完成');
+      appendLog(gridStyle === 'line-art' ? '线稿分镜网格生成完成' : '分镜网格生成完成');
     } catch (e) {
       updateNodeData(props.id, { status: 'error', error: String(e) });
       appendLog(`分镜网格失败: ${String(e)}`);
     }
-  }, [prompt, rows, cols, props.id, updateNodeData, appendLog]);
+  }, [prompt, rows, cols, gridStyle, props.id, updateNodeData, appendLog]);
 
   return (
     <BlockShell {...props}>
@@ -46,6 +50,14 @@ function StoryGridBlock(props: NodeProps) {
         />
         <div className="flex gap-2 text-[10px] text-ink/50">
           <span>{rows}×{cols} 宫格</span>
+          <select
+            value={gridStyle}
+            onChange={(e) => updateNodeData(props.id, { style: e.target.value })}
+            className="text-[10px] rounded border border-line px-1 py-0.5"
+          >
+            <option value="cinematic">电影感</option>
+            <option value="line-art">线稿</option>
+          </select>
         </div>
         {previewUrl && (
           <img src={previewUrl} alt="" className="w-full rounded-lg border border-line max-h-36 object-cover" />

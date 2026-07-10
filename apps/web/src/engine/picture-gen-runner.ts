@@ -6,9 +6,10 @@ export interface PictureGenJobInput {
   modelId?: string;
   size?: string;
   referenceImageUrl?: string;
+  n?: number;
 }
 
-export async function runPictureGenJob(input: PictureGenJobInput): Promise<string> {
+export async function runPictureGenJob(input: PictureGenJobInput): Promise<string[]> {
   const def = lookupPictureModel(input.modelId);
   const prompt = input.prompt.trim();
   if (!prompt) throw new Error('Prompt 为空');
@@ -23,16 +24,18 @@ export async function runPictureGenJob(input: PictureGenJobInput): Promise<strin
     }
     const res = await api.proxyFal({ model: def.model, input: falInput });
     if (!res.url) throw new Error('Fal 未返回图片');
-    return res.url;
+    return [res.url];
   }
 
+  const n = Math.min(4, Math.max(1, input.n ?? 1));
   const res = (await api.proxyImage({
     prompt,
     model: def.model,
     size: input.size || def.defaultSize || '1024x1024',
-  })) as { ok?: boolean; url?: string };
-  if (!res.url) throw new Error('图像生成失败');
-  return res.url;
+    n,
+  })) as { ok?: boolean; url?: string; urls?: string[] };
+  if (!res.url && !res.urls) throw new Error('图像生成失败');
+  return res.urls ?? [res.url!];
 }
 
 export async function pollClipTask(taskId: string): Promise<string | undefined> {

@@ -49,8 +49,13 @@ function FrameEndpointsBlock(props: NodeProps) {
           />
         </label>
         <div className="grid grid-cols-2 gap-1">
-          {frames.slice(0, 2).map((u) => (
-            <img key={u} src={u} alt="" className="rounded border border-line aspect-video object-cover" />
+          {frames.slice(0, 2).map((u, i) => (
+            <div key={u} className="relative">
+              <img src={u} alt="" className="rounded border border-line aspect-video object-cover" />
+              <span className="absolute bottom-1 left-1 rounded bg-black/60 px-1 py-0.5 text-[10px] text-white">
+                {i === 0 ? '首帧' : '尾帧'}
+              </span>
+            </div>
           ))}
         </div>
         <button

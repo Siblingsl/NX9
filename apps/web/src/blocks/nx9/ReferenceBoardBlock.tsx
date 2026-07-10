@@ -1,6 +1,7 @@
 import { memo, useCallback, useMemo } from 'react';
 import { type NodeProps, useReactFlow } from '@xyflow/react';
 import { BlockShell } from '../shared/BlockShell';
+import ImageUploadSlot from '../shared/ImageUploadSlot';
 
 function ReferenceBoardBlock(props: NodeProps) {
   const { updateNodeData } = useReactFlow();
@@ -9,6 +10,14 @@ function ReferenceBoardBlock(props: NodeProps) {
   const palette = (props.data?.palette as string[] | undefined) ?? ['#A13D63', '#5E4D8A', '#FAFAF8'];
   const styleNotes = (props.data?.styleNotes as string) ?? '';
   const content = (props.data?.content as string) ?? '';
+
+  const addImage = useCallback(
+    (url: string) => {
+      const next = [...new Set([url, ...boardImages, ...(upstream?.pictures ?? [])])].filter(Boolean);
+      updateNodeData(props.id, { boardImages: next, pictures: next });
+    },
+    [boardImages, upstream?.pictures, props.id, updateNodeData],
+  );
 
   const allImages = useMemo(() => {
     const set = new Set<string>([...boardImages, ...(upstream?.pictures ?? [])]);
@@ -36,6 +45,7 @@ function ReferenceBoardBlock(props: NodeProps) {
   return (
     <BlockShell {...props}>
       <div className="space-y-2 nodrag nopan text-xs">
+        <ImageUploadSlot url="" label="上传参考图" compact onUploaded={addImage} />
         <div className="grid grid-cols-3 gap-1">
           {allImages.slice(0, 6).map((url) => (
             <img key={url} src={url} alt="" className="aspect-square object-cover rounded-lg border border-line" />

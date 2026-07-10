@@ -1,52 +1,59 @@
 import { memo, useCallback } from 'react';
 import { type NodeProps, useReactFlow } from '@xyflow/react';
-import { ShieldAlert } from 'lucide-react';
+import { Film, ShieldAlert } from 'lucide-react';
 import { BlockShell } from '../shared/BlockShell';
 import { api } from '../../api/client';
 import { useWorkspaceDocument } from '../../stores/workspace-document';
 import { useActivityLog } from '../../stores/activity-log';
+import { useRemotionUi } from '../../stores/flow-runtime';
 import { openReviewGateSession } from '../../engine/stage-deck/utils/review-gate-session';
 
 function ReviewGateBlock(props: NodeProps) {
   const { updateNodeData } = useReactFlow();
   const appendLog = useActivityLog((s) => s.append);
   const shots = useWorkspaceDocument((s) => s.storyboard.shots);
+  const gateMode = (props.data?.gateMode as string | undefined) ?? 'keyframe';
+  const gateLabel = gateMode === 'video' ? '成片审阅' : '关键帧审阅';
   const gatePassed = (props.data?.gatePassed as boolean) ?? false;
   const pending = (props.data?.pendingShots as number[] | undefined) ?? [];
   const status = (props.data?.status as string | undefined) ?? 'idle';
   const upstream = props.data?.upstream as Record<string, unknown> | undefined;
 
+  const setStudioOpen = useRemotionUi((s) => s.setOpen);
+
   const runCheck = useCallback(async () => {
     if (shots.length === 0) {
-      appendLog('审阅关卡：故事板无镜头');
+      appendLog(`${gateLabel}：故事板无镜头`);
       return;
     }
     updateNodeData(props.id, { status: 'running' });
     try {
-      const res = await api.checkReviewGate(shots);
+      const checkGateMode = gateMode === 'video' ? 'video' : 'keyframe';
+      const res = await api.checkReviewGate(shots, checkGateMode);
       if (!res.ok) {
+        const pendingShots = res.pending ?? [];
         updateNodeData(props.id, {
           status: 'blocked',
           gatePassed: false,
-          pendingShots: res.pending,
-          meta: { pending: res.pending },
+          pendingShots,
+          meta: { pending: pendingShots, gateMode },
         });
-        appendLog(`审阅关卡阻塞 · 待审镜头 ${res.pending.join(', ')}`);
-        openReviewGateSession(res.pending);
+        appendLog(`${gateLabel}阻塞 · 待审 ${pendingShots.join(', ')}`);
+        openReviewGateSession(pendingShots);
         return;
       }
       updateNodeData(props.id, {
         status: 'success',
         gatePassed: true,
         pendingShots: [],
-        meta: { gatePassed: true },
+        meta: { gatePassed: true, gateMode },
         upstream,
       });
-      appendLog('审阅关卡通过');
+      appendLog(`${gateLabel}通过`);
     } catch (e) {
       updateNodeData(props.id, { status: 'error', error: String(e) });
     }
-  }, [shots, upstream, props.id, updateNodeData, appendLog]);
+  }, [shots, upstream, props.id, updateNodeData, appendLog, gateMode, gateLabel]);
 
   const goReview = useCallback(() => {
     openReviewGateSession(pending.length > 0 ? pending : undefined);
@@ -58,7 +65,17 @@ function ReviewGateBlock(props: NodeProps) {
       <div className="space-y-2 nodrag nopan text-xs">
         <p className="text-[10px] text-ink/50">故事板 {shots.length} 镜头 · 需全部 approved</p>
         {gatePassed ? (
-          <p className="text-[10px] text-brand font-medium">✓ 已通过审阅</p>
+          <>
+            <p className="text-[10px] text-brand font-medium">✓ 已通过审阅</p>
+            <button
+              type="button"
+              onClick={() => setStudioOpen(true)}
+              className="w-full flex items-center justify-center gap-1 rounded-xl border border-brand/30 bg-brand/5 text-brand py-2 text-[10px] hover:bg-brand/10"
+            >
+              <Film size={12} />
+              打开成片工作室
+            </button>
+          </>
         ) : pending.length > 0 || status === 'blocked' ? (
           <p className="text-[10px] text-warn flex items-center gap-1">
             <ShieldAlert size={12} />

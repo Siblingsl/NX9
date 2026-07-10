@@ -1,5 +1,6 @@
 import type { BacklotTemplateKind } from '@nx9/shared';
 import { create } from 'zustand';
+import { useDirector3dUi } from './director3d-ui';
 
 export interface BacklotWorkspaceNavigateRequest {
   tab: BacklotTemplateKind;
@@ -19,6 +20,9 @@ export const useBacklotLibraryUi = create<{
   navigateRequest: null,
   setOpen: (open) => set({ open }),
   toggle: () => set((s) => ({ open: !s.open })),
-  openWorkspace: (request) => set({ open: true, navigateRequest: request }),
+  openWorkspace: (request) => {
+    useDirector3dUi.getState().close();
+    set({ open: true, navigateRequest: request });
+  },
   clearNavigateRequest: () => set({ navigateRequest: null }),
 }));

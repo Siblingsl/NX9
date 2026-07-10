@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { existsSync } from 'fs';
 import { join } from 'path';
 import sharp from 'sharp';
 import { PATHS } from '../../config/app.config';
@@ -131,4 +132,29 @@ export class ImageOpsService {
 
     return { ok: true, url: this.assets.publicUrl('images', name) };
   }
+
+  async thumbnailCompose(
+    imageUrl: string,
+    title?: string,
+    safeZone: string = '9:16',
+  ): Promise<{ ok: boolean; url: string }> {
+    const local = resolveMediaUrl(imageUrl);
+    if (!local || !existsSync(local)) throw new Error('无法读取源图像');
+    const stamp = Date.now();
+    const name = `thumb-${stamp}.png`;
+    const out = join(PATHS.images, name);
+    const targetW = 1080;
+    const targetH = 1920;
+    let img = sharp(local).resize(targetW, targetH, { fit: 'cover', position: 'center' });
+    if (title?.trim()) {
+      const svgText = `<svg width="${targetW}" height="${targetH}"><rect x="0" y="${targetH - 200}" width="${targetW}" height="200" fill="rgba(0,0,0,0.6)"/><text x="${targetW / 2}" y="${targetH - 80}" text-anchor="middle" fill="white" font-size="48" font-family="sans-serif" font-weight="bold">${escapeXml(title.trim())}</text></svg>`;
+      img = img.composite([{ input: Buffer.from(svgText), top: 0, left: 0 }]);
+    }
+    await img.png().toFile(out);
+    return { ok: true, url: this.assets.publicUrl('images', name) };
+  }
+}
+
+function escapeXml(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }

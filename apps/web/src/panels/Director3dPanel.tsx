@@ -1,17 +1,19 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef } from 'react';
 import type { Director3dCapturePayload, DirectorProject } from '@nx9/director3d';
 import { normalizeDirectorProject, isWebGLAvailable } from '@nx9/director3d';
+import { useToast } from '../stores/toast';
+import { toastSuccess } from '../stores/toast';
 import { newBacklotWorkspaceItem } from '@nx9/shared';
 import { useDirector3dUi } from '../stores/director3d-ui';
 import { useFlowRuntime } from '../stores/flow-runtime';
 import { useWorkspaceDocument } from '../stores/workspace-document';
 import { useBacklotLibraryUi } from '../stores/backlot-library-ui';
 import { useActivityLog } from '../stores/activity-log';
-import { toastSuccess } from '../stores/toast';
 import { api } from '../api/client';
 import { useTakeStore } from '../engine/stage-deck/stores/take-store';
 import { applyPrimaryTakeToNodeData } from '../engine/stage-deck/utils/take-utils';
 import { isStageDeckEnabled } from '../stores/stage-deck-flag';
+import { syncDirector3dToBlocking } from '../engine/blocking-3d-sync';
 
 const Director3dShell = lazy(() =>
   import('@nx9/director3d').then((m) => ({ default: m.Director3dShell })),
@@ -37,6 +39,14 @@ export function Director3dPanel() {
   const appendLog = useActivityLog((s) => s.append);
   const intensive = runtime?.intensive ?? false;
   const webglOk = useMemo(() => isWebGLAvailable(), [open]);
+  const intensiveShownRef = useRef(false);
+
+  useEffect(() => {
+    if (intensive && !intensiveShownRef.current) {
+      intensiveShownRef.current = true;
+      useToast.getState().push({ message: '画布节点较多，3D 导演台将使用性能模式', variant: 'info' });
+    }
+  }, [intensive]);
 
   const persistProject = useCallback(
     (next: DirectorProject) => {
@@ -72,7 +82,13 @@ export function Director3dPanel() {
               blockId,
               uploaded.url,
               uploaded.url,
-              { mediaKind: 'picture', source: 'director3d' },
+              {
+                mediaKind: 'picture',
+                source: 'director3d',
+                cameraPosition: payload.cameraPosition,
+                cameraRotation: payload.cameraRotation,
+                cameraFov: payload.cameraFov,
+              },
             );
             if (take.picked) {
               Object.assign(patch, applyPrimaryTakeToNodeData(take));
@@ -83,10 +99,20 @@ export function Director3dPanel() {
 
         if (linkedShotId) {
           const reviewMode = useWorkspaceDocument.getState().storyboard.reviewMode;
+          const cameraJson = JSON.stringify({
+            position: payload.cameraPosition,
+            rotation: payload.cameraRotation,
+            fov: payload.cameraFov,
+          });
           updateShot(linkedShotId, {
             firstFrameAssetId: uploaded.url,
             status: reviewMode === 'manual' ? 'review' : 'approved',
+            notes: cameraJson,
+            promptEn: payload.cameraPrompt
+              ? `${useWorkspaceDocument.getState().storyboard.shots.find((s) => s.id === linkedShotId)?.promptEn ?? ''} ${payload.cameraPrompt}`.trim()
+              : undefined,
           });
+          syncDirector3dToBlocking(cameraJson);
           appendLog(`截图已写入故事板镜头`);
         }
       } catch (e) {
@@ -135,15 +161,24 @@ export function Director3dPanel() {
       <div className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-[#fafaf8] px-8 text-center">
         <p className="text-lg font-semibold text-ink mb-2">无法启动 Stage Deck</p>
         <p className="text-sm text-ink/60 max-w-md mb-6">
-          当前环境不支持 WebGL。请使用支持硬件加速的桌面浏览器，或在系统设置中启用 GPU 加速后重试。
+          当前环境不支持 WebGL。请使用支持硬件加速的桌面浏览器（Chrome / Edge / Firefox），或在系统设置中启用 GPU 加速后重试。
         </p>
-        <button
-          type="button"
-          onClick={handleClose}
-          className="rounded-xl bg-brand text-white px-4 py-2 text-sm"
-        >
-          关闭
-        </button>
+        <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={handleClose}
+            className="rounded-xl bg-brand text-white px-4 py-2 text-sm"
+          >
+            关闭
+          </button>
+          <button
+            type="button"
+            onClick={() => window.open('https://get.webgl.org/', '_blank')}
+            className="rounded-xl border border-line px-4 py-2 text-sm"
+          >
+            检测 WebGL 支持
+          </button>
+        </div>
       </div>
     );
   }
@@ -162,6 +197,8 @@ export function Director3dPanel() {
             project: normalizeDirectorProject(project),
             linkedShotId: linkedShotId ?? undefined,
             performanceMode: intensive ? 'low' : 'normal',
+            nodeCount: runtime?.getNodes()?.length ?? 0,
+            crowdMax: 20,
             onProjectChange: persistProject,
             onCapture: handleCapture,
             onUploadFile: async (file) => {

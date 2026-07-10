@@ -2,6 +2,8 @@ export type ShotStatus = 'draft' | 'generating' | 'review' | 'approved' | 'faile
 
 export type ShotType = 'close' | 'medium' | 'wide' | 'extreme-wide' | 'custom';
 
+export type SketchSource = 'ai-grid' | 'ai-single' | 'upload' | 'hand-draw' | 'import';
+
 export interface StoryboardShot {
   id: string;
   index: number;
@@ -18,10 +20,27 @@ export interface StoryboardShot {
   characterIds?: string[];
   linkedBlockId?: string | null;
   notes?: string;
+  sketchSource?: SketchSource | null;
+  sketchPrompt?: string | null;
+  sketchApprovedAt?: string | null;
+  videoDesc?: string | null;
+  associateAssetIds?: string[];
+  tableRowId?: string | null;
+  subtitleText?: string | null;
+  /** 与 SceneSplitRecord 关联 */
+  sceneId?: string | null;
+  /** 显示用 "1-3" */
+  sceneCode?: string | null;
+  /** 双阶段审阅：关键帧状态 */
+  keyframeStatus?: 'draft' | 'review' | 'approved' | 'failed';
+  /** 双阶段审阅：视频状态 */
+  videoStatus?: 'draft' | 'review' | 'approved' | 'failed';
 }
 
+export type StoryboardPayloadVersion = 1 | 2 | 3;
+
 export interface StoryboardPayload {
-  version: 1;
+  version: StoryboardPayloadVersion;
   title: string;
   reviewMode: 'manual' | 'auto';
   shots: StoryboardShot[];
@@ -60,7 +79,37 @@ export interface WorkspacePreferences {
 }
 
 export function emptyStoryboard(): StoryboardPayload {
-  return { version: 1, title: '', reviewMode: 'manual', shots: [] };
+  return { version: 2, title: '', reviewMode: 'manual', shots: [] };
+}
+
+export function migrateStoryboardPayload(payload: StoryboardPayload): StoryboardPayload {
+  let v2: StoryboardPayload & { shots: (StoryboardShot & { status?: string })[] };
+  if (payload.version >= 2) {
+    v2 = payload as any;
+  } else {
+    v2 = {
+      ...payload,
+      version: 2,
+      shots: payload.shots.map((s) => ({
+        ...s,
+        sketchSource: null,
+        sketchPrompt: null,
+        sketchApprovedAt: null,
+      })),
+    };
+  }
+  if (payload.version >= 3) return payload as StoryboardPayload;
+  return {
+    ...v2,
+    version: 3,
+    shots: v2.shots.map((s) => ({
+      ...s,
+      sceneId: (s as any).sceneId ?? null,
+      sceneCode: (s as any).sceneCode ?? null,
+      keyframeStatus: s.status === 'approved' ? 'approved' : s.status === 'review' ? 'review' : s.status === 'failed' ? 'failed' : 'draft',
+      videoStatus: (s as any).videoStatus ?? 'draft',
+    })),
+  };
 }
 
 export function emptyVoice(): VoicePayload {

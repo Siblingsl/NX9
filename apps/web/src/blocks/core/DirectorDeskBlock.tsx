@@ -1,6 +1,6 @@
 import { memo, useCallback, useEffect } from 'react';
 import { type NodeProps, useReactFlow } from '@xyflow/react';
-import { enrichPromptWithCharacters, resolveBlockCharacters } from '@nx9/shared';
+import { enrichPromptWithCharacters, resolveBlockCharacters, defaultBridge } from '@nx9/shared';
 import { BlockShell } from '../shared/BlockShell';
 import { CharacterBadge } from '../shared/CharacterSelect';
 import { useActivityLog } from '../../stores/activity-log';
@@ -66,16 +66,26 @@ function DirectorDeskBlock(props: NodeProps) {
     appendLog(`导演台生成首帧 · 镜头 #${shot?.index ?? '?'}`);
 
     try {
-      const res = (await api.proxyImage({ prompt, model: 'dall-e-3' })) as {
+      const res = await api.proxyImage({ prompt, model: 'dall-e-3' }) as {
         ok?: boolean;
         url?: string;
       };
+      if (!res.url) throw new Error('图像生成未返回 URL');
+      const bridges: import('@nx9/shared').BridgeShotMeta[] = [];
+      if (shot) {
+        const allShots = useWorkspaceDocument.getState().storyboard.shots;
+        const idx = allShots.findIndex((s) => s.id === shot.id);
+        const next = idx >= 0 && idx < allShots.length - 1 ? allShots[idx + 1] : undefined;
+        if (next) bridges.push(defaultBridge(shot.id, next.id));
+      }
       updateNodeData(props.id, {
         status: 'success',
         previewUrl: res.url,
         content: prompt,
         characterInjected: activeCharacters.map((c) => c.id),
         lastResult: res,
+        meta: { bridges },
+        bridgeRefs: bridges.length ? bridges.flatMap((b) => b.refImageIds) : undefined,
       });
       if (shot) {
         const reviewMode = useWorkspaceDocument.getState().storyboard.reviewMode;
@@ -119,6 +129,11 @@ function DirectorDeskBlock(props: NodeProps) {
             characters,
           ).map((c) => c.name)}
         />
+        {status === 'running' && (
+          <div className="w-full bg-line/30 rounded-full h-1.5 overflow-hidden">
+            <div className="bg-brand h-full rounded-full animate-pulse" style={{ width: '60%' }} />
+          </div>
+        )}
         {previewUrl && (
           <img
             src={previewUrl}

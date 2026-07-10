@@ -19,7 +19,9 @@ export interface FlowRuntimeApi {
   stopRun: () => void;
   deleteNodes: (ids: string[]) => void;
   focusBlock: (blockId: string) => void;
-  spawnBlockForShot: (shotId: string, kind: string) => void;
+  fitViewToNodes: (nodeIds: string[]) => void;
+  highlightNodes: (nodeIds: string[], opts?: { durationMs?: number }) => void;
+  spawnBlockForShot: (shotId: string, kind: string, extraData?: Record<string, unknown>) => void;
   loadWorkflowTemplate: (templateId: string, mode?: 'merge' | 'replace') => void | Promise<void>;
   importWorkflowZip: (file: File, mode?: 'merge' | 'replace') => Promise<void>;
   selectedBlockId: string | null;
@@ -27,14 +29,18 @@ export interface FlowRuntimeApi {
 
 interface FlowRuntimeState {
   runtime: FlowRuntimeApi | null;
+  selectedBlockId: string | null;
   register: (api: FlowRuntimeApi) => void;
   unregister: () => void;
+  setSelectedBlockId: (id: string | null) => void;
 }
 
 export const useFlowRuntime = create<FlowRuntimeState>((set) => ({
   runtime: null,
+  selectedBlockId: null,
   register: (api) => set({ runtime: api }),
-  unregister: () => set({ runtime: null }),
+  unregister: () => set({ runtime: null, selectedBlockId: null }),
+  setSelectedBlockId: (selectedBlockId) => set({ selectedBlockId }),
 }));
 
 export const useStoryboardUi = create<{

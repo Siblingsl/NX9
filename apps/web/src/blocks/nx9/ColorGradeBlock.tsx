@@ -4,6 +4,13 @@ import { BlockShell } from '../shared/BlockShell';
 import { api } from '../../api/client';
 import { useActivityLog } from '../../stores/activity-log';
 
+const LUT_PRESETS = [
+  { id: 'none', label: '无 LUT', brightness: 0, contrast: 1, saturation: 1 },
+  { id: 'warm', label: '暖色调', brightness: 0.05, contrast: 1.1, saturation: 1.2 },
+  { id: 'cold', label: '冷色调', brightness: -0.05, contrast: 1.15, saturation: 0.9 },
+  { id: 'vintage', label: '复古胶片', brightness: -0.1, contrast: 1.3, saturation: 0.7 },
+] as const;
+
 function ColorGradeBlock(props: NodeProps) {
   const { updateNodeData } = useReactFlow();
   const appendLog = useActivityLog((s) => s.append);
@@ -11,7 +18,23 @@ function ColorGradeBlock(props: NodeProps) {
   const brightness = (props.data?.brightness as number) ?? 0;
   const contrast = (props.data?.contrast as number) ?? 1;
   const saturation = (props.data?.saturation as number) ?? 1;
+  const lutPreset = (props.data?.lutPreset as string) ?? 'none';
   const outputUrl = (props.data?.outputUrl as string) ?? upstream?.clips?.[0] ?? upstream?.pictures?.[0];
+
+  const applyPreset = useCallback(
+    (presetId: string) => {
+      const preset = LUT_PRESETS.find((p) => p.id === presetId);
+      if (!preset) return;
+      updateNodeData(props.id, {
+        lutPreset: presetId,
+        brightness: preset.brightness,
+        contrast: preset.contrast,
+        saturation: preset.saturation,
+      });
+      appendLog(`LUT 预设: ${preset.label}`);
+    },
+    [props.id, updateNodeData, appendLog],
+  );
 
   const run = useCallback(async () => {
     const source = upstream?.clips?.[0] ?? upstream?.pictures?.[0];
@@ -52,6 +75,20 @@ function ColorGradeBlock(props: NodeProps) {
   return (
     <BlockShell {...props}>
       <div className="space-y-2 nodrag nopan text-xs">
+        <div className="flex gap-1">
+          {LUT_PRESETS.map((p) => (
+            <button
+              key={p.id}
+              type="button"
+              onClick={() => applyPreset(p.id)}
+              className={`flex-1 py-1 rounded-lg text-[10px] border ${
+                lutPreset === p.id ? 'border-brand bg-brand/10 text-brand' : 'border-line text-ink/50'
+              }`}
+            >
+              {p.label}
+            </button>
+          ))}
+        </div>
         {slider('亮度', 'brightness', -0.5, 0.5, 0.05)}
         {slider('对比', 'contrast', 0.5, 2, 0.05)}
         {slider('饱和', 'saturation', 0, 2, 0.05)}

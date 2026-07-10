@@ -1,19 +1,29 @@
 import { create } from 'zustand';
 
-export type ContextRailTab =
-  | 'props'
-  | 'storyboard'
-  | 'backlot'
-  | 'history'
-  | 'workflow'
-  | 'agent';
+export type ContextRailTab = 'inspector' | 'storyboard' | 'script' | 'library';
 
-export const useContextRailUi = create<{
+export type LibrarySubTab = 'templates' | 'history' | 'workflow';
+
+export interface ContextRailUiState {
   requestedTab: ContextRailTab | null;
-  requestTab: (tab: ContextRailTab) => void;
+  librarySub: LibrarySubTab;
+  banner: { kind: 'review' | 'blocked'; shotIds: string[] } | null;
+  requestTab: (tab: ContextRailTab, opts?: { librarySub?: LibrarySubTab }) => void;
   clearRequest: () => void;
-}>((set) => ({
+  setBanner: (b: { kind: 'review' | 'blocked'; shotIds: string[] } | null) => void;
+  setLibrarySub: (sub: LibrarySubTab) => void;
+}
+
+export const useContextRailUi = create<ContextRailUiState>((set) => ({
   requestedTab: null,
-  requestTab: (requestedTab) => set({ requestedTab }),
+  librarySub: 'templates',
+  banner: null,
+  requestTab: (tab, opts) =>
+    set({
+      requestedTab: tab,
+      librarySub: opts?.librarySub ?? 'templates',
+    }),
   clearRequest: () => set({ requestedTab: null }),
+  setBanner: (banner) => set({ banner }),
+  setLibrarySub: (librarySub) => set({ librarySub }),
 }));

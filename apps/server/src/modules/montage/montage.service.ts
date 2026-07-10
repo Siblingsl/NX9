@@ -1,19 +1,23 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, ServiceUnavailableException } from '@nestjs/common';
 import { spawn } from 'child_process';
-import { existsSync, writeFileSync, mkdirSync } from 'fs';
+import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs';
 import { join } from 'path';
 import sharp from 'sharp';
-import { buildTimelineFromShots } from '@nx9/shared';
+import { buildTimelineFromShots, buildTimelineFromShotsV2, type TranscribeCue } from '@nx9/shared';
 import { PATHS } from '../../config/app.config';
 import { resolveMediaUrl } from '../../common/media-path';
 import type { StoryboardShot } from '@nx9/shared';
 import { GatewayService } from '../gateway/gateway.service';
+import { SettingsService } from '../settings/settings.service';
 
 @Injectable()
 export class MontageService {
   private ffmpegAvailable: boolean | null = null;
 
-  constructor(private readonly gateway: GatewayService) {}
+  constructor(
+    private readonly gateway: GatewayService,
+    private readonly settings: SettingsService,
+  ) {}
 
   async checkFfmpeg(): Promise<boolean> {
     if (this.ffmpegAvailable !== null) return this.ffmpegAvailable;
@@ -33,6 +37,7 @@ export class MontageService {
   async createContactSheet(
     shots: Pick<StoryboardShot, 'index' | 'descriptionZh' | 'firstFrameAssetId'>[],
     cols = 3,
+    lineArt = false,
   ) {
     const cellW = 320;
     const cellH = 200;
@@ -73,10 +78,19 @@ export class MontageService {
       composites.push({ input: labelSvg, left, top: top + cellH });
     }
 
+    if (lineArt) {
+      const watermarkSvg = Buffer.from(
+        `<svg width="${canvasW}" height="48"><rect width="100%" height="100%" fill="rgba(0,0,0,0.6)"/><text x="${canvasW / 2}" y="32" font-family="sans-serif" font-size="22" fill="white" text-anchor="middle" font-weight="bold">LINE ART — 线稿分镜</text></svg>`,
+      );
+      composites.push({ input: watermarkSvg, left: 0, top: canvasH });
+    }
+
+    const finalH = lineArt ? canvasH + 48 : canvasH;
+
     const name = `contact-${Date.now()}.png`;
     const out = join(PATHS.exports, name);
     await sharp({
-      create: { width: canvasW, height: canvasH, channels: 3, background: '#FAFAF8' },
+      create: { width: canvasW, height: finalH, channels: 3, background: '#FAFAF8' },
     })
       .composite(composites)
       .png()
@@ -111,11 +125,31 @@ export class MontageService {
     let srtPath: string | undefined;
     if (body.subtitle?.trim()) {
       srtPath = join(PATHS.exports, `shot-${stamp}.srt`);
+      const raw = body.subtitle.trim();
       const dur = body.durationSec ?? 4;
-      writeFileSync(
-        srtPath,
-        `1\n00:00:00,000 --> 00:00:${String(dur).padStart(2, '0')},000\n${body.subtitle}\n`,
-      );
+      if (/^\d+\n\d{2}:\d{2}:\d{2},\d{3} -->/.test(raw)) {
+        writeFileSync(srtPath, raw + '\n');
+      } else {
+        const paragraphs = raw.split(/\n\s*\n/).filter(Boolean);
+        if (paragraphs.length > 1) {
+          const blockDur = dur / paragraphs.length;
+          const lines = paragraphs.map((p, i) => {
+            const start = i * blockDur;
+            const end = (i + 1) * blockDur;
+            const fmt = (s: number) => {
+              const h = Math.floor(s / 3600);
+              const m = Math.floor((s % 3600) / 60);
+              const ss = Math.floor(s % 60);
+              const ms = Math.round((s % 1) * 1000);
+              return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(ss).padStart(2, '0')},${String(ms).padStart(3, '0')}`;
+            };
+            return `${i + 1}\n${fmt(start)} --> ${fmt(end)}\n${p}`;
+          });
+          writeFileSync(srtPath, lines.join('\n\n') + '\n');
+        } else {
+          writeFileSync(srtPath, `1\n00:00:00,000 --> 00:00:${String(dur).padStart(2, '0')},000\n${raw}\n`);
+        }
+      }
     }
 
     await this.runFfmpeg(videoPath, audioPath, srtPath, outPath);
@@ -156,22 +190,33 @@ export class MontageService {
     });
   }
 
-  validateReviewGate(shots: StoryboardShot[]): { ok: boolean; pending: number[] } {
-    const pending = shots.filter((s) => s.status !== 'approved').map((s) => s.index);
+  validateReviewGate(shots: StoryboardShot[], gateMode?: string): { ok: boolean; pending: number[] } {
+    const pending = gateMode === 'keyframe'
+      ? shots.filter((s) => (s.keyframeStatus ?? 'draft') !== 'approved').map((s) => s.index)
+      : shots.filter((s) => (s.videoStatus ?? 'draft') !== 'approved').map((s) => s.index);
     return { ok: pending.length === 0, pending };
   }
 
-  exportTimeline(shots: StoryboardShot[], title?: string) {
-    const timeline = buildTimelineFromShots(shots, title);
+  exportTimeline(
+    shots: StoryboardShot[],
+    title?: string,
+    transcribeCues?: { start: number; end: number; text: string }[],
+  ) {
+    const cuesInSec: TranscribeCue[] | undefined = transcribeCues?.map((c) => ({
+      startSec: c.start / 1000,
+      endSec: c.end / 1000,
+      text: c.text,
+    }));
+    const result = buildTimelineFromShotsV2(shots, title, { transcribeCues: cuesInSec });
     const name = `timeline-${Date.now()}.json`;
     const out = join(PATHS.exports, name);
-    writeFileSync(out, JSON.stringify(timeline, null, 2));
-    return { ok: true, timeline, url: `/media/exports/${name}` };
+    writeFileSync(out, JSON.stringify(result, null, 2));
+    return { ok: true, timeline: result, url: `/media/exports/${name}` };
   }
 
   async concatEpisode(
     shots: StoryboardShot[],
-    opts?: { requireApproved?: boolean; title?: string },
+    opts?: { requireApproved?: boolean; title?: string; audioUrl?: string },
   ) {
     const sorted = [...shots].sort((a, b) => a.index - b.index);
     if (opts?.requireApproved !== false) {
@@ -209,6 +254,8 @@ export class MontageService {
 
     const stamp = Date.now();
     const listFile = join(PATHS.exports, `concat-${stamp}.txt`);
+    const rawName = `episode-raw-${stamp}.mp4`;
+    const rawPath = join(PATHS.exports, rawName);
     const outName = `episode-${stamp}.mp4`;
     const outPath = join(PATHS.exports, outName);
 
@@ -228,7 +275,7 @@ export class MontageService {
         listFile,
         '-c',
         'copy',
-        outPath,
+        rawPath,
       ]);
       let stderr = '';
       proc.stderr.on('data', (d) => {
@@ -241,17 +288,58 @@ export class MontageService {
       });
     });
 
+    const audioUrl = opts?.audioUrl?.trim();
+    const audioLocal = audioUrl ? resolveMediaUrl(audioUrl) : null;
+    const verticalVf =
+      'scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2:(0,0,0),setsar=1';
+
+    await new Promise<void>((resolve, reject) => {
+      const args: string[] = ['-y', '-i', rawPath];
+      if (audioLocal && existsSync(audioLocal)) {
+        args.push('-i', audioLocal);
+        args.push(
+          '-filter_complex',
+          `[0:v]${verticalVf}[v]`,
+          '-map',
+          '[v]',
+          '-map',
+          '1:a:0',
+          '-c:v',
+          'libx264',
+          '-preset',
+          'fast',
+          '-c:a',
+          'aac',
+          '-shortest',
+        );
+      } else {
+        args.push('-vf', verticalVf, '-c:v', 'libx264', '-preset', 'fast', '-c:a', 'copy');
+      }
+      args.push(outPath);
+      const proc = spawn('ffmpeg', args);
+      let stderr = '';
+      proc.stderr.on('data', (d) => {
+        stderr += String(d);
+      });
+      proc.on('error', reject);
+      proc.on('close', (code) => {
+        if (code === 0) resolve();
+        else reject(new Error(stderr.slice(-500) || `ffmpeg episode exit ${code}`));
+      });
+    });
+
     return {
       ok: true,
       status: 'done',
       url: `/media/exports/${outName}`,
       segmentCount: segments.length,
+      vertical: true,
       title: opts?.title ?? '整集导出',
     };
   }
 
   /** Concat arbitrary local /media video clips (canvas clip-editor). */
-  async concatClips(videoUrls: string[], title?: string) {
+  async concatClips(videoUrls: string[], title?: string, transition?: string) {
     const hasFfmpeg = await this.checkFfmpeg();
     if (!hasFfmpeg) {
       return { ok: false, status: 'failed', message: '未检测到 FFmpeg' };
@@ -267,37 +355,94 @@ export class MontageService {
     }
 
     const stamp = Date.now();
-    const listFile = join(PATHS.exports, `clips-${stamp}.txt`);
     const outName = `clips-${stamp}.mp4`;
     const outPath = join(PATHS.exports, outName);
-    writeFileSync(
-      listFile,
-      paths.map((p) => `file '${p.replace(/'/g, "'\\''")}'`).join('\n'),
-    );
 
-    await new Promise<void>((resolve, reject) => {
-      const proc = spawn('ffmpeg', [
-        '-y',
-        '-f',
-        'concat',
-        '-safe',
-        '0',
-        '-i',
+    if (transition && paths.length >= 2) {
+      // 带转场的拼接：使用 xfade filter
+      const xfadeMap: Record<string, string> = {
+        dissolve: 'dissolve',
+        fade: 'fade',
+        wipe: 'wipeleft',
+        'match-cut': 'fadeblack',
+      };
+      const xfade = xfadeMap[transition] ?? 'dissolve';
+      const filterParts: string[] = [];
+      for (let i = 0; i < paths.length; i++) {
+        filterParts.push(`[${i}:v]`);
+      }
+      let filter = '';
+      let prev = '';
+      for (let i = 0; i < paths.length; i++) {
+        if (i === 0) {
+          prev = `v${i}`;
+          filter = `[0:v]setpts=PTS-STARTPTS[v0];`;
+        } else {
+          filter += `[${i}:v]setpts=PTS-STARTPTS[v${i}];`;
+        }
+      }
+      for (let i = 0; i < paths.length - 1; i++) {
+        const next = `v${i + 1}`;
+        filter += `[${prev}][${next}]xfade=transition=${xfade}:duration=0.5:offset=0[vout${i}];`;
+        prev = `vout${i}`;
+      }
+      filter = filter.replace(/;vout\d\]$/, ']');
+
+      const inputs: string[] = [];
+      for (const p of paths) {
+        inputs.push('-i', p);
+      }
+
+      await new Promise<void>((resolve, reject) => {
+        const proc = spawn('ffmpeg', [
+          '-y',
+          ...inputs,
+          '-filter_complex', filter,
+          '-map', `[${prev}]`,
+          '-c:v', 'libx264',
+          '-preset', 'fast',
+          '-crf', '22',
+          '-pix_fmt', 'yuv420p',
+          '-movflags', '+faststart',
+          outPath,
+        ]);
+        let stderr = '';
+        proc.stderr.on('data', (d) => { stderr += String(d); });
+        proc.on('error', reject);
+        proc.on('close', (code) => {
+          if (code === 0) resolve();
+          else reject(new Error(stderr.slice(-500) || `ffmpeg xfade exit ${code}`));
+        });
+      });
+    } else {
+      const listFile = join(PATHS.exports, `clips-${stamp}.txt`);
+      writeFileSync(
         listFile,
-        '-c',
-        'copy',
-        outPath,
-      ]);
-      let stderr = '';
-      proc.stderr.on('data', (d) => {
-        stderr += String(d);
+        paths.map((p) => `file '${p.replace(/'/g, "'\\''")}'`).join('\n'),
+      );
+
+      await new Promise<void>((resolve, reject) => {
+        const proc = spawn('ffmpeg', [
+          '-y',
+          '-f',
+          'concat',
+          '-safe',
+          '0',
+          '-i',
+          listFile,
+          '-c',
+          'copy',
+          outPath,
+        ]);
+        let stderr = '';
+        proc.stderr.on('data', (d) => { stderr += String(d); });
+        proc.on('error', reject);
+        proc.on('close', (code) => {
+          if (code === 0) resolve();
+          else reject(new Error(stderr.slice(-500) || `ffmpeg concat exit ${code}`));
+        });
       });
-      proc.on('error', reject);
-      proc.on('close', (code) => {
-        if (code === 0) resolve();
-        else reject(new Error(stderr.slice(-500) || `ffmpeg concat exit ${code}`));
-      });
-    });
+    }
 
     return {
       ok: true,
@@ -435,12 +580,14 @@ export class MontageService {
       return { ok: false, status: 'failed', message: '未检测到 FFmpeg' };
     }
     const paths: string[] = [];
+    let failedCount = 0;
     for (const url of audioUrls) {
       const local = resolveMediaUrl(url);
       if (local && existsSync(local)) paths.push(local);
+      else failedCount++;
     }
     if (paths.length < 2) {
-      return { ok: false, status: 'failed', message: '至少需要 2 条音频轨' };
+      return { ok: false, status: 'failed', message: `至少需要 2 条音频轨（${failedCount} 条不可用）` };
     }
 
     const stamp = Date.now();
@@ -464,7 +611,7 @@ export class MontageService {
       });
     });
 
-    return { ok: true, status: 'done', url: `/media/exports/${outName}`, trackCount: paths.length };
+    return { ok: true, status: 'done', url: `/media/exports/${outName}`, trackCount: paths.length, failedTracks: failedCount };
   }
 
   /** Apply brightness/contrast/saturation via FFmpeg (video) or sharp (image). */
@@ -568,4 +715,54 @@ export class MontageService {
       method: 'luminance-depth-emboss-normal',
     };
   }
+
+  async transcribeAudio(
+    sourceUrl: string,
+    language?: string,
+  ): Promise<{ ok: boolean; srtContent: string; cues: { start: number; end: number; text: string }[] }> {
+    const local = resolveMediaUrl(sourceUrl);
+    if (!local || !existsSync(local)) {
+      throw new ServiceUnavailableException('无法读取音频/视频文件');
+    }
+    const apiKey = this.settings.getRaw().primaryApiKey || '';
+    if (!apiKey) throw new ServiceUnavailableException('API key 未配置');
+
+    const form = new FormData();
+    const blob = new Blob([readFileSync(local)], { type: 'audio/mpeg' }) as Blob & { name?: string };
+    blob.name = 'audio.mp3';
+    form.append('file', blob as unknown as Blob);
+    form.append('model', 'whisper-1');
+    form.append('response_format', 'srt');
+    if (language) form.append('language', language);
+
+    const res = await fetch('https://api.openai.com/v1/audio/transcriptions', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${apiKey}` },
+      body: form,
+    });
+    if (!res.ok) {
+      const text = await res.text();
+      throw new ServiceUnavailableException(`Whisper 转写失败: ${text.slice(0, 200)}`);
+    }
+    const srtContent = await res.text();
+
+    const cues: { start: number; end: number; text: string }[] = [];
+    const blockRegex = /(\d+)\n(\d{2}:\d{2}:\d{2},\d{3}) --> (\d{2}:\d{2}:\d{2},\d{3})\n([\s\S]*?)(?=\n\n|\n*$)/g;
+    let match: RegExpExecArray | null;
+    while ((match = blockRegex.exec(srtContent)) !== null) {
+      cues.push({
+        start: srtToMs(match[2]),
+        end: srtToMs(match[3]),
+        text: match[4].trim(),
+      });
+    }
+
+    return { ok: true, srtContent, cues };
+  }
+}
+
+function srtToMs(timestamp: string): number {
+  const [h, m, s] = timestamp.split(':');
+  const [sec, ms] = s!.split(',');
+  return Number(h) * 3600000 + Number(m) * 60000 + Number(sec) * 1000 + Number(ms);
 }

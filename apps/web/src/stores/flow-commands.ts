@@ -5,6 +5,8 @@ interface FlowCommandState {
   spawnAt: { x: number; y: number } | null;
   spawnShotId: string | null;
   spawnData: Record<string, unknown> | null;
+  /** true = 使用 spawnAt 精确落点（拖放）；false = 自动避让 */
+  spawnExact: boolean;
   templateId: string | null;
   templateMode: 'merge' | 'replace';
   /** 每次请求递增，确保 FlowSurface 在 ready 后能可靠消费模板 */
@@ -13,12 +15,14 @@ interface FlowCommandState {
     kind: string,
     at?: { x: number; y: number },
     data?: Record<string, unknown>,
+    exact?: boolean,
   ) => void;
   requestSpawnForShot: (
     shotId: string,
     kind: string,
     at?: { x: number; y: number },
     data?: Record<string, unknown>,
+    exact?: boolean,
   ) => void;
   requestLoadTemplate: (templateId: string, mode?: 'merge' | 'replace') => void;
   consumeSpawn: () => {
@@ -26,6 +30,7 @@ interface FlowCommandState {
     at: { x: number; y: number } | null;
     shotId: string | null;
     data: Record<string, unknown> | null;
+    exact: boolean;
   } | null;
   consumeTemplate: () => { templateId: string; mode: 'merge' | 'replace' } | null;
 }
@@ -35,24 +40,27 @@ export const useFlowCommands = create<FlowCommandState>((set, get) => ({
   spawnAt: null,
   spawnShotId: null,
   spawnData: null,
+  spawnExact: false,
   templateId: null,
   templateMode: 'merge' as const,
   templateRequestId: 0,
 
-  requestSpawn: (kind, at, data) =>
+  requestSpawn: (kind, at, data, exact) =>
     set({
       spawnKind: kind,
       spawnAt: at ?? null,
       spawnShotId: null,
       spawnData: data ?? null,
+      spawnExact: exact ?? false,
     }),
 
-  requestSpawnForShot: (shotId, kind, at, data) =>
+  requestSpawnForShot: (shotId, kind, at, data, exact) =>
     set({
       spawnKind: kind,
       spawnShotId: shotId,
       spawnAt: at ?? null,
       spawnData: data ?? null,
+      spawnExact: exact ?? false,
     }),
 
   requestLoadTemplate: (templateId, mode = 'merge') =>
@@ -63,10 +71,10 @@ export const useFlowCommands = create<FlowCommandState>((set, get) => ({
     })),
 
   consumeSpawn: () => {
-    const { spawnKind, spawnAt, spawnShotId, spawnData } = get();
+    const { spawnKind, spawnAt, spawnShotId, spawnData, spawnExact } = get();
     if (!spawnKind) return null;
-    set({ spawnKind: null, spawnAt: null, spawnShotId: null, spawnData: null });
-    return { kind: spawnKind, at: spawnAt, shotId: spawnShotId, data: spawnData };
+    set({ spawnKind: null, spawnAt: null, spawnShotId: null, spawnData: null, spawnExact: false });
+    return { kind: spawnKind, at: spawnAt, shotId: spawnShotId, data: spawnData, exact: spawnExact };
   },
 
   consumeTemplate: () => {

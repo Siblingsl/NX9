@@ -53,11 +53,11 @@ export const BlockShell = memo(function BlockShell({
 
   return (
     <div
-      className={`min-w-[220px] max-w-[360px] rounded-2xl border bg-white shadow-panel transition-shadow nowheel ${
-        selected ? 'border-brand ring-2 ring-brand/20' : 'border-line'
+      className={`min-w-[220px] max-w-[360px] rounded-2xl border bg-white dark:bg-[#222222] shadow-panel transition-shadow nowheel ${
+        selected ? 'border-brand ring-2 ring-brand/20' : 'border-line dark:border-[#333]'
       }`}
     >
-      <div className="flex items-center gap-2 px-3 py-2 border-b border-line bg-surface/80 rounded-t-2xl cursor-grab active:cursor-grabbing">
+      <div className="flex items-center gap-2 px-3 py-2 border-b border-line dark:border-[#333] bg-surface/80 dark:bg-[#2a2a2a] rounded-t-2xl cursor-grab active:cursor-grabbing">
         <span
           className="w-2 h-2 rounded-full shrink-0"
           style={{ background: meta?.accent ?? '#5E4D8A' }}

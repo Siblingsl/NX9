@@ -1,9 +1,22 @@
 import type { StoryboardPayload, VoicePayload, WorkspacePreferences } from './storyboard';
 import type { CharacterLibraryPayload } from './character';
 import type { BacklotCustomPayload, BacklotWorkspacePayload } from '../data/backlot-templates';
-import { emptyStoryboard, emptyVoice } from './storyboard';
+import type { CanvasAppearance } from '../utils/canvas-theme';
+import type { ScriptPlanPayload } from './script-plan';
+import type { EnvironmentLibraryPayload } from './environment';
+import type { PlaybookId } from '../data/playbook-definitions';
+import { emptyStoryboard, emptyVoice, migrateStoryboardPayload } from './storyboard';
 import { emptyCharacterLibrary } from './character';
 import { emptyBacklotCustom, emptyBacklotWorkspace } from '../data/backlot-templates';
+import { DEFAULT_CANVAS_APPEARANCE } from '../utils/canvas-theme';
+
+export interface PlaybookSession {
+  playbookId: PlaybookId;
+  startedAt: string;
+  currentStepId: string;
+  completedStepIds: string[];
+  dismissed?: boolean;
+}
 
 export interface ViewportState {
   x: number;
@@ -70,6 +83,7 @@ export interface WorkspacePayloadV2 {
   backlotCustom?: BacklotCustomPayload;
   backlotWorkspace?: BacklotWorkspacePayload;
   preferences?: WorkspacePreferences;
+  canvasAppearance?: CanvasAppearance;
 }
 
 export interface WorkspacePayloadV3 extends Omit<WorkspacePayloadV2, 'version'> {
@@ -79,6 +93,9 @@ export interface WorkspacePayloadV3 extends Omit<WorkspacePayloadV2, 'version'> 
   groups?: SceneGroupRecord[];
   takes?: TakeRecord[];
   viewMode?: ViewMode;
+  scriptPlan?: ScriptPlanPayload;
+  environments?: import('./environment').EnvironmentLibraryPayload;
+  playbookSession?: PlaybookSession | null;
 }
 
 /** Workspace on disk — v1/v2 legacy or v3 Stage Deck */
@@ -131,19 +148,22 @@ export interface WorkspaceExportEnvelope {
 }
 
 export function normalizeWorkspacePayload(raw: Partial<WorkspacePayload>): WorkspacePayload {
+  const storyboard = raw.storyboard ? migrateStoryboardPayload(raw.storyboard) : emptyStoryboard();
   const base: WorkspacePayloadV2 = {
     version: 2,
     blocks: Array.isArray(raw.blocks) ? raw.blocks : [],
     links: Array.isArray(raw.links) ? raw.links : [],
     viewport: raw.viewport ?? { x: 0, y: 0, zoom: 1 },
     nextBlockIndex: raw.nextBlockIndex ?? 1,
-    storyboard: raw.storyboard ?? emptyStoryboard(),
+    storyboard,
     voice: raw.voice ?? emptyVoice(),
     characters: raw.characters ?? emptyCharacterLibrary(),
     backlotCustom: raw.backlotCustom ?? emptyBacklotCustom(),
     backlotWorkspace: raw.backlotWorkspace ?? emptyBacklotWorkspace(),
     preferences: raw.preferences ?? {},
+    canvasAppearance: raw.canvasAppearance ?? DEFAULT_CANVAS_APPEARANCE,
   };
+  const rawScriptPlan = (raw as any).scriptPlan as ScriptPlanPayload | undefined;
   if (raw.version === 3) {
     return {
       ...base,
@@ -153,6 +173,9 @@ export function normalizeWorkspacePayload(raw: Partial<WorkspacePayload>): Works
       groups: raw.groups ?? [],
       takes: raw.takes ?? [],
       viewMode: raw.viewMode ?? 'explore',
+      scriptPlan: rawScriptPlan,
+      environments: (raw as any).environments ?? undefined,
+      playbookSession: (raw as any).playbookSession ?? null,
     };
   }
   return base;

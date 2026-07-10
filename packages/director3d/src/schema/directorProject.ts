@@ -65,6 +65,9 @@ export interface DirectorCameraCapture {
   dataUrl?: string;
   imageUrl?: string;
   cameraPrompt?: string;
+  cameraPosition?: [number, number, number];
+  cameraRotation?: [number, number, number];
+  cameraFov?: number;
   createdAt: number;
 }
 

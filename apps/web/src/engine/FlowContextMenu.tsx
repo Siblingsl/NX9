@@ -25,6 +25,7 @@ import {
   Trash2,
   ClipboardPaste,
   Zap,
+  RefreshCw,
 } from 'lucide-react';
 import type { NodeAlignAction } from './node-align';
 import { FLOW_EDGE_TYPES, type FlowEdgeTypeId } from './flow-edge-types';
@@ -235,10 +236,12 @@ interface SelectionContextMenuProps {
   storyboardActionCount: number;
   cascadeEnabled?: boolean;
   expandLabel?: string;
+  rerunDownstreamEnabled?: boolean;
   onClose: () => void;
   onRun: () => void;
   onStop: () => void;
   onCascade?: () => void;
+  onRerunDownstream?: () => void;
   onToggleExpand?: () => void;
   onCopy: () => void;
   onDuplicate: () => void;
@@ -257,10 +260,12 @@ export function SelectionContextMenu({
   storyboardActionCount,
   cascadeEnabled,
   expandLabel,
+  rerunDownstreamEnabled,
   onClose,
   onRun,
   onStop,
   onCascade,
+  onRerunDownstream,
   onToggleExpand,
   onCopy,
   onDuplicate,
@@ -382,6 +387,17 @@ export function SelectionContextMenu({
           >
             <Zap size={13} />
             <span>级联运行 (Cascade)</span>
+          </button>
+        )}
+
+        {rerunDownstreamEnabled && onRerunDownstream && !isRunning && (
+          <button
+            type="button"
+            className="nx9-context-menu__item"
+            onClick={() => { onRerunDownstream(); onClose(); }}
+          >
+            <RefreshCw size={13} />
+            <span>重跑下游链</span>
           </button>
         )}
 

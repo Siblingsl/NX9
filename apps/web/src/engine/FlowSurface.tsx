@@ -41,6 +41,7 @@ import { useFlowCommands } from '../stores/flow-commands';
 import { useFlowRuntime } from '../stores/flow-runtime';
 import { useStoryboardUi } from '../stores/flow-runtime';
 import { useWorkspaceDocument } from '../stores/workspace-document';
+import { PLAYBOOK_DEFINITIONS, type PlaybookId } from '@nx9/shared';
 import { useExecutionQueue } from '../stores/execution-queue';
 import {
   copySelection,
@@ -52,7 +53,7 @@ import {
 import { applyNodeAlignment, type NodeAlignAction } from './node-align';
 import { type FlowEdgeTypeId, normalizeFlowEdgeType } from './flow-edge-types';
 import { EdgeContextMenu, PaneContextMenu, SelectionContextMenu } from './FlowContextMenu';
-import { findOpenPosition, relocateNodeGroup } from './spawn-placement';
+import { exactDropPosition, findOpenPosition, relocateNodeGroup } from './spawn-placement';
 import { fromPayload as parseFlowPayload, toPayload as buildFlowPayload } from './flow-payload';
 import { channelEdgeTypes } from './stage-deck/canvas/ChannelEdge';
 import { LaneBackground } from './stage-deck/canvas/LaneBackground';
@@ -77,7 +78,8 @@ import { SmartGuides } from './stage-deck/canvas/SmartGuides';
 import { computeSmartSnap } from './stage-deck/utils/smart-guides';
 import { applyUpstreamHighlight } from './stage-deck/utils/upstream-graph';
 import { openReviewGateSession } from './stage-deck/utils/review-gate-session';
-import { runCascadeFromBlock } from './stage-deck/execution/cascade-runner';
+import { useContextRailUi } from './stage-deck/stores/context-rail-ui';
+import { runCascadeFromBlock, runDownstreamFromBlock } from './stage-deck/execution/cascade-runner';
 import { withPendingTake } from './stage-deck/execution/pending-take';
 import {
   applyPrimaryTakeToNodeData,
@@ -86,7 +88,8 @@ import {
 } from './stage-deck/utils/take-utils';
 import { TakeRail } from './stage-deck/chrome/TakeRail';
 import { TakeLightboxHost } from './stage-deck/chrome/CompareLightbox';
-import { RecipePickerOverlay } from './stage-deck/chrome/RecipePickerOverlay';
+import { PlaybookLauncherOverlay } from './stage-deck/chrome/PlaybookLauncherOverlay';
+import { CanvasFlowRail } from './stage-deck/chrome/CanvasFlowRail';
 import { filterBlocksForWireDrop } from './stage-deck/interaction/wire-drop';
 import { computeGroupBounds } from './stage-deck/canvas/SceneGroup';
 import { StageDeckInteractionBridge } from './stage-deck/StageDeckInteractionBridge';
@@ -155,6 +158,7 @@ const FlowSurfaceInner = memo(function FlowSurfaceInner({
   const [recipePickerDismissed, setRecipePickerDismissed] = useState(false);
   const [dragging, setDragging] = useState(false);
   const [selectedBlockId, setSelectedBlockId] = useState<string | null>(null);
+  const selectedBlockIdRef = useRef<string | null>(null);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; ids: string[] } | null>(null);
   const [paneMenu, setPaneMenu] = useState<{ x: number; y: number } | null>(null);
   const [edgeMenu, setEdgeMenu] = useState<{ x: number; y: number; edgeId: string } | null>(null);
@@ -182,6 +186,7 @@ const FlowSurfaceInner = memo(function FlowSurfaceInner({
     (screen) => screen,
   );
   const cancelRunRef = useRef(false);
+  const resumedGateRef = useRef<Set<string>>(new Set());
   const loadWorkflowTemplateRef = useRef<
     (id: string, mode: 'merge' | 'replace') => Promise<void>
   >(async () => {});
@@ -209,6 +214,7 @@ const FlowSurfaceInner = memo(function FlowSurfaceInner({
 
   nodesRef.current = nodes;
   edgesRef.current = edges;
+  selectedBlockIdRef.current = selectedBlockId;
 
   const bindFocusBlock = useCallback((fn: (blockId: string) => void) => {
     focusBlockRef.current = fn;
@@ -242,6 +248,14 @@ const FlowSurfaceInner = memo(function FlowSurfaceInner({
   );
   const registerRuntime = useFlowRuntime((s) => s.register);
   const unregisterRuntime = useFlowRuntime((s) => s.unregister);
+  const setRuntimeSelectedBlockId = useFlowRuntime((s) => s.setSelectedBlockId);
+  const syncSelectedBlockId = useCallback(
+    (id: string | null) => {
+      setSelectedBlockId(id);
+      setRuntimeSelectedBlockId(id);
+    },
+    [setRuntimeSelectedBlockId],
+  );
   const updateShot = useWorkspaceDocument((s) => s.updateShot);
   const selectShot = useStoryboardUi((s) => s.selectShot);
   const requestScrollToShot = useStoryboardUi((s) => s.requestScrollToShot);
@@ -249,6 +263,7 @@ const FlowSurfaceInner = memo(function FlowSurfaceInner({
   const storyboard = useWorkspaceDocument((s) => s.storyboard);
   const voice = useWorkspaceDocument((s) => s.voice);
   const characters = useWorkspaceDocument((s) => s.characters);
+  const canvasAppearance = useWorkspaceDocument((s) => s.canvasAppearance);
   const startBatch = useExecutionQueue((s) => s.startBatch);
   const finishBatch = useExecutionQueue((s) => s.finish);
   const reportProgress = useExecutionQueue((s) => s.reportProgress);
@@ -325,6 +340,7 @@ const FlowSurfaceInner = memo(function FlowSurfaceInner({
 
     setReady(false);
     setRecipePickerDismissed(false);
+    syncSelectedBlockId(null);
     skipSaveRef.current = true;
     useWorkspaceDocument.getState().reset();
 
@@ -374,7 +390,10 @@ const FlowSurfaceInner = memo(function FlowSurfaceInner({
       ? useWorkspaceDocument.getState().storyboard.shots.find((s) => s.id === pending.shotId)
       : undefined;
     pushFlowSnapshot(nodes, edges);
-    const at = findOpenPosition(nodes, pending.at ? { preferred: pending.at } : {});
+    const at =
+      pending.exact && pending.at
+        ? exactDropPosition(pending.at)
+        : findOpenPosition(nodes, pending.at ? { preferred: pending.at } : {});
     setNodes((nds) => [
       ...nds,
       {
@@ -440,6 +459,10 @@ const FlowSurfaceInner = memo(function FlowSurfaceInner({
 
   loadWorkflowTemplateRef.current = loadWorkflowTemplate;
 
+  const importWorkflowZipRef = useRef<
+    (file: File, mode?: 'merge' | 'replace') => Promise<void>
+  >(async () => {});
+
   const importWorkflowZip = useCallback(
     async (file: File, mode: 'merge' | 'replace' = 'merge') => {
       const imported = await parseWorkflowZip(file);
@@ -485,6 +508,7 @@ const FlowSurfaceInner = memo(function FlowSurfaceInner({
       appendLog,
     ],
   );
+  importWorkflowZipRef.current = importWorkflowZip;
 
   useEffect(() => {
     if (!ready || templateRequestId === 0) return;
@@ -718,6 +742,70 @@ const FlowSurfaceInner = memo(function FlowSurfaceInner({
     [setEdges, updateNodeDataStable, appendLog, highlightBlock],
   );
 
+  const runSelectedDownstream = useCallback(
+    async (ids: string[]) => {
+      cancelRunRef.current = false;
+      appendLog('重跑下游链开始');
+      for (const id of ids) {
+        await runDownstreamFromBlock({
+          blockId: id,
+          nodes: nodesRef.current,
+          edges: edgesRef.current,
+          getNodes: () => nodesRef.current,
+          setEdges,
+          updateNodeData: updateNodeDataStable,
+          signal: { get cancelled() { return cancelRunRef.current; } },
+          onProgress: (p) => {
+            if (p.phase === 'blocked') {
+              appendLog(`下游链审阅阻塞 · ${(p.pendingShots ?? []).join(', ')}`);
+              openReviewGateSession(p.pendingShots);
+            }
+          },
+        });
+      }
+      appendLog('重跑下游链完成');
+    },
+    [setEdges, updateNodeDataStable, appendLog, openReviewGateSession],
+  );
+
+  useEffect(() => {
+    if (!isStageDeck || !ready) return;
+    const gate = nodes.find(
+      (n) => n.type === 'review-gate' && n.data?.status === 'blocked',
+    );
+    const setBanner = useContextRailUi.getState().setBanner;
+    if (gate) {
+      const pending = (gate.data?.pendingShots as number[] | undefined) ?? [];
+      setBanner({ kind: 'blocked', shotIds: pending.map(String) });
+    } else if (useContextRailUi.getState().banner?.kind === 'blocked') {
+      setBanner(null);
+    }
+  }, [nodes, isStageDeck, ready]);
+
+  useEffect(() => {
+    if (!isStageDeck || !ready) return;
+    const gates = nodesRef.current.filter(
+      (n) => n.type === 'review-gate' && n.data?.status === 'blocked',
+    );
+    for (const gate of gates) {
+      const pending = (gate.data?.pendingShots as number[] | undefined) ?? [];
+      if (pending.length === 0) continue;
+      const allApproved = pending.every((idx) => {
+        const shot = useWorkspaceDocument.getState().storyboard.shots.find((s) => s.index === idx);
+        return shot?.status === 'approved';
+      });
+      if (allApproved) {
+        if (!resumedGateRef.current.has(gate.id)) {
+          resumedGateRef.current.add(gate.id);
+          appendLog(`审阅关卡通过 · 自动续跑 Cascade · ${gate.id}`);
+          void runCascade(gate.id);
+        }
+      } else {
+        resumedGateRef.current.delete(gate.id);
+      }
+    }
+  }, [storyboard, isStageDeck, ready, runCascade, appendLog]);
+
   const stopRun = useCallback(() => {
     cancelRunRef.current = true;
     cancelBatch();
@@ -725,8 +813,8 @@ const FlowSurfaceInner = memo(function FlowSurfaceInner({
   }, [cancelBatch, appendLog]);
 
   const spawnBlockForShot = useCallback(
-    (shotId: string, kind: string) => {
-      useFlowCommands.getState().requestSpawnForShot(shotId, kind);
+    (shotId: string, kind: string, extraData?: Record<string, unknown>) => {
+      useFlowCommands.getState().requestSpawnForShot(shotId, kind, undefined, extraData);
     },
     [],
   );
@@ -734,19 +822,13 @@ const FlowSurfaceInner = memo(function FlowSurfaceInner({
   const onSelectionChange = useCallback(
     ({ nodes: selected }: { nodes: Node[] }) => {
       const id = selected.length === 1 ? selected[0].id : null;
-      setSelectedBlockId(id);
+      syncSelectedBlockId(id);
       if (isStageDeck) {
         if (!id) {
           setDeckSelection(null, false);
         } else {
           setDeckSelection(id, false);
         }
-        const highlighted = applyUpstreamHighlight(id, nodesRef.current, edgesRef.current);
-        const selectedIds = new Set(selected.map((s) => s.id));
-        setNodes(
-          highlighted.nodes.map((n) => ({ ...n, selected: selectedIds.has(n.id) })),
-        );
-        setEdges(highlighted.edges);
       }
       if (!id) return;
       const node = selected[0];
@@ -773,10 +855,43 @@ const FlowSurfaceInner = memo(function FlowSurfaceInner({
       requestScrollToShot,
       isStageDeck,
       setDeckSelection,
-      setNodes,
-      setEdges,
+      syncSelectedBlockId,
     ],
   );
+
+  useEffect(() => {
+    if (!isStageDeck || !ready) return;
+    const highlighted = applyUpstreamHighlight(
+      selectedBlockId,
+      nodesRef.current,
+      edgesRef.current,
+    );
+    const prevNodeById = new Map(nodesRef.current.map((n) => [n.id, n]));
+    const nodesNeedUpdate = highlighted.nodes.some((n) => n !== prevNodeById.get(n.id));
+    const prevEdgeById = new Map(edgesRef.current.map((e) => [e.id, e]));
+    const edgesNeedUpdate = highlighted.edges.some((e) => e !== prevEdgeById.get(e.id));
+
+    if (nodesNeedUpdate) {
+      const nextNodeById = new Map(highlighted.nodes.map((n) => [n.id, n]));
+      setNodes((prev) =>
+        prev.map((n) => {
+          const next = nextNodeById.get(n.id);
+          if (!next || next === n) return n;
+          return { ...n, data: next.data };
+        }),
+      );
+    }
+    if (edgesNeedUpdate) {
+      const nextEdgeById = new Map(highlighted.edges.map((e) => [e.id, e]));
+      setEdges((prev) =>
+        prev.map((e) => {
+          const next = nextEdgeById.get(e.id);
+          if (!next || next === e) return e;
+          return { ...e, data: next.data };
+        }),
+      );
+    }
+  }, [selectedBlockId, isStageDeck, ready, setNodes, setEdges]);
 
   const closeMenus = useCallback(() => {
     setContextMenu(null);
@@ -1030,6 +1145,62 @@ const FlowSurfaceInner = memo(function FlowSurfaceInner({
     [handleDeleteSelected],
   );
 
+  const canUndoRef = useRef(canUndo);
+  const canRedoRef = useRef(canRedo);
+  const effectiveIntensiveRef = useRef(effectiveIntensive);
+  const isStageDeckRef = useRef(isStageDeck);
+  const handleUndoRef = useRef(handleUndo);
+  const handleRedoRef = useRef(handleRedo);
+  const runBatchRef = useRef(runBatch);
+  const runSelectedRef = useRef(runSelected);
+  const runCascadeRef = useRef(runCascade);
+  const stopRunRef = useRef(stopRun);
+  const deleteNodesRef = useRef(deleteNodes);
+  const spawnBlockForShotRef = useRef(spawnBlockForShot);
+
+  canUndoRef.current = canUndo;
+  canRedoRef.current = canRedo;
+  effectiveIntensiveRef.current = effectiveIntensive;
+  isStageDeckRef.current = isStageDeck;
+  handleUndoRef.current = handleUndo;
+  handleRedoRef.current = handleRedo;
+  runBatchRef.current = runBatch;
+  runSelectedRef.current = runSelected;
+  runCascadeRef.current = runCascade;
+  stopRunRef.current = stopRun;
+  deleteNodesRef.current = deleteNodes;
+  spawnBlockForShotRef.current = spawnBlockForShot;
+
+  const { fitView } = useReactFlow();
+
+  const fitViewToNodes = useCallback((nodeIds: string[]) => {
+    const nodeList = nodeIds
+      .map((id) => nodesRef.current.find((n) => n.id === id))
+      .filter((n): n is Node => !!n);
+    if (nodeList.length === 0) return;
+    void fitView({ nodes: nodeList, duration: 300, padding: 0.4 });
+  }, [fitView]);
+
+  const highlightNodes = useCallback((nodeIds: string[], opts?: { durationMs?: number }) => {
+    const durationMs = opts?.durationMs ?? 1200;
+    const until = Date.now() + durationMs;
+    const idSet = new Set(nodeIds);
+    setNodes((nds) =>
+      nds.map((n) =>
+        idSet.has(n.id) ? { ...n, data: { ...n.data, highlightUntil: until } } : n,
+      ),
+    );
+    setTimeout(() => {
+      setNodes((nds) =>
+        nds.map((n) =>
+          idSet.has(n.id) && n.data?.highlightUntil
+            ? { ...n, data: { ...n.data, highlightUntil: undefined } }
+            : n,
+        ),
+      );
+    }, durationMs + 50);
+  }, [setNodes]);
+
   useEffect(() => {
     if (!ready) return;
     registerRuntime({
@@ -1039,46 +1210,39 @@ const FlowSurfaceInner = memo(function FlowSurfaceInner({
       setNodes,
       setEdges,
       updateNodeData: updateNodeDataStable,
-      undo: handleUndo,
-      redo: handleRedo,
-      canUndo,
-      canRedo,
-      intensive: effectiveIntensive,
-      runBatch,
-      runSelected,
-      runCascade: isStageDeck ? runCascade : undefined,
-      stopRun,
-      deleteNodes,
+      undo: () => handleUndoRef.current(),
+      redo: () => handleRedoRef.current(),
+      get canUndo() {
+        return canUndoRef.current;
+      },
+      get canRedo() {
+        return canRedoRef.current;
+      },
+      get intensive() {
+        return effectiveIntensiveRef.current;
+      },
+      runBatch: () => Promise.resolve(runBatchRef.current ? runBatchRef.current() : undefined),
+      runSelected: (ids) => void runSelectedRef.current(ids),
+      get runCascade() {
+        return isStageDeckRef.current
+          ? (blockId: string) => void runCascadeRef.current(blockId)
+          : undefined;
+      },
+      stopRun: () => stopRunRef.current(),
+      deleteNodes: (ids) => deleteNodesRef.current(ids),
       focusBlock: (blockId) => focusBlockRef.current(blockId),
-      spawnBlockForShot,
-      loadWorkflowTemplate,
-      importWorkflowZip,
-      selectedBlockId,
+      fitViewToNodes,
+      highlightNodes,
+      spawnBlockForShot: (shotId, kind, extraData) =>
+        spawnBlockForShotRef.current(shotId, kind, extraData),
+      loadWorkflowTemplate: (id, mode) => loadWorkflowTemplateRef.current(id, mode ?? 'merge'),
+      importWorkflowZip: (file, mode) => importWorkflowZipRef.current(file, mode),
+      get selectedBlockId() {
+        return selectedBlockIdRef.current;
+      },
     });
     return () => unregisterRuntime();
-  }, [
-    ready,
-    registerRuntime,
-    unregisterRuntime,
-    setNodes,
-    setEdges,
-    updateNodeDataStable,
-    handleUndo,
-    handleRedo,
-    canUndo,
-    canRedo,
-    runBatch,
-    runSelected,
-    runCascade,
-    stopRun,
-    deleteNodes,
-    spawnBlockForShot,
-    loadWorkflowTemplate,
-    importWorkflowZip,
-    selectedBlockId,
-    effectiveIntensive,
-    isStageDeck,
-  ]);
+  }, [ready, registerRuntime, unregisterRuntime, setNodes, setEdges, updateNodeDataStable, fitViewToNodes, highlightNodes]);
 
   useEffect(() => {
     if (!ready) return;
@@ -1088,7 +1252,7 @@ const FlowSurfaceInner = memo(function FlowSurfaceInner({
       if ((e.ctrlKey || e.metaKey) && e.key === 'a') {
         e.preventDefault();
         setNodes((prev) => prev.map((n) => ({ ...n, selected: true })));
-        setSelectedBlockId(null);
+        syncSelectedBlockId(null);
         return;
       }
       if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey) {
@@ -1327,22 +1491,21 @@ const FlowSurfaceInner = memo(function FlowSurfaceInner({
     e.preventDefault();
     const assetUrl = e.dataTransfer.getData('application/nx9-asset-url');
     const kind = e.dataTransfer.getData('application/nx9-block') || 'asset-import';
-    const bounds = (e.currentTarget as HTMLElement).getBoundingClientRect();
-    const dropAt = {
-      x: e.clientX - bounds.left - 80,
-      y: e.clientY - bounds.top - 40,
-    };
+    const flowAt = screenToFlowRef.current({ x: e.clientX, y: e.clientY });
+    const dropAt = exactDropPosition({
+      x: flowAt.x - 110,
+      y: flowAt.y - 80,
+    });
     if (assetUrl) {
       const id = `blk-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
       pushFlowSnapshot(nodesRef.current, edgesRef.current);
       const isPic = /\.(png|jpe?g|gif|webp)$/i.test(assetUrl);
-      const position = findOpenPosition(nodesRef.current, { preferred: dropAt });
       setNodes((nds) => [
         ...nds,
         {
           id,
           type: 'asset-import',
-          position,
+          position: dropAt,
           data: {
             blockIndex: nextIndexRef.current++,
             assetUrl,
@@ -1355,16 +1518,16 @@ const FlowSurfaceInner = memo(function FlowSurfaceInner({
       return;
     }
     if (!kind) return;
-    useFlowCommands.getState().requestSpawn(kind, dropAt);
+    useFlowCommands.getState().requestSpawn(kind, dropAt, undefined, true);
   }, [push, setNodes, appendLog]);
 
   const selectEdge = useCallback(
     (edgeId: string) => {
       setNodes((prev) => prev.map((n) => ({ ...n, selected: false })));
       setEdges((prev) => prev.map((e) => ({ ...e, selected: e.id === edgeId })));
-      setSelectedBlockId(null);
+      syncSelectedBlockId(null);
     },
-    [setNodes, setEdges],
+    [setNodes, setEdges, syncSelectedBlockId],
   );
 
   const onEdgeClick = useCallback(
@@ -1392,7 +1555,7 @@ const FlowSurfaceInner = memo(function FlowSurfaceInner({
   const onNodeDoubleClick = useCallback(
     (_e: ReactMouseEvent, node: Node) => {
       setNodes((prev) => prev.map((n) => ({ ...n, selected: n.id === node.id })));
-      setSelectedBlockId(node.id);
+      syncSelectedBlockId(node.id);
       if (isStageDeck && (node.type === 'director-3d' || node.type === 'blocking-stage' || node.type === 'light-rig')) {
         openDirector3dForBlock(
           node.id,
@@ -1411,12 +1574,13 @@ const FlowSurfaceInner = memo(function FlowSurfaceInner({
       focusBlockRef.current(node.id);
       appendLog(`聚焦模块 · ${node.type ?? 'unknown'}`);
     },
-    [setNodes, appendLog, isStageDeck, openDirector3dForBlock, viewMode, updateNodeDataStable],
+    [setNodes, appendLog, isStageDeck, openDirector3dForBlock, viewMode, updateNodeDataStable, syncSelectedBlockId],
   );
 
   return (
     <div
-      className={`relative h-full w-full ${flowClass}`}
+      className={`relative h-full w-full ${flowClass} ${canvasAppearance.theme === 'dark' ? 'nx9-theme-dark' : ''}`}
+      style={canvasAppearance.theme === 'dark' ? { background: '#181715' } : undefined}
       onDragOver={onDragOver}
       onDrop={onDrop}
       onDoubleClick={onPaneDoubleClick}
@@ -1428,11 +1592,23 @@ const FlowSurfaceInner = memo(function FlowSurfaceInner({
         </div>
       )}
       {isStageDeck && ready && nodes.length === 0 && !recipePickerDismissed && (
-        <RecipePickerOverlay
-          onPick={(id) => void loadWorkflowTemplate(id, 'replace')}
-          onBlank={() => setRecipePickerDismissed(true)}
+        <PlaybookLauncherOverlay
+          onStartPlaybook={(playbookId) => {
+            const def = PLAYBOOK_DEFINITIONS.find((p) => p.id === playbookId);
+            if (!def) return;
+            useWorkspaceDocument.getState().startPlaybook(playbookId);
+            if (def.bootstrapTemplates.length > 0) {
+              void loadWorkflowTemplate(def.bootstrapTemplates[0].templateId, 'replace');
+            }
+            setRecipePickerDismissed(true);
+          }}
+          onOpenLibrary={() => {
+            setRecipePickerDismissed(true);
+          }}
+          onDismiss={() => setRecipePickerDismissed(true)}
         />
       )}
+      {isStageDeck && ready && <CanvasFlowRail />}
       <ReactFlow
         nodes={nodes}
         edges={edges}
@@ -1477,7 +1653,20 @@ const FlowSurfaceInner = memo(function FlowSurfaceInner({
         nodesDraggable
         elevateNodesOnSelect={!effectiveIntensive}
       >
-        <Background variant={BackgroundVariant.Dots} gap={PERF.gridStep} size={1} color="#E6E6E6" />
+        {canvasAppearance.gridStyle === 'blank' ? null : canvasAppearance.gridStyle === 'lines' ? (
+          <Background variant={BackgroundVariant.Lines} gap={PERF.gridStep} size={1} color={canvasAppearance.theme === 'dark' ? 'rgba(255,255,255,0.06)' : '#E0E0E0'} />
+        ) : (
+          <Background variant={BackgroundVariant.Dots} gap={PERF.gridStep} size={1} color={canvasAppearance.theme === 'dark' ? 'rgba(255,255,255,0.08)' : '#E6E6E6'} />
+        )}
+        {canvasAppearance.backgroundImageUrl && (
+          <div
+            className="absolute inset-0 pointer-events-none bg-cover bg-center"
+            style={{
+              backgroundImage: `url(${canvasAppearance.backgroundImageUrl})`,
+              opacity: canvasAppearance.backgroundImageOpacity ?? 0.35,
+            }}
+          />
+        )}
         {isStageDeck && <LaneBackground />}
         {isStageDeck && <SmartGuides guides={smartGuides} />}
         {!effectiveIntensive && <MiniMap pannable zoomable className="!bottom-4 !right-4" />}
@@ -1567,6 +1756,11 @@ const FlowSurfaceInner = memo(function FlowSurfaceInner({
             const id = contextMenu.ids[0];
             if (id) void runCascade(id);
           }}
+          rerunDownstreamEnabled={contextMenu.ids.some((id) => {
+            const n = nodes.find((node) => node.id === id);
+            return Boolean(n?.type && RUNNABLE_BLOCKS.has(n.type));
+          })}
+          onRerunDownstream={() => void runSelectedDownstream(contextMenu.ids)}
           onToggleExpand={() => {
             const id = contextMenu.ids[0];
             const node = nodes.find((n) => n.id === id);

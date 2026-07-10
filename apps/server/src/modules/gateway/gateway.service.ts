@@ -54,6 +54,44 @@ export class GatewayService {
     return (override || 'https://api.openai.com/v1').replace(/\/$/, '');
   }
 
+  async proxyLlmStream(
+    messages: { role: string; content: string }[],
+    userId: string | undefined,
+    onChunk: (text: string) => void,
+  ): Promise<string> {
+    const apiKey = this.apiKey('llm');
+    if (!apiKey) throw new BadRequestException('LLM API key not configured');
+    const baseUrl = this.baseUrl();
+    const res = await fetch(`${baseUrl}/chat/completions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+      body: JSON.stringify({ model: 'gpt-4o-mini', messages, stream: true }),
+    });
+    if (!res.ok) {
+      const text = await res.text();
+      throw new ServiceUnavailableException(`LLM stream error: ${text.slice(0, 300)}`);
+    }
+    const reader = res.body?.getReader();
+    if (!reader) throw new ServiceUnavailableException('No response body');
+    const decoder = new TextDecoder();
+    let full = '';
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      const chunk = decoder.decode(value, { stream: true });
+      for (const line of chunk.split('\n').filter((l) => l.startsWith('data: '))) {
+        const json = line.slice(6).trim();
+        if (json === '[DONE]') continue;
+        try {
+          const parsed = JSON.parse(json) as { choices?: { delta?: { content?: string } }[] };
+          const text = parsed.choices?.[0]?.delta?.content ?? '';
+          if (text) { full += text; onChunk(text); }
+        } catch { /* ignore parse errors */ }
+      }
+    }
+    return full;
+  }
+
   async proxyLlm(body: Record<string, unknown>, userId?: string) {
     const apiKey = this.apiKey('llm');
     if (!apiKey) throw new BadRequestException('LLM API key not configured');
@@ -89,6 +127,7 @@ export class GatewayService {
   async proxyImage(body: Record<string, unknown>, userId?: string): Promise<{
     ok: boolean;
     url: string;
+    urls?: string[];
     revisedPrompt?: string;
   }> {
     const apiKey = this.apiKey('image');
@@ -100,6 +139,7 @@ export class GatewayService {
     const baseUrl = this.baseUrl(body.baseUrl as string);
     const model = (body.model as string) || 'dall-e-3';
     const size = (body.size as string) || '1024x1024';
+    const n = Math.min(4, Math.max(1, (body.n as number) || 1));
 
     const res = await fetch(`${baseUrl}/images/generations`, {
       method: 'POST',
@@ -107,7 +147,7 @@ export class GatewayService {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${apiKey}`,
       },
-      body: JSON.stringify({ model, prompt, n: 1, size, response_format: 'b64_json' }),
+      body: JSON.stringify({ model, prompt, n, size, response_format: 'b64_json' }),
     });
 
     if (!res.ok) {
@@ -118,27 +158,33 @@ export class GatewayService {
     const json = (await res.json()) as {
       data?: { b64_json?: string; url?: string; revised_prompt?: string }[];
     };
-    const item = json.data?.[0];
-    if (!item) throw new ServiceUnavailableException('Empty image response');
+    if (!json.data?.length) throw new ServiceUnavailableException('Empty image response');
 
-    if (!existsSync(PATHS.images)) mkdirSync(PATHS.images, { recursive: true });
-    const name = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}.png`;
+    const urls: string[] = [];
+    for (const item of json.data) {
+      if (!existsSync(PATHS.images)) mkdirSync(PATHS.images, { recursive: true });
+      const name = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}.png`;
 
-    if (item.b64_json) {
-      writeFileSync(join(PATHS.images, name), Buffer.from(item.b64_json, 'base64'));
-    } else if (item.url) {
-      const imgRes = await fetch(item.url);
-      if (!imgRes.ok) throw new ServiceUnavailableException('Failed to download image URL');
-      writeFileSync(join(PATHS.images, name), Buffer.from(await imgRes.arrayBuffer()));
-    } else {
-      throw new ServiceUnavailableException('No image data in response');
+      if (item.b64_json) {
+        writeFileSync(join(PATHS.images, name), Buffer.from(item.b64_json, 'base64'));
+      } else if (item.url) {
+        const imgRes = await fetch(item.url);
+        if (!imgRes.ok) throw new ServiceUnavailableException('Failed to download image URL');
+        writeFileSync(join(PATHS.images, name), Buffer.from(await imgRes.arrayBuffer()));
+      } else {
+        continue;
+      }
+      urls.push(`/media/images/${encodeURIComponent(name)}`);
     }
+
+    if (urls.length === 0) throw new ServiceUnavailableException('No image data in response');
 
     void this.track('image', { userId, model });
     return {
       ok: true,
-      url: `/media/images/${encodeURIComponent(name)}`,
-      revisedPrompt: item.revised_prompt,
+      url: urls[0],
+      urls,
+      revisedPrompt: json.data[0].revised_prompt,
     };
   }
 
@@ -164,6 +210,10 @@ export class GatewayService {
 
     const payload: Record<string, unknown> = { model, prompt };
     if (body.imageUrl) payload.image_url = body.imageUrl;
+    if (body.size) payload.size = body.size;
+    if (body.aspect_ratio) payload.aspect_ratio = body.aspect_ratio;
+    if (body.duration) payload.duration = body.duration;
+    if (body.resolution) payload.resolution = body.resolution;
 
     const res = await fetch(`${baseUrl}/videos/generations`, {
       method: 'POST',
@@ -527,6 +577,38 @@ export class GatewayService {
     };
   }
 
+  async probeProviders() {
+    const cfg = this.settings.getRaw();
+    const providers = cfg.advancedProviders ?? [];
+    const results = await Promise.all(
+      providers.filter((p) => p.enabled !== false).map(async (p) => {
+        if (p.protocol === 'openai-compat' && p.baseUrl && p.apiKey) {
+          try {
+            const res = await fetch(`${p.baseUrl.replace(/\/+$/, '')}/v1/models`, {
+              headers: { Authorization: `Bearer ${p.apiKey}` },
+              signal: AbortSignal.timeout(8000),
+            });
+            if (!res.ok) {
+              return { id: p.id, label: p.label, available: false, message: `HTTP ${res.status}` };
+            }
+            const json = (await res.json()) as { data?: { id: string }[] };
+            const models = json.data?.map((m) => m.id) ?? [];
+            return { id: p.id, label: p.label, available: true, models, message: `可用模型: ${models.length} 个` };
+          } catch (e) {
+            return { id: p.id, label: p.label, available: false, message: String(e) };
+          }
+        }
+        try {
+          const res = await fetch(p.baseUrl ?? '', { method: 'HEAD', signal: AbortSignal.timeout(5000) });
+          return { id: p.id, label: p.label, available: res.ok, message: res.ok ? '已连接' : `HTTP ${res.status}` };
+        } catch (e) {
+          return { id: p.id, label: p.label, available: false, message: String(e) };
+        }
+      }),
+    );
+    return { providers: results };
+  }
+
   private mediaUrlToDataUri(url: string): string {
     const local = resolveMediaUrl(url);
     if (!local) throw new BadRequestException(`无法解析本地媒体: ${url}`);
@@ -596,7 +678,51 @@ export class GatewayService {
       return { ok: true, url: saved, output: json };
     }
 
+    const requestId =
+      (json.request_id as string) ||
+      (json.requestId as string) ||
+      (json.id as string);
+    const status = (json.status as string) || '';
+    if (requestId && /inprogress|queued|processing/i.test(status)) {
+      return this.pollFalRequest(model, requestId, apiKey, userId);
+    }
+    if (status && /inprogress|queued|processing/i.test(status) && !requestId) {
+      throw new ServiceUnavailableException(`Fal 任务已排队但缺少 request_id，无法轮询：${status}`);
+    }
+
     return { ok: true, output: json };
+  }
+
+  private async pollFalRequest(
+    model: string,
+    requestId: string,
+    apiKey: string,
+    userId?: string,
+  ): Promise<{ ok: boolean; url?: string; output?: Record<string, unknown> }> {
+    for (let i = 0; i < 30; i++) {
+      await new Promise((r) => setTimeout(r, 3000));
+      const pollRes = await fetch(`https://fal.run/${model}/requests/${requestId}`, {
+        method: 'GET',
+        headers: { Authorization: `Key ${apiKey}` },
+      });
+      if (!pollRes.ok) continue;
+      const json = (await pollRes.json()) as Record<string, unknown>;
+      const imageUrl =
+        (json.image as { url?: string })?.url ||
+        (json.images as { url?: string }[])?.[0]?.url ||
+        (json.output as { url?: string })?.url ||
+        (typeof json.url === 'string' ? json.url : undefined);
+      if (imageUrl) {
+        const saved = await this.saveRemoteImage(imageUrl, 'fal');
+        void this.track('image', { userId, model: `fal:${model}` });
+        return { ok: true, url: saved, output: json };
+      }
+      const status = (json.status as string) || '';
+      if (/error|failed|cancel/i.test(status)) {
+        throw new ServiceUnavailableException(`Fal 任务失败：${status}`);
+      }
+    }
+    throw new ServiceUnavailableException('Fal 任务轮询超时（90s），请稍后在客户端重试查询');
   }
 
   private resolveComfyBaseUrl(override?: string): string {

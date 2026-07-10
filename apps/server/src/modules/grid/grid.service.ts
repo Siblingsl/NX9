@@ -3,10 +3,12 @@ import { readFileSync } from 'fs';
 import { join } from 'path';
 import sharp from 'sharp';
 import type { GridCellPrompt } from '@nx9/shared';
+import { buildLineArtGridPrompt, buildLineArtShotPrompt } from '@nx9/shared';
 import { PATHS } from '../../config/app.config';
 import { resolveMediaUrl } from '../../common/media-path';
 import { AssetsService } from '../assets/assets.service';
 import { GatewayService } from '../gateway/gateway.service';
+import { SettingsService } from '../settings/settings.service';
 
 @Injectable()
 export class GridService {
@@ -75,15 +77,17 @@ export class GridService {
     return { ok: true, url: `/media/images/${name}`, rows, cols };
   }
 
-  async generateStoryGrid(prompt: string, rows = 3, cols = 3) {
-    const gridPrompt = [
-      prompt.trim(),
-      `cinematic storyboard contact sheet, ${rows}x${cols} panel grid layout,`,
-      'consistent characters, numbered panels left-to-right top-to-bottom,',
-      'no borders text or watermarks, production storyboard style',
-    ]
-      .filter(Boolean)
-      .join(' ');
+  async generateStoryGrid(prompt: string, rows = 3, cols = 3, style: 'cinematic' | 'line-art' = 'cinematic') {
+    const gridPrompt = style === 'line-art'
+      ? buildLineArtGridPrompt(prompt, rows, cols)
+      : [
+          prompt.trim(),
+          `cinematic storyboard contact sheet, ${rows}x${cols} panel grid layout,`,
+          'consistent characters, numbered panels left-to-right top-to-bottom,',
+          'no borders text or watermarks, production storyboard style',
+        ]
+          .filter(Boolean)
+          .join(' ');
 
     const generated = await this.gateway.proxyImage({
       prompt: gridPrompt,
@@ -97,7 +101,36 @@ export class GridService {
       prompt: gridPrompt,
       rows,
       cols,
-      message: '已通过图像 API 生成分镜宫格',
+      style,
+      message: style === 'line-art' ? '已生成线稿分镜宫格' : '已通过图像 API 生成分镜宫格',
+    };
+  }
+
+  async generateShotSketch(body: {
+    descriptionZh: string;
+    promptEn?: string;
+    shotType?: string;
+    artStylePrompt?: string;
+  }) {
+    const shotPrompt = buildLineArtShotPrompt(
+      body.promptEn || body.descriptionZh,
+      body.shotType,
+    );
+    const finalPrompt = body.artStylePrompt
+      ? `${shotPrompt}, ${body.artStylePrompt}`
+      : shotPrompt;
+
+    const generated = await this.gateway.proxyImage({
+      prompt: finalPrompt,
+      model: 'dall-e-3',
+      size: '1024x1024',
+    });
+
+    return {
+      ok: true,
+      url: generated.url,
+      prompt: finalPrompt,
+      message: '已生成单镜线稿',
     };
   }
 

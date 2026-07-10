@@ -1,24 +1,34 @@
 import { Terminal, X } from 'lucide-react';
 import { useActivityLog } from '../stores/activity-log';
 
+export function LogDockButton() {
+  const { open, toggle } = useActivityLog();
+
+  return (
+    <button
+      type="button"
+      title="活动日志"
+      aria-label="活动日志"
+      onClick={() => toggle()}
+      className={`w-9 h-9 rounded-xl flex items-center justify-center transition-colors ${
+        open ? 'bg-brand/10 text-brand' : 'hover:bg-surface text-ink/60'
+      }`}
+    >
+      <Terminal size={18} />
+    </button>
+  );
+}
+
 export function LogPanel() {
   const { lines, open, toggle, clear } = useActivityLog();
 
-  if (!open) {
-    return (
-      <button
-        type="button"
-        onClick={() => toggle(true)}
-        className="fixed bottom-4 right-4 z-40 flex items-center gap-2 rounded-full bg-ink text-white px-4 py-2 text-sm shadow-panel hover:bg-ink/90"
-      >
-        <Terminal size={16} />
-        日志
-      </button>
-    );
-  }
+  if (!open) return null;
 
   return (
-    <div className="fixed bottom-0 left-0 right-0 z-40 h-48 bg-ink text-white/90 flex flex-col border-t border-white/10">
+    <div
+      className="fixed bottom-0 z-40 h-48 bg-ink text-white/90 flex flex-col border-t border-white/10"
+      style={{ left: 'var(--nx9-dock-width)', right: 'var(--nx9-rail-width)' }}
+    >
       <div className="flex items-center justify-between px-4 py-2 border-b border-white/10">
         <span className="text-xs font-mono uppercase tracking-wider text-white/60">Activity Log</span>
         <div className="flex gap-2">

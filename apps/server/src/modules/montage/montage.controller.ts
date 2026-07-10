@@ -1,13 +1,30 @@
-import { Body, Controller, Get, Post } from '@nestjs/common';
-import type { StoryboardShot } from '@nx9/shared';
+import { Body, Controller, Get, Param, Post, Query, Res } from '@nestjs/common';
+import { Response } from 'express';
+import type { StoryboardShot, TimelinePayload } from '@nx9/shared';
+import { buildTimelineFromShots, timelineToHyperFramesHtml } from '@nx9/shared';
 import { AnalyzeService } from './analyze.service';
 import { MontageService } from './montage.service';
+import { HyperframesService, type RenderResult } from './hyperframes.service';
+import { WorkspaceService } from '../workspace/workspace.service';
+
+interface RemotionTask {
+  taskId: string;
+  status: 'queued' | 'processing' | 'done' | 'failed';
+  progress: number;
+  message: string;
+  createdAt: number;
+  url?: string;
+}
+
+const remotionTasks = new Map<string, RemotionTask>();
 
 @Controller('api/montage')
 export class MontageController {
   constructor(
     private readonly montage: MontageService,
     private readonly analyze: AnalyzeService,
+    private readonly hyperframes: HyperframesService,
+    private readonly workspace: WorkspaceService,
   ) {}
 
   @Get('ffmpeg')
@@ -17,13 +34,13 @@ export class MontageController {
   }
 
   @Post('contact-sheet')
-  contactSheet(@Body() body: { shots: StoryboardShot[]; cols?: number }) {
-    return this.montage.createContactSheet(body.shots ?? [], body.cols ?? 3);
+  contactSheet(@Body() body: { shots: StoryboardShot[]; cols?: number; lineArt?: boolean }) {
+    return this.montage.createContactSheet(body.shots ?? [], body.cols ?? 3, body.lineArt ?? false);
   }
 
   @Post('review-gate')
-  reviewGate(@Body() body: { shots: StoryboardShot[] }) {
-    return this.montage.validateReviewGate(body.shots ?? []);
+  reviewGate(@Body() body: { shots: StoryboardShot[]; gateMode?: string }) {
+    return this.montage.validateReviewGate(body.shots ?? [], body.gateMode);
   }
 
   @Post('render-shot')
@@ -60,23 +77,30 @@ export class MontageController {
   }
 
   @Post('export-timeline')
-  exportTimeline(@Body() body: { shots: StoryboardShot[]; title?: string }) {
-    return this.montage.exportTimeline(body.shots ?? [], body.title);
+  exportTimeline(@Body() body: { shots: StoryboardShot[]; title?: string; transcribeCues?: { start: number; end: number; text: string }[] }) {
+    return this.montage.exportTimeline(body.shots ?? [], body.title, body.transcribeCues);
   }
 
   @Post('concat-episode')
   concatEpisode(
-    @Body() body: { shots: StoryboardShot[]; requireApproved?: boolean; title?: string },
+    @Body()
+    body: {
+      shots: StoryboardShot[];
+      requireApproved?: boolean;
+      title?: string;
+      audioUrl?: string;
+    },
   ) {
     return this.montage.concatEpisode(body.shots ?? [], {
       requireApproved: body.requireApproved,
       title: body.title,
+      audioUrl: body.audioUrl,
     });
   }
 
   @Post('concat-clips')
-  concatClips(@Body() body: { videoUrls: string[]; title?: string }) {
-    return this.montage.concatClips(body.videoUrls ?? [], body.title);
+  concatClips(@Body() body: { videoUrls: string[]; title?: string; transition?: string }) {
+    return this.montage.concatClips(body.videoUrls ?? [], body.title, body.transition);
   }
 
   @Post('extract-frames')
@@ -125,5 +149,64 @@ export class MontageController {
   @Post('depth-pass')
   depthPass(@Body() body: { sourceUrl: string }) {
     return this.montage.generateDepthPass(body);
+  }
+
+  @Post('transcribe')
+  transcribe(@Body() body: { sourceUrl: string; language?: string }) {
+    return this.montage.transcribeAudio(body.sourceUrl ?? '', body.language);
+  }
+
+  @Get('hyperframes-preview')
+  async hyperframesPreview(
+    @Query('workspaceId') workspaceId: string,
+    @Res() res: Response,
+  ) {
+    if (!workspaceId) {
+      res.type('text/html').send('<!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8"/><title>HF Preview</title></head><body><p style="padding:40px;color:red;">缺少 workspaceId 参数</p></body></html>');
+      return;
+    }
+    const payload = await this.workspace.load(workspaceId);
+    const shots = payload.storyboard?.shots ?? [];
+    const timeline = buildTimelineFromShots(shots, payload.storyboard?.title);
+    const html = timelineToHyperFramesHtml(timeline);
+    res.type('text/html').send(html);
+  }
+
+  @Post('render-hyperframes')
+  renderHyperframes(
+    @Body() body: { timeline: TimelinePayload; templateId?: string; transitionPack?: string },
+  ) {
+    return this.hyperframes.renderTimeline(body.timeline, {
+      templateId: body.templateId,
+      transitionPack: body.transitionPack,
+    });
+  }
+
+  @Get('tasks/:taskId')
+  getTaskStatus(@Param('taskId') taskId: string) {
+    const status = this.hyperframes.getTaskStatus(taskId);
+    if (!status) return { ok: false, message: 'task not found' };
+    return { ok: true, ...status };
+  }
+
+  @Post('render-remotion')
+  renderRemotion(@Body() body: { timeline: TimelinePayload; codec?: string }) {
+    const taskId = `remotion-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const task: RemotionTask = {
+      taskId,
+      status: 'queued',
+      progress: 0,
+      message: 'Remotion 渲染已入队（P2 功能，当前为异步任务骨架）',
+      createdAt: Date.now(),
+    };
+    remotionTasks.set(taskId, task);
+    return { ok: true, taskId, status: 'queued', message: task.message };
+  }
+
+  @Get('remotion-tasks/:taskId')
+  getRemotionTaskStatus(@Param('taskId') taskId: string) {
+    const task = remotionTasks.get(taskId);
+    if (!task) return { ok: false, message: 'task not found' };
+    return { ok: true, ...task };
   }
 }

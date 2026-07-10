@@ -1,6 +1,6 @@
 import { memo, useCallback, useMemo, useRef } from 'react';
 import { type NodeProps, useEdges, useNodes, useReactFlow } from '@xyflow/react';
-import { gatherUpstream } from '@nx9/shared';
+import { gatherUpstream, AUDIO_FORMAT_OPTIONS, SPEECH_RATE_OPTIONS } from '@nx9/shared';
 import { BlockShell } from '../shared/BlockShell';
 import { GenUpstreamHint } from '../shared/backlot-template-picker';
 import { GenFallbackTemplate } from '../shared/gen-fallback-template';
@@ -9,6 +9,7 @@ import { api } from '../../api/client';
 import { useActivityLog } from '../../stores/activity-log';
 import { MentionEditor } from '../../engine/stage-deck/chrome/MentionEditor';
 import { useWorkspaceDocument } from '../../stores/workspace-document';
+import GenSettingsPills from '../shared/GenSettingsPills';
 
 const CLOUD_VOICES = ['alloy', 'echo', 'fable', 'onyx', 'nova', 'shimmer'] as const;
 
@@ -23,6 +24,8 @@ function SoundGenBlock(props: NodeProps) {
   const upstreamPrompt = (props.data?.upstreamPrompt as string) ?? '';
   const provider = (props.data?.provider as string) ?? 'cloud';
   const voice = (props.data?.voice as string) ?? 'alloy';
+  const audioFormat = (props.data?.audioFormat as string) ?? 'mp3';
+  const speechRate = (props.data?.speechRate as number) ?? 1;
   const characterId = (props.data?.characterId as string) ?? '';
   const referenceAudioUrl = (props.data?.referenceAudioUrl as string) ?? '';
   const backlotTemplateId = props.data?.backlotTemplateId as string | undefined;
@@ -80,6 +83,8 @@ function SoundGenBlock(props: NodeProps) {
         useLuxTts: provider === 'luxtts',
         referenceAudioUrl: provider === 'luxtts' ? luxRef : undefined,
         luxTtsProfileId: selectedChar?.id,
+        response_format: audioFormat,
+        speed: speechRate,
       });
       updateNodeData(props.id, {
         status: 'done',
@@ -103,6 +108,8 @@ function SoundGenBlock(props: NodeProps) {
     text,
     provider,
     voice,
+    audioFormat,
+    speechRate,
     luxRef,
     selectedChar?.id,
     nodes,
@@ -145,6 +152,13 @@ function SoundGenBlock(props: NodeProps) {
           }
           className="w-full min-h-[64px] rounded-xl border border-line bg-surface px-2 py-1.5 text-sm resize-y focus:outline-none focus:border-brand/40"
         />
+        <textarea
+          value={(props.data?.instructions as string) ?? ''}
+          onChange={(e) => updateNodeData(props.id, { instructions: e.target.value })}
+          placeholder="声音指令（情绪/语调/语速变化等）…"
+          className="w-full rounded-lg border border-line px-2 py-1.5 text-[10px] resize-y"
+          rows={2}
+        />
         <label className="flex items-center gap-2 text-xs text-ink/70">
           引擎
           <select
@@ -156,6 +170,36 @@ function SoundGenBlock(props: NodeProps) {
             <option value="luxtts">LuxTTS 声线克隆</option>
           </select>
         </label>
+        <GenSettingsPills
+          label="格式"
+          options={AUDIO_FORMAT_OPTIONS}
+          value={audioFormat}
+          onChange={(v) => updateNodeData(props.id, { audioFormat: v })}
+        />
+        <GenSettingsPills
+          label="语速"
+          options={[...SPEECH_RATE_OPTIONS, { id: 'custom', label: '自定义' }]}
+          value={SPEECH_RATE_OPTIONS.some((o) => Number(o.id) === speechRate) ? String(speechRate) : 'custom'}
+          onChange={(v) => updateNodeData(props.id, { speechRate: v === 'custom' ? 1 : Number(v) })}
+        />
+        {!SPEECH_RATE_OPTIONS.some((o) => Number(o.id) === speechRate) && (
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] text-ink/50">自定义</span>
+            <input
+              type="range"
+              min={0.25}
+              max={4}
+              step={0.05}
+              value={speechRate}
+              onChange={(e) => updateNodeData(props.id, { speechRate: Number(e.target.value) })}
+              className="flex-1 accent-brand"
+            />
+            <span className="text-[10px] font-mono text-ink/60 w-8 text-right">{speechRate.toFixed(2)}x</span>
+          </div>
+        )}
+        {provider === 'luxtts' && !['mp3', 'wav'].includes(audioFormat) && (
+          <p className="text-[10px] text-warn">LuxTTS 可能不支持 {audioFormat.toUpperCase()} 格式，建议用 MP3 或 WAV</p>
+        )}
         {provider === 'cloud' ? (
           <label className="flex items-center gap-2 text-xs text-ink/70">
             音色

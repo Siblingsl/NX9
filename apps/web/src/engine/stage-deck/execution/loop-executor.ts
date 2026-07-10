@@ -300,9 +300,10 @@ export async function runCascadeWithLoop(options: LoopCascadeOptions): Promise<v
   };
 
   if (config.loopMode === 'parallel' && config.effectiveRounds > 1) {
-    await Promise.all(
-      Array.from({ length: config.effectiveRounds }, (_, round) => runRound(round)),
-    );
+    for (let round = 0; round < config.effectiveRounds; round++) {
+      if (signal?.cancelled) return;
+      await runRound(round);
+    }
   } else {
     for (let round = 0; round < config.effectiveRounds; round++) {
       if (signal?.cancelled) return;

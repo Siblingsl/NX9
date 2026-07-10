@@ -1,6 +1,6 @@
 import { memo, useCallback } from 'react';
 import { type NodeProps, useReactFlow } from '@xyflow/react';
-import { Box } from 'lucide-react';
+import { Box, Image } from 'lucide-react';
 import {
   emptyDirectorProject,
   normalizeDirectorProject,
@@ -8,18 +8,28 @@ import {
 } from '@nx9/director3d';
 import { BlockShell } from '../shared/BlockShell';
 import { useDirector3dUi } from '../../stores/director3d-ui';
+import { useWorkspaceDocument } from '../../stores/workspace-document';
 
 function Director3dBlock(props: NodeProps) {
   const openForBlock = useDirector3dUi((s) => s.openForBlock);
+  const setHostBridge = useDirector3dUi((s) => s.setHostBridge);
+  const storyboardShots = useWorkspaceDocument((s) => s.storyboard.shots);
   const project = normalizeDirectorProject(props.data?.scene);
   const linkedShotId = props.data?.linkedShotId as string | undefined;
   const lastCaptureUrl = props.data?.lastCaptureUrl as string | undefined;
   const activeCam = project.cameras.find((c) => c.id === project.activeCameraId);
   const captureCount = project.cameras.reduce((n, c) => n + c.captures.length, 0);
 
+  const linkedShot = linkedShotId ? storyboardShots.find((s) => s.id === linkedShotId) : undefined;
+  const lineArtUrl = linkedShot?.firstFrameAssetId;
+
   const open = useCallback(() => {
-    openForBlock(props.id, project, linkedShotId);
-  }, [openForBlock, props.id, project, linkedShotId]);
+    const base = lineArtUrl
+      ? { ...project, panorama: { url: lineArtUrl, yaw: 0, exposure: 1 } }
+      : project;
+    openForBlock(props.id, base, linkedShotId);
+    if (lineArtUrl) setHostBridge(lineArtUrl);
+  }, [openForBlock, setHostBridge, props.id, project, linkedShotId, lineArtUrl]);
 
   return (
     <BlockShell {...props}>
@@ -43,6 +53,11 @@ function Director3dBlock(props: NodeProps) {
           {project.objects.filter((o) => o.kind === 'character').length} · 机位{' '}
           {project.cameras.length} · 截图 {captureCount}
         </p>
+        {lineArtUrl && (
+          <p className="text-[10px] text-accent/70 flex items-center gap-1">
+            <Image size={12} /> 已绑定线稿背景参考
+          </p>
+        )}
         {activeCam?.captures[activeCam.captures.length - 1]?.cameraPrompt && (
           <p className="text-[10px] text-ink/40 line-clamp-2">
             机位: {activeCam.captures[activeCam.captures.length - 1].cameraPrompt}

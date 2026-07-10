@@ -87,6 +87,58 @@ export async function runCascadeFromBlock(options: CascadeRunOptions): Promise<v
   }
 }
 
+/**
+ * EPIC-W01: 仅重跑某节点及其下游链（不含上游），用于上游变更后刷新 stale 下游。
+ */
+export async function runDownstreamFromBlock(options: CascadeRunOptions): Promise<void> {
+  const { blockId, nodes, edges, setEdges, updateNodeData, onProgress, signal } = options;
+
+  const scope = new Set<string>([blockId]);
+  const queue = [blockId];
+  while (queue.length > 0) {
+    const id = queue.shift()!;
+    for (const e of edges) {
+      if (e.source === id && !scope.has(e.target)) {
+        scope.add(e.target);
+        queue.push(e.target);
+      }
+    }
+  }
+
+  const runnable = new Set(
+    [...scope].filter((id) => {
+      const n = nodes.find((node) => node.id === id);
+      return n?.type && RUNNABLE_BLOCKS.has(n.type);
+    }),
+  );
+  if (runnable.size === 0) return;
+
+  const wrappedUpdate = (id: string, data: Record<string, unknown>) => {
+    if (data.status === 'running') {
+      setEdges((prev) => markCascadeEdge(prev, id, scope));
+    }
+    updateNodeData(id, data);
+  };
+
+  try {
+    await runFlowBatch(
+      nodes,
+      edges,
+      wrappedUpdate,
+      (p) => {
+        if (p.currentId) {
+          setEdges((prev) => markCascadeEdge(prev, p.currentId!, scope));
+        }
+        onProgress?.(p);
+      },
+      signal,
+      runnable,
+    );
+  } finally {
+    setEdges((prev) => clearCascadeEdges(prev));
+  }
+}
+
 /** @deprecated use filterBlocksForWireDrop from wire-drop.ts */
 export function filterBlockKindsForHandle(
   sourceHandle: string | null | undefined,

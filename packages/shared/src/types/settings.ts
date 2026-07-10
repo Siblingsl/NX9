@@ -22,6 +22,14 @@ export interface AppPreferences {
   reduceMotion: boolean;
   /** Use Stage Deck Canvas instead of legacy FlowSurface */
   stageDeckCanvas?: boolean;
+  /** 默认图像质量 */
+  defaultImageQuality?: 'auto' | 'high' | 'medium' | 'low';
+  /** 默认图像宽高比 */
+  defaultImageAspect?: string;
+  /** 默认视频分辨率 */
+  defaultVideoResolution?: '480' | '720' | '1080';
+  /** 默认视频时长 */
+  defaultVideoDuration?: number;
 }
 
 /** LuxTTS 无 GPU 时的用户保底选择 */

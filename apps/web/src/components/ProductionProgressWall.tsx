@@ -16,7 +16,7 @@ export function ProductionProgressWall() {
 
   return (
     <div
-      className="shrink-0 border-b border-line bg-gradient-to-r from-brand/5 via-white to-brand/5 px-5 py-2"
+      className="shrink-0 border-b border-line/60 bg-gradient-to-r from-brand/4 via-white to-brand/4 px-4 py-2"
       role="status"
       aria-live="polite"
     >

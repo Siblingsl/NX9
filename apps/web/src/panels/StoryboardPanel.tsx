@@ -15,14 +15,23 @@ import {
   Clock,
   Link2,
   Layers,
+  Pencil,
+  Sparkles,
+  Upload,
 } from 'lucide-react';
-import { parseStoryboardMarkdown, parseChineseScript, scenesToStoryboardShots, suggestShotGroups, type StoryboardShot } from '@nx9/shared';
+import { buildTimelineFromShots, buildTimelineFromShotsV2, type TranscribeCue, parseStoryboardMarkdown, parseChineseScript, scenesToStoryboardShots, suggestShotGroups, type StoryboardShot } from '@nx9/shared';
 import { useWorkspaceDocument } from '../stores/workspace-document';
-import { useStoryboardUi, useFlowRuntime } from '../stores/flow-runtime';
+import { useStoryboardUi, useFlowRuntime, useRemotionUi } from '../stores/flow-runtime';
 import { useBacklotLibraryUi } from '../stores/backlot-library-ui';
 import { useActivityLog } from '../stores/activity-log';
+import { useTakeStore } from '../engine/stage-deck/stores/take-store';
 import { api } from '../api/client';
 import { StoryboardShotMenu } from './StoryboardShotMenu';
+import ImageUploadSlot from '../blocks/shared/ImageUploadSlot';
+
+function artStyleFromPrefs(): string | undefined {
+  try { return localStorage.getItem('nx9-art-style') || undefined; } catch { return undefined; }
+}
 
 const STATUS_LABEL: Record<string, string> = {
   draft: '草稿',
@@ -69,6 +78,7 @@ export function StoryboardPanel() {
   const backlotOpen = useBacklotLibraryUi((s) => s.open);
 
   const storyboard = useWorkspaceDocument((s) => s.storyboard);
+  const characters = useWorkspaceDocument((s) => s.characters);
   const voice = useWorkspaceDocument((s) => s.voice);
   const updateShot = useWorkspaceDocument((s) => s.updateShot);
   const addShots = useWorkspaceDocument((s) => s.addShots);
@@ -94,6 +104,7 @@ export function StoryboardPanel() {
   const [showImport, setShowImport] = useState(false);
   const [generatingVoice, setGeneratingVoice] = useState(false);
   const [shotMenu, setShotMenu] = useState<{ x: number; y: number; shotId: string } | null>(null);
+  const [sketchFilter, setSketchFilter] = useState<'all' | 'with-sketch'>('all');
 
   const openShotContext = useCallback(
     (e: React.MouseEvent, shotId: string) => {
@@ -110,6 +121,7 @@ export function StoryboardPanel() {
   const [refNotes, setRefNotes] = useState('');
   const [analyzing, setAnalyzing] = useState(false);
   const [checkedShotIds, setCheckedShotIds] = useState<Set<string>>(new Set());
+  const [takePickerShotId, setTakePickerShotId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!scrollToShotId || !open) return;
@@ -261,10 +273,9 @@ export function StoryboardPanel() {
     }
   }, [storyboard.shots, selectedShotId, voice.lines, appendLog]);
 
-  const filteredShots =
-    statusFilter === 'all'
-      ? storyboard.shots
-      : storyboard.shots.filter((s) => s.status === statusFilter);
+  const filteredShots = storyboard.shots
+    .filter((s) => statusFilter === 'all' || s.status === statusFilter)
+    .filter((s) => sketchFilter === 'all' || s.firstFrameAssetId != null);
 
   const handleAnalyzeReference = useCallback(async () => {
     if (!refVideoUrl.trim()) {
@@ -318,11 +329,60 @@ export function StoryboardPanel() {
     if (storyboard.shots.length === 0) return;
     setExporting(true);
     try {
-      const res = await api.exportTimelineJson(storyboard.shots, storyboard.title);
-      appendLog('时间线 JSON 已导出');
-      window.open(res.url, '_blank');
+      // 导出 Timeline v2（含 aspect、字幕轨）
+      const timeline = buildTimelineFromShots(storyboard.shots, storyboard.title);
+      const blob = new Blob([JSON.stringify(timeline, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `timeline-v2-${storyboard.title || 'episode'}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+      appendLog(`Timeline v2 已导出 · ${timeline.tracks.length} 轨 · version=${timeline.version}`);
     } catch (e) {
       appendLog(`时间线导出失败: ${String(e)}`);
+    } finally {
+      setExporting(false);
+    }
+  }, [storyboard, appendLog]);
+
+  const handleTranscribeToTimeline = useCallback(async () => {
+    const shotsWithAudio = storyboard.shots.filter((s) => s.audioAssetId);
+    if (shotsWithAudio.length === 0) {
+      appendLog('生成字幕轨：无配音素材的镜头');
+      return;
+    }
+    setExporting(true);
+    try {
+      const cues: TranscribeCue[] = [];
+      for (const shot of shotsWithAudio) {
+        const res = await api.transcribeAudio(shot.audioAssetId!, 'zh');
+        if (res.ok && res.cues) {
+          for (const c of res.cues) {
+            const shotStart = storyboard.shots
+              .sort((a, b) => a.index - b.index)
+              .filter((s) => s.index < shot.index)
+              .reduce((sum, s) => sum + (s.durationSec || 4), 0);
+            cues.push({
+              startSec: shotStart + c.start,
+              endSec: shotStart + c.end,
+              text: c.text,
+            });
+          }
+        }
+      }
+      if (cues.length === 0) {
+        appendLog('字幕轨生成：未识别到语音内容');
+        return;
+      }
+      // 写入 workspace timelineDraft 供后续使用
+      const result = buildTimelineFromShotsV2(storyboard.shots, storyboard.title, {
+        transcribeCues: cues,
+      });
+      useWorkspaceDocument.getState().setTimelineDraft(result);
+      appendLog(`字幕轨生成完成 · ${cues.length} 条 SRT cues，已写入 timelineDraft`);
+    } catch (e) {
+      appendLog(`字幕轨生成失败: ${String(e)}`);
     } finally {
       setExporting(false);
     }
@@ -412,14 +472,23 @@ export function StoryboardPanel() {
             >
               <Grid3x3 size={16} />
             </button>
-            <button
-              type="button"
-              onClick={() => setView('timeline')}
-              className={`p-1.5 rounded-lg ${view === 'timeline' ? 'bg-brand/10 text-brand' : 'text-ink/50'}`}
-              title="时间线"
-            >
-              <Clock size={16} />
-            </button>
+              <button
+                type="button"
+                onClick={() => useRemotionUi.getState().setOpen(true)}
+                className={`p-1.5 rounded-lg text-ink/50 hover:text-brand`}
+                title="成片工作室"
+              >
+                <Film size={16} />
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleTranscribeToTimeline()}
+                disabled={exporting || storyboard.shots.filter((s) => s.audioAssetId).length === 0}
+                className="flex items-center gap-1 text-xs px-2 py-1 rounded-lg border border-line hover:border-brand/40 disabled:opacity-40"
+                title="从配音生成字幕轨"
+              >
+                SR
+              </button>
             <select
               value={storyboard.reviewMode}
               onChange={(e) => setReviewMode(e.target.value as 'manual' | 'auto')}
@@ -454,10 +523,10 @@ export function StoryboardPanel() {
               onClick={() => void handleExportTimeline()}
               disabled={exporting || storyboard.shots.length === 0}
               className="flex items-center gap-1 text-xs px-2 py-1 rounded-lg border border-line hover:border-brand/40 disabled:opacity-40"
-              title="时间线 JSON"
-            >
-              JSON
-            </button>
+            title="时间线 JSON"
+          >
+            JSON
+          </button>
             <button
               type="button"
               onClick={() => setShowReference((v) => !v)}
@@ -533,6 +602,16 @@ export function StoryboardPanel() {
                 {f === 'all' ? '全部' : STATUS_LABEL[f]}
               </button>
             ))}
+            <div className="w-px h-4 bg-line mx-1" />
+            <button
+              type="button"
+              onClick={() => setSketchFilter((v) => (v === 'all' ? 'with-sketch' : 'all'))}
+              className={`px-2 py-0.5 rounded-full shrink-0 text-[10px] ${
+                sketchFilter === 'with-sketch' ? 'bg-brand/10 text-brand' : 'text-ink/50'
+              }`}
+            >
+              {sketchFilter === 'with-sketch' ? '线稿' : '全部'}
+            </button>
           </div>
 
           {showReference && (
@@ -634,12 +713,30 @@ export function StoryboardPanel() {
                     onContextMenu={(e) => openShotContext(e, shot.id)}
                   >
                     <div className="flex items-start gap-2">
+                      <div className="w-12 h-[27px] shrink-0 rounded border border-line overflow-hidden bg-surface flex items-center justify-center">
+                        {shot.firstFrameAssetId ? (
+                          <img
+                            src={shot.firstFrameAssetId}
+                            alt=""
+                            className="w-full h-full object-cover"
+                            onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
+                          />
+                        ) : (
+                          <Pencil size={12} className="text-ink/20" />
+                        )}
+                      </div>
                       <span className="text-xs font-mono text-brand shrink-0">#{shot.index}</span>
                       <div className="flex-1 min-w-0">
                         <p className="text-sm truncate">{shot.descriptionZh || shot.promptEn || '未命名'}</p>
                         <p className="text-[10px] text-ink/50 mt-0.5">
                           {shot.durationSec}s · {shot.shotType}
                         </p>
+                        {shot.videoDesc && (
+                          <p className="text-[9px] text-ink/40 truncate mt-0.5">{shot.videoDesc}</p>
+                        )}
+                        {shot.associateAssetIds && shot.associateAssetIds.length > 0 && (
+                          <p className="text-[9px] text-accent/60 truncate mt-0.5">资产: {shot.associateAssetIds.join(', ')}</p>
+                        )}
                       </div>
                       <span
                         className={`text-[10px] px-1.5 py-0.5 rounded-full shrink-0 ${STATUS_COLOR[shot.status]}`}
@@ -762,6 +859,41 @@ export function StoryboardPanel() {
                   >
                     打回
                   </button>
+                  <button
+                    type="button"
+                    disabled={checkedShotIds.size === 0}
+                    onClick={async () => {
+                      const ids = [...checkedShotIds].filter((id) => {
+                        const s = storyboard.shots.find((sh) => sh.id === id);
+                        return s && !s.firstFrameAssetId && (s.descriptionZh || s.promptEn);
+                      });
+                      if (ids.length === 0) {
+                        appendLog('选中镜头中无可用文本描述生成线稿');
+                        return;
+                      }
+                      appendLog(`开始批量生成 ${ids.length} 镜线稿…`);
+                      for (const id of ids) {
+                        const s = storyboard.shots.find((sh) => sh.id === id);
+                        if (!s) continue;
+                        updateShot(id, { status: 'generating' });
+                        try {
+                          const res = await api.gridShotSketch({
+                            descriptionZh: s.descriptionZh || '',
+                            promptEn: s.promptEn || undefined,
+                            shotType: s.shotType,
+                            artStylePrompt: artStyleFromPrefs(),
+                          });
+                          updateShot(id, { firstFrameAssetId: res.url, sketchSource: 'ai-single', sketchPrompt: res.prompt, status: 'review' });
+                        } catch {
+                          updateShot(id, { status: 'failed' });
+                        }
+                      }
+                      appendLog('批量线稿生成完毕');
+                    }}
+                    className="text-[10px] px-2 py-1 rounded-lg border border-accent text-accent disabled:opacity-40"
+                  >
+                    批量 AI 线稿
+                  </button>
                 </div>
                 <div className="grid grid-cols-2 gap-2">
                 {filteredShots.map((shot) => (
@@ -773,7 +905,7 @@ export function StoryboardPanel() {
                     onClick={() => selectShot(shot.id)}
                     onContextMenu={(e) => openShotContext(e, shot.id)}
                     onKeyDown={(e) => e.key === 'Enter' && selectShot(shot.id)}
-                    className={`relative rounded-xl border aspect-video flex flex-col items-center justify-center p-2 text-center cursor-pointer ${
+                    className={`relative rounded-xl border aspect-video flex flex-col items-center justify-center p-2 text-center cursor-pointer overflow-hidden ${
                       selectedShotId === shot.id ? 'border-brand bg-brand/5' : 'border-line'
                     } ${checkedShotIds.has(shot.id) ? 'ring-2 ring-brand/30' : ''}`}
                   >
@@ -788,49 +920,99 @@ export function StoryboardPanel() {
                         className="rounded border-line"
                       />
                     </label>
-                    <span className="text-lg font-mono text-brand">#{shot.index}</span>
-                    <p className="text-[10px] text-ink/60 line-clamp-2 mt-1">
-                      {shot.descriptionZh || '—'}
-                    </p>
-                    <span className={`text-[10px] mt-1 px-1 rounded ${STATUS_COLOR[shot.status]}`}>
+                    {shot.firstFrameAssetId ? (
+                      <img
+                        src={shot.firstFrameAssetId}
+                        alt=""
+                        className="absolute inset-0 w-full h-full object-cover"
+                        onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
+                      />
+                    ) : (
+                      <span className="flex flex-col items-center justify-center gap-1 text-ink/20">
+                        <span className="flex flex-col items-center justify-center">
+                          <Pencil size={24} />
+                          <span className="text-[9px] mt-1">无线稿</span>
+                        </span>
+                        {(shot.descriptionZh || shot.promptEn) && shot.status !== 'generating' && shot.status !== 'failed' && (
+                          <button
+                            type="button"
+                            onClick={async (e) => {
+                              e.stopPropagation();
+                              updateShot(shot.id, { status: 'generating' });
+                              try {
+                                const res = await api.gridShotSketch({
+                                  descriptionZh: shot.descriptionZh || '',
+                                  promptEn: shot.promptEn || undefined,
+                                  shotType: shot.shotType,
+                                  artStylePrompt: artStyleFromPrefs(),
+                                });
+                                updateShot(shot.id, { firstFrameAssetId: res.url, sketchSource: 'ai-single', sketchPrompt: res.prompt, status: 'review' });
+                              } catch {
+                                updateShot(shot.id, { status: 'failed' });
+                              }
+                            }}
+                            className="text-[10px] px-2 py-0.5 rounded bg-accent text-white hover:bg-accent/90 z-10"
+                          >
+                            生成线稿
+                          </button>
+                        )}
+                      </span>
+                    )}
+                    <span className={`absolute bottom-1.5 left-1.5 text-lg font-mono text-white drop-shadow-md ${shot.firstFrameAssetId ? '' : 'text-brand drop-shadow-none'}`}>
+                      #{shot.index}
+                    </span>
+                    <span className={`absolute bottom-1.5 right-1.5 text-[10px] px-1 rounded ${STATUS_COLOR[shot.status]}`}>
                       {STATUS_LABEL[shot.status]}
                     </span>
+                    {shot.linkedBlockId && useTakeStore.getState().getForBlock(shot.linkedBlockId).length > 0 && (
+                      <div className="absolute top-1.5 right-1.5 z-10" onClick={(e) => e.stopPropagation()}>
+                        <button
+                          type="button"
+                          onClick={() => setTakePickerShotId(takePickerShotId === shot.id ? null : shot.id)}
+                          className="text-[10px] px-1.5 py-0.5 rounded bg-accent text-white"
+                        >
+                          Take
+                        </button>
+                        {takePickerShotId === shot.id && (() => {
+                          const takes = useTakeStore.getState().getForBlock(shot.linkedBlockId!);
+                          return (
+                            <div className="absolute top-full right-0 mt-1 bg-white border border-line rounded-lg shadow-lg z-20 min-w-[120px]">
+                              {takes.map((take) => (
+                                <button
+                                  key={take.id}
+                                  type="button"
+                                  onClick={() => {
+                                    updateShot(shot.id, { videoAssetId: take.assetUrl, status: 'review' });
+                                    setTakePickerShotId(null);
+                                  }}
+                                  className="block w-full text-left text-[10px] px-2 py-1 hover:bg-surface"
+                                >
+                                  采用 Take · {take.thumbUrl ? <img src={take.thumbUrl} alt="" className="inline w-4 h-4 rounded" /> : null}
+                                </button>
+                              ))}
+                            </div>
+                          );
+                        })()}
+                      </div>
+                    )}
                   </div>
                 ))}
                 </div>
               </div>
             ) : (
-              <div className="space-y-1 py-2">
-                {filteredShots.map((shot) => {
-                  const widthPct = Math.max(12, (shot.durationSec / 30) * 100);
-                  return (
-                    <div
-                      key={shot.id}
-                      id={`storyboard-shot-${shot.id}`}
-                      role="button"
-                      tabIndex={0}
-                      onClick={() => selectShot(shot.id)}
-                    onContextMenu={(e) => openShotContext(e, shot.id)}
-                      onKeyDown={(e) => e.key === 'Enter' && selectShot(shot.id)}
-                      className={`flex items-center gap-2 cursor-pointer ${
-                        selectedShotId === shot.id ? 'opacity-100' : 'opacity-80'
-                      }`}
-                    >
-                      <span className="text-[10px] font-mono w-8 shrink-0 text-brand">#{shot.index}</span>
-                      <div
-                        className={`h-8 rounded-lg border flex items-center px-2 text-[10px] truncate ${
-                          selectedShotId === shot.id ? 'border-brand bg-brand/5' : 'border-line bg-white'
-                        }`}
-                        style={{ width: `${widthPct}%`, minWidth: '4rem' }}
-                      >
-                        {shot.durationSec}s · {shot.descriptionZh || shot.promptEn || '—'}
-                      </div>
-                      <span className={`text-[10px] px-1 rounded shrink-0 ${STATUS_COLOR[shot.status]}`}>
-                        {STATUS_LABEL[shot.status]}
-                      </span>
-                    </div>
-                  );
-                })}
+              <div className="space-y-3 py-2">
+                <div className="text-center py-6 text-sm text-ink/50 space-y-2">
+                  <Film size={32} className="mx-auto text-ink/20" />
+                  <p>时间线视图已迁移至 Episode Studio</p>
+                  <button
+                    type="button"
+                    onClick={() => useRemotionUi.getState().setOpen(true)}
+                    className="inline-flex items-center gap-1 text-xs px-4 py-2 rounded-xl bg-brand text-white"
+                  >
+                    <Film size={14} />
+                    打开 Episode Studio
+                  </button>
+                </div>
               </div>
             )}
           </div>
@@ -842,6 +1024,14 @@ export function StoryboardPanel() {
                 if (!shot) return null;
                 return (
                   <>
+                    {shot.firstFrameAssetId && (
+                      <img
+                        src={shot.firstFrameAssetId}
+                        alt="线稿"
+                        className="w-full rounded-lg border border-line max-h-24 object-cover"
+                        onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
+                      />
+                    )}
                     <input
                       className="w-full text-sm rounded-lg border border-line px-2 py-1"
                       value={shot.descriptionZh}
@@ -854,6 +1044,96 @@ export function StoryboardPanel() {
                       placeholder="英文提示词"
                       onChange={(e) => updateShot(shot.id, { promptEn: e.target.value })}
                     />
+                    {characters.characters.length > 0 && (
+                      <div className="space-y-1">
+                        <p className="text-[10px] text-ink/50">关联角色</p>
+                        <div className="flex flex-wrap gap-1">
+                          {characters.characters.map((c) => {
+                            const checked = shot.characterIds?.includes(c.id) ?? false;
+                            return (
+                              <label
+                                key={c.id}
+                                className={`flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded-full cursor-pointer border ${
+                                  checked ? 'border-brand bg-brand/10 text-brand' : 'border-line text-ink/50'
+                                }`}
+                                onClick={(e) => e.stopPropagation()}
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={checked}
+                                  onChange={() => {
+                                    const current = shot.characterIds ?? [];
+                                    const next = checked
+                                      ? current.filter((id) => id !== c.id)
+                                      : [...current, c.id];
+                                    updateShot(shot.id, { characterIds: next });
+                                  }}
+                                  className="hidden"
+                                />
+                                {c.name}
+                              </label>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+                    <div className="flex gap-2">
+                      <div className="flex-1">
+                        <ImageUploadSlot
+                          url={shot.firstFrameAssetId ?? ''}
+                          label="上传线稿"
+                          aspectClass="aspect-auto h-9"
+                          compact
+                          onUploaded={(url) => {
+                            updateShot(shot.id, { firstFrameAssetId: url, sketchSource: 'upload', status: 'review' });
+                          }}
+                          onClear={() => updateShot(shot.id, { firstFrameAssetId: null, sketchSource: undefined })}
+                        />
+                      </div>
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          if (!shot.descriptionZh && !shot.promptEn) {
+                            appendLog('请先填写画面描述或英文提示词');
+                            return;
+                          }
+                          updateShot(shot.id, { status: 'generating' });
+                          try {
+                            const res = await api.gridShotSketch({
+                              descriptionZh: shot.descriptionZh || '',
+                              promptEn: shot.promptEn || undefined,
+                              shotType: shot.shotType,
+                              artStylePrompt: artStyleFromPrefs(),
+                            });
+                            updateShot(shot.id, {
+                              firstFrameAssetId: res.url,
+                              sketchSource: 'ai-single',
+                              sketchPrompt: res.prompt,
+                              status: 'review',
+                            });
+                            appendLog('单镜线稿生成完成');
+                          } catch (e) {
+                            updateShot(shot.id, { status: 'failed' });
+                            appendLog(`AI 线稿失败: ${String(e)}`);
+                          }
+                        }}
+                        className="flex items-center justify-center gap-1 text-xs rounded-lg border border-accent text-accent py-1.5 hover:bg-accent/5"
+                      >
+                        <Sparkles size={14} />
+                        AI 线稿
+                      </button>
+                      {spawnBlockForShot && (
+                        <button
+                          type="button"
+                          onClick={() => spawnBlockForShot(shot.id, 'sketch-pad', { linkedShotId: shot.id })}
+                          className="flex items-center justify-center gap-1 text-xs rounded-lg border border-line py-1.5 hover:border-brand/40"
+                          title="手绘分镜"
+                        >
+                          <Pencil size={14} />
+                          手绘
+                        </button>
+                      )}
+                    </div>
                     <button
                       type="button"
                       disabled={exporting}
@@ -1013,6 +1293,42 @@ export function StoryboardPanel() {
             }}
             onRegenerate={(kind) => spawnBlockForShot?.(shot.id, kind)}
             onDelete={() => removeShot(shot.id)}
+            onAiSketch={async (shotId) => {
+              const s = storyboard.shots.find((sh) => sh.id === shotId);
+              if (!s) return;
+              if (!s.descriptionZh && !s.promptEn) {
+                appendLog('请先填写画面描述或英文提示词');
+                return;
+              }
+              updateShot(shotId, { status: 'generating' });
+              try {
+                const res = await api.gridShotSketch({
+                  descriptionZh: s.descriptionZh || '',
+                  promptEn: s.promptEn || undefined,
+                  shotType: s.shotType,
+                  artStylePrompt: artStyleFromPrefs(),
+                });
+                updateShot(shotId, { firstFrameAssetId: res.url, sketchSource: 'ai-single', sketchPrompt: res.prompt, status: 'review' });
+                appendLog('AI 线稿生成完成');
+              } catch (e) {
+                updateShot(shotId, { status: 'failed' });
+                appendLog(`AI 线稿失败: ${String(e)}`);
+              }
+            }}
+            onUploadSketch={(shotId) => {
+              const input = document.createElement('input');
+              input.type = 'file';
+              input.accept = 'image/png,image/jpeg,image/jpg';
+              input.onchange = () => {
+                const f = input.files?.[0];
+                if (f) void api.uploadAsset(f).then((res) => {
+                  updateShot(shotId, { firstFrameAssetId: res.url, sketchSource: 'upload', status: 'review' });
+                });
+              };
+              input.click();
+            }}
+            onSpawnSketchPad={(shotId) => spawnBlockForShot?.(shotId, 'sketch-pad', { linkedShotId: shotId })}
+            onSpawnDirector3d={(shotId) => spawnBlockForShot?.(shotId, 'director-3d', { linkedShotId: shotId })}
           />
         );
       })()}

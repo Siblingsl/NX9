@@ -18,6 +18,18 @@ function DepthPassBlock(props: NodeProps) {
       appendLog('深度通道：需要上游图像（可先经 mesh-viewer 快照）');
       return;
     }
+    try {
+      const ffmpegRes = await api.ffmpegStatus();
+      if (!ffmpegRes.available) {
+        updateNodeData(props.id, { status: 'error', error: 'FFmpeg 未安装或不可用' });
+        appendLog('深度通道：FFmpeg 不可用，请安装 FFmpeg');
+        return;
+      }
+    } catch {
+      updateNodeData(props.id, { status: 'error', error: 'FFmpeg 检测失败' });
+      appendLog('深度通道：FFmpeg 检测失败');
+      return;
+    }
     updateNodeData(props.id, { status: 'running' });
     try {
       const res = await api.generateDepthPass({ sourceUrl });

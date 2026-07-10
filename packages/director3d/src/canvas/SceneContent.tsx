@@ -103,34 +103,36 @@ function SceneObject({
   };
 
   return (
-    <group
-      ref={groupRef}
-      position={[px, py, pz]}
-      rotation={[rx, ry, rz].map((d) => MathUtils.degToRad(d)) as [number, number, number]}
-      scale={[sx, sy, sz]}
-      onClick={(e) => {
-        e.stopPropagation();
-        onSelect();
-      }}
-    >
-      {object.kind === 'character' ? (
-        <StageActor
-          color={object.color}
-          bodyType={object.bodyType as CharacterBodyType}
-          posePresetId={object.posePresetId}
-        />
-      ) : object.kind === 'mesh' && object.meshUrl ? (
-        <ImportedMesh url={object.meshUrl} />
-      ) : (
-        <PropMesh type={object.geometryType ?? 'box'} color={object.color ?? '#888'} />
-      )}
+    <>
+      <group
+        ref={groupRef}
+        position={[px, py, pz]}
+        rotation={[rx, ry, rz].map((d) => MathUtils.degToRad(d)) as [number, number, number]}
+        scale={[sx, sy, sz]}
+        onClick={(e) => {
+          e.stopPropagation();
+          onSelect();
+        }}
+      >
+        {object.kind === 'character' ? (
+          <StageActor
+            color={object.color}
+            bodyType={object.bodyType as CharacterBodyType}
+            posePresetId={object.posePresetId}
+          />
+        ) : object.kind === 'mesh' && object.meshUrl ? (
+          <ImportedMesh url={object.meshUrl} />
+        ) : (
+          <PropMesh type={object.geometryType ?? 'box'} color={object.color ?? '#888'} />
+        )}
+      </group>
       <ObjectGizmo
         groupRef={groupRef}
         enabled={selected && !object.locked}
         mode={transformMode}
         onChange={sync}
       />
-    </group>
+    </>
   );
 }
 
@@ -149,18 +151,20 @@ function CameraMarker({
   const [px, py, pz] = camera.transform.position;
 
   return (
-    <group
-      ref={groupRef}
-      position={[px, py, pz]}
-      onClick={(e) => {
-        e.stopPropagation();
-        onSelect();
-      }}
-    >
-      <mesh>
-        <octahedronGeometry args={[0.22, 0]} />
-        <meshStandardMaterial color="#A13D63" emissive="#A13D63" emissiveIntensity={0.35} />
-      </mesh>
+    <>
+      <group
+        ref={groupRef}
+        position={[px, py, pz]}
+        onClick={(e) => {
+          e.stopPropagation();
+          onSelect();
+        }}
+      >
+        <mesh>
+          <octahedronGeometry args={[0.22, 0]} />
+          <meshStandardMaterial color="#A13D63" emissive="#A13D63" emissiveIntensity={0.35} />
+        </mesh>
+      </group>
       <ObjectGizmo
         groupRef={groupRef}
         enabled={selected}
@@ -171,7 +175,7 @@ function CameraMarker({
           updateTransform(camera.id, { position: [g.position.x, g.position.y, g.position.z] });
         }}
       />
-    </group>
+    </>
   );
 }
 

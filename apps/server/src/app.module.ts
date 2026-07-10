@@ -5,6 +5,7 @@ import { JsonStoreService } from './common/json-store.service';
 import { PATHS } from './config/app.config';
 import { AssetsModule } from './modules/assets/assets.module';
 import { GatewayModule } from './modules/gateway/gateway.module';
+import { AgentModule } from './modules/agent/agent.module';
 import { HealthModule } from './modules/health/health.module';
 import { SettingsModule } from './modules/settings/settings.module';
 import { SkillsModule } from './modules/skills/skills.module';
@@ -27,6 +28,7 @@ import { WorkspaceModule } from './modules/workspace/workspace.module';
     SettingsModule,
     AssetsModule,
     GatewayModule,
+    AgentModule,
     SkillsModule,
     GridModule,
     MontageModule,

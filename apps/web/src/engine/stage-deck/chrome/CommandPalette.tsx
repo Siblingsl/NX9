@@ -4,15 +4,17 @@ import {
   getDockBlocks,
   getSpawnableBlocks,
   WORKFLOW_TEMPLATES,
+  PLAYBOOK_DEFINITIONS,
 } from '@nx9/shared';
 import { Search } from 'lucide-react';
 import { useFlowCommands } from '../../../stores/flow-commands';
 import { useFlowRuntime, useStoryboardUi } from '../../../stores/flow-runtime';
 import { useViewMode } from '../stores/view-mode';
 import { useContextRailUi } from '../stores/context-rail-ui';
+import { useWorkspaceDocument } from '../../../stores/workspace-document';
 import type { NodeAlignAction } from '../../node-align';
 
-type CommandSection = 'recipe' | 'dock' | 'advanced' | 'action';
+type CommandSection = 'playbook' | 'recipe' | 'dock' | 'advanced' | 'action';
 
 interface CommandItem {
   id: string;
@@ -30,26 +32,36 @@ interface CommandPaletteProps {
 }
 
 const FEATURED_RECIPE_IDS = [
+  'tpl-pipeline-13-3d',
+  'tpl-pipeline-13-live',
   'tpl-nx9-character-pipeline',
   'tpl-shot-script-desk',
   'tpl-text-to-picture',
   'tpl-image-to-clip',
   'tpl-storyboard-grid',
+  'tpl-line-art-storyboard',
+  'tpl-3d-preview',
+  'tpl-toonflow-lite',
   'tpl-photo-speak',
+  'tpl-sclass-seedance',
+  'tpl-novel-import',
+  'tpl-link-replicate',
 ] as const;
 
 const SECTION_LABELS: Record<CommandSection, string> = {
-  recipe: '配方 Recipe',
+  playbook: '生产剧本 Playbook',
+  recipe: '进阶 Recipe',
   dock: '生产模块',
   advanced: '进阶模块',
   action: '命令',
 };
 
-const SECTION_ORDER: CommandSection[] = ['recipe', 'dock', 'advanced', 'action'];
+const SECTION_ORDER: CommandSection[] = ['playbook', 'recipe', 'dock', 'advanced', 'action'];
 
 function scoreMatch(query: string, item: CommandItem): number {
   const q = query.trim().toLowerCase();
   if (!q) {
+    if (item.section === 'playbook') return 120;
     if (item.section === 'recipe' && FEATURED_RECIPE_IDS.some((id) => item.id === `recipe-${id}`)) {
       return 100;
     }
@@ -89,6 +101,20 @@ export function CommandPalette({ open, onClose, onAlign }: CommandPaletteProps) 
 
   const commands = useMemo<CommandItem[]>(() => {
     const dockKinds = new Set(getDockBlocks().map((b) => b.kind));
+
+    const playbookCommands: CommandItem[] = PLAYBOOK_DEFINITIONS.filter((pb) => pb.steps.length > 0).map((pb) => ({
+      id: `playbook-${pb.id}`,
+      label: `剧本 · ${pb.label}`,
+      keywords: [pb.id, pb.subtitle, pb.category, 'playbook', '生产剧本', pb.label],
+      section: 'playbook' as const,
+      badge: pb.featured ? '推荐' : undefined,
+      run: () => {
+        useWorkspaceDocument.getState().startPlaybook(pb.id);
+        for (const bt of pb.bootstrapTemplates) {
+          useFlowCommands.getState().requestLoadTemplate(bt.templateId, bt.mode);
+        }
+      },
+    }));
 
     const recipeCommands: CommandItem[] = WORKFLOW_TEMPLATES.map((tpl) => ({
       id: `recipe-${tpl.id}`,
@@ -178,11 +204,18 @@ export function CommandPalette({ open, onClose, onAlign }: CommandPaletteProps) 
         },
       },
       {
+        id: 'open-sketch-pad',
+        label: '添加 · 手绘分镜',
+        keywords: ['sketch', '画板', '手绘', 'pencil', '线稿'],
+        section: 'action',
+        run: () => requestSpawn('sketch-pad'),
+      },
+      {
         id: 'open-workflow-rail',
         label: '打开 · 工作流 Rail',
         keywords: ['workflow', 'zip', '模板', '导入', '导出'],
         section: 'action',
-        run: () => requestRailTab('workflow'),
+        run: () => requestRailTab('library', { librarySub: 'workflow' }),
       },
       {
         id: 'undo',
@@ -200,7 +233,7 @@ export function CommandPalette({ open, onClose, onAlign }: CommandPaletteProps) 
       },
     ];
 
-    return [...recipeCommands, ...moduleCommands, ...alignCommands, ...actionCommands];
+    return [...playbookCommands, ...recipeCommands, ...moduleCommands, ...alignCommands, ...actionCommands];
   }, [
     requestSpawn,
     requestLoadTemplate,

@@ -5,6 +5,7 @@ import {
   type ClipChainState,
 } from '@nx9/shared';
 import { api } from '../api/client';
+import { pollVideoUntilDone } from './poll-task';
 
 export async function runClipChain(
   chain: ClipChainState,
@@ -36,8 +37,8 @@ export async function runClipChain(
 
       if (!res.url && res.status === 'processing' && res.taskId) {
         log(`${item.label} 异步任务 ${res.taskId} — 轮询中…`);
-        const polled = await api.pollVideo(res.taskId);
-        if (polled.url) res.url = polled.url;
+        const polledUrl = await pollVideoUntilDone(res.taskId);
+        if (polledUrl) res.url = polledUrl;
       }
 
       const videoUrl = res.url ?? '';

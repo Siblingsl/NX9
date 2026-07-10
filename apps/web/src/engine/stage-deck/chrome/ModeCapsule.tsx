@@ -12,14 +12,16 @@ export function ModeCapsule() {
   const setMode = useViewMode((s) => s.setMode);
 
   return (
-    <div className="flex items-center rounded-full border border-line bg-surface/80 p-0.5 text-xs nx9-mode-capsule">
+    <div className="flex items-center rounded-lg border border-line/70 bg-surface/40 p-0.5 text-[11px] nx9-mode-capsule shrink-0">
       {MODES.map((m) => (
         <button
           key={m.id}
           type="button"
           onClick={() => setMode(m.id)}
-          className={`px-3 py-1 rounded-full transition-all duration-300 ${
-            mode === m.id ? 'bg-brand text-white shadow-sm' : 'text-ink/60 hover:text-ink'
+          className={`px-2.5 py-1 rounded-md transition-all duration-200 whitespace-nowrap ${
+            mode === m.id
+              ? 'bg-white text-brand shadow-sm font-medium'
+              : 'text-ink/50 hover:text-ink/75'
           }`}
         >
           {m.label}

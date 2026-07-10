@@ -34,7 +34,9 @@ export const LaneBackground = memo(function LaneBackground() {
               <text
                 x={64}
                 y={y + 28}
-                className="fill-ink/40 text-xs font-semibold"
+                fill="var(--nx9-ink)"
+                fillOpacity="0.4"
+                className="text-xs font-semibold"
                 style={{ fontSize: 12 }}
               >
                 {lane.label}

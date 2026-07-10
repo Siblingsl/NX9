@@ -33,8 +33,10 @@ function AssetWatchBlock(props: NodeProps) {
       if (lastFingerprint && fp !== lastFingerprint) {
         updateNodeData(props.id, {
           lastFingerprint: fp,
+          inputHash: fp,
           changeCount: changeCount + 1,
           assetChanged: true,
+          status: 'success',
           meta: { changedAt: new Date().toISOString(), watchUrl: url },
           pictures: upstream?.pictures,
           clips: upstream?.clips,
@@ -42,7 +44,7 @@ function AssetWatchBlock(props: NodeProps) {
         });
         appendLog(`素材监听 · 检测到变更 (${url})`);
       } else if (!lastFingerprint) {
-        updateNodeData(props.id, { lastFingerprint: fp, watchUrl: url });
+        updateNodeData(props.id, { lastFingerprint: fp, inputHash: fp, watchUrl: url });
       }
     } catch {
       /* ignore network errors during poll */

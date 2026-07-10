@@ -1,9 +1,9 @@
-import { useLoader } from '@react-three/fiber';
 import { Suspense } from 'react';
-import { BackSide, TextureLoader } from 'three';
+import { BackSide } from 'three';
+import { usePanorama } from '../loaders/panoramaLoader';
 
 function PanoramaSphereInner({ url, yaw }: { url: string; yaw: number }) {
-  const texture = useLoader(TextureLoader, url);
+  const texture = usePanorama(url);
   return (
     <mesh rotation={[0, (yaw * Math.PI) / 180, 0]}>
       <sphereGeometry args={[48, 64, 32]} />

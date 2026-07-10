@@ -1,9 +1,10 @@
-import { memo, useCallback, useMemo, useState } from 'react';
+import { memo, useCallback, useMemo, useRef, useState } from 'react';
 import { type NodeProps, useReactFlow } from '@xyflow/react';
 import {
   ANGLE_PRESETS,
   CHARACTER_EXPRESSION_PRESETS,
   CHARACTER_SHEET_POSE_PRESETS,
+  CHARACTER_BIBLE_LAYERS,
   applyCharacterSheetPatch,
   characterSheetFromNodeData,
   syncCharacterSheetNodeOutput,
@@ -18,13 +19,14 @@ import { useActivityLog } from '../../stores/activity-log';
 import { toastSuccess } from '../../stores/toast';
 import { api } from '../../api/client';
 
-type SheetTab = 'sheet' | 'profile' | 'turnaround' | 'variant';
+type SheetTab = 'sheet' | 'profile' | 'turnaround' | 'variant' | 'bible';
 
 const TAB_LABELS: { id: SheetTab; label: string }[] = [
   { id: 'sheet', label: '设定图' },
   { id: 'profile', label: '档案' },
   { id: 'turnaround', label: '三视图' },
   { id: 'variant', label: '变体' },
+  { id: 'bible', label: '六层锚点' },
 ];
 
 function ChipRow({
@@ -83,6 +85,7 @@ function CharacterSheetBlock(props: NodeProps) {
   const characterId = props.data?.characterId as string | undefined;
   const syncedAt = props.data?.backlotSyncedAt as string | undefined;
   const [parsing, setParsing] = useState(false);
+  const retryCountRef = useRef(0);
 
   const sheet = useMemo(() => characterSheetFromNodeData(props.data), [props.data]);
 
@@ -131,52 +134,66 @@ function CharacterSheetBlock(props: NodeProps) {
       appendLog('请先上传完整设定图');
       return;
     }
-    setParsing(true);
-    updateNodeData(props.id, { status: 'running' });
-    try {
-      const res = await api.proxyLlm({
-        model: 'gpt-4o-mini',
-        messages: [
-          {
-            role: 'system',
-            content:
-              '你是角色设定分析师。从角色设定图提取结构化信息，只输出 JSON，不要 markdown：{"characterName":"","age":"","height":"","weight":"","occupation":"","personality":"","background":"","distinctiveFeatures":"","palette":"","forbiddenTraits":""}',
+    retryCountRef.current = 0;
+
+    const attempt = async (): Promise<void> => {
+      setParsing(true);
+      updateNodeData(props.id, { status: 'running' });
+      try {
+        const res = await api.proxyLlm({
+          model: 'gpt-4o-mini',
+          messages: [
+            {
+              role: 'system',
+              content:
+                '你是角色设定分析师。从角色设定图提取结构化信息，只输出 JSON，不要 markdown：{"characterName":"","age":"","height":"","weight":"","occupation":"","personality":"","background":"","distinctiveFeatures":"","palette":"","forbiddenTraits":""}',
+            },
+            {
+              role: 'user',
+              content: [
+                { type: 'text', text: '解析这张角色设定图，填写各字段。distinctiveFeatures 写外貌识别特征。' },
+                { type: 'image_url', image_url: { url: imageUrl } },
+              ],
+            },
+          ],
+        });
+        const raw = (res as { content?: string }).content ?? '';
+        const jsonMatch = raw.match(/\{[\s\S]*\}/);
+        const parsed = JSON.parse(jsonMatch?.[0] ?? raw) as ParsedSheetProfile;
+        commit({
+          characterName: parsed.characterName ?? sheet.characterName,
+          palette: parsed.palette ?? sheet.palette,
+          forbiddenTraits: parsed.forbiddenTraits ?? sheet.forbiddenTraits,
+          profile: {
+            age: parsed.age,
+            height: parsed.height,
+            weight: parsed.weight,
+            occupation: parsed.occupation,
+            personality: parsed.personality,
+            background: parsed.background,
+            distinctiveFeatures: parsed.distinctiveFeatures,
           },
-          {
-            role: 'user',
-            content: [
-              { type: 'text', text: '解析这张角色设定图，填写各字段。distinctiveFeatures 写外貌识别特征。' },
-              { type: 'image_url', image_url: { url: imageUrl } },
-            ],
-          },
-        ],
-      });
-      const raw = (res as { content?: string }).content ?? '';
-      const jsonMatch = raw.match(/\{[\s\S]*\}/);
-      const parsed = JSON.parse(jsonMatch?.[0] ?? raw) as ParsedSheetProfile;
-      commit({
-        characterName: parsed.characterName ?? sheet.characterName,
-        palette: parsed.palette ?? sheet.palette,
-        forbiddenTraits: parsed.forbiddenTraits ?? sheet.forbiddenTraits,
-        profile: {
-          age: parsed.age,
-          height: parsed.height,
-          weight: parsed.weight,
-          occupation: parsed.occupation,
-          personality: parsed.personality,
-          background: parsed.background,
-          distinctiveFeatures: parsed.distinctiveFeatures,
-        },
-      });
-      updateNodeData(props.id, { status: 'success', sheetTab: 'profile' });
-      appendLog('已从设定图识别档案');
-      toastSuccess('档案已自动填充，请核对后保存');
-    } catch (e) {
-      updateNodeData(props.id, { status: 'error', error: String(e) });
-      appendLog(`设定图识别失败: ${String(e)}`);
-    } finally {
-      setParsing(false);
-    }
+        });
+        updateNodeData(props.id, { status: 'success', sheetTab: 'profile' });
+        retryCountRef.current = 0;
+        appendLog('已从设定图识别档案');
+        toastSuccess('档案已自动填充，请核对后保存');
+      } catch (e) {
+        if (retryCountRef.current < 1) {
+          retryCountRef.current++;
+          appendLog(`设定图识别失败，3 秒后自动重试…`);
+          updateNodeData(props.id, { status: 'error', error: String(e), meta: { retryAt: Date.now() + 3000 } });
+          await new Promise((r) => setTimeout(r, 3000));
+          return attempt();
+        }
+        updateNodeData(props.id, { status: 'error', error: String(e) });
+        appendLog(`设定图识别失败（已重试）: ${String(e)}`);
+      } finally {
+        setParsing(false);
+      }
+    };
+
+    await attempt();
   }, [sheet, props.id, commit, updateNodeData, appendLog]);
 
   const saveToBacklot = useCallback(() => {
@@ -201,6 +218,14 @@ function CharacterSheetBlock(props: NodeProps) {
       referenceImageUrl: ref,
       referenceAudioUrl: null,
       tags: ['character-sheet'],
+      bible: {
+        identity: sheet.bible?.identity?.trim() || undefined,
+        appearance: sheet.bible?.appearance?.trim() || undefined,
+        personality: sheet.bible?.personality?.trim() || undefined,
+        background: sheet.bible?.background?.trim() || undefined,
+        voice: sheet.bible?.voice?.trim() || undefined,
+        relationships: sheet.bible?.relationships?.trim() || undefined,
+      },
     };
     upsertCharacter(profile);
     updateNodeData(props.id, {
@@ -448,6 +473,28 @@ function CharacterSheetBlock(props: NodeProps) {
             <p className="text-[10px] text-ink/40 pt-1 border-t border-line">
               参考图优先用完整设定图，其次三视图正面。
             </p>
+          </div>
+        )}
+
+        {tab === 'bible' && (
+          <div className="space-y-2 max-h-56 overflow-y-auto nx9-scroll">
+            <p className="text-[10px] text-ink/45">
+              Character Bible 六层锚点：逐层填写，保存到角色库后作为一致性强约束。
+            </p>
+            {CHARACTER_BIBLE_LAYERS.map((layer) => (
+              <div key={layer.key}>
+                <p className="text-[10px] text-ink/55 mb-0.5">{layer.label}</p>
+                <textarea
+                  value={(sheet.bible?.[layer.key] as string) ?? ''}
+                  onChange={(e) =>
+                    commit({ bible: { ...sheet.bible, [layer.key]: e.target.value } })
+                  }
+                  placeholder={layer.placeholder}
+                  rows={2}
+                  className="w-full rounded-lg border border-line px-2 py-1 resize-y text-[10px]"
+                />
+              </div>
+            ))}
           </div>
         )}
 

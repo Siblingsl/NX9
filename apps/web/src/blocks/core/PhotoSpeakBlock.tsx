@@ -1,6 +1,7 @@
 import { memo, useCallback, useMemo } from 'react';
 import { type NodeProps, useReactFlow } from '@xyflow/react';
 import { BlockShell } from '../shared/BlockShell';
+import ImageUploadSlot from '../shared/ImageUploadSlot';
 import { api } from '../../api/client';
 import { useActivityLog } from '../../stores/activity-log';
 import { useWorkspaceDocument } from '../../stores/workspace-document';
@@ -149,11 +150,17 @@ function PhotoSpeakBlock(props: NodeProps) {
                   ))}
               </select>
             </label>
-            <input
-              value={referenceAudioUrl}
-              onChange={(e) => updateNodeData(props.id, { referenceAudioUrl: e.target.value })}
-              placeholder="/media/uploads/ref.wav"
-              className="w-full rounded-lg border border-line px-2 py-1 font-mono text-[10px]"
+            <ImageUploadSlot
+              url={referenceAudioUrl}
+              label="上传参考音频"
+              aspectClass="aspect-auto h-10"
+              accept="audio/*"
+              compact
+              onUploaded={(url) => {
+                updateNodeData(props.id, { referenceAudioUrl: url });
+                appendLog(`参考音频已上传`);
+              }}
+              onClear={() => updateNodeData(props.id, { referenceAudioUrl: '' })}
             />
           </>
         )}

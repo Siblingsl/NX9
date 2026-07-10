@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { X } from 'lucide-react';
 
-const STORAGE_KEY = 'nx9-stage-deck-tour-v1';
+const STORAGE_KEY = 'nx9-stage-deck-tour-v2';
 
 const STEPS = [
   {
@@ -21,8 +21,8 @@ const STEPS = [
     body: '右侧栏集中属性、分镜、Backlot、历史、工作流导出与 Agent 确认。',
   },
   {
-    title: 'Pipeline 进度',
-    body: '顶栏五阶段圆点显示剧本→分镜→生成→配音→导出就绪情况，点击可跳转。',
+    title: 'Playbook 引导',
+    body: '选择生产剧本后，顶栏出现步骤条引导您逐步完成。右侧 Banner 显示「执行下一步」快捷操作。',
   },
 ];
 

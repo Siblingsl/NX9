@@ -3,11 +3,23 @@ import { type NodeProps, useReactFlow } from '@xyflow/react';
 import { BlockShell } from '../shared/BlockShell';
 import { api } from '../../api/client';
 import { useActivityLog } from '../../stores/activity-log';
+import { useWorkspaceDocument } from '../../stores/workspace-document';
+
+async function readSrtFile(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(r.result as string);
+    r.onerror = () => reject(new Error('读取 SRT 文件失败'));
+    r.readAsText(file);
+  });
+}
 
 function SubtitleBurnBlock(props: NodeProps) {
   const { updateNodeData } = useReactFlow();
   const appendLog = useActivityLog((s) => s.append);
-  const upstream = props.data?.upstream as { clips?: string[]; prompts?: string[] } | undefined;
+  const shots = useWorkspaceDocument((s) => s.storyboard.shots);
+  const updateShot = useWorkspaceDocument((s) => s.updateShot);
+  const upstream = props.data?.upstream as { clips?: string[]; prompts?: string[]; shotIds?: string[] } | undefined;
   const subtitle = (props.data?.subtitle as string) ?? upstream?.prompts?.[0] ?? '';
   const durationSec = (props.data?.durationSec as number) ?? 4;
   const outputUrl = props.data?.outputClip as string | undefined;
@@ -31,13 +43,23 @@ function SubtitleBurnBlock(props: NodeProps) {
         skipReview: true,
       });
       if (!res.ok || !res.url) throw new Error(res.message ?? '烧录失败');
+      // 写入 storyboard shot 元数据（供 Timeline v2 字幕轨使用）
+      if (upstream?.shotIds) {
+        for (const shotId of upstream.shotIds) {
+          const shot = shots.find((s) => s.id === shotId);
+          if (shot) {
+            updateShot(shotId, { subtitleText: subtitle.trim() } as Record<string, unknown>);
+          }
+        }
+      }
       updateNodeData(props.id, {
         status: 'success',
         outputClip: res.url,
         clips: [res.url],
         content: subtitle,
+        subtitleText: subtitle.trim(),
       });
-      appendLog('字幕烧录完成');
+      appendLog('字幕烧录完成 · 已写入时间线字幕轨');
     } catch (e) {
       updateNodeData(props.id, { status: 'error', error: String(e) });
     }
@@ -49,9 +71,31 @@ function SubtitleBurnBlock(props: NodeProps) {
         <textarea
           value={subtitle}
           onChange={(e) => updateNodeData(props.id, { subtitle: e.target.value })}
-          placeholder="字幕文本…"
+          placeholder="字幕文本或 SRT 内容…"
           className="w-full min-h-[56px] rounded-xl border border-line px-2 py-1.5 resize-y"
         />
+        <label className="flex items-center gap-2 text-[10px] text-ink/50">
+          <input
+            type="file"
+            accept=".srt,.txt"
+            className="hidden"
+            id={`srt-upload-${props.id}`}
+            onChange={async (e) => {
+              const file = e.target.files?.[0];
+              if (!file) return;
+              try {
+                const text = await readSrtFile(file);
+                updateNodeData(props.id, { subtitle: text });
+                appendLog(`SRT 已加载 · ${file.name}`);
+              } catch (err) {
+                appendLog(`SRT 加载失败: ${String(err)}`);
+              }
+            }}
+          />
+          <label htmlFor={`srt-upload-${props.id}`} className="text-brand cursor-pointer hover:underline">
+            上传 SRT 文件
+          </label>
+        </label>
         <label className="flex items-center gap-2 text-[10px] text-ink/50">
           时长(s)
           <input

@@ -1,0 +1,287 @@
+:root {
+  --nx9-flow-rail-top: 12px;
+  --nx9-flow-rail-max-width: min(960px, 92vw);
+  --nx9-flow-rail-bg: rgba(255, 255, 255, 0.92);
+  --nx9-flow-rail-shadow: 0 4px 24px rgba(0, 0, 0, 0.08);
+  --nx9-step-warn: #D97706;
+}
+
+.nx9-flow-rail {
+  position: absolute;
+  top: var(--nx9-flow-rail-top);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 20;
+  max-width: var(--nx9-flow-rail-max-width);
+  background: var(--nx9-flow-rail-bg);
+  box-shadow: var(--nx9-flow-rail-shadow);
+  border-radius: 12px;
+  padding: 6px 12px;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  backdrop-filter: blur(8px);
+  pointer-events: auto;
+  white-space: nowrap;
+}
+
+.nx9-flow-rail-step {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 6px;
+  border-radius: 8px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  position: relative;
+  font-family: inherit;
+  font-size: 11px;
+  color: rgba(0, 0, 0, 0.55);
+}
+
+.nx9-flow-rail-step:hover {
+  background: rgba(0, 0, 0, 0.04);
+}
+
+.nx9-flow-rail-step--done {
+  color: rgba(0, 0, 0, 0.7);
+}
+
+.nx9-flow-rail-step--current {
+  color: #A13D63;
+}
+
+.nx9-flow-rail-step--blocked {
+  color: rgba(0, 0, 0, 0.55);
+}
+
+.nx9-flow-rail-step--future {
+  color: rgba(0, 0, 0, 0.3);
+  opacity: 0.5;
+}
+
+.nx9-flow-rail-step-badge {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  font-size: 10px;
+  font-weight: 700;
+  flex-shrink: 0;
+  transition: all 0.15s ease;
+}
+
+.nx9-flow-rail-step-badge--done {
+  background: #2E8B57;
+  color: white;
+  box-shadow: 0 0 0 2px rgba(46, 139, 87, 0.2);
+}
+
+.nx9-flow-rail-step-badge--current {
+  background: #A13D63;
+  color: white;
+  box-shadow: 0 0 0 2px rgba(161, 61, 99, 0.25);
+}
+
+.nx9-flow-rail-step-badge--blocked {
+  background: #E0E0E0;
+  color: rgba(0, 0, 0, 0.4);
+}
+
+.nx9-flow-rail-step-badge--future {
+  background: #E0E0E0;
+  color: rgba(0, 0, 0, 0.25);
+}
+
+.nx9-flow-rail-step-warn {
+  position: absolute;
+  top: -4px;
+  right: 2px;
+  font-size: 9px;
+  color: var(--nx9-step-warn);
+  font-weight: 700;
+  line-height: 1;
+}
+
+.nx9-flow-rail-step-sep {
+  width: 12px;
+  height: 1px;
+  background: rgba(0, 0, 0, 0.1);
+  flex-shrink: 0;
+}
+
+.nx9-flow-rail-label {
+  display: none;
+}
+
+@media (min-width: 1024px) {
+  .nx9-flow-rail-label {
+    display: inline;
+  }
+}
+
+.nx9-flow-rail-free {
+  padding: 4px 12px;
+  text-align: center;
+  color: rgba(0, 0, 0, 0.45);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.nx9-flow-rail-free-modes {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+  margin-top: 4px;
+}
+
+.nx9-flow-rail-free-dot {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  color: rgba(0, 0, 0, 0.35);
+  position: relative;
+}
+
+.nx9-flow-rail-free-dot--done {
+  color: rgba(46, 139, 87, 0.7);
+}
+
+.nx9-flow-rail-free-dot--active {
+  color: rgba(161, 61, 99, 0.7);
+}
+
+.nx9-flow-rail-free-dot-indicator {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.15);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.nx9-flow-rail-free-dot-indicator--done {
+  background: #2E8B57;
+  color: #fff;
+}
+
+.nx9-flow-rail-free-dot-indicator--active {
+  background: #A13D63;
+}
+
+.nx9-flow-rail-free-dot-indicator--pending {
+  background: rgba(0, 0, 0, 0.15);
+}
+
+.nx9-flow-rail-free-dot-warn {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  font-size: 8px;
+  font-weight: 700;
+  color: #D97706;
+  line-height: 1;
+}
+
+/* Tooltip */
+
+.nx9-flow-rail-tooltip {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 30;
+  min-width: 200px;
+  max-width: 280px;
+  background: #fff;
+  border-radius: 10px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.14);
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  padding: 10px 12px;
+  pointer-events: auto;
+}
+
+.nx9-flow-rail-tooltip-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+
+.nx9-flow-rail-tooltip-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: rgba(0, 0, 0, 0.8);
+}
+
+.nx9-flow-rail-tooltip-close {
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  color: rgba(0, 0, 0, 0.3);
+  padding: 2px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+}
+
+.nx9-flow-rail-tooltip-close:hover {
+  color: rgba(0, 0, 0, 0.6);
+  background: rgba(0, 0, 0, 0.05);
+}
+
+.nx9-flow-rail-tooltip-body {
+  margin-bottom: 8px;
+}
+
+.nx9-flow-rail-tooltip-reason {
+  font-size: 11px;
+  color: #D97706;
+  line-height: 1.4;
+  padding: 2px 0;
+}
+
+.nx9-flow-rail-tooltip-reason::before {
+  content: '! ';
+  font-weight: 700;
+}
+
+.nx9-flow-rail-tooltip-action {
+  width: 100%;
+  border: none;
+  background: #A13D63;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 6px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.nx9-flow-rail-tooltip-action:hover {
+  background: #8a2f50;
+}
+
+/* Flash animation for selected node step */
+
+.nx9-flow-rail-step--flash {
+  animation: nx9-rail-flash 0.6s ease-in-out 3;
+}
+
+@keyframes nx9-rail-flash {
+  0%, 100% {
+    background: transparent;
+  }
+  50% {
+    background: rgba(161, 61, 99, 0.12);
+  }
+}

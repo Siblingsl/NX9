@@ -3,6 +3,21 @@ import { useFlowCommands } from '../../../stores/flow-commands';
 import { useWorkspaceDocument } from '../../../stores/workspace-document';
 import { useFlowRuntime } from '../../../stores/flow-runtime';
 import { useActivityLog } from '../../../stores/activity-log';
+import type { StoryboardShot } from '@nx9/shared';
+
+function newShot(index: number): StoryboardShot {
+  return {
+    id: `shot-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+    index,
+    durationSec: 4,
+    shotType: 'medium',
+    descriptionZh: '',
+    promptEn: '',
+    status: 'draft',
+    characterIds: [],
+    linkedBlockId: null,
+  };
+}
 
 interface GridGeneratePanelProps {
   selectedBlockId: string | null;
@@ -16,6 +31,7 @@ export function GridGeneratePanel({ selectedBlockId }: GridGeneratePanelProps) {
   const runtime = useFlowRuntime((s) => s.runtime);
   const storyboard = useWorkspaceDocument((s) => s.storyboard);
   const updateShot = useWorkspaceDocument((s) => s.updateShot);
+  const addShots = useWorkspaceDocument((s) => s.addShots);
   const appendLog = useActivityLog((s) => s.append);
 
   const node = selectedBlockId
@@ -23,6 +39,7 @@ export function GridGeneratePanel({ selectedBlockId }: GridGeneratePanelProps) {
     : undefined;
   const splitUrls = (node?.data?.splitUrls as string[]) ?? [];
   const isGridSplit = node?.type === 'grid-split';
+  const gridStyle = node?.data?.style as string | undefined;
 
   const spawnGridChain = () => {
     requestSpawn('grid-split');
@@ -42,16 +59,27 @@ export function GridGeneratePanel({ selectedBlockId }: GridGeneratePanelProps) {
     }
     const shots = [...storyboard.shots].sort((a, b) => a.index - b.index);
     let assigned = 0;
+    const newShots: StoryboardShot[] = [];
     splitUrls.forEach((url, i) => {
       const shot = shots[i];
-      if (!shot) return;
+      if (!shot) {
+        const ns = newShot(i + 1);
+        ns.firstFrameAssetId = url;
+        ns.status = 'review';
+        newShots.push(ns);
+        assigned++;
+        return;
+      }
       updateShot(shot.id, {
         firstFrameAssetId: url,
         status: 'review',
       });
       assigned++;
     });
-    appendLog(`已将 ${assigned} 张切分图分配到分镜（待审阅）`);
+    if (newShots.length > 0) {
+      addShots(newShots, 'append');
+    }
+    appendLog(`已将 ${assigned} 张切分图写入故事板（待审阅）`);
   };
 
   return (
@@ -59,6 +87,11 @@ export function GridGeneratePanel({ selectedBlockId }: GridGeneratePanelProps) {
       <p className="text-ink/50 leading-relaxed">
         宫格流程：生成/contact-sheet → <strong>grid-split</strong> 切分 → 绑定分镜镜头。
       </p>
+      {gridStyle === 'line-art' && (
+        <p className="text-[10px] text-brand/70 bg-brand/5 rounded-lg px-2 py-1">
+          线稿模式 · 分配后故事板镜头自动标为「待审阅」
+        </p>
+      )}
       <div className="flex gap-2">
         <label className="flex-1">
           行
@@ -96,7 +129,7 @@ export function GridGeneratePanel({ selectedBlockId }: GridGeneratePanelProps) {
           onClick={assignToShots}
           className="w-full rounded-xl bg-brand text-white py-2 hover:bg-brand/90"
         >
-          分配 {splitUrls.length} 张到分镜
+          写入故事板镜头 ({splitUrls.length})
         </button>
       )}
       {isGridSplit && splitUrls.length > 0 && (

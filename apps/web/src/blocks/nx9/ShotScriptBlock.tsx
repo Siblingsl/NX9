@@ -1,11 +1,14 @@
-import { memo, useCallback } from 'react';
-import { type NodeProps, useReactFlow } from '@xyflow/react';
+import { memo, useCallback, useMemo, useState } from 'react';
+import { type NodeProps, useEdges, useNodes, useReactFlow } from '@xyflow/react';
 import type { ShotType, StoryboardShot } from '@nx9/shared';
+import { gatherUpstream } from '@nx9/shared';
 import { BlockShell } from '../shared/BlockShell';
 import { useWorkspaceDocument } from '../../stores/workspace-document';
+import { useActivityLog } from '../../stores/activity-log';
 import { useFlowCommands } from '../../stores/flow-commands';
 import { useStoryboardUi } from '../../stores/flow-runtime';
 import { useContextRailUi } from '../../engine/stage-deck/stores/context-rail-ui';
+import { api } from '../../api/client';
 
 export interface ShotScriptRow {
   id: string;
@@ -46,7 +49,12 @@ function mapShotType(code: string): ShotType {
   return table[code] ?? 'custom';
 }
 
-function rowToShot(row: ShotScriptRow, index: number, baseIndex: number): StoryboardShot {
+function rowToShot(
+  row: ShotScriptRow,
+  index: number,
+  baseIndex: number,
+  blockId?: string,
+): StoryboardShot {
   const action = row.action.trim();
   const dialogue = row.dialogue.trim();
   return {
@@ -58,12 +66,15 @@ function rowToShot(row: ShotScriptRow, index: number, baseIndex: number): Storyb
     promptEn: action || dialogue,
     videoPromptEn: dialogue ? `${action}. Dialogue: ${dialogue}` : action,
     status: 'draft',
-    linkedBlockId: null,
+    linkedBlockId: blockId ?? null,
   };
 }
 
 function ShotScriptBlock(props: NodeProps) {
   const { updateNodeData } = useReactFlow();
+  const nodes = useNodes();
+  const edges = useEdges();
+  const appendLog = useActivityLog((s) => s.append);
   const rows = (props.data?.scriptRows as ShotScriptRow[] | undefined) ?? [newRow()];
   const content = (props.data?.content as string) ?? composeScript(rows);
   const addShots = useWorkspaceDocument((s) => s.addShots);
@@ -71,6 +82,20 @@ function ShotScriptBlock(props: NodeProps) {
   const requestSpawn = useFlowCommands((s) => s.requestSpawn);
   const setStoryboardOpen = useStoryboardUi((s) => s.setOpen);
   const requestRailTab = useContextRailUi((s) => s.requestTab);
+  const [novelText, setNovelText] = useState((props.data?.novelText as string) ?? '');
+  const [aiBusy, setAiBusy] = useState(false);
+  const [aiError, setAiError] = useState<string | null>(null);
+
+  const dialogueLines = useMemo(() => {
+    const incoming = edges.filter((e) => e.target === props.id).map((e) => e.source);
+    for (const srcId of incoming) {
+      const src = nodes.find((n) => n.id === srcId);
+      if (!src) continue;
+      const lines = (src.data as Record<string, unknown>)?.lines as { speaker: string; text: string; emotion?: string }[] | undefined;
+      if (Array.isArray(lines) && lines.length > 0) return lines;
+    }
+    return null;
+  }, [edges, nodes, props.id]);
 
   const patchRows = useCallback(
     (next: ShotScriptRow[]) => {
@@ -83,10 +108,43 @@ function ShotScriptBlock(props: NodeProps) {
     [props.id, updateNodeData],
   );
 
+  const aiBreakdown = useCallback(async () => {
+    const source = novelText.trim();
+    if (source.length < 20) {
+      setAiError('请输入至少 20 字的小说/章节文本');
+      return;
+    }
+    setAiBusy(true);
+    setAiError(null);
+    try {
+      const res = await api.agentShotScript(source);
+      if (!res.ok || res.rows.length === 0) {
+        throw new Error('LLM 未返回可分镜内容');
+      }
+      const next = res.rows.map((r) => ({
+        id: newRow().id,
+        durationSec: r.durationSec,
+        shotType: r.shotType,
+        dialogue: r.dialogue,
+        action: r.action,
+      }));
+      patchRows(next);
+      updateNodeData(props.id, { novelText, aiError: undefined });
+      appendLog(`AI 拆镜完成 · ${next.length} 行`);
+    } catch (e) {
+      const msg = String(e);
+      setAiError(msg);
+      updateNodeData(props.id, { aiError: msg });
+      appendLog(`AI 拆镜失败: ${msg}`);
+    } finally {
+      setAiBusy(false);
+    }
+  }, [novelText, props.id, patchRows, updateNodeData, appendLog]);
+
   const pushToStoryboard = useCallback(() => {
-    const shots = rows.map((row, i) => rowToShot(row, i, shotCount));
+    const shots = rows.map((row, i) => rowToShot(row, i, shotCount, props.id));
     addShots(shots, 'append');
-  }, [rows, shotCount, addShots]);
+  }, [rows, shotCount, addShots, props.id]);
 
   const startProduction = useCallback(() => {
     pushToStoryboard();
@@ -98,6 +156,43 @@ function ShotScriptBlock(props: NodeProps) {
   return (
     <BlockShell {...props}>
       <div className="space-y-2 nodrag nopan text-xs max-h-72 overflow-y-auto nx9-scroll">
+        <textarea
+          value={novelText}
+          onChange={(e) => setNovelText(e.target.value)}
+          placeholder="粘贴小说 / 章节文本，AI 拆镜为分镜行"
+          rows={3}
+          className="w-full rounded-lg border border-line px-2 py-1 resize-y"
+        />
+        <div className="flex gap-1">
+          <button
+            type="button"
+            onClick={() => void aiBreakdown()}
+            disabled={aiBusy}
+            className="flex-1 rounded-xl bg-brand text-white py-1.5 text-[11px] disabled:opacity-50"
+          >
+            {aiBusy ? '拆镜中…' : 'AI 拆镜'}
+          </button>
+        </div>
+        {aiError && <p className="text-[10px] text-red-600">{aiError}</p>}
+        {dialogueLines && (
+          <button
+            type="button"
+            onClick={() => {
+              const next = dialogueLines.map((dl) => ({
+                id: newRow().id,
+                durationSec: 3,
+                shotType: 'MS',
+                dialogue: dl.text,
+                action: dl.speaker ? `${dl.speaker}：` : '',
+              }));
+              patchRows(next);
+              appendLog(`已从对白表导入 ${next.length} 行`);
+            }}
+            className="w-full flex items-center justify-center gap-1 rounded-xl border border-accent/30 bg-accent/5 text-accent py-1.5 text-[11px] hover:bg-accent/10"
+          >
+            导入对白（{dialogueLines.length} 行）
+          </button>
+        )}
         {rows.map((row, idx) => (
           <div key={row.id} className="rounded-xl border border-line p-2 space-y-1 bg-surface/50">
             <div className="flex gap-1 items-center">

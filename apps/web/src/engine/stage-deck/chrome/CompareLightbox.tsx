@@ -1,9 +1,10 @@
 import { createPortal } from 'react-dom';
-import { useMemo, useState } from 'react';
-import { ChevronLeft, ChevronRight, GitCompare, Star, X } from 'lucide-react';
+import { useMemo, useState, useCallback } from 'react';
+import { Check, ChevronLeft, ChevronRight, GitCompare, Star, X } from 'lucide-react';
 import type { TakeRecord } from '@nx9/shared';
 import { useTakeStore } from '../stores/take-store';
 import { useRemotionUi } from '../../../stores/flow-runtime';
+import { useActivityLog } from '../../../stores/activity-log';
 
 interface CompareLightboxProps {
   takeA: TakeRecord;
@@ -18,6 +19,13 @@ function isVideoUrl(url: string): boolean {
 export function CompareLightbox({ takeA, takeB, onClose }: CompareLightboxProps) {
   const [slider, setSlider] = useState(50);
   const requestRemotion = useRemotionUi((s) => s.requestOpen);
+  const appendLog = useActivityLog((s) => s.append);
+  const pickTake = useTakeStore((s) => s.pickTake);
+
+  const handleAddToTimeline = useCallback((takeId: string) => {
+    pickTake(takeId, { updateNodeData: (_blockId: string, _data: Record<string, unknown>) => {} });
+    appendLog(`Take ${takeId} 已加入时间线`);
+  }, [pickTake, appendLog]);
 
   return createPortal(
     <div className="fixed inset-0 z-[200] bg-ink/90 flex flex-col">
@@ -30,12 +38,32 @@ export function CompareLightbox({ takeA, takeB, onClose }: CompareLightboxProps)
           <button
             type="button"
             onClick={() => {
+              handleAddToTimeline(takeA.id);
+            }}
+            className="text-xs px-3 py-1.5 rounded-lg border border-white/30 hover:bg-white/10 flex items-center gap-1"
+          >
+            <Check size={12} />
+            采用 A
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              handleAddToTimeline(takeB.id);
+            }}
+            className="text-xs px-3 py-1.5 rounded-lg border border-white/30 hover:bg-white/10 flex items-center gap-1"
+          >
+            <Check size={12} />
+            采用 B
+          </button>
+          <button
+            type="button"
+            onClick={() => {
               requestRemotion();
               onClose();
             }}
-            className="text-xs px-3 py-1.5 rounded-lg border border-white/30 hover:bg-white/10"
+            className="text-xs px-3 py-1.5 rounded-lg bg-brand hover:bg-brand/90"
           >
-            Remotion 时间线
+            打开工作室
           </button>
           <button type="button" onClick={onClose} className="p-2 rounded-xl hover:bg-white/10">
             <X size={20} />

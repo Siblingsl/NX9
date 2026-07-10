@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect } from 'react';
+import { memo, useCallback, useEffect, useRef } from 'react';
 import { type NodeProps, useReactFlow } from '@xyflow/react';
 import { BlockShell } from '../shared/BlockShell';
 import { DoubleClickText } from '../shared/DoubleClickText';
@@ -16,6 +16,7 @@ function ChatModelBlock(props: NodeProps) {
   const fetchSkills = useSkillVault((s) => s.fetchAll);
   const addShots = useWorkspaceDocument((s) => s.addShots);
   const setStoryboardOpen = useStoryboardUi((s) => s.setOpen);
+  const abortRef = useRef<AbortController | null>(null);
 
   const reply = (props.data?.reply as string) ?? '';
   const lastReply = (props.data?.lastReply as string) ?? reply;
@@ -30,10 +31,19 @@ function ChatModelBlock(props: NodeProps) {
     if (skills.length === 0) void fetchSkills();
   }, [skills.length, fetchSkills]);
 
+  useEffect(() => {
+    return () => {
+      abortRef.current?.abort();
+      abortRef.current = null;
+    };
+  }, []);
+
   const run = useCallback(async () => {
+    abortRef.current?.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
     updateNodeData(props.id, { status: 'running' });
     try {
-      // If a skill is selected, inject its SKILL.md body as the system prompt.
       let messages: { role: string; content: string }[];
       if (skillId) {
         const skill = await api.readSkill(skillId);
@@ -47,7 +57,7 @@ function ChatModelBlock(props: NodeProps) {
         appendLog(`LLM 启动 · ${props.id}`);
       }
 
-      const res = (await api.proxyLlm({ messages })) as {
+      const res = (await api.proxyLlm({ messages }, controller.signal)) as {
         choices?: { message?: { content?: string } }[];
       };
       const text = res.choices?.[0]?.message?.content ?? '(无响应)';
@@ -61,8 +71,16 @@ function ChatModelBlock(props: NodeProps) {
       });
       appendLog(`LLM 完成 · ${props.id}`);
     } catch (e) {
+      if ((e as Error)?.name === 'AbortError') {
+        updateNodeData(props.id, { status: 'idle', error: undefined });
+        return;
+      }
       updateNodeData(props.id, { status: 'error', error: String(e) });
       appendLog(`LLM 失败 · ${props.id}`);
+    } finally {
+      if (abortRef.current === controller) {
+        abortRef.current = null;
+      }
     }
   }, [appendLog, prompt, props.id, skillId, updateNodeData]);
 

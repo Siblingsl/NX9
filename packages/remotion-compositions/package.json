@@ -1,0 +1,32 @@
+{
+  "name": "@nx9/remotion-compositions",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/esm/index.js",
+  "module": "./dist/esm/index.js",
+  "types": "./dist/esm/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/esm/index.d.ts",
+      "import": "./dist/esm/index.js",
+      "default": "./dist/esm/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "remotion": "remotion studio"
+  },
+  "dependencies": {
+    "@nx9/shared": "*",
+    "react": "^19.0.0"
+  },
+  "peerDependencies": {
+    "remotion": "^4.0.0",
+    "@remotion/player": "^4.0.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0"
+  }
+}

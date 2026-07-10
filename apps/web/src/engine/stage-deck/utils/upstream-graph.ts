@@ -54,22 +54,32 @@ export function applyUpstreamHighlight(
   const lit = new Set([selectedId, ...upstream]);
 
   return {
-    nodes: nodes.map((n) => ({
-      ...n,
-      data: {
-        ...n.data,
-        dimmed: !lit.has(n.id),
-        upstreamLit: lit.has(n.id) && n.id !== selectedId,
-      },
-    })),
+    nodes: nodes.map((n) => {
+      const dimmed = !lit.has(n.id);
+      const upstreamLit = lit.has(n.id) && n.id !== selectedId;
+      const data = (n.data ?? {}) as Record<string, unknown>;
+      if (data.dimmed === dimmed && data.upstreamLit === upstreamLit) return n;
+      return {
+        ...n,
+        data: {
+          ...n.data,
+          dimmed,
+          upstreamLit,
+        },
+      };
+    }),
     edges: edges.map((e) => {
       const onPath = lit.has(e.source) && lit.has(e.target);
+      const data = (e.data ?? {}) as Record<string, unknown>;
+      const highlighted = onPath;
+      const dimmed = !lit.has(e.source);
+      if (data.highlighted === highlighted && data.dimmed === dimmed) return e;
       return {
         ...e,
         data: {
           ...(e.data ?? {}),
-          highlighted: onPath,
-          dimmed: !lit.has(e.source),
+          highlighted,
+          dimmed,
         },
       };
     }),

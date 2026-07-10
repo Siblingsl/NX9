@@ -7,6 +7,29 @@ export interface CharacterPromptContext {
   referenceImageUrl?: string;
 }
 
+/**
+ * Parse @Name mentions from a prompt string and resolve to CharacterProfile objects.
+ */
+export function parseMentionsFromPrompt(
+  prompt: string | undefined,
+  library: CharacterProfile[],
+): CharacterProfile[] {
+  if (!prompt) return [];
+  const nameMap = new Map(library.map((c) => [c.name, c]));
+  const mentionPattern = /@(\S+)/g;
+  const seen = new Set<string>();
+  const result: CharacterProfile[] = [];
+  for (const m of prompt.matchAll(mentionPattern)) {
+    const name = m[1];
+    if (!seen.has(name)) {
+      seen.add(name);
+      const found = nameMap.get(name);
+      if (found) result.push(found);
+    }
+  }
+  return result;
+}
+
 /** Resolve characters for a block from explicit id or linked shot. */
 export function resolveBlockCharacters(
   blockData: Record<string, unknown> | undefined,

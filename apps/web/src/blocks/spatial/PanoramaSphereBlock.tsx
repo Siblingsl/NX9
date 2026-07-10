@@ -1,6 +1,6 @@
 import { memo, useCallback, useRef } from 'react';
 import { type NodeProps, useReactFlow } from '@xyflow/react';
-import { Globe2, Upload } from 'lucide-react';
+import { Globe2, Upload, Link2 } from 'lucide-react';
 import { BlockShell } from '../shared/BlockShell';
 import { useDirector3dUi } from '../../stores/director3d-ui';
 import { emptyDirectorProject, normalizeDirectorProject } from '@nx9/director3d';
@@ -10,6 +10,7 @@ import { useActivityLog } from '../../stores/activity-log';
 function PanoramaSphereBlock(props: NodeProps) {
   const { updateNodeData } = useReactFlow();
   const openForBlock = useDirector3dUi((s) => s.openForBlock);
+  const setHostBridge = useDirector3dUi((s) => s.setHostBridge);
   const appendLog = useActivityLog((s) => s.append);
   const inputRef = useRef<HTMLInputElement>(null);
   const panoramaUrl =
@@ -44,6 +45,12 @@ function PanoramaSphereBlock(props: NodeProps) {
     });
   }, [openForBlock, props.id, props.data, panoramaUrl]);
 
+  const syncBridge = useCallback(() => {
+    if (!panoramaUrl) return;
+    setHostBridge(panoramaUrl);
+    appendLog(`全景已同步为 3D 背景`);
+  }, [panoramaUrl, setHostBridge, appendLog]);
+
   return (
     <BlockShell {...props}>
       <div className="space-y-2 text-sm">
@@ -75,15 +82,26 @@ function PanoramaSphereBlock(props: NodeProps) {
             上传 360° 全景
           </button>
         )}
-        <button
-          type="button"
-          onClick={openStage}
-          disabled={!panoramaUrl}
-          className="w-full flex items-center justify-center gap-2 rounded-xl bg-brand text-white py-2 disabled:opacity-40"
-        >
-          <Globe2 size={16} />
-          在 Stage Deck 中预演
-        </button>
+        <div className="grid grid-cols-2 gap-1">
+          <button
+            type="button"
+            onClick={openStage}
+            disabled={!panoramaUrl}
+            className="flex items-center justify-center gap-1 rounded-xl bg-brand text-white py-2 disabled:opacity-40"
+          >
+            <Globe2 size={14} />
+            预演
+          </button>
+          <button
+            type="button"
+            onClick={syncBridge}
+            disabled={!panoramaUrl}
+            className="flex items-center justify-center gap-1 rounded-xl border border-line py-2 disabled:opacity-40"
+          >
+            <Link2 size={14} />
+            同步背景
+          </button>
+        </div>
       </div>
     </BlockShell>
   );

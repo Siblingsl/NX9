@@ -3,6 +3,7 @@ import {
   CHARACTER_EXPRESSION_PRESETS,
   CHARACTER_SHEET_POSE_PRESETS,
 } from '../data/character-sheet-presets';
+import type { CharacterBible } from '../types/character';
 
 export interface CharacterSheetProfile {
   age?: string;
@@ -21,6 +22,22 @@ export interface CharacterSheetVariant {
   angleId?: string;
 }
 
+export interface CharacterBibleLayer {
+  key: keyof CharacterBible;
+  label: string;
+  placeholder: string;
+}
+
+/** Character Bible 六层锚点（moyin 借鉴，语义融入） */
+export const CHARACTER_BIBLE_LAYERS: CharacterBibleLayer[] = [
+  { key: 'identity', label: '基础设定', placeholder: '姓名 / 年龄 / 职业 / 身份…' },
+  { key: 'appearance', label: '外貌', placeholder: '识别特征、发色、瞳色、身材、色板…' },
+  { key: 'personality', label: '性格动机', placeholder: '性格关键词与核心动机…' },
+  { key: 'background', label: '背景故事', placeholder: '出身、关键经历…' },
+  { key: 'voice', label: '声音语言', placeholder: '声线、口癖、语言风格…' },
+  { key: 'relationships', label: '关系网络', placeholder: '与其他角色的关系…' },
+];
+
 export interface CharacterSheetInput {
   characterName?: string;
   profile?: CharacterSheetProfile;
@@ -32,6 +49,8 @@ export interface CharacterSheetInput {
   palette?: string;
   forbiddenTraits?: string;
   activeVariant?: CharacterSheetVariant;
+  /** Character Bible 六层锚点 */
+  bible?: CharacterBible;
 }
 
 function lookupExpression(id?: string) {
@@ -100,12 +119,20 @@ export function collectCharacterSheetPictures(input: CharacterSheetInput): strin
 /** 写入 Backlot CharacterProfile 的一致性描述 */
 export function buildCharacterConsistencyPrompt(input: CharacterSheetInput): string {
   const p = input.profile ?? {};
+  const bible = input.bible ?? {};
+  const bibleText = CHARACTER_BIBLE_LAYERS.map((l) => {
+    const v = (bible[l.key] ?? '').trim();
+    return v ? `${l.label}: ${v}` : '';
+  })
+    .filter(Boolean)
+    .join('. ');
   const base = [p.distinctiveFeatures, p.occupation, p.personality, p.background]
     .map((s) => s?.trim())
     .filter(Boolean)
     .join('. ');
+  const combined = [base, bibleText].filter(Boolean).join('. ');
   const variant = buildCharacterSheetPrompt(input);
-  return base ? `${base}. ${variant}` : variant;
+  return combined ? `${combined}. ${variant}` : variant;
 }
 
 export function buildCharacterSheetMeta(input: CharacterSheetInput) {
@@ -125,6 +152,7 @@ export function buildCharacterSheetMeta(input: CharacterSheetInput) {
       back: input.backUrl ?? '',
     },
     fullSheetUrl: input.fullSheetUrl ?? '',
+    bible: input.bible ?? {},
   };
 }
 
@@ -136,6 +164,9 @@ export function applyCharacterSheetPatch(
     ...current,
     ...patch,
     profile: { ...current.profile, ...patch.profile },
+    bible: patch.bible
+      ? { ...current.bible, ...patch.bible }
+      : current.bible,
     activeVariant: patch.activeVariant
       ? { ...current.activeVariant, ...patch.activeVariant }
       : current.activeVariant,
@@ -144,6 +175,7 @@ export function applyCharacterSheetPatch(
 
 export function characterSheetFromNodeData(data: Record<string, unknown> | undefined): CharacterSheetInput {
   const profile = (data?.profile as CharacterSheetProfile | undefined) ?? {};
+  const bible = (data?.bible as CharacterBible | undefined) ?? {};
   return {
     characterName: (data?.characterName as string) ?? '',
     profile: {
@@ -162,6 +194,14 @@ export function characterSheetFromNodeData(data: Record<string, unknown> | undef
     fullSheetUrl: (data?.fullSheetUrl as string) ?? '',
     palette: (data?.palette as string) ?? '',
     forbiddenTraits: (data?.forbiddenTraits as string) ?? '',
+    bible: {
+      identity: (bible.identity ?? (data?.bibleIdentity as string)) || undefined,
+      appearance: (bible.appearance ?? (data?.bibleAppearance as string)) || undefined,
+      personality: (bible.personality ?? (data?.biblePersonality as string)) || undefined,
+      background: (bible.background ?? (data?.bibleBackground as string)) || undefined,
+      voice: (bible.voice ?? (data?.bibleVoice as string)) || undefined,
+      relationships: (bible.relationships ?? (data?.bibleRelationships as string)) || undefined,
+    },
     activeVariant: (data?.activeVariant as CharacterSheetVariant) ?? {
       expressionId: 'calm',
       poseId: 'stand',

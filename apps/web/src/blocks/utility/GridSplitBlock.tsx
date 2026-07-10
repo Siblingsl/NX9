@@ -1,5 +1,5 @@
-import { memo, useCallback, useState } from 'react';
-import { type NodeProps, useReactFlow } from '@xyflow/react';
+import { memo, useCallback, useMemo, useState } from 'react';
+import { type NodeProps, useEdges, useNodes, useReactFlow } from '@xyflow/react';
 import { BlockShell } from '../shared/BlockShell';
 import { EditableImage } from '../shared/EditableImage';
 import { ImageEditModal } from '../shared/ImageEditModal';
@@ -9,11 +9,24 @@ import { api } from '../../api/client';
 
 function GridSplitBlock(props: NodeProps) {
   const { updateNodeData } = useReactFlow();
+  const nodes = useNodes();
+  const edges = useEdges();
   const produce = useImageEditProduce(props.id);
   const appendLog = useActivityLog((s) => s.append);
   const [editingUrl, setEditingUrl] = useState<string | null>(null);
-  const rows = (props.data?.rows as number) ?? 3;
-  const cols = (props.data?.cols as number) ?? 3;
+
+  const upstreamMeta = useMemo(() => {
+    const incoming = edges.filter((e) => e.target === props.id);
+    for (const e of incoming) {
+      const up = nodes.find((n) => n.id === e.source);
+      const m = up?.data?.meta as { rows?: number; cols?: number } | undefined;
+      if (m?.rows && m?.cols) return m;
+    }
+    return undefined;
+  }, [props.id, nodes, edges]);
+
+  const rows = (props.data?.rows as number) ?? upstreamMeta?.rows ?? 3;
+  const cols = (props.data?.cols as number) ?? upstreamMeta?.cols ?? 3;
   const status = props.data?.status as string | undefined;
   const upstream = props.data?.upstream as { pictures?: string[] } | undefined;
   const splitUrls = (props.data?.splitUrls as string[]) ?? [];
