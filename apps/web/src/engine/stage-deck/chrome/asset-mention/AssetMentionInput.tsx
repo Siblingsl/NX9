@@ -16,6 +16,7 @@ export interface AssetMentionInputProps {
   kinds?: AssetLibraryKind[];
   enabled?: boolean;
   onFocus?: () => void;
+  onBlur?: () => void;
   onMouseDown?: (e: React.MouseEvent) => void;
 }
 
@@ -28,6 +29,7 @@ export function AssetMentionInput({
   kinds,
   enabled = true,
   onFocus,
+  onBlur,
   onMouseDown,
 }: AssetMentionInputProps) {
   const mention = useAssetMention({ value, onChange, kinds, enabled });
@@ -49,6 +51,7 @@ export function AssetMentionInput({
     placeholder,
     className,
     onFocus,
+    onBlur,
     onMouseDown: (e: React.MouseEvent) => {
       stop(e);
       onMouseDown?.(e);

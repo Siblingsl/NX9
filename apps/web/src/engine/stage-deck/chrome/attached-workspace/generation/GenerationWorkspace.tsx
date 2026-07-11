@@ -101,22 +101,14 @@ export function GenerationWorkspace({ blockId, kind, onCollapse }: GenerationWor
     [data, handlePatch],
   );
 
-  const assetKinds: AssetLibraryKind[] | undefined = kind === 'sound-gen'
-    ? ['character', 'sound']
-    : kind === 'prompt'
-      ? ['hook']
-      : ['character', 'scene'];
+  const assetKinds: AssetLibraryKind[] | undefined =
+    kind === 'sound-gen' ? ['character', 'sound'] : ['character', 'scene'];
 
   const status = (data.status as string) ?? 'idle';
 
-  const handleAiOptimize = useCallback(() => appendLog('AI 优化（即将推出）'), [appendLog]);
-  const handleAiComplete = useCallback(() => appendLog('Prompt 补全（即将推出）'), [appendLog]);
-  const handleAiRewrite = useCallback(() => appendLog('AI 重写（即将推出）'), [appendLog]);
-  const handleAiTranslate = useCallback(() => appendLog('AI 翻译（即将推出）'), [appendLog]);
-
   return (
     <div
-      className="flex flex-col w-full max-h-[min(420px,50vh)] px-3 py-2.5"
+      className="flex flex-col w-full max-h-[min(480px,55vh)] px-3 py-2.5"
       onMouseDown={(e) => e.stopPropagation()}
       onPointerDown={(e) => e.stopPropagation()}
       onWheel={(e) => e.stopPropagation()}
@@ -125,26 +117,26 @@ export function GenerationWorkspace({ blockId, kind, onCollapse }: GenerationWor
 
       <div
         ref={textareaContainerRef}
-        className="flex-1 min-h-[140px] overflow-y-auto nowheel overscroll-contain"
+        className="flex-1 min-h-0 overflow-y-auto nowheel overscroll-contain space-y-2"
       >
         <PromptComposer
-          blockId={blockId}
-          kind={kind}
-          value={primaryContent}
-          onChange={handlePrimaryChange}
-          placeholder={meta ? `${meta.label} Prompt…` : '输入 Prompt…'}
-          data={data}
-          onPatch={handlePatch}
-          assetKinds={assetKinds}
+            blockId={blockId}
+            kind={kind}
+            value={primaryContent}
+            onChange={handlePrimaryChange}
+            placeholder={meta ? `${meta.label} Prompt…` : '输入 Prompt…'}
+            data={data}
+            onPatch={handlePatch}
+            assetKinds={assetKinds}
         />
       </div>
 
       <div className="shrink-0 flex flex-wrap items-center gap-x-2 gap-y-1 pt-2 border-t border-line/60 mt-2 nodrag">
         <WorkspaceAiTools
-          onOptimize={handleAiOptimize}
-          onComplete={handleAiComplete}
-          onRewrite={handleAiRewrite}
-          onTranslate={handleAiTranslate}
+          onOptimize={() => appendLog('AI 优化（即将推出）')}
+          onComplete={() => appendLog('Prompt 补全（即将推出）')}
+          onRewrite={() => appendLog('AI 重写（即将推出）')}
+          onTranslate={() => appendLog('AI 翻译（即将推出）')}
         />
 
         {history.length > 0 && (

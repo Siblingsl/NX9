@@ -11,10 +11,11 @@ import GenSettingsPills from '../../../../blocks/shared/GenSettingsPills';
 interface PromptBarGenFooterProps {
   blockId: string;
   kind: string;
+  layout?: 'inline' | 'stacked';
 }
 
 /** 嵌入 Prompt 框底部的高级生成参数（紧凑横排） */
-export function PromptBarGenFooter({ blockId, kind }: PromptBarGenFooterProps) {
+export function PromptBarGenFooter({ blockId, kind, layout = 'inline' }: PromptBarGenFooterProps) {
   const { getNode, updateNodeData } = useReactFlow();
   const node = getNode(blockId);
   const data = (node?.data ?? {}) as Record<string, unknown>;
@@ -31,13 +32,18 @@ export function PromptBarGenFooter({ blockId, kind }: PromptBarGenFooterProps) {
     const quality = (data.quality as string) ?? 'auto';
     const aspectRatio = (data.aspectRatio as string) ?? '1:1';
     const imageCount = (data.imageCount as number) ?? 1;
+    const stacked = layout === 'stacked';
 
     return (
-      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 w-full pt-1 border-t border-line/40 mt-1">
+      <div
+        className={`w-full space-y-2 ${stacked ? '' : 'flex flex-wrap items-center gap-x-2 gap-y-1 pt-1 border-t border-line/40 mt-1'}`}
+      >
         <select
           value={modelId}
           onChange={(e) => patch({ model: e.target.value })}
-          className="max-w-[120px] rounded-lg border border-line bg-white px-1.5 py-0.5 text-[10px] truncate"
+          className={`rounded-lg border border-line bg-white px-2 py-1 text-[10px] truncate nodrag nopan ${
+            stacked ? 'w-full' : 'max-w-[120px]'
+          }`}
         >
           {PICTURE_GEN_MODELS.map((m) => (
             <option key={m.id} value={m.id}>
@@ -46,33 +52,35 @@ export function PromptBarGenFooter({ blockId, kind }: PromptBarGenFooterProps) {
           ))}
         </select>
         <GenSettingsPills
-          compact
+          compact={!stacked}
           label="质量"
           options={IMAGE_QUALITY_OPTIONS.map((o) => ({ id: o.id, label: o.label }))}
           value={quality}
           onChange={(v: string) => patch({ quality: v })}
         />
         <GenSettingsPills
-          compact
+          compact={!stacked}
           label="比例"
           options={IMAGE_ASPECT_OPTIONS.map((o) => ({ id: o.id, label: o.label }))}
           value={aspectRatio}
           onChange={(v: string) => patch({ aspectRatio: v })}
         />
-        <GenSettingsPills
-          compact
-          label="张数"
-          options={[1, 2, 3, 4].map((n) => ({ id: String(n), label: String(n) }))}
-          value={String(imageCount)}
-          onChange={(v: string) => patch({ imageCount: Number(v) })}
-        />
-        <input
-          type="text"
-          value={data.seed != null ? String(data.seed) : ''}
-          onChange={(e) => patch({ seed: e.target.value ? Number(e.target.value) : undefined })}
-          placeholder="Seed"
-          className="w-16 rounded-lg border border-line px-1.5 py-0.5 text-[10px]"
-        />
+        <div className={`flex items-center gap-2 ${stacked ? 'flex-wrap' : ''}`}>
+          <GenSettingsPills
+            compact={!stacked}
+            label="张数"
+            options={[1, 2, 3, 4].map((n) => ({ id: String(n), label: String(n) }))}
+            value={String(imageCount)}
+            onChange={(v: string) => patch({ imageCount: Number(v) })}
+          />
+          <input
+            type="text"
+            value={data.seed != null ? String(data.seed) : ''}
+            onChange={(e) => patch({ seed: e.target.value ? Number(e.target.value) : undefined })}
+            placeholder="Seed"
+            className="w-20 rounded-lg border border-line px-2 py-1 text-[10px] nodrag nopan"
+          />
+        </div>
       </div>
     );
   }

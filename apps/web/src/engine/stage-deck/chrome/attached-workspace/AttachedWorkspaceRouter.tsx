@@ -1,5 +1,7 @@
 import { resolveAttachedWorkspace } from '@nx9/shared';
 import { GenerationWorkspace } from './generation/GenerationWorkspace';
+import { VideoWorkspace } from './generation/video/VideoWorkspace';
+import { PictureWorkspace } from './generation/picture/PictureWorkspace';
 import { PromptWorkspace } from './prompt/PromptWorkspace';
 import { ToolWorkspace } from './tool/ToolWorkspace';
 import { ReportWorkspace } from './report/ReportWorkspace';
@@ -24,6 +26,12 @@ export function AttachedWorkspaceRouter({ blockId, kind, onCollapse }: AttachedW
     case 'generation':
       if (kind === 'prompt') {
         return <PromptWorkspace blockId={blockId} kind={kind} onCollapse={onCollapse} />;
+      }
+      if (kind === 'clip-gen') {
+        return <VideoWorkspace blockId={blockId} kind={kind} onCollapse={onCollapse} />;
+      }
+      if (kind === 'picture-gen') {
+        return <PictureWorkspace blockId={blockId} kind={kind} onCollapse={onCollapse} />;
       }
       return <GenerationWorkspace blockId={blockId} kind={kind} onCollapse={onCollapse} />;
     case 'tool':
