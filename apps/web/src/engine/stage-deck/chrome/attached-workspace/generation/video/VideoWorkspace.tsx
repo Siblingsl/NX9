@@ -1,20 +1,25 @@
 import { useCallback, useEffect, useMemo, useRef } from 'react';
 import type { AssetLibraryKind } from '@nx9/shared';
-import { lookupBlock } from '@nx9/shared';
+import { CLIP_GEN_MODELS, lookupBlock } from '@nx9/shared';
 import { useReactFlow } from '@xyflow/react';
 import { AssetMentionInput } from '../../../asset-mention/AssetMentionInput';
+import { ComposerModelSelect } from '../../composer/ComposerModelSelect';
+import { ComposerWorkspaceShell, COMPOSER_PROMPT_TEXTAREA_CLASS } from '../../composer/ComposerWorkspaceShell';
+import { useWorkspaceAiLog } from '../../composer/useWorkspaceAiLog';
 import { useDeckUi } from '../../../../stores/deck-ui';
 import { useFlowRuntime } from '../../../../../../stores/flow-runtime';
 import { useActivityLog } from '../../../../../../stores/activity-log';
 import { usePromptHistory } from '../../../../stores/prompt-history';
 import { useAttachedNodeData } from '../use-attached-node-data';
 import { useLocalNodePrompt } from '../use-local-node-prompt';
-import { VideoWorkspaceHeader } from './VideoWorkspaceHeader';
-import { VideoWorkspaceToolbar } from './VideoWorkspaceToolbar';
+import { VideoGenModeChip } from './VideoGenModeChip';
+import { VideoParamChips } from './VideoParamChips';
 import { VideoFrameStrip } from './VideoFrameStrip';
 import {
+  patchVideoGenMode,
   readVideoGenMode,
   showVideoFrameStrip,
+  type VideoGenMode,
 } from './video-gen-modes';
 
 const EMPTY_HISTORY: { id: string; blockId: string; text: string; savedAt: number }[] = [];
@@ -45,8 +50,8 @@ export function VideoWorkspace({ blockId, kind, onCollapse }: VideoWorkspaceProp
   const promptEntries = usePromptHistory((s) => s.entries);
   const pushHistory = usePromptHistory((s) => s.push);
   const { updateNodeData } = useReactFlow();
+  const handleAiAction = useWorkspaceAiLog();
 
-  const meta = lookupBlock(kind);
   const data = useAttachedNodeData(blockId);
 
   const history = useMemo(
@@ -60,9 +65,7 @@ export function VideoWorkspace({ blockId, kind, onCollapse }: VideoWorkspaceProp
   );
 
   const pushHistoryDebounced = useCallback(
-    (text: string) => {
-      pushHistory(blockId, text);
-    },
+    (text: string) => pushHistory(blockId, text),
     [blockId, pushHistory],
   );
 
@@ -82,6 +85,8 @@ export function VideoWorkspace({ blockId, kind, onCollapse }: VideoWorkspaceProp
     const ta = promptContainerRef.current?.querySelector('textarea');
     ta?.focus();
   }, [blockId, focusNonce]);
+
+  const meta = lookupBlock(kind);
 
   const handleRun = useCallback(async () => {
     flushNow();
@@ -123,41 +128,71 @@ export function VideoWorkspace({ blockId, kind, onCollapse }: VideoWorkspaceProp
     onCollapse?.();
   }, [collapsePromptBar, onCollapse, flushNow]);
 
-  const handleAiAction = useCallback(
-    (id: string) => {
-      const labels: Record<string, string> = {
-        optimize: 'AI 优化',
-        complete: 'AI 补全',
-        rewrite: 'Prompt 重写',
-        translate: 'Prompt 翻译',
-        shorten: '缩短',
-        expand: '扩写',
-      };
-      appendLog(`${labels[id] ?? id}（即将推出）`);
-    },
-    [appendLog],
+  const toolbarLeft = (
+    <div className="flex items-center gap-1" onMouseDown={stop}>
+      <VideoGenModeChip
+        mode={videoGenMode}
+        onChange={(mode: VideoGenMode) => handlePatch(patchVideoGenMode(mode))}
+      />
+      <span className="w-px h-3.5 bg-line/50" />
+      <VideoParamChips blockId={blockId} onPatch={handlePatch} />
+    </div>
+  );
+
+  const toolbarAdvanced = (
+    <div className="space-y-2">
+      <label className="block space-y-1">
+        <span className="text-[10px] text-ink/45">Seed</span>
+        <input
+          type="text"
+          value={data.seed != null ? String(data.seed) : ''}
+          onChange={(e) =>
+            handlePatch({ seed: e.target.value ? Number(e.target.value) : undefined })
+          }
+          onMouseDown={stop}
+          placeholder="留空随机"
+          className="w-full rounded-lg border border-line/50 px-2 py-1 text-[11px] focus:outline-none focus:border-brand/40"
+        />
+      </label>
+      <label className="block space-y-1">
+        <span className="text-[10px] text-ink/45">Negative Prompt</span>
+        <textarea
+          value={(data.negativePrompt as string) ?? ''}
+          onChange={(e) => handlePatch({ negativePrompt: e.target.value })}
+          onMouseDown={stop}
+          placeholder="排除元素…"
+          rows={2}
+          className="w-full rounded-lg border border-line/50 px-2 py-1 text-[11px] resize-none focus:outline-none focus:border-brand/40"
+        />
+      </label>
+      <label className="block space-y-1">
+        <span className="text-[10px] text-ink/45">Provider 参数</span>
+        <input
+          type="text"
+          value={(data.modelParams as string) ?? ''}
+          onChange={(e) => handlePatch({ modelParams: e.target.value || undefined })}
+          onMouseDown={stop}
+          placeholder="JSON 或 key=value"
+          className="w-full rounded-lg border border-line/50 px-2 py-1 text-[11px] focus:outline-none focus:border-brand/40"
+        />
+      </label>
+    </div>
   );
 
   return (
-    <div
-      className="flex flex-col w-full h-[340px] max-h-[360px] px-3 py-2 nodrag"
-      onMouseDown={stop}
-      onPointerDown={stop}
-      onWheel={(e) => e.stopPropagation()}
-    >
-      <VideoWorkspaceHeader
-        kind={kind}
-        status={status as any}
-        model={model}
-        onModelChange={(v) => handlePatch({ model: v })}
-        onCollapse={handleCollapse}
-      />
-
-      <div
-        className="flex-1 min-h-0 mt-1.5 rounded-xl border border-line/35 bg-white shadow-[0_1px_8px_rgba(15,15,15,0.03)] flex flex-col overflow-hidden"
-        onMouseDown={stop}
-      >
-        {showFrames && (
+    <ComposerWorkspaceShell
+      kind={kind}
+      status={status as any}
+      onCollapse={handleCollapse}
+      headerTrailing={
+        <ComposerModelSelect
+          value={model}
+          options={CLIP_GEN_MODELS.map((m) => ({ id: m.id, label: m.label }))}
+          onChange={(v) => handlePatch({ model: v })}
+        />
+      }
+      topSlot={
+        showFrames ? (
           <VideoFrameStrip
             startFrameUrl={data.startFrameUrl as string | undefined}
             endFrameUrl={data.endFrameUrl as string | undefined}
@@ -166,32 +201,27 @@ export function VideoWorkspace({ blockId, kind, onCollapse }: VideoWorkspaceProp
             onEndChange={(url) => handlePatch({ endFrameUrl: url })}
             onReferenceChange={(url) => handlePatch({ referenceFrameUrl: url })}
           />
-        )}
-
-        <div ref={promptContainerRef} className="flex-1 min-h-0 px-3 pt-2.5 pb-1 overflow-hidden">
-          <AssetMentionInput
-            as="textarea"
-            value={draft}
-            onChange={onChange}
-            onFocus={onFocus}
-            onBlur={onBlur}
-            placeholder="描述你想生成的视频… 输入 @ 引用角色、场景、镜头、情绪、声音"
-            kinds={VIDEO_MENTION_KINDS}
-            className="w-full h-full min-h-[96px] border-0 text-[13px] leading-relaxed resize-none focus:outline-none bg-transparent text-ink/85 placeholder:text-ink/28 nodrag nopan"
-          />
-        </div>
-
-        <VideoWorkspaceToolbar
-          blockId={blockId}
-          data={data}
-          onPatch={handlePatch}
-          history={history}
-          onApplyHistory={applyText}
-          onAiAction={handleAiAction}
-          onRun={() => void handleRun()}
-          running={data.status === 'running'}
-        />
-      </div>
-    </div>
+        ) : undefined
+      }
+      toolbarLeft={toolbarLeft}
+      toolbarAdvanced={toolbarAdvanced}
+      history={history}
+      onApplyHistory={applyText}
+      onAiAction={handleAiAction}
+      onRun={() => void handleRun()}
+      running={data.status === 'running'}
+      promptContainerRef={promptContainerRef}
+    >
+      <AssetMentionInput
+        as="textarea"
+        value={draft}
+        onChange={onChange}
+        onFocus={onFocus}
+        onBlur={onBlur}
+        placeholder="描述你想生成的视频… 输入 @ 引用角色、场景、镜头、情绪、声音"
+        kinds={VIDEO_MENTION_KINDS}
+        className={COMPOSER_PROMPT_TEXTAREA_CLASS}
+      />
+    </ComposerWorkspaceShell>
   );
 }

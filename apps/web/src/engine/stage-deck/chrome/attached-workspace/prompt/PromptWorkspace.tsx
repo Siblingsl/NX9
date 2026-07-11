@@ -1,20 +1,22 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Play } from 'lucide-react';
-import { useReactFlow } from '@xyflow/react';
+import type { AssetLibraryKind } from '@nx9/shared';
 import { lookupBlock } from '@nx9/shared';
+import { useReactFlow } from '@xyflow/react';
 import {
   usePromptBatchNodeAdapter,
   usePromptBatchState,
 } from '../../../../../blocks/shared/usePromptBatchState';
-import { PromptComposer } from '../../prompt-bar/PromptComposer';
-import { WorkspaceHeader } from '../WorkspaceHeader';
-import { WorkspaceAiTools } from '../WorkspaceAiTools';
+import { AssetMentionInput } from '../../asset-mention/AssetMentionInput';
+import { ComposerWorkspaceShell, COMPOSER_PROMPT_TEXTAREA_CLASS } from '../composer/ComposerWorkspaceShell';
+import { useWorkspaceAiLog } from '../composer/useWorkspaceAiLog';
 import { PromptBatchPanel, type PromptMentionTarget } from './PromptBatchPanel';
+import { PromptToolbarLeft } from './PromptToolbarLeft';
 import { useDeckUi } from '../../../stores/deck-ui';
 import { useFlowRuntime } from '../../../../../stores/flow-runtime';
 import { useActivityLog } from '../../../../../stores/activity-log';
-import { useAssetLibraryModalUi } from '../../../../../stores/asset-library-modal-ui';
-import { useWorkspaceCatalog } from '../../../../../stores/workspace-catalog';
+
+const PROMPT_MENTION_KINDS: AssetLibraryKind[] = ['character', 'scene', 'shot', 'emotion', 'sound'];
+const SYNC_MS = 280;
 
 function stop(e: React.SyntheticEvent) {
   e.stopPropagation();
@@ -31,13 +33,11 @@ export function PromptWorkspace({ blockId, kind, onCollapse }: PromptWorkspacePr
   const focusNonce = useDeckUi((s) => s.promptFocusNonce);
   const runtime = useFlowRuntime((s) => s.runtime);
   const appendLog = useActivityLog((s) => s.append);
-  const openAt = useAssetLibraryModalUi((s) => s.openAt);
-  const setLibraryOpen = useAssetLibraryModalUi((s) => s.setOpen);
-  const activeProjectId = useWorkspaceCatalog((s) => s.activeId);
-  const { getNode, updateNodeData } = useReactFlow();
+  const { getNode } = useReactFlow();
   const { data, updateNode } = usePromptBatchNodeAdapter(blockId);
-  const textareaContainerRef = useRef<HTMLDivElement>(null);
+  const promptContainerRef = useRef<HTMLDivElement>(null);
   const [mentionTarget, setMentionTarget] = useState<PromptMentionTarget>('global');
+  const handleAiAction = useWorkspaceAiLog();
 
   const batch = usePromptBatchState({ blockId, data, updateNode });
   const meta = lookupBlock(kind);
@@ -45,7 +45,55 @@ export function PromptWorkspace({ blockId, kind, onCollapse }: PromptWorkspacePr
   const status = ((node?.data ?? data).status as string) ?? 'idle';
   const canRun = batch.jobs.length > 0 || batch.simplePromptText.trim().length > 0;
 
+  const [draft, setDraft] = useState(batch.simplePromptText);
+  const draftRef = useRef(batch.simplePromptText);
+  const focusedRef = useRef(false);
+  const syncTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    draftRef.current = batch.simplePromptText;
+    setDraft(batch.simplePromptText);
+    focusedRef.current = false;
+  }, [blockId]);
+
+  useEffect(() => {
+    if (focusedRef.current || batch.useBatchWorkspace) return;
+    if (batch.simplePromptText !== draftRef.current) {
+      draftRef.current = batch.simplePromptText;
+      setDraft(batch.simplePromptText);
+    }
+  }, [batch.simplePromptText, batch.useBatchWorkspace]);
+
+  useEffect(
+    () => () => {
+      if (syncTimer.current) clearTimeout(syncTimer.current);
+    },
+    [],
+  );
+
+  const flushSimplePrompt = useCallback(
+    (text: string) => {
+      if (syncTimer.current) {
+        clearTimeout(syncTimer.current);
+        syncTimer.current = null;
+      }
+      batch.setSimplePrompt(text);
+    },
+    [batch],
+  );
+
+  const handleSimpleChange = useCallback(
+    (next: string) => {
+      setDraft(next);
+      draftRef.current = next;
+      if (syncTimer.current) clearTimeout(syncTimer.current);
+      syncTimer.current = setTimeout(() => flushSimplePrompt(next), SYNC_MS);
+    },
+    [flushSimplePrompt],
+  );
+
   const handleRun = useCallback(async () => {
+    if (!batch.useBatchWorkspace) flushSimplePrompt(draftRef.current);
     if (!runtime || !canRun) return;
     try {
       const { runCascadeFromBlock } = await import('../../../execution/cascade-runner');
@@ -64,125 +112,130 @@ export function PromptWorkspace({ blockId, kind, onCollapse }: PromptWorkspacePr
     } catch (e) {
       appendLog(`运行失败: ${String(e)}`);
     }
-  }, [appendLog, batch.jobs.length, blockId, canRun, kind, meta, runtime]);
+  }, [appendLog, batch.jobs.length, batch.useBatchWorkspace, blockId, canRun, flushSimplePrompt, kind, meta, runtime]);
 
   const handleCollapse = useCallback(() => {
+    if (!batch.useBatchWorkspace) flushSimplePrompt(draftRef.current);
     collapsePromptBar();
     onCollapse?.();
-  }, [collapsePromptBar, onCollapse]);
-
-  const handlePatch = useCallback(
-    (patch: Record<string, unknown>) => updateNodeData(blockId, patch),
-    [blockId, updateNodeData],
-  );
+  }, [batch.useBatchWorkspace, collapsePromptBar, flushSimplePrompt, onCollapse]);
 
   useEffect(() => {
-    if (batch.useBatchWorkspace || !textareaContainerRef.current) return;
-    const ta = textareaContainerRef.current.querySelector('textarea');
+    if (batch.useBatchWorkspace || !promptContainerRef.current) return;
+    const ta = promptContainerRef.current.querySelector('textarea');
     ta?.focus();
   }, [blockId, focusNonce, batch.useBatchWorkspace]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
-        e.preventDefault();
-        void handleRun();
-      }
+      if (e.key !== 'Enter' || !(e.ctrlKey || e.metaKey)) return;
+      e.preventDefault();
+      void handleRun();
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [handleRun]);
 
-  const openLibrary = useCallback(() => {
-    setLibraryOpen(true);
-    openAt({ tab: 'character', projectId: activeProjectId ?? undefined });
-  }, [activeProjectId, openAt, setLibraryOpen]);
+  const runLabel =
+    batch.useBatchWorkspace && batch.jobs.length > 0 ? `运行 (${batch.jobs.length})` : '运行';
 
-  return (
-    <div
-      className="flex flex-col w-full max-h-[min(420px,50vh)] px-3 py-2.5"
-      onMouseDown={stop}
-      onPointerDown={stop}
-      onWheel={(e) => e.stopPropagation()}
-    >
-      <WorkspaceHeader kind={kind} status={status as any} onCollapse={handleCollapse} />
+  const toolbarLeft = batch.useBatchWorkspace ? (
+    <PromptToolbarLeft
+      hasAssets={batch.hasAssets}
+      hasUpstream={batch.hasUpstream}
+      promptMode={batch.promptMode}
+      composeAction={batch.composeAction}
+      imageCount={batch.imageCount}
+      items={batch.items}
+      onPersist={batch.persistState}
+      onManualSync={batch.handleManualSync}
+    />
+  ) : null;
 
-      <div className="flex-1 min-h-0 overflow-y-auto nowheel overscroll-contain">
-        {batch.useBatchWorkspace ? (
-          <PromptBatchPanel
-            items={batch.items}
-            promptMode={batch.promptMode}
-            globalPrompt={batch.globalPrompt}
-            composeAction={batch.composeAction}
-            hasUpstream={batch.hasUpstream}
-            hasAssets={batch.hasAssets}
-            imageCount={batch.imageCount}
-            jobsCount={batch.jobs.length}
-            filledCount={batch.filledCount}
-            mentionTarget={mentionTarget}
-            onMentionTargetChange={setMentionTarget}
-            onPersist={batch.persistState}
-            onUpdateItem={batch.updateItem}
-            onAddItem={batch.addItem}
-            onRemoveItem={batch.removeItem}
-            onManualSync={batch.handleManualSync}
-            onOpenLibrary={openLibrary}
-          />
-        ) : (
-          <div ref={textareaContainerRef} className="space-y-2">
-            {batch.hasUpstream && batch.imageCount === 1 && batch.items[0]?.imageUrl && (
-              <div className="flex items-center gap-2 px-1">
-                <img
-                  src={batch.items[0].imageUrl}
-                  alt=""
-                  className="w-10 h-10 rounded-md object-cover border border-line/60 shrink-0"
-                />
-                <span className="text-[10px] text-ink/40">上游素材已关联</span>
-                {batch.hasUpstream && (
-                  <button
-                    type="button"
-                    onMouseDown={stop}
-                    onClick={batch.handleManualSync}
-                    className="text-[10px] text-brand ml-auto hover:underline nodrag nopan"
-                  >
-                    重新同步
-                  </button>
-                )}
-              </div>
-            )}
-            <PromptComposer
-              blockId={blockId}
-              kind={kind}
-              value={batch.simplePromptText}
-              onChange={batch.setSimplePrompt}
-              placeholder={meta ? `${meta.label} Prompt…` : '输入 Prompt…'}
-              data={data}
-              onPatch={handlePatch}
-            />
-          </div>
-        )}
-      </div>
-
-      <div className="shrink-0 flex items-center gap-2 pt-2 mt-2 border-t border-line/50 nodrag">
-        <WorkspaceAiTools
-          onOptimize={() => appendLog('AI 优化（即将推出）')}
-          onComplete={() => appendLog('Prompt 补全（即将推出）')}
-          onRewrite={() => appendLog('AI 重写（即将推出）')}
-          onTranslate={() => appendLog('AI 翻译（即将推出）')}
+  const topSlot =
+    !batch.useBatchWorkspace && batch.hasUpstream && batch.imageCount === 1 && batch.items[0]?.imageUrl ? (
+      <div
+        className="shrink-0 flex items-center gap-2 px-3 py-2 border-b border-line/25 bg-surface/20"
+        onMouseDown={stop}
+      >
+        <img
+          src={batch.items[0].imageUrl}
+          alt=""
+          className="w-10 h-10 rounded-md object-cover border border-line/60 shrink-0"
         />
-        <div className="flex-1" />
-        <span className="text-[9px] text-ink/30 hidden sm:inline">Ctrl+Enter</span>
+        <span className="text-[10px] text-ink/40">上游素材已关联</span>
         <button
           type="button"
-          onClick={() => void handleRun()}
-          disabled={status === 'running' || !canRun}
-          className="flex items-center gap-1 px-3 py-1.5 rounded-xl bg-brand text-white text-xs font-medium hover:bg-brand/90 disabled:opacity-40"
+          onMouseDown={stop}
+          onClick={batch.handleManualSync}
+          className="text-[10px] text-brand ml-auto hover:underline nodrag nopan"
         >
-          <Play size={12} />
-          运行
-          {batch.useBatchWorkspace && batch.jobs.length > 0 ? ` (${batch.jobs.length})` : ''}
+          重新同步
         </button>
       </div>
-    </div>
+    ) : undefined;
+
+  return (
+    <ComposerWorkspaceShell
+      kind={kind}
+      status={status as any}
+      onCollapse={handleCollapse}
+      topSlot={topSlot}
+      toolbarLeft={toolbarLeft}
+      onAiAction={handleAiAction}
+      onRun={() => void handleRun()}
+      running={status === 'running'}
+      runDisabled={!canRun}
+      runLabel={runLabel}
+      showAdvanced={false}
+      showHistory={false}
+      heightClass={
+        batch.useBatchWorkspace ? 'h-[340px] max-h-[min(420px,50vh)]' : undefined
+      }
+      bodyClassName={
+        batch.useBatchWorkspace
+          ? 'flex-1 min-h-0 px-3 pt-2 pb-1 overflow-y-auto nowheel overscroll-contain'
+          : undefined
+      }
+      promptContainerRef={promptContainerRef}
+    >
+      {batch.useBatchWorkspace ? (
+        <PromptBatchPanel
+          items={batch.items}
+          promptMode={batch.promptMode}
+          globalPrompt={batch.globalPrompt}
+          composeAction={batch.composeAction}
+          hasUpstream={batch.hasUpstream}
+          hasAssets={batch.hasAssets}
+          imageCount={batch.imageCount}
+          jobsCount={batch.jobs.length}
+          filledCount={batch.filledCount}
+          mentionTarget={mentionTarget}
+          onMentionTargetChange={setMentionTarget}
+          onPersist={batch.persistState}
+          onUpdateItem={batch.updateItem}
+          onAddItem={batch.addItem}
+          onRemoveItem={batch.removeItem}
+          onManualSync={batch.handleManualSync}
+          hideToolbar
+        />
+      ) : (
+        <AssetMentionInput
+          as="textarea"
+          value={draft}
+          onChange={handleSimpleChange}
+          onFocus={() => {
+            focusedRef.current = true;
+          }}
+          onBlur={() => {
+            focusedRef.current = false;
+            flushSimplePrompt(draftRef.current);
+          }}
+          placeholder={meta ? `${meta.label} Prompt… 输入 @ 引用角色、场景` : '输入 Prompt… 输入 @ 引用'}
+          kinds={PROMPT_MENTION_KINDS}
+          className={COMPOSER_PROMPT_TEXTAREA_CLASS}
+        />
+      )}
+    </ComposerWorkspaceShell>
   );
 }

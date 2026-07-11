@@ -1,75 +1,9 @@
-import { FolderOpen, Plus, RefreshCw, Trash2 } from 'lucide-react';
+import { Plus, Trash2 } from 'lucide-react';
 import type { PromptBatchItem, PromptComposeAction, PromptDispatchMode } from '@nx9/shared';
 import { AssetMentionInput } from '../../asset-mention/AssetMentionInput';
 
 function stop(e: React.SyntheticEvent) {
   e.stopPropagation();
-}
-
-const MODES: { id: PromptDispatchMode; label: string }[] = [
-  { id: 'batch', label: '一对一' },
-  { id: 'single', label: '合成' },
-  { id: 'broadcast', label: '广播' },
-];
-
-const COMPOSE: { id: PromptComposeAction; label: string }[] = [
-  { id: 'generate', label: '参考' },
-  { id: 'merge', label: '拼接' },
-  { id: 'merge-then-generate', label: '拼后生' },
-];
-
-function ModePills({
-  value,
-  onChange,
-}: {
-  value: PromptDispatchMode;
-  onChange: (m: PromptDispatchMode) => void;
-}) {
-  return (
-    <div className="flex rounded-lg bg-surface/80 p-0.5 border border-line/60 shrink-0">
-      {MODES.map((m) => (
-        <button
-          key={m.id}
-          type="button"
-          onMouseDown={stop}
-          onClick={() => onChange(m.id)}
-          className={`px-2 py-0.5 rounded-md text-[10px] transition-colors nodrag nopan ${
-            value === m.id ? 'bg-white text-brand shadow-sm font-medium' : 'text-ink/45 hover:text-ink'
-          }`}
-        >
-          {m.label}
-        </button>
-      ))}
-    </div>
-  );
-}
-
-function ComposePills({
-  value,
-  onChange,
-}: {
-  value: PromptComposeAction;
-  onChange: (v: PromptComposeAction) => void;
-}) {
-  return (
-    <div className="flex gap-0.5 flex-wrap">
-      {COMPOSE.map((c) => (
-        <button
-          key={c.id}
-          type="button"
-          onMouseDown={stop}
-          onClick={() => onChange(c.id)}
-          className={`px-1.5 py-0.5 rounded-full text-[9px] border nodrag nopan ${
-            value === c.id
-              ? 'border-brand/40 bg-brand/10 text-brand'
-              : 'border-line text-ink/45 hover:border-brand/30'
-          }`}
-        >
-          {c.label}
-        </button>
-      ))}
-    </div>
-  );
 }
 
 export type PromptMentionTarget = 'global' | { itemId: string };
@@ -98,7 +32,7 @@ export interface PromptBatchPanelProps {
   onAddItem: () => void;
   onRemoveItem: (id: string) => void;
   onManualSync: () => void;
-  onOpenLibrary?: () => void;
+  hideToolbar?: boolean;
 }
 
 function isTargetActive(target: PromptMentionTarget | undefined, check: PromptMentionTarget): boolean {
@@ -116,7 +50,7 @@ export function PromptBatchPanel({
   items,
   promptMode,
   globalPrompt,
-  composeAction,
+  composeAction: _composeAction,
   hasUpstream,
   hasAssets,
   imageCount,
@@ -126,8 +60,7 @@ export function PromptBatchPanel({
   onUpdateItem,
   onAddItem,
   onRemoveItem,
-  onManualSync,
-  onOpenLibrary,
+  hideToolbar: _hideToolbar,
 }: PromptBatchPanelProps) {
   const showRowPrompt = !hasAssets || promptMode === 'batch';
   const showMainPrompt = hasAssets && (promptMode === 'single' || promptMode === 'broadcast');
@@ -136,36 +69,6 @@ export function PromptBatchPanel({
 
   return (
     <div className="space-y-2 nodrag nopan min-w-0">
-      <div className="flex items-center gap-1.5 flex-wrap">
-        {hasAssets && (
-          <ModePills
-            value={promptMode}
-            onChange={(mode) => onPersist(items, { promptMode: mode })}
-          />
-        )}
-        {hasUpstream && (
-          <button
-            type="button"
-            onMouseDown={stop}
-            onClick={onManualSync}
-            className="p-1 rounded-md text-ink/40 hover:text-brand hover:bg-brand/5 nodrag nopan"
-            title="同步上游素材"
-          >
-            <RefreshCw size={13} />
-          </button>
-        )}
-        {onOpenLibrary && (
-          <button
-            type="button"
-            onMouseDown={stop}
-            onClick={onOpenLibrary}
-            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border border-line text-[10px] text-ink/55 hover:border-brand/40 hover:text-brand shrink-0 ml-auto nodrag nopan"
-          >
-            <FolderOpen size={11} />
-            素材库
-          </button>
-        )}
-      </div>
 
       {showPrefix && (
         <AssetMentionInput
@@ -190,13 +93,6 @@ export function PromptBatchPanel({
           className={`w-full text-xs rounded-lg border border-brand/25 bg-white px-2.5 py-2 placeholder:text-ink/35 focus:outline-none focus:border-brand/45 nodrag nopan ${
             isTargetActive(mentionTarget, 'global') ? activeInputClass : idleInputClass
           }`}
-        />
-      )}
-
-      {hasAssets && promptMode === 'single' && imageCount >= 2 && (
-        <ComposePills
-          value={composeAction}
-          onChange={(v) => onPersist(items, { composeAction: v })}
         />
       )}
 

@@ -1,17 +1,18 @@
 import { useCallback, useEffect, useMemo, useRef } from 'react';
-import { Play, History } from 'lucide-react';
-import { lookupBlock, resolveNodePromptField, resolveNodePromptText } from '@nx9/shared';
-import { WorkspaceHeader } from '../WorkspaceHeader';
-import { WorkspaceAiTools } from '../WorkspaceAiTools';
-import { PromptComposer } from '../../prompt-bar/PromptComposer';
+import type { AssetLibraryKind } from '@nx9/shared';
+import { lookupBlock } from '@nx9/shared';
+import { useReactFlow } from '@xyflow/react';
+import { AssetMentionInput } from '../../asset-mention/AssetMentionInput';
+import { ComposerWorkspaceShell, COMPOSER_PROMPT_TEXTAREA_CLASS } from '../composer/ComposerWorkspaceShell';
+import { useWorkspaceAiLog } from '../composer/useWorkspaceAiLog';
 import { useDeckUi } from '../../../stores/deck-ui';
 import { useFlowRuntime } from '../../../../../stores/flow-runtime';
 import { useActivityLog } from '../../../../../stores/activity-log';
 import { usePromptHistory } from '../../../stores/prompt-history';
-import { useReactFlow } from '@xyflow/react';
-import type { AssetLibraryKind } from '@nx9/shared';
+import { useAttachedNodeData } from './use-attached-node-data';
+import { useLocalNodePrompt } from './use-local-node-prompt';
 
-const EMPTY_HISTORY: { blockId: string; text: string }[] = [];
+const EMPTY_HISTORY: { id: string; blockId: string; text: string; savedAt: number }[] = [];
 
 export interface GenerationWorkspaceProps {
   blockId: string;
@@ -24,24 +25,44 @@ export function GenerationWorkspace({ blockId, kind, onCollapse }: GenerationWor
   const collapsePromptBar = useDeckUi((s) => s.collapsePromptBar);
   const runtime = useFlowRuntime((s) => s.runtime);
   const appendLog = useActivityLog((s) => s.append);
-  const textareaContainerRef = useRef<HTMLDivElement>(null);
+  const promptContainerRef = useRef<HTMLDivElement>(null);
   const promptEntries = usePromptHistory((s) => s.entries);
-  const history = useMemo(() => {
-    return (promptEntries ?? EMPTY_HISTORY).filter((e) => e.blockId === blockId).slice(0, 20);
-  }, [promptEntries, blockId]);
-  const { getNode, updateNodeData } = useReactFlow();
+  const pushHistory = usePromptHistory((s) => s.push);
+  const { updateNodeData } = useReactFlow();
+  const handleAiAction = useWorkspaceAiLog();
 
   const meta = lookupBlock(kind);
-  const node = getNode(blockId);
-  const data = (node?.data ?? {}) as Record<string, unknown>;
+  const data = useAttachedNodeData(blockId);
+
+  const history = useMemo(
+    () => (promptEntries ?? EMPTY_HISTORY).filter((e) => e.blockId === blockId).slice(0, 20),
+    [promptEntries, blockId],
+  );
+
+  const pushHistoryDebounced = useCallback(
+    (text: string) => pushHistory(blockId, text),
+    [blockId, pushHistory],
+  );
+
+  const { draft, onChange, onFocus, onBlur, applyText, flushNow } = useLocalNodePrompt({
+    blockId,
+    data,
+    updateNodeData,
+    onHistoryPush: pushHistoryDebounced,
+  });
+
+  const assetKinds: AssetLibraryKind[] =
+    kind === 'sound-gen' ? ['character', 'sound'] : ['character', 'scene'];
+
+  const status = (data.status as string) ?? 'idle';
 
   useEffect(() => {
-    if (!textareaContainerRef.current) return;
-    const ta = textareaContainerRef.current.querySelector('textarea');
+    const ta = promptContainerRef.current?.querySelector('textarea');
     ta?.focus();
   }, [blockId, focusNonce]);
 
   const handleRun = useCallback(async () => {
+    flushNow();
     if (!runtime) return;
     try {
       const { runCascadeFromBlock } = await import('../../../execution/cascade-runner');
@@ -60,104 +81,49 @@ export function GenerationWorkspace({ blockId, kind, onCollapse }: GenerationWor
     } catch (e) {
       appendLog(`运行失败: ${String(e)}`);
     }
-  }, [blockId, runtime, meta, kind, appendLog]);
+  }, [blockId, runtime, meta, kind, appendLog, flushNow]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
-        const active = document.activeElement;
-        const inPanel = textareaContainerRef.current?.contains(active);
-        if (!inPanel) return;
-        e.preventDefault();
-        void handleRun();
-        return;
-      }
-      if (e.key === '/' && (e.ctrlKey || e.metaKey)) {
-        e.preventDefault();
-        appendLog('AI 优化（即将推出）');
-      }
+      if (e.key !== 'Enter' || !(e.ctrlKey || e.metaKey)) return;
+      const ta = promptContainerRef.current?.querySelector('textarea');
+      if (document.activeElement !== ta) return;
+      e.preventDefault();
+      void handleRun();
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [handleRun, appendLog]);
+  }, [handleRun]);
 
   const handleCollapse = useCallback(() => {
+    flushNow();
     collapsePromptBar();
     onCollapse?.();
-  }, [collapsePromptBar, onCollapse]);
-
-  const handlePatch = useCallback(
-    (patch: Record<string, unknown>) => updateNodeData(blockId, patch),
-    [blockId, updateNodeData],
-  );
-
-  const primaryContent = resolveNodePromptText(data);
-
-  const handlePrimaryChange = useCallback(
-    (next: string) => {
-      const key = resolveNodePromptField(data);
-      handlePatch({ [key]: next });
-    },
-    [data, handlePatch],
-  );
-
-  const assetKinds: AssetLibraryKind[] | undefined =
-    kind === 'sound-gen' ? ['character', 'sound'] : ['character', 'scene'];
-
-  const status = (data.status as string) ?? 'idle';
+  }, [collapsePromptBar, onCollapse, flushNow]);
 
   return (
-    <div
-      className="flex flex-col w-full max-h-[min(480px,55vh)] px-3 py-2.5"
-      onMouseDown={(e) => e.stopPropagation()}
-      onPointerDown={(e) => e.stopPropagation()}
-      onWheel={(e) => e.stopPropagation()}
+    <ComposerWorkspaceShell
+      kind={kind}
+      status={status as any}
+      onCollapse={handleCollapse}
+      history={history}
+      onApplyHistory={applyText}
+      onAiAction={handleAiAction}
+      onRun={() => void handleRun()}
+      running={data.status === 'running'}
+      showAdvanced={false}
+      promptContainerRef={promptContainerRef}
     >
-      <WorkspaceHeader kind={kind} status={status as any} onCollapse={handleCollapse} />
-
-      <div
-        ref={textareaContainerRef}
-        className="flex-1 min-h-0 overflow-y-auto nowheel overscroll-contain space-y-2"
-      >
-        <PromptComposer
-            blockId={blockId}
-            kind={kind}
-            value={primaryContent}
-            onChange={handlePrimaryChange}
-            placeholder={meta ? `${meta.label} Prompt…` : '输入 Prompt…'}
-            data={data}
-            onPatch={handlePatch}
-            assetKinds={assetKinds}
-        />
-      </div>
-
-      <div className="shrink-0 flex flex-wrap items-center gap-x-2 gap-y-1 pt-2 border-t border-line/60 mt-2 nodrag">
-        <WorkspaceAiTools
-          onOptimize={() => appendLog('AI 优化（即将推出）')}
-          onComplete={() => appendLog('Prompt 补全（即将推出）')}
-          onRewrite={() => appendLog('AI 重写（即将推出）')}
-          onTranslate={() => appendLog('AI 翻译（即将推出）')}
-        />
-
-        {history.length > 0 && (
-          <span className="flex items-center gap-1 px-2 py-1 text-[10px] text-ink/35">
-            <History size={11} />
-            {history.length} 条历史
-          </span>
-        )}
-
-        <div className="flex-1 min-w-[8px]" />
-        <span className="text-[9px] text-ink/30 hidden sm:inline">Ctrl+Enter</span>
-        <button
-          type="button"
-          onClick={() => void handleRun()}
-          disabled={data.status === 'running'}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-brand text-white text-xs font-medium hover:bg-brand/90 disabled:opacity-50"
-        >
-          <Play size={12} />
-          运行
-        </button>
-      </div>
-    </div>
+      <AssetMentionInput
+        as="textarea"
+        value={draft}
+        onChange={onChange}
+        onFocus={onFocus}
+        onBlur={onBlur}
+        placeholder={meta ? `${meta.label} Prompt… 输入 @ 引用` : '输入 Prompt… 输入 @ 引用'}
+        kinds={assetKinds}
+        className={COMPOSER_PROMPT_TEXTAREA_CLASS}
+      />
+    </ComposerWorkspaceShell>
   );
 }
