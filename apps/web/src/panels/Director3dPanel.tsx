@@ -3,7 +3,11 @@ import type { Director3dCapturePayload, DirectorProject } from '@nx9/director3d'
 import { normalizeDirectorProject, isWebGLAvailable } from '@nx9/director3d';
 import { useToast } from '../stores/toast';
 import { toastSuccess } from '../stores/toast';
-import { newBacklotWorkspaceItem } from '@nx9/shared';
+import {
+  emptyStoryboardPreview,
+  newBacklotWorkspaceItem,
+  type StoryboardPreviewPayload,
+} from '@nx9/shared';
 import { useDirector3dUi } from '../stores/director3d-ui';
 import { useFlowRuntime } from '../stores/flow-runtime';
 import { useWorkspaceDocument } from '../stores/workspace-document';
@@ -29,6 +33,10 @@ export function Director3dPanel() {
   const open = useDirector3dUi((s) => s.open);
   const blockId = useDirector3dUi((s) => s.blockId);
   const linkedShotId = useDirector3dUi((s) => s.linkedShotId);
+  const linkedStoryboardPreviewId = useDirector3dUi((s) => s.linkedStoryboardPreviewId);
+  const linkedStoryboardPreviewFrameId = useDirector3dUi(
+    (s) => s.linkedStoryboardPreviewFrameId,
+  );
   const project = useDirector3dUi((s) => s.project);
   const close = useDirector3dUi((s) => s.close);
   const setProject = useDirector3dUi((s) => s.setProject);
@@ -76,6 +84,8 @@ export function Director3dPanel() {
             content: payload.cameraPrompt ?? '',
             outputPrompt: payload.cameraPrompt ?? '',
             status: 'done',
+            linkedStoryboardPreviewId,
+            linkedStoryboardPreviewFrameId,
           };
           if (isStageDeckEnabled()) {
             const take = useTakeStore.getState().appendTake(
@@ -97,29 +107,104 @@ export function Director3dPanel() {
           runtime.updateNodeData(blockId, patch);
         }
 
+        let appliedToStoryboardPreview = false;
+        if (linkedStoryboardPreviewId && linkedStoryboardPreviewFrameId && runtime && blockId) {
+          const previewNode = runtime
+            .getNodes()
+            .find((node) => node.id === linkedStoryboardPreviewId);
+          const previewData = (previewNode?.data ?? {}) as Record<string, unknown>;
+          const raw = previewData.storyboardPreview as StoryboardPreviewPayload | undefined;
+          const current =
+            raw?.version === 1 && Array.isArray(raw.frames)
+              ? { ...emptyStoryboardPreview(), ...raw }
+              : undefined;
+          const target = current?.frames.find(
+            (frame) => frame.id === linkedStoryboardPreviewFrameId,
+          );
+
+          if (current && target && !target.locked) {
+            const frames = current.frames.map((frame) =>
+              frame.id === linkedStoryboardPreviewFrameId
+                ? {
+                    ...frame,
+                    referenceImageUrl: uploaded.url,
+                    director3dGuide: {
+                      sourceBlockId: blockId,
+                      captureId: payload.captureId,
+                      captureUrl: uploaded.url,
+                      cameraPrompt: payload.cameraPrompt,
+                      cameraPosition: payload.cameraPosition,
+                      cameraRotation: payload.cameraRotation,
+                      cameraFov: payload.cameraFov,
+                      appliedAt: new Date().toISOString(),
+                    },
+                    userModified: true,
+                    status: 'modified' as const,
+                    errorMessage: null,
+                  }
+                : frame,
+            );
+            runtime.updateNodeData(linkedStoryboardPreviewId, {
+              storyboardPreview: {
+                ...current,
+                frames,
+                selectedFrameId: linkedStoryboardPreviewFrameId,
+                confirmed: false,
+                confirmedAt: null,
+              },
+              status: 'idle',
+            });
+            appliedToStoryboardPreview = true;
+            appendLog(`3D 机位已应用到 ${target.label}，可返回分镜预览正式出图`);
+          } else if (target?.locked) {
+            appendLog(`${target.label} 已锁定，3D 截图仅保存在导演台节点`);
+          }
+        }
+
         if (linkedShotId) {
           const reviewMode = useWorkspaceDocument.getState().storyboard.reviewMode;
+          const linkedShot = useWorkspaceDocument
+            .getState()
+            .storyboard.shots.find((shot) => shot.id === linkedShotId);
           const cameraJson = JSON.stringify({
             position: payload.cameraPosition,
             rotation: payload.cameraRotation,
             fov: payload.cameraFov,
           });
           updateShot(linkedShotId, {
-            firstFrameAssetId: uploaded.url,
-            status: reviewMode === 'manual' ? 'review' : 'approved',
+            firstFrameAssetId: appliedToStoryboardPreview
+              ? linkedShot?.firstFrameAssetId
+              : uploaded.url,
+            status: appliedToStoryboardPreview
+              ? linkedShot?.status
+              : reviewMode === 'manual'
+                ? 'review'
+                : 'approved',
             notes: cameraJson,
             promptEn: payload.cameraPrompt
-              ? `${useWorkspaceDocument.getState().storyboard.shots.find((s) => s.id === linkedShotId)?.promptEn ?? ''} ${payload.cameraPrompt}`.trim()
+              ? `${linkedShot?.promptEn ?? ''} ${payload.cameraPrompt}`.trim()
               : undefined,
           });
           syncDirector3dToBlocking(cameraJson);
-          appendLog(`截图已写入故事板镜头`);
+          appendLog(
+            appliedToStoryboardPreview
+              ? '机位数据已写入故事板镜头'
+              : '截图已写入故事板镜头',
+          );
         }
       } catch (e) {
         appendLog(`3D 截图上传失败: ${String(e)}`);
       }
     },
-    [blockId, runtime, linkedShotId, updateShot, appendLog],
+    [
+      blockId,
+      runtime,
+      linkedShotId,
+      linkedStoryboardPreviewId,
+      linkedStoryboardPreviewFrameId,
+      updateShot,
+      appendLog,
+    ],
   );
 
   const handleSaveSceneTemplate = useCallback(

@@ -1,4 +1,5 @@
 import type { StoryboardShot } from './storyboard';
+import type { ScriptBreakdownShot } from './script-breakdown';
 
 /** 分镜预览帧状态 — Video Proof 专用，区别于 StoryboardShot.status */
 export type StoryboardPreviewFrameStatus =
@@ -12,6 +13,41 @@ export type StoryboardPreviewFrameStatus =
 export type StoryboardPreviewViewMode = 'grid' | 'timeline' | 'storyboard';
 
 export type StoryboardPreviewGridColumns = 2 | 3 | 4;
+
+/** 分镜预览调度图像生成时的出图参数（每帧固定 1 张） */
+export type StoryboardPreviewPictureSettings = {
+  model: string;
+  pictureGenMode: 'text-to-image' | 'image-to-image';
+  quality: string;
+  aspectRatio: string;
+};
+
+/** 3D 导演台写入分镜帧的机位参考；正式成图仍由 picture-gen 执行。 */
+export interface StoryboardPreviewDirector3dGuide {
+  sourceBlockId: string;
+  captureId: string;
+  captureUrl: string;
+  cameraPrompt?: string;
+  cameraPosition?: [number, number, number];
+  cameraRotation?: [number, number, number];
+  cameraFov?: number;
+  appliedAt: string;
+}
+
+/** 分镜预览统一管理的 720°（360×180）2:1 等距柱状场景环境。 */
+export interface StoryboardPreviewPanorama720 {
+  imageUrl: string;
+  prompt: string;
+  sourcePictureNodeId: string;
+  updatedAt: string;
+}
+
+export const DEFAULT_STORYBOARD_PREVIEW_PICTURE_SETTINGS: StoryboardPreviewPictureSettings = {
+  model: 'dall-e-3',
+  pictureGenMode: 'text-to-image',
+  quality: 'auto',
+  aspectRatio: '16:9',
+};
 
 /** 单张分镜预览帧 */
 export interface StoryboardPreviewFrame {
@@ -32,6 +68,8 @@ export interface StoryboardPreviewFrame {
   sceneAssetRef?: string | null;
   imageUrl?: string | null;
   referenceImageUrl?: string | null;
+  /** 3D 构图与机位数据，作为图像生成参考，不等同于最终分镜图。 */
+  director3dGuide?: StoryboardPreviewDirector3dGuide | null;
   stylePreset?: string | null;
   status: StoryboardPreviewFrameStatus;
   /** 🔒 锁定后禁止任何批量/全量/修复触发的重新生成 */
@@ -57,6 +95,10 @@ export interface StoryboardPreviewPayload {
   selectedFrameId?: string | null;
   /** 一致性检查最近一次结果 */
   lastConsistencyReport?: StoryboardPreviewConsistencyReport | null;
+  /** 出图参数 — 由分镜预览统一调度并同步至图像生成节点 */
+  pictureSettings: StoryboardPreviewPictureSettings;
+  /** 可加载至 3D 导演台的全景环境。 */
+  panorama720?: StoryboardPreviewPanorama720 | null;
 }
 
 export interface StoryboardPreviewConsistencyDimension {
@@ -108,7 +150,15 @@ export function emptyStoryboardPreview(): StoryboardPreviewPayload {
     confirmed: false,
     selectedFrameId: null,
     lastConsistencyReport: null,
+    pictureSettings: { ...DEFAULT_STORYBOARD_PREVIEW_PICTURE_SETTINGS },
+    panorama720: null,
   };
+}
+
+export function resolveStoryboardPreviewPictureSettings(
+  payload: StoryboardPreviewPayload | undefined,
+): StoryboardPreviewPictureSettings {
+  return payload?.pictureSettings ?? { ...DEFAULT_STORYBOARD_PREVIEW_PICTURE_SETTINGS };
 }
 
 /**
@@ -185,6 +235,37 @@ export function buildStoryboardPreviewFrames(shots: StoryboardShot[]): Storyboar
       imageUrl: shot.firstFrameAssetId ?? null,
       status: shot.firstFrameAssetId ? 'success' : 'idle',
       locked,
+      userModified: false,
+    } satisfies StoryboardPreviewFrame;
+  });
+}
+
+/** 从剧本拆分分镜构建预览时间轴帧 */
+export function buildStoryboardPreviewFramesFromBreakdown(
+  shots: ScriptBreakdownShot[],
+): StoryboardPreviewFrame[] {
+  let cursor = 0;
+  return shots.map((shot, i) => {
+    const duration = Math.max(1, shot.durationSec || 5);
+    const startSec = cursor;
+    const endSec = cursor + duration;
+    cursor = endSec;
+    return {
+      id: `spf-${shot.id}`,
+      order: i + 1,
+      label: `Shot${String(i + 1).padStart(2, '0')}`,
+      startSec,
+      endSec,
+      sourceShotId: shot.id,
+      sceneCode: shot.sceneCode,
+      sceneId: shot.sceneId,
+      promptSummary: shot.imagePrompt || shot.scriptText,
+      characterIds: shot.characters,
+      sceneAssetRef: shot.scene || null,
+      imageUrl: shot.previewImageUrl ?? null,
+      referenceImageUrl: shot.referenceImageUrl ?? null,
+      status: shot.previewImageUrl ? 'success' : 'idle',
+      locked: shot.status === 'approved',
       userModified: false,
     } satisfies StoryboardPreviewFrame;
   });

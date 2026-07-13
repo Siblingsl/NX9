@@ -201,6 +201,15 @@ export const api = {
       lines: { speaker: string; text: string; emotion?: string }[];
     }>('/api/agent/dialogue-parse', { method: 'POST', body: JSON.stringify({ text }) }),
 
+  storyboardTable: (body: { sourceText: string }) =>
+    request<{
+      ok: boolean;
+      table: import('@nx9/shared').StoryboardTableRow[];
+    }>('/api/agent/production/storyboard-table', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+
   seedSeedanceSkills: () =>
     request<{ imported: number; skipped: number }>('/api/skills/seed/seedance', {
       method: 'POST',
@@ -576,12 +585,6 @@ export const api = {
 
   directorPlan: (body: { sourceText: string }) =>
     request<{ ok: boolean; plan: string }>('/api/agent/production/director-plan', {
-      method: 'POST',
-      body: JSON.stringify(body),
-    }),
-
-  storyboardTable: (body: { sourceText: string }) =>
-    request<{ ok: boolean; table: import('@nx9/shared').StoryboardTableRow[] }>('/api/agent/production/storyboard-table', {
       method: 'POST',
       body: JSON.stringify(body),
     }),

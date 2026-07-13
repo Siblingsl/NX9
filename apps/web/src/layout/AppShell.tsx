@@ -304,7 +304,8 @@ export default function AppShell() {
       {isSurfaceEnabled('settings') && <SettingsDrawer />}
       <Suspense fallback={null}>
         {isSurfaceEnabled('skillsDrawer') && <SkillsDrawer />}
-        {isSurfaceEnabled('director3d') && <Director3dPanel />}
+        {/* 节点工作区需要 3D 宿主常驻；director3d surface flag 仅控制顶部独立入口。 */}
+        <Director3dPanel />
         {isSurfaceEnabled('stageDeckTour') && <StageDeckTour />}
       </Suspense>
       {isSurfaceEnabled('logPanel') && <LogPanel />}

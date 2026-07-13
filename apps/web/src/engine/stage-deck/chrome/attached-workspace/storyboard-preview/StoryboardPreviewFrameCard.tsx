@@ -27,7 +27,9 @@ const STATUS_CLASS: Record<string, string> = {
 export interface StoryboardPreviewFrameCardProps {
   frame: StoryboardPreviewFrame;
   selected?: boolean;
+  checked?: boolean;
   onSelect: () => void;
+  onToggleSelect?: () => void;
   onToggleLock: () => void;
   onRegenerate: () => void;
   onInsertAfter: () => void;
@@ -37,7 +39,9 @@ export interface StoryboardPreviewFrameCardProps {
 export function StoryboardPreviewFrameCard({
   frame,
   selected,
+  checked,
   onSelect,
+  onToggleSelect,
   onToggleLock,
   onRegenerate,
   onInsertAfter,
@@ -48,11 +52,26 @@ export function StoryboardPreviewFrameCard({
   return (
     <div
       className={`group relative flex flex-col rounded-xl border bg-white overflow-hidden nodrag nopan transition-shadow ${
-        selected ? 'border-brand/50 ring-2 ring-brand/20' : 'border-line/45 hover:border-line/70'
+        selected ? 'border-brand/50 ring-2 ring-brand/20' : checked ? 'border-brand/30' : 'border-line/45 hover:border-line/70'
       } ${frame.locked ? 'opacity-95' : ''}`}
       onMouseDown={stop}
       onClick={onSelect}
     >
+      {onToggleSelect && (
+        <button
+          type="button"
+          onMouseDown={stop}
+          onClick={(e) => {
+            e.stopPropagation();
+            onToggleSelect();
+          }}
+          className={`absolute top-1.5 left-1.5 z-10 w-4 h-4 rounded border text-[9px] grid place-items-center ${
+            checked ? 'bg-brand border-brand text-white' : 'bg-white/90 border-line/60 text-transparent'
+          }`}
+        >
+          ✓
+        </button>
+      )}
       <div className="relative aspect-video bg-surface/60">
         {frame.imageUrl ? (
           <img src={frame.imageUrl} alt="" className="w-full h-full object-cover" />
@@ -93,6 +112,9 @@ export function StoryboardPreviewFrameCard({
         </div>
         {frame.sceneCode && (
           <p className="text-[9px] text-ink/40 truncate">场景 {frame.sceneCode}</p>
+        )}
+        {frame.director3dGuide && (
+          <p className="text-[9px] text-violet-700 truncate">3D 机位已绑定</p>
         )}
         <p className="text-[9px] text-ink/55 line-clamp-2 leading-snug">{frame.promptSummary || '—'}</p>
       </div>

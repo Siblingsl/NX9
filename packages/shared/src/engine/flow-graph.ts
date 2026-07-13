@@ -1,5 +1,6 @@
 import type { FlowBlock, FlowLink } from '../types/workspace';
 import type { PromptBatchItem, PromptBatchJob, PromptDispatchMeta } from '../types/prompt-batch';
+import type { ScriptBreakdownPayload } from '../types/script-breakdown';
 import { promptItemsToBatch } from '../types/prompt-batch';
 import { resolveAssetImportItems } from '../utils/asset-import';
 
@@ -12,6 +13,8 @@ export interface UpstreamOutputs {
   promptBatch?: PromptBatchJob[];
   /** 提示词节点的分发策略 */
   promptDispatch?: PromptDispatchMeta;
+  /** 剧本拆分后的集数/分镜结构 */
+  scriptBreakdowns?: ScriptBreakdownPayload[];
 }
 
 /** Kahn topological sort — returns block ids in execution order. */
@@ -107,6 +110,38 @@ export function gatherUpstream(
     if (kind === 'chat-model' || kind === 'memo' || kind === 'cinema-prompt' || kind === 'camera-prompt' || kind === 'link-parser' || kind === 'style-atelier' || kind === 'tag-atelier' || kind === 'angle-visual') {
       const text = (d.content as string) || (d.output as string) || (d.lastReply as string);
       if (text?.trim()) out.prompts.push(text.trim());
+    }
+    if (kind === 'dialogue-sheet' || kind === 'story-grid') {
+      const payload = d.scriptBreakdown as ScriptBreakdownPayload | undefined;
+      if (payload?.version === 1) {
+        out.scriptBreakdowns = [...(out.scriptBreakdowns ?? []), payload];
+        const prompts = payload.episodes.flatMap((ep) => ep.shots.map((shot) => shot.imagePrompt));
+        out.prompts.push(...prompts.filter(Boolean));
+      }
+      continue;
+    }
+    if (kind === 'storyboard-preview') {
+      const preview = d.storyboardPreview as import('../types/storyboard-preview').StoryboardPreviewPayload | undefined;
+      if (preview?.version === 1) {
+        const frames = preview.confirmed
+          ? preview.frames.filter(
+              (f) => f.imageUrl && (f.status === 'success' || f.status === 'locked'),
+            )
+          : preview.frames.filter((f) => f.imageUrl);
+        for (const frame of frames) {
+          out.pictures.push(frame.imageUrl!);
+          if (frame.promptSummary) out.prompts.push(frame.promptSummary);
+        }
+      }
+      const breakdown = d.scriptBreakdown as ScriptBreakdownPayload | undefined;
+      if (breakdown?.version === 1) {
+        out.scriptBreakdowns = [...(out.scriptBreakdowns ?? []), breakdown];
+        const videoPrompts = breakdown.episodes.flatMap((ep) =>
+          ep.shots.map((shot) => shot.videoPrompt).filter(Boolean),
+        );
+        out.prompts.push(...videoPrompts);
+      }
+      continue;
     }
     if (kind === 'picture-gen') {
       const urls = (d.previewUrls as string[]) ?? [];
@@ -252,6 +287,7 @@ export function gatherUpstream(
         out.pictures.push(...(up.pictures ?? []));
         out.clips.push(...(up.clips ?? []));
         out.sounds.push(...(up.sounds ?? []));
+        out.scriptBreakdowns = [...(out.scriptBreakdowns ?? []), ...(up.scriptBreakdowns ?? [])];
       }
     }
   }

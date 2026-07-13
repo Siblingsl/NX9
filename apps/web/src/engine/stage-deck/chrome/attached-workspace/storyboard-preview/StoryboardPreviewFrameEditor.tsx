@@ -1,4 +1,4 @@
-import { X } from 'lucide-react';
+import { Box, X } from 'lucide-react';
 import type { StoryboardPreviewFrame } from '@nx9/shared';
 import { canRegenerateFrame } from '@nx9/shared';
 import { AssetMentionInput } from '../../asset-mention/AssetMentionInput';
@@ -12,6 +12,8 @@ export interface StoryboardPreviewFrameEditorProps {
   onClose: () => void;
   onUpdate: (patch: Partial<StoryboardPreviewFrame>) => void;
   onRegenerate: () => void;
+  onOpenDirector3d?: () => void;
+  director3dConnected?: boolean;
 }
 
 /** 单张分镜编辑 — 点击卡片后切换为 Image Workspace 能力（Prompt / 参考图 / 风格） */
@@ -20,6 +22,8 @@ export function StoryboardPreviewFrameEditor({
   onClose,
   onUpdate,
   onRegenerate,
+  onOpenDirector3d,
+  director3dConnected,
 }: StoryboardPreviewFrameEditorProps) {
   const canRegen = canRegenerateFrame(frame);
 
@@ -70,10 +74,36 @@ export function StoryboardPreviewFrameEditor({
               className="flex-1 min-w-[120px] text-[10px] rounded-md border border-line/50 px-2 py-1"
             />
           </div>
+          {frame.director3dGuide && (
+            <div className="rounded-lg border border-violet-500/20 bg-violet-500/5 px-2 py-1.5">
+              <p className="text-[10px] font-medium text-violet-700">已绑定 3D 机位参考</p>
+              {frame.director3dGuide.cameraPrompt && (
+                <p className="mt-0.5 text-[9px] text-ink/45 line-clamp-2">
+                  {frame.director3dGuide.cameraPrompt}
+                </p>
+              )}
+            </div>
+          )}
         </div>
       </div>
 
       <div className="flex justify-end gap-2 pt-1">
+        <button
+          type="button"
+          disabled={!director3dConnected || frame.locked}
+          onClick={onOpenDirector3d}
+          title={
+            director3dConnected
+              ? frame.locked
+                ? '请先解锁此分镜'
+                : '在 3D 导演台中设计此帧机位'
+              : '请先连接 3D 导演台节点'
+          }
+          className="inline-flex items-center gap-1 px-3 py-1 rounded-lg border border-violet-500/25 text-violet-700 text-[11px] disabled:opacity-40"
+        >
+          <Box size={12} />
+          3D 构图
+        </button>
         <button
           type="button"
           disabled={!canRegen}

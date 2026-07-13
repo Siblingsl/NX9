@@ -8,7 +8,7 @@ import {
   getStraightPath,
   type EdgeProps,
 } from '@xyflow/react';
-import { SOCKET_COLORS, type SocketKind } from '@nx9/shared';
+import { SOCKET_COLORS, type SocketKind, isStoryboardExecLink } from '@nx9/shared';
 import type { FlowEdgeTypeId } from '../../flow-edge-types';
 import { normalizeFlowEdgeType } from '../../flow-edge-types';
 import { EdgeMidpointMenu } from './EdgeMidpointMenu';
@@ -56,7 +56,8 @@ export const ChannelEdge = memo(function ChannelEdge(props: EdgeProps) {
   const highlighted = Boolean(props.data?.highlighted);
   const dimmed = Boolean(props.data?.dimmed);
   const handleKind = (props.sourceHandleId ?? 'prompt') as SocketKind;
-  const stroke = SOCKET_COLORS[handleKind] ?? SOCKET_COLORS.prompt;
+  const execLink = Boolean(props.data?.execLink);
+  const stroke = execLink ? SOCKET_COLORS.picture : (SOCKET_COLORS[handleKind] ?? SOCKET_COLORS.prompt);
   const [edgePath, labelX, labelY] = resolvePath(pathType, props);
   const [midHover, setMidHover] = useState(false);
   const menu = useStageDeckEdgeMenu((s) => s.menu);
@@ -64,7 +65,7 @@ export const ChannelEdge = memo(function ChannelEdge(props: EdgeProps) {
   const onChangeType = useStageDeckEdgeMenu((s) => s.onChangeType);
   const onDelete = useStageDeckEdgeMenu((s) => s.onDelete);
 
-  const strokeWidth = props.selected || highlighted ? 3 : 2;
+  const strokeWidth = execLink ? 3 : props.selected || highlighted ? 3 : 2;
   const opacity = dimmed ? 0.25 : 1;
   const edgeType = normalizeFlowEdgeType(
     props.type === 'channel' ? pathType : props.type,

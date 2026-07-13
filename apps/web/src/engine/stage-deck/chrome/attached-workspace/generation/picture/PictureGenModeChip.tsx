@@ -14,9 +14,10 @@ function stop(e: React.SyntheticEvent) {
 export interface PictureGenModeChipProps {
   mode: PictureGenMode;
   onChange: (mode: PictureGenMode) => void;
+  modes?: PictureGenMode[];
 }
 
-export function PictureGenModeChip({ mode, onChange }: PictureGenModeChipProps) {
+export function PictureGenModeChip({ mode, onChange, modes }: PictureGenModeChipProps) {
   const btnRef = useRef<HTMLButtonElement>(null);
   const [open, setOpen] = useState(false);
   const current = lookupPictureGenModeDef(mode);
@@ -46,7 +47,7 @@ export function PictureGenModeChip({ mode, onChange }: PictureGenModeChipProps) 
         width={148}
       >
         <p className="px-3 pt-2 pb-1 text-[10px] text-ink/40">图像生成模式</p>
-        {PICTURE_GEN_MODES.map((m) => {
+        {PICTURE_GEN_MODES.filter((m) => !modes || modes.includes(m.id)).map((m) => {
           const ItemIcon = m.icon;
           const active = m.id === mode;
           return (

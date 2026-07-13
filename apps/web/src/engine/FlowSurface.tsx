@@ -28,7 +28,7 @@ import {
   type OnNodeDrag,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import { PERF, validateLink, WORKFLOW_TEMPLATES, lookupBlock, canExecuteNode, resolveNodeInteraction, isPromptBarKind, syncAssetImportNodeFields } from '@nx9/shared';
+import { PERF, validateLink, WORKFLOW_TEMPLATES, lookupBlock, canExecuteNode, resolveNodeInteraction, isPromptBarKind, syncAssetImportNodeFields, isStoryboardExecLink } from '@nx9/shared';
 import { blockTypes, preloadBlockTypes } from '../blocks/registry';
 import { api } from '../api/client';
 import { useFlowHistory, type FlowSnapshot } from '../hooks/use-flow-history';
@@ -1358,18 +1358,48 @@ const FlowSurfaceInner = memo(function FlowSurfaceInner({
   const onConnect: OnConnect = useCallback(
     (conn) => {
       pushFlowSnapshot(nodes, edges);
+      const source = nodes.find((n) => n.id === conn.source);
+      const target = nodes.find((n) => n.id === conn.target);
+      const execLink = Boolean(
+        source &&
+          target &&
+          isStoryboardExecLink(
+            source.type ?? '',
+            target.type ?? '',
+            conn.sourceHandle,
+            conn.targetHandle,
+          ),
+      );
       setEdges((eds) =>
         addEdge(
           {
             ...conn,
             id: `link-${Date.now()}`,
             ...(isStageDeck
-              ? { type: 'channel', data: { pathType: 'default' } }
+              ? {
+                  type: 'channel',
+                  data: {
+                    pathType: execLink ? 'straight' : 'default',
+                    execLink,
+                  },
+                }
               : {}),
           },
           eds,
         ),
       );
+      if (execLink) {
+        const pictureId =
+          source?.type === 'picture-gen'
+            ? source.id
+            : target?.type === 'picture-gen'
+              ? target.id
+              : null;
+        if (pictureId) {
+          const deck = useDeckUi.getState();
+          if (deck.selectedBlockId === pictureId) deck.collapsePromptBar();
+        }
+      }
     },
     [edges, nodes, push, setEdges, isStageDeck],
   );

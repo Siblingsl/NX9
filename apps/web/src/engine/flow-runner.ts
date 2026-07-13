@@ -22,6 +22,11 @@ import {
   type FlowLink,
   type TextSplitMode,
   type StoryboardShot,
+  buildScriptBreakdownFromText,
+  flattenScriptBreakdownShots,
+  buildStoryboardPreviewFramesFromBreakdown,
+  emptyStoryboardPreview,
+  resolveStoryboardPreviewPictureSettings,
 } from '@nx9/shared';
 import { buildCameraPrompt, normalizeDirectorProject } from '@nx9/director3d';
 import { api } from '../api/client';
@@ -108,6 +113,7 @@ export const RUNNABLE_BLOCKS = new Set([
   'light-rig',
   'depth-pass',
   'picture-diff',
+  'storyboard-preview',
 ]);
 
 function toBlocks(nodes: Node[]): FlowBlock[] {
@@ -154,6 +160,7 @@ async function executeBlock(
   block: FlowBlock,
   upstream: ReturnType<typeof gatherUpstream>,
   updateNodeData: (id: string, data: Record<string, unknown>) => void,
+  ctx?: { nodes: Node[]; edges: Edge[] },
 ): Promise<void> {
   const kind = block.type;
   const d = block.data ?? {};
@@ -208,6 +215,141 @@ async function executeBlock(
     return;
   }
 
+  if (kind === 'dialogue-sheet') {
+    const source = ((d.sourceText as string) || prompt).trim();
+    if (!source) throw new Error('剧本拆分缺少文本');
+    const payload = (d.scriptBreakdown as import('@nx9/shared').ScriptBreakdownPayload | undefined) ?? buildScriptBreakdownFromText(source);
+    const shots = flattenScriptBreakdownShots(payload);
+    updateNodeData(block.id, {
+      status: 'success',
+      sourceText: source,
+      scriptBreakdown: payload,
+      content: `${payload.title} · ${payload.episodes.length} 集 · ${shots.length} 个分镜`,
+      output: shots.map((shot) => shot.imagePrompt).join('\n\n'),
+      meta: { episodeCount: payload.episodes.length, shotCount: shots.length },
+    });
+    return;
+  }
+
+  if (kind === 'story-grid') {
+    const payload =
+      upstream.scriptBreakdowns?.[0] ??
+      (d.scriptBreakdown as import('@nx9/shared').ScriptBreakdownPayload | undefined);
+    if (!payload) throw new Error('分镜网格缺少剧本拆分数据');
+    const shots = flattenScriptBreakdownShots(payload);
+    updateNodeData(block.id, {
+      status: 'success',
+      scriptBreakdown: payload,
+      content: `${payload.title} · ${payload.episodes.length} 集 · ${shots.length} 个分镜`,
+      output: shots.map((shot) => shot.imagePrompt).join('\n\n'),
+      meta: { episodeCount: payload.episodes.length, shotCount: shots.length },
+    });
+    return;
+  }
+
+  if (kind === 'storyboard-preview') {
+    const payload =
+      upstream.scriptBreakdowns?.[0] ??
+      (d.scriptBreakdown as import('@nx9/shared').ScriptBreakdownPayload | undefined);
+    const current =
+      (d.storyboardPreview as import('@nx9/shared').StoryboardPreviewPayload | undefined) ??
+      emptyStoryboardPreview();
+    const breakdownShots = flattenScriptBreakdownShots(payload);
+    const frames =
+      breakdownShots.length > 0
+        ? buildStoryboardPreviewFramesFromBreakdown(breakdownShots)
+        : current.frames;
+    const totalDurationSec = frames.reduce((sum, f) => sum + Math.max(0, f.endSec - f.startSec), 0);
+
+    const pictureNode =
+      ctx?.nodes && ctx?.edges
+        ? (await import('./storyboard-preview-runner')).findConnectedPictureGenNode(
+            block.id,
+            ctx.nodes,
+            ctx.edges,
+          )
+        : undefined;
+    const pictureData = (pictureNode?.data ?? {}) as Record<string, unknown>;
+
+    let nextFrames = [...frames];
+    if (pictureNode) {
+      const { generateStoryboardFrameImage } = await import('./storyboard-preview-runner');
+      const { writeBackBreakdownPreviewImage } = await import('@nx9/shared');
+      let nextBreakdown = payload;
+
+      for (let i = 0; i < nextFrames.length; i++) {
+        const frame = nextFrames[i];
+        if (frame.locked || frame.status === 'success' || frame.status === 'locked') continue;
+        nextFrames[i] = { ...frame, status: 'generating' };
+        updateNodeData(block.id, {
+          storyboardPreview: {
+            ...current,
+            frames: nextFrames,
+            computedFrameCount: nextFrames.length,
+            totalDurationSec,
+            confirmed: false,
+          },
+        });
+
+        try {
+          const imageUrl = await generateStoryboardFrameImage(
+            frame,
+            pictureData,
+            resolveStoryboardPreviewPictureSettings(current),
+          );
+          nextFrames[i] = { ...frame, imageUrl, status: 'success', errorMessage: null };
+          nextBreakdown = writeBackBreakdownPreviewImage(nextBreakdown, frame.sourceShotId, imageUrl) ?? nextBreakdown;
+          updateNodeData(pictureNode.id, {
+            status: 'success',
+            previewUrl: imageUrl,
+            previewUrls: [imageUrl],
+            batchCount: 1,
+            linkedFrameId: frame.id,
+            frameJob: { frameId: frame.id, source: block.id },
+            lastResult: { count: 1, urls: [imageUrl], frameId: frame.id },
+          });
+        } catch (e) {
+          nextFrames[i] = { ...frame, status: 'error', errorMessage: String(e) };
+        }
+      }
+
+      const successCount = nextFrames.filter((f) => f.status === 'success' || f.status === 'locked').length;
+      updateNodeData(block.id, {
+        status: successCount === nextFrames.length && nextFrames.length > 0 ? 'success' : 'idle',
+        scriptBreakdown: nextBreakdown,
+        storyboardPreview: {
+          ...current,
+          frames: nextFrames,
+          computedFrameCount: nextFrames.length,
+          totalDurationSec,
+          confirmed: false,
+          confirmedAt: null,
+        },
+        previewUrls: nextFrames.map((f) => f.imageUrl).filter(Boolean),
+        batchCount: nextFrames.length,
+        content: `Storyboard Preview · ${nextFrames.length} Images · ${successCount}/${nextFrames.length}`,
+      });
+      return;
+    }
+
+    updateNodeData(block.id, {
+      status: frames.length ? 'idle' : 'idle',
+      scriptBreakdown: payload,
+      storyboardPreview: {
+        ...current,
+        frames,
+        computedFrameCount: frames.length,
+        totalDurationSec,
+        confirmed: false,
+        confirmedAt: null,
+      },
+      previewUrls: frames.map((f) => f.imageUrl).filter(Boolean),
+      batchCount: frames.length,
+      content: `Storyboard Preview · ${frames.length} Images · 请连接图像生成节点`,
+    });
+    return;
+  }
+
   if (kind === 'picture-gen') {
     const characters = useWorkspaceDocument.getState().characters.characters;
     const environments = useWorkspaceDocument.getState().environments;
@@ -249,6 +391,7 @@ async function executeBlock(
     const quality = (d.quality as string) || 'auto';
     const aspectRatio = (d.aspectRatio as string) || '1:1';
     const imageCount = (d.imageCount as number) || 1;
+    const pictureGenMode = (d.pictureGenMode as string) || 'text-to-image';
     const customW = (d.width as number) || 1024;
     const customH = (d.height as number) || 1024;
     const snapToStep = (d.snapToStep as boolean) ?? true;
@@ -294,6 +437,7 @@ async function executeBlock(
         size,
         referenceImageUrl: refImage,
         n: imageCount,
+        mode: pictureGenMode === 'panorama-720' ? 'panorama-720' : 'standard',
       });
       urls.push(...batchUrls);
     }
@@ -307,13 +451,72 @@ async function executeBlock(
       batchCount: urls.length,
       characterInjected: enhancedCtx.characters.map((c) => c.id),
       lastResult: { count: urls.length, urls },
+      ...(pictureGenMode === 'panorama-720'
+        ? {
+            panoramaUrl: urls[0],
+            panoramaProjection: 'equirectangular',
+            aspectRatio: '2:1',
+          }
+        : {}),
     });
     return;
   }
 
   if (kind === 'clip-gen') {
     const charCtx = characterContextForBlock(block, upstream.pictures);
-    const finalPrompt = enrichPromptWithCharacters(prompt || 'cinematic scene', charCtx.characters);
+    const breakdown = upstream.scriptBreakdowns?.[0];
+    const breakdownShots = flattenScriptBreakdownShots(breakdown);
+    const confirmedPreview =
+      (d.storyboardPreview as import('@nx9/shared').StoryboardPreviewPayload | undefined)?.confirmed;
+
+    if (breakdownShots.length > 1 && upstream.pictures.length > 1) {
+      const videoParams = resolveVideoGenParams({
+        resolution: d.resolution as string | undefined,
+        orientation: d.orientation as string | undefined,
+        aspect: d.aspect as string | undefined,
+        durationSec: d.durationSec as number | undefined,
+      });
+      const clips: string[] = [];
+      const count = Math.min(breakdownShots.length, upstream.pictures.length);
+      for (let i = 0; i < count; i++) {
+        const shot = breakdownShots[i];
+        const imageUrl = upstream.pictures[i];
+        const finalPrompt = enrichPromptWithCharacters(
+          shot.videoPrompt || shot.imagePrompt || prompt || 'cinematic scene',
+          charCtx.characters,
+        );
+        const res = (await api.proxyVideo({
+          prompt: finalPrompt,
+          model: (d.model as string) || 'veo',
+          imageUrl,
+          duration: shot.durationSec || videoParams.durationSec,
+          aspect_ratio: videoParams.aspect,
+          size: videoParams.size,
+          resolution: videoParams.resolution,
+        })) as { ok?: boolean; url?: string; status?: string; taskId?: string; message?: string };
+        let videoUrl = res.url;
+        if (!videoUrl && res.taskId && (res.status === 'processing' || res.status === 'queued')) {
+          videoUrl = await pollVideoUntilDone(res.taskId);
+        }
+        if (!videoUrl) throw new Error(res.message ?? `镜头 ${i + 1} 视频生成失败`);
+        clips.push(videoUrl);
+      }
+      updateNodeData(block.id, {
+        status: 'success',
+        videoUrl: clips[0],
+        videoUrls: clips,
+        batchCount: clips.length,
+        content: breakdown?.title ?? prompt,
+        characterInjected: charCtx.characters.map((c) => c.id),
+        lastResult: { count: clips.length, urls: clips, confirmedPreview },
+      });
+      return;
+    }
+
+    const finalPrompt = enrichPromptWithCharacters(
+      breakdownShots[0]?.videoPrompt || prompt || 'cinematic scene',
+      charCtx.characters,
+    );
     const imageUrl = upstream.pictures[0] ?? charCtx.referenceImageUrl;
     const videoParams = resolveVideoGenParams({
       resolution: d.resolution as string | undefined,
@@ -460,21 +663,6 @@ async function executeBlock(
       status: 'success',
       composedUrl: res.url,
       previewUrl: res.url,
-    });
-    return;
-  }
-
-  if (kind === 'story-grid') {
-    const gridPrompt = prompt || (d.content as string) || 'storyboard 9-panel grid';
-    const rows = (d.rows as number) ?? 3;
-    const cols = (d.cols as number) ?? 3;
-    const style = (d.style as 'cinematic' | 'line-art') ?? 'cinematic';
-    const res = await api.gridGenerate({ prompt: gridPrompt, rows, cols, style });
-    updateNodeData(block.id, {
-      status: 'success',
-      previewUrl: res.url,
-      content: gridPrompt,
-      style,
     });
     return;
   }
@@ -877,17 +1065,6 @@ async function executeBlock(
       results,
       sounds: audioUrls,
       meta: { total: results.length, failed: results.filter((r) => r.error).length },
-    });
-    return;
-  }
-
-  if (kind === 'dialogue-sheet') {
-    const lines = (d.lines as { speaker: string; text: string; emotion?: string }[]) ?? [];
-    updateNodeData(block.id, {
-      status: 'success',
-      lines,
-      output: lines.map((l) => `${l.speaker}：${l.text}`).join('\n'),
-      meta: { lineCount: lines.length },
     });
     return;
   }
@@ -1538,11 +1715,16 @@ export async function runFlowBatch(
         onProgress({ phase: 'running', current: completed, total, currentId: id });
         try {
           const upstream = gatherUpstream(id, [...blockMap.values()], links);
-          await executeBlock(block, upstream, (nodeId, data) => {
-            const b = blockMap.get(nodeId);
-            if (b) b.data = { ...b.data, ...data };
-            updateNodeData(nodeId, data);
-          });
+          await executeBlock(
+            block,
+            upstream,
+            (nodeId, data) => {
+              const b = blockMap.get(nodeId);
+              if (b) b.data = { ...b.data, ...data };
+              updateNodeData(nodeId, data);
+            },
+            { nodes, edges },
+          );
         } catch (e) {
           errors.push({
             id,

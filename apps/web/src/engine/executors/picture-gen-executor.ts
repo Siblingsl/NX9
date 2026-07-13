@@ -43,6 +43,7 @@ export async function runPictureGenExecutor(ctx: BlockExecutorContext): Promise<
   const quality = (d.quality as string) || 'auto';
   const aspectRatio = (d.aspectRatio as string) || '1:1';
   const imageCount = (d.imageCount as number) || 1;
+  const pictureGenMode = (d.pictureGenMode as string) || 'text-to-image';
   const customW = (d.width as number) || 1024;
   const customH = (d.height as number) || 1024;
   const snapToStep = (d.snapToStep as boolean) ?? true;
@@ -84,6 +85,7 @@ export async function runPictureGenExecutor(ctx: BlockExecutorContext): Promise<
       size: resolvedSize.size,
       referenceImageUrl: refImage,
       n: imageCount,
+      mode: pictureGenMode === 'panorama-720' ? 'panorama-720' : 'standard',
     });
     urls.push(...batchUrls);
   }
@@ -97,5 +99,12 @@ export async function runPictureGenExecutor(ctx: BlockExecutorContext): Promise<
     batchCount: urls.length,
     characterInjected: enhancedCtx.characters.map((c) => c.id),
     lastResult: { count: urls.length, urls },
+    ...(pictureGenMode === 'panorama-720'
+      ? {
+          panoramaUrl: urls[0],
+          panoramaProjection: 'equirectangular',
+          aspectRatio: '2:1',
+        }
+      : {}),
   });
 }

@@ -13,6 +13,7 @@ export const IMAGE_ASPECT_OPTIONS = [
   { id: '3:4', label: '3:4', w: 1024, h: 1360 },
   { id: '3:2', label: '3:2', w: 1536, h: 1024 },
   { id: '2:3', label: '2:3', w: 1024, h: 1536 },
+  { id: '2:1', label: '2:1 全景', w: 2048, h: 1024 },
   { id: '2k', label: '2K 2048', w: 2048, h: 2048 },
   { id: '4k', label: '4K 4096', w: 4096, h: 4096 },
 ] as const;

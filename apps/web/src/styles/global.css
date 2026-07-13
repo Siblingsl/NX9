@@ -63,6 +63,15 @@ body {
   pointer-events: none;
 }
 
+.nx9-socket-exec {
+  box-shadow: 0 0 0 2px rgba(161, 61, 99, 0.18);
+}
+
+.nx9-stage-deck .react-flow__edge[data-exec='true'] .react-flow__edge-path {
+  stroke: #a13d63;
+  stroke-width: 3px;
+}
+
 /* 滚轮在节点内（.nowheel）时由 React Flow 跳过缩放，交给节点内 overflow 区域滚动 */
 .nx9-flow .nowheel .nx9-scroll,
 .nx9-flow .nowheel [class*='overflow-y-auto'] {

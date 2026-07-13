@@ -1,6 +1,10 @@
-import { memo, useCallback, useRef, useMemo } from 'react';
+import { memo, useCallback, useRef } from 'react';
 import { useStore } from '@xyflow/react';
-import { resolveNodeInteraction } from '@nx9/shared';
+import {
+  isDirector3dDelegatedToPreview,
+  isPictureGenDelegatedToPreview,
+  resolveNodeInteraction,
+} from '@nx9/shared';
 import { useDeckUi } from '../stores/deck-ui';
 import { NodeAttachedPromptBar } from './NodeAttachedPromptBar';
 import { isSurfaceEnabled } from '../../../config/product-surface';
@@ -25,6 +29,11 @@ export const NodePromptBarAnchor = memo(function NodePromptBarAnchor({
   const offset = promptBarOffsets[blockId] ?? ZERO_OFFSET;
   const setPromptBarOffset = useDeckUi((s) => s.setPromptBarOffset);
   const zoom = useStore((s) => s.transform[2]) || 1;
+  const nodes = useStore((s) => s.nodes);
+  const edges = useStore((s) => s.edges);
+  const delegatedToPreview =
+    (kind === 'picture-gen' && isPictureGenDelegatedToPreview(blockId, nodes, edges)) ||
+    (kind === 'director-3d' && isDirector3dDelegatedToPreview(blockId, nodes, edges));
   const dragRef = useRef<{ startX: number; startY: number; originX: number; originY: number } | null>(
     null,
   );
@@ -35,7 +44,8 @@ export const NodePromptBarAnchor = memo(function NodePromptBarAnchor({
     Boolean(selected) &&
     selectedBlockId === blockId &&
     promptBarVisible &&
-    interaction.opensPromptBar;
+    interaction.opensPromptBar &&
+    !delegatedToPreview;
 
   const onDragPointerDown = useCallback(
     (e: React.PointerEvent) => {

@@ -43,6 +43,7 @@ function PictureGenBlock(props: NodeProps) {
   const quality = (props.data?.quality as string) ?? 'auto';
   const aspectRatio = (props.data?.aspectRatio as string) ?? '1:1';
   const imageCount = (props.data?.imageCount as number) ?? 1;
+  const pictureGenMode = (props.data?.pictureGenMode as string) ?? 'text-to-image';
   const customW = (props.data?.width as number) ?? 1024;
   const customH = (props.data?.height as number) ?? 1024;
   const snapToStep = (props.data?.snapToStep as boolean) ?? true;
@@ -159,6 +160,7 @@ function PictureGenBlock(props: NodeProps) {
           size: resolvedSize.size,
           referenceImageUrl: refImage,
           n: count,
+          mode: pictureGenMode === 'panorama-720' ? 'panorama-720' : 'standard',
         });
         urls.push(...batchUrls);
       }
@@ -174,6 +176,13 @@ function PictureGenBlock(props: NodeProps) {
         referenceImageUsed: charRef,
         characterInjected: allChars.map((c) => c.id),
         lastResult: { count: urls.length, urls },
+        ...(pictureGenMode === 'panorama-720'
+          ? {
+              panoramaUrl: urls[0],
+              panoramaProjection: 'equirectangular',
+              aspectRatio: '2:1',
+            }
+          : {}),
       });
       appendLog(urls.length > 1 ? `批量图像生成完成 · ${urls.length} 张` : `图像生成完成 · ${modelDef.label}`);
     } catch (e) {
@@ -188,6 +197,7 @@ function PictureGenBlock(props: NodeProps) {
     quality,
     aspectRatio,
     imageCount,
+    pictureGenMode,
     customW,
     customH,
     snapToStep,

@@ -127,7 +127,14 @@ export function PictureWorkspace({ blockId, kind, onCollapse }: PictureWorkspace
     <div className="flex items-center gap-1" onMouseDown={stop}>
       <PictureGenModeChip
         mode={pictureGenMode}
-        onChange={(mode: PictureGenMode) => handlePatch(patchPictureGenMode(mode))}
+        onChange={(mode: PictureGenMode) =>
+          handlePatch({
+            ...patchPictureGenMode(mode),
+            ...(mode === 'panorama-720' && model === 'flux-i2i'
+              ? { model: 'flux-dev' }
+              : {}),
+          })
+        }
       />
       <span className="w-px h-3.5 bg-line/50" />
       <PictureParamChips blockId={blockId} onPatch={handlePatch} />
@@ -176,7 +183,12 @@ export function PictureWorkspace({ blockId, kind, onCollapse }: PictureWorkspace
         />
       }
       topSlot={
-        showReference ? (
+        pictureGenMode === 'panorama-720' ? (
+          <div className="mx-3 mt-2 rounded-lg border border-sky-500/20 bg-sky-500/5 px-2.5 py-2 text-[10px] text-sky-800">
+            720° 全景会生成标准 360×180、2:1 等距柱状环境图。建议只描述场景，人物在
+            3D 导演台中实时放置。
+          </div>
+        ) : showReference ? (
           <PictureReferenceStrip
             blockId={blockId}
             mode={pictureGenMode}

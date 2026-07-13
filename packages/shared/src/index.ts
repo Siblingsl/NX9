@@ -36,11 +36,26 @@ export type {
 export { emptyStoryboard, emptyVoice, migrateStoryboardPayload } from './types/storyboard';
 
 export type {
+  ScriptBreakdownDialogueLine,
+  ScriptBreakdownShot,
+  ScriptBreakdownEpisode,
+  ScriptBreakdownPayload,
+} from './types/script-breakdown';
+export {
+  emptyScriptBreakdown,
+  flattenScriptBreakdownShots,
+} from './types/script-breakdown';
+export { buildScriptBreakdownFromText } from './utils/script-breakdown';
+
+export type {
   StoryboardPreviewFrameStatus,
   StoryboardPreviewViewMode,
   StoryboardPreviewGridColumns,
   StoryboardPreviewFrame,
+  StoryboardPreviewDirector3dGuide,
+  StoryboardPreviewPanorama720,
   StoryboardPreviewPayload,
+  StoryboardPreviewPictureSettings,
   StoryboardPreviewConsistencyDimension,
   StoryboardPreviewConsistencyReport,
   StoryboardPreviewComputeInput,
@@ -48,13 +63,27 @@ export type {
 } from './types/storyboard-preview';
 export {
   emptyStoryboardPreview,
+  DEFAULT_STORYBOARD_PREVIEW_PICTURE_SETTINGS,
+  resolveStoryboardPreviewPictureSettings,
   computeStoryboardPreviewFrameCount,
   estimateActionComplexity,
   buildStoryboardPreviewFrames,
+  buildStoryboardPreviewFramesFromBreakdown,
   storyboardPreviewSummary,
   canRegenerateFrame,
   canConfirmStoryboardPreview,
 } from './types/storyboard-preview';
+export {
+  buildStoryboardFramePrompt,
+  writeBackBreakdownPreviewImage,
+  resolveConnectedPictureGenId,
+  resolveConnectedStoryboardPreviewId,
+  isPictureGenDelegatedToPreview,
+  buildPictureGenDelegatePatch,
+  resolveConnectedDirector3dId,
+  resolveConnectedStoryboardPreviewForDirector3dId,
+  isDirector3dDelegatedToPreview,
+} from './utils/storyboard-preview-jobs';
 
 export type { SceneSplitRecord, SceneSplitPayload } from './types/scene-split';
 export type { EnvironmentProfile, EnvironmentLibraryPayload } from './types/environment';
@@ -224,7 +253,12 @@ export {
   resolveAccepts,
   socketsCompatible,
   validateLink,
+  EXEC_PICTURE_HANDLES,
+  VERTICAL_SOCKETS,
+  resolveVerticalSockets,
+  isStoryboardExecLink,
 } from './catalog/socket-registry';
+export type { VerticalSocketSpec } from './catalog/socket-registry';
 
 export type { WorkspaceVisibility } from './utils/workspace-utils';
 export { isPrivateWorkspace, computeWorkspaceAssetCount } from './utils/workspace-utils';

@@ -68,7 +68,7 @@ export const SOCKET_REGISTRY: Record<string, SocketProfile> = {
   'panorama-flat': { accepts: ['prompt'], emits: ['picture'] },
   'portrait-flow': { accepts: ['prompt', 'picture', 'meta'], emits: ['picture'] },
   'portrait-meta': { accepts: ['picture'], emits: ['meta'] },
-  'story-grid': { accepts: ['picture'], emits: ['picture'] },
+  'story-grid': { accepts: ['prompt', 'meta'], emits: ['prompt', 'meta'] },
   'grid-prompt-reverse': { accepts: ['picture'], emits: ['prompt', 'picture'] },
   'photo-speak': { accepts: ['prompt', 'picture', 'sound'], emits: ['clip', 'sound'] },
 
@@ -185,4 +185,70 @@ export function validateLink(
   const emits = resolveEmits(sourceKind, sourceData);
   const accepts = resolveAccepts(targetKind);
   return socketsCompatible(emits, accepts);
+}
+
+/** 分镜预览挂载图像生成 / 3D 导演台能力的上下端口（竖直连线） */
+export type VerticalSocketSpec = {
+  kind: SocketKind;
+  position: 'top' | 'bottom';
+  type: 'source' | 'target';
+  id: string;
+  label?: string;
+};
+
+export const EXEC_PICTURE_HANDLES = new Set([
+  'exec-picture',
+  'exec-picture-in',
+  'exec-picture-out',
+]);
+
+export const VERTICAL_SOCKETS: Record<string, VerticalSocketSpec[]> = {
+  'picture-gen': [
+    {
+      kind: 'picture',
+      position: 'bottom',
+      type: 'source',
+      id: 'exec-picture',
+      // label: '出图',
+    },
+  ],
+  'director-3d': [
+    {
+      kind: 'picture',
+      position: 'bottom',
+      type: 'source',
+      id: 'exec-picture',
+      // 与图像生成共用能力口：向分镜预览回写 3D 机位参考
+    },
+  ],
+  'storyboard-preview': [
+    {
+      kind: 'picture',
+      position: 'top',
+      type: 'target',
+      id: 'exec-picture',
+      // label: '预览',
+    },
+  ],
+};
+
+export function resolveVerticalSockets(kind: string): VerticalSocketSpec[] {
+  return VERTICAL_SOCKETS[kind] ?? [];
+}
+
+export function isStoryboardExecLink(
+  sourceKind: string,
+  targetKind: string,
+  sourceHandle?: string | null,
+  targetHandle?: string | null,
+): boolean {
+  const usesExec =
+    EXEC_PICTURE_HANDLES.has(sourceHandle ?? '') ||
+    EXEC_PICTURE_HANDLES.has(targetHandle ?? '');
+  const pair =
+    (sourceKind === 'picture-gen' && targetKind === 'storyboard-preview') ||
+    (sourceKind === 'storyboard-preview' && targetKind === 'picture-gen') ||
+    (sourceKind === 'director-3d' && targetKind === 'storyboard-preview') ||
+    (sourceKind === 'storyboard-preview' && targetKind === 'director-3d');
+  return usesExec && pair;
 }
