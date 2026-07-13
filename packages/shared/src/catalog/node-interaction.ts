@@ -247,6 +247,17 @@ export function resolveNodePromptText(data: Record<string, unknown> | undefined)
     if (filled.length === 1) return filled[0].text!.trim();
     if (withImages.length > 0) return `${withImages.length} 素材 · 待填提示词`;
   }
+  const previewPayload = data.storyboardPreview as
+    | { frames?: Array<{ status?: string }> }
+    | undefined;
+  if (previewPayload?.frames?.length) {
+    const total = previewPayload.frames.length;
+    const ok = previewPayload.frames.filter(
+      (f) => f.status === 'success' || f.status === 'locked',
+    ).length;
+    const ready = ok === total ? 'Ready' : `${ok}/${total}`;
+    return `Storyboard Preview · ${total} Images · ${ready}`;
+  }
   return '';
 }
 
@@ -284,6 +295,11 @@ export function resolveNodeAssetTags(data: Record<string, unknown> | undefined):
 
 export function resolveNodeThumbUrl(data: Record<string, unknown> | undefined): string | undefined {
   if (!data) return undefined;
+  const previewPayload = data.storyboardPreview as
+    | { frames?: Array<{ imageUrl?: string | null }> }
+    | undefined;
+  const frameThumb = previewPayload?.frames?.find((f) => f.imageUrl)?.imageUrl;
+  if (frameThumb) return frameThumb ?? undefined;
   const previewUrls = data.previewUrls as string[] | undefined;
   return (
     previewUrls?.[0] ??
@@ -299,6 +315,11 @@ export function resolveNodeOutputCount(
   data: Record<string, unknown> | undefined,
 ): number | undefined {
   if (!data) return undefined;
+  if (kind === 'storyboard-preview') {
+    const previewPayload = data.storyboardPreview as { frames?: unknown[] } | undefined;
+    const n = previewPayload?.frames?.length;
+    if (typeof n === 'number' && n > 0) return n;
+  }
   const imageCount = data.imageCount as number | undefined;
   if (typeof imageCount === 'number' && imageCount > 0) return imageCount;
   const previewUrls = data.previewUrls as string[] | undefined;

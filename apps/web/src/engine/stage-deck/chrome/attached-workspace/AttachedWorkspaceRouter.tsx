@@ -6,6 +6,7 @@ import { PromptWorkspace } from './prompt/PromptWorkspace';
 import { ToolWorkspace } from './tool/ToolWorkspace';
 import { ReportWorkspace } from './report/ReportWorkspace';
 import { ControlWorkspace } from './control/ControlWorkspace';
+import { StoryboardPreviewWorkspace } from './storyboard-preview/StoryboardPreviewWorkspace';
 
 export interface AttachedWorkspaceRouterProps {
   blockId: string;
@@ -41,6 +42,11 @@ export function AttachedWorkspaceRouter({ blockId, kind, onCollapse }: AttachedW
     case 'control':
     case 'task':
       return <ControlWorkspace blockId={blockId} kind={kind} onCollapse={onCollapse} />;
+    case 'preview':
+      if (kind === 'storyboard-preview') {
+        return <StoryboardPreviewWorkspace blockId={blockId} kind={kind} onCollapse={onCollapse} />;
+      }
+      return null;
     default:
       return null;
   }

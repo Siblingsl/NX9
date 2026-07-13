@@ -79,6 +79,17 @@ export const ATTACHED_WORKSPACE_REGISTRY: Record<string, AttachedWorkspaceSpec> 
     showPreview: true,
     phase: 'P1',
   },
+  'storyboard-preview': {
+    kind: 'storyboard-preview',
+    functionalClass: 'media-editor',
+    workspaceType: 'preview',
+    attachToNode: true,
+    compactCanvas: true,
+    showRun: true,
+    showPreview: true,
+    phase: 'P1',
+    note: 'Video Proof · 分镜图网格 + 时间轴 + 单张编辑',
+  },
   'motion-story': {
     kind: 'motion-story',
     functionalClass: 'generation',
@@ -769,6 +780,7 @@ const IMPLEMENTED_WORKSPACE_TYPES = new Set<AttachedWorkspaceType>([
   'report',
   'control',
   'task',
+  'preview',
 ]);
 
 /** 是否使用紧凑画布 + 节点跟随工作区；否则保留完整 Block UI */

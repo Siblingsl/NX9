@@ -47,6 +47,7 @@ const STEP_KINDS: Record<string, string[]> = {
   script: ['shot-script'],
   'scene-split': ['text-chunker'],
   storyboard: ['story-grid'],
+  'storyboard-preview': ['storyboard-preview'],
   'character-bible': ['character-sheet'],
   'environment-bible': ['scene-card'],
   'camera-3d': ['director-3d'],

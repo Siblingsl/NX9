@@ -7,6 +7,7 @@ export const SOCKET_REGISTRY: Record<string, SocketProfile> = {
   prompt: { accepts: ['prompt', 'picture', 'clip', 'sound'], emits: ['prompt'] },
   'picture-gen': { accepts: ['prompt', 'picture'], emits: ['picture'] },
   'clip-gen': { accepts: ['prompt', 'picture', 'clip', 'sound'], emits: ['clip'] },
+  'storyboard-preview': { accepts: ['prompt', 'picture', 'meta'], emits: ['picture', 'meta'] },
   'clip-editor': { accepts: ['clip'], emits: ['clip'] },
   'motion-story': { accepts: ['prompt', 'picture', 'clip', 'sound'], emits: ['clip'] },
   'director-desk': { accepts: ['prompt', 'picture', 'clip', 'sound'], emits: ['clip', 'prompt'] },

@@ -35,6 +35,27 @@ export type {
 } from './types/storyboard';
 export { emptyStoryboard, emptyVoice, migrateStoryboardPayload } from './types/storyboard';
 
+export type {
+  StoryboardPreviewFrameStatus,
+  StoryboardPreviewViewMode,
+  StoryboardPreviewGridColumns,
+  StoryboardPreviewFrame,
+  StoryboardPreviewPayload,
+  StoryboardPreviewConsistencyDimension,
+  StoryboardPreviewConsistencyReport,
+  StoryboardPreviewComputeInput,
+  StoryboardPreviewAiExtensions,
+} from './types/storyboard-preview';
+export {
+  emptyStoryboardPreview,
+  computeStoryboardPreviewFrameCount,
+  estimateActionComplexity,
+  buildStoryboardPreviewFrames,
+  storyboardPreviewSummary,
+  canRegenerateFrame,
+  canConfirmStoryboardPreview,
+} from './types/storyboard-preview';
+
 export type { SceneSplitRecord, SceneSplitPayload } from './types/scene-split';
 export type { EnvironmentProfile, EnvironmentLibraryPayload } from './types/environment';
 export { migrateEnvironmentProfile } from './types/environment';
