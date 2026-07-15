@@ -14,6 +14,18 @@ import { emptySoundLibrary } from './sound-library';
 import { emptyBacklotCustom, emptyBacklotWorkspace } from '../data/backlot-templates';
 import { DEFAULT_CANVAS_APPEARANCE } from '../utils/canvas-theme';
 
+export type PlaybookWorkflowStatus = 'idle' | 'running' | 'blocked' | 'done' | 'error';
+
+/** 一集自己的流程进度；PlaybookSession 顶层字段始终投影当前集。 */
+export interface EpisodePlaybookProgress {
+  currentStepId: string;
+  completedStepIds: string[];
+  skippedStepIds: string[];
+  failedStepIds: string[];
+  waitingStepIds: string[];
+  workflowStatus: PlaybookWorkflowStatus;
+}
+
 export interface PlaybookSession {
   playbookId: PlaybookId;
   startedAt: string;
@@ -22,7 +34,9 @@ export interface PlaybookSession {
   skippedStepIds?: string[];
   failedStepIds?: string[];
   waitingStepIds?: string[];
-  workflowStatus?: 'idle' | 'running' | 'blocked' | 'done' | 'error';
+  workflowStatus?: PlaybookWorkflowStatus;
+  /** 按 episodeId 保存；顶层进度字段保留为当前集投影，兼容旧界面和旧项目。 */
+  episodeProgress?: Record<string, EpisodePlaybookProgress>;
   dismissed?: boolean;
 }
 

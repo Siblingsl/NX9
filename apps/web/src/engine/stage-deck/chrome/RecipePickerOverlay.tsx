@@ -2,19 +2,9 @@ import { LayoutTemplate, Sparkles } from 'lucide-react';
 import { WORKFLOW_TEMPLATES, type WorkflowTemplate } from '@nx9/shared';
 
 const FEATURED_RECIPE_IDS = [
-  'tpl-nx9-character-pipeline',
-  'tpl-nx9-review-pipeline',
-  'tpl-shot-script-desk',
+  'tpl-core-episode',
   'tpl-text-to-picture',
   'tpl-image-to-clip',
-  'tpl-storyboard-grid',
-  'tpl-line-art-storyboard',
-  'tpl-3d-preview',
-  'tpl-toonflow-lite',
-  'tpl-photo-speak',
-  'tpl-sclass-seedance',
-  'tpl-novel-import',
-  'tpl-link-replicate',
 ] as const;
 
 function featuredRecipes(): WorkflowTemplate[] {

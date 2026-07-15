@@ -111,7 +111,7 @@ export function gatherUpstream(
       const text = (d.content as string) || (d.output as string) || (d.lastReply as string);
       if (text?.trim()) out.prompts.push(text.trim());
     }
-    if (kind === 'dialogue-sheet' || kind === 'story-grid') {
+    if (kind === 'dialogue-sheet' || kind === 'asset-gate' || kind === 'story-grid') {
       const payload = d.scriptBreakdown as ScriptBreakdownPayload | undefined;
       if (payload?.version === 1) {
         out.scriptBreakdowns = [...(out.scriptBreakdowns ?? []), payload];
@@ -280,7 +280,7 @@ export function gatherUpstream(
       const url = (d.videoUrl as string) || (d.outputUrl as string);
       if (url) out.clips.push(url);
     }
-    if (kind === 'passthrough') {
+    if (kind === 'passthrough' || kind === 'review-gate') {
       const up = d.upstream as UpstreamOutputs | undefined;
       if (up) {
         out.prompts.push(...(up.prompts ?? []));

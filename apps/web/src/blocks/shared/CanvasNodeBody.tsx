@@ -64,7 +64,8 @@ export const CanvasNodeBody = memo(function CanvasNodeBody({
   const prompt = resolveNodePromptText(data);
   const promptPreview = truncatePromptPreview(prompt);
   const tags = resolveNodeAssetTags(data);
-  const thumb = resolveNodeThumbUrl(data);
+  const thumb = resolveNodeThumbUrl(data, kind);
+  const videoUrl = kind === 'clip-gen' ? (data.videoUrl as string | undefined) : undefined;
   const outputCount = resolveNodeOutputCount(kind, data);
   const focusPromptBar = useDeckUi((s) => s.focusPromptBar);
   const configSummary =
@@ -144,13 +145,17 @@ export const CanvasNodeBody = memo(function CanvasNodeBody({
         )}
       </div>
 
-      {thumb && (
+      {videoUrl ? (
+        <div className="aspect-video rounded-lg overflow-hidden border border-line/60 bg-black">
+          <video src={videoUrl} controls className="w-full h-full object-cover" playsInline />
+        </div>
+      ) : thumb && (
         <div className="aspect-video rounded-lg overflow-hidden border border-line/60 bg-surface">
           <img src={thumb} alt="" className="w-full h-full object-cover" />
         </div>
       )}
 
-      {!alias && meta?.hint && !thumb && !promptPreview && (
+      {!alias && meta?.hint && !thumb && !videoUrl && !promptPreview && (
         <p className="text-[9px] text-ink/30 line-clamp-2">{meta.hint}</p>
       )}
     </div>

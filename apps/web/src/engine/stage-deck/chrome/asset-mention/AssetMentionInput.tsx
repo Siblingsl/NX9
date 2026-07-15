@@ -13,6 +13,7 @@ export interface AssetMentionInputProps {
   as?: 'input' | 'textarea';
   placeholder?: string;
   className?: string;
+  rows?: number;
   kinds?: AssetLibraryKind[];
   enabled?: boolean;
   onFocus?: () => void;
@@ -26,6 +27,7 @@ export function AssetMentionInput({
   as = 'input',
   placeholder,
   className,
+  rows,
   kinds,
   enabled = true,
   onFocus,
@@ -71,7 +73,7 @@ export function AssetMentionInput({
   return (
     <>
       {as === 'textarea' ? (
-        <textarea ref={bindRef} {...commonProps} />
+        <textarea ref={bindRef} rows={rows} {...commonProps} />
       ) : (
         <input type="text" ref={bindRef} {...commonProps} />
       )}

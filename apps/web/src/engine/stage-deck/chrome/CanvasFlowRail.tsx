@@ -47,10 +47,13 @@ export function CanvasFlowRail() {
   const readinessCtx = useMemo(() => ({
     storyboard: {
       title: storyboard.title,
+      activeEpisodeId: storyboard.activeEpisodeId,
       shots: storyboard.shots.map((sh) => ({
         id: sh.id,
+        episodeId: sh.episodeId,
         status: sh.status as string,
         firstFrameAssetId: sh.firstFrameAssetId ?? undefined,
+        videoAssetId: sh.videoAssetId ?? undefined,
         keyframeStatus: sh.keyframeStatus,
         videoStatus: sh.videoStatus,
         linkedBlockId: sh.linkedBlockId ?? undefined,
@@ -95,6 +98,8 @@ export function CanvasFlowRail() {
       reasons.push('请先在 Script 中完成 AI 场次拆分');
     } else if (key === 'has_storyboard_shots') {
       reasons.push('请先生成故事板分镜表');
+    } else if (key === 'story_grid_confirmed') {
+      reasons.push('请先在分镜网格检查并确认当前集');
     } else if (key === 'has_character_bibles') {
       reasons.push('请先提取角色，填写六层设定 + 上传参考图');
     } else if (key === 'has_camera_blocks') {

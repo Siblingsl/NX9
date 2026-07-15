@@ -1,20 +1,28 @@
 import { describe, expect, it } from 'vitest';
-import { PLAYBOOK_DEFINITIONS, resolveNextStep, readinessRegistry, has_scene_split, has_environment_bibles, all_keyframes_approved, all_videos_approved, has_video_assets, has_camera_blocks, has_keyframes, consistency_resolved, export_ready } from '@nx9/shared';
+import { PLAYBOOK_DEFINITIONS, WORKFLOW_TEMPLATES, activeEpisodeShots, bindStoryboardShotAssets, storyboardShotsFromScriptBreakdown, resolveNextStep, readinessRegistry, story_grid_confirmed, has_scene_split, has_environment_bibles, all_keyframes_approved, all_videos_approved, has_video_assets, has_camera_blocks, has_keyframes, consistency_resolved, export_ready } from '@nx9/shared';
 import type { PlaybookSession, PlaybookReadinessContext, StoryboardShot } from '@nx9/shared';
 import { FIXTURE_NOVEL_500, FIXTURE_SCENE_SPLIT_3, FIXTURE_ENV_PROFILE } from './fixtures';
 
-describe('TEST-PIPE — 13-Step Production Pipeline', () => {
+describe('TEST-PIPE — Core 6-Step Production Pipeline', () => {
 
-  it('TEST-PIPE-000: resolveNextStep 13 步 playbook 第一步 script', () => {
+  it('TEST-PIPE-000: resolveNextStep 核心 6 步 playbook 第一步是剧本拆分', () => {
     const def = PLAYBOOK_DEFINITIONS.find((p) => p.id === 'pb-ai-comic-3d');
     expect(def).toBeDefined();
-    expect(def!.steps.length).toBe(13);
-    expect(def!.steps[0].id).toBe('script');
+    expect(def!.steps.length).toBe(6);
+    expect(def!.steps.map((s) => s.id)).toEqual([
+      'script-breakdown',
+      'story-grid',
+      'storyboard-preview',
+      'keyframe-review',
+      'video-gen',
+      'export',
+    ]);
+    expect(def!.bootstrapTemplates[0]?.templateId).toBe('tpl-core-episode');
 
     const session: PlaybookSession = {
       playbookId: 'pb-ai-comic-3d',
       startedAt: new Date().toISOString(),
-      currentStepId: 'script',
+      currentStepId: 'script-breakdown',
       completedStepIds: [],
     };
 
@@ -26,15 +34,132 @@ describe('TEST-PIPE — 13-Step Production Pipeline', () => {
     };
 
     const resolved = resolveNextStep(def!, session, ctx);
-    expect(resolved.step.id).toBe('script');
+    expect(resolved.step.id).toBe('script-breakdown');
     expect(resolved.allDone).toBe(false);
   });
 
-  it('TEST-PIPE-000-live: pb-ai-comic-live 也有 13 步', () => {
+  it('TEST-PIPE-000-template: 核心模板拓扑完整且旧全流程模板已取消', () => {
+    expect(WORKFLOW_TEMPLATES.some((tpl) => /pipeline-(13|11)/.test(tpl.id))).toBe(false);
+    const template = WORKFLOW_TEMPLATES.find((tpl) => tpl.id === 'tpl-core-episode');
+    expect(template).toBeDefined();
+    const flow = template!.build();
+    expect(flow.blocks.map((block) => block.type)).toEqual([
+      'dialogue-sheet',
+      'asset-gate',
+      'story-grid',
+      'storyboard-preview',
+      'picture-gen',
+      'director-3d',
+      'review-gate',
+      'clip-gen',
+      'export-pack',
+    ]);
+    const preview = flow.blocks.find((block) => block.type === 'storyboard-preview')!;
+    const gate = flow.blocks.find((block) => block.type === 'asset-gate')!;
+    expect(flow.links.some((link) => link.target === gate.id && link.targetHandle === 'asset-gate')).toBe(true);
+    expect(flow.links.some((link) => link.source === gate.id && link.sourceHandle === 'asset-gate')).toBe(true);
+    const capabilityLinks = flow.links.filter(
+      (link) => link.target === preview.id && link.targetHandle === 'exec-picture',
+    );
+    expect(capabilityLinks).toHaveLength(2);
+    expect(capabilityLinks.every((link) => link.sourceHandle === 'exec-picture')).toBe(true);
+  });
+
+  it('TEST-PIPE-000-episode: 批量生产只处理 activeEpisodeId', () => {
+    const shots = storyboardShotsFromScriptBreakdown({
+      version: 1,
+      title: '双集测试',
+      sourceText: '测试',
+      generatedAt: new Date().toISOString(),
+      episodes: [1, 2].map((index) => ({
+        id: `ep-${index}`,
+        index,
+        title: `第 ${index} 集`,
+        shots: [{
+          id: `ep-${index}-shot-1`,
+          episodeId: `ep-${index}`,
+          episodeIndex: index,
+          index: 1,
+          sceneId: `scene-${index}`,
+          sceneCode: `${index}-1`,
+          title: '镜头',
+          durationSec: 5,
+          characters: [],
+          scene: '室内',
+          scriptText: '动作',
+          dialogue: [],
+          imagePrompt: 'image',
+          videoPrompt: 'video',
+          status: 'draft' as const,
+        }],
+      })),
+    });
+    const scoped = activeEpisodeShots({
+      version: 3,
+      title: '双集测试',
+      reviewMode: 'manual',
+      activeEpisodeId: 'ep-2',
+      shots,
+    });
+    expect(scoped).toHaveLength(1);
+    expect(scoped[0].episodeId).toBe('ep-2');
+
+    const staleScope = activeEpisodeShots({
+      version: 3,
+      title: '双集测试',
+      reviewMode: 'manual',
+      activeEpisodeId: 'missing-episode',
+      shots,
+    });
+    expect(staleScope).toHaveLength(1);
+    expect(staleScope[0].episodeId).toBe('ep-1');
+
+    const bound = bindStoryboardShotAssets(
+      [{ ...shots[0], characterNames: ['小明'], sceneName: '咖啡厅', sceneCode: '1-1' }],
+      [{ id: 'char-1', name: '小明' }],
+      [{ id: 'env-1', name: '咖啡厅', sceneCode: '1-1', descriptionZh: '暖色室内' }],
+    );
+    expect(bound[0].characterIds).toEqual(['char-1']);
+    expect(bound[0].sceneAssetId).toBe('env-1');
+
+    const readiness: PlaybookReadinessContext = {
+      storyboard: {
+        activeEpisodeId: 'ep-1',
+        shots: [
+          { id: 'a', episodeId: 'ep-1', status: 'approved', firstFrameAssetId: '/a.jpg' },
+          { id: 'b', episodeId: 'ep-2', status: 'draft' },
+        ],
+      },
+      voice: { lines: [] },
+      nodes: [],
+    };
+    expect(has_keyframes(readiness)).toBe(true);
+
+    expect(story_grid_confirmed({
+      ...readiness,
+      nodes: [{
+        id: 'grid',
+        type: 'story-grid',
+        data: { confirmedEpisodeIds: ['ep-1'] },
+      }],
+    })).toBe(true);
+    expect(story_grid_confirmed({
+      ...readiness,
+      storyboard: { ...readiness.storyboard, activeEpisodeId: 'ep-2' },
+      nodes: [{
+        id: 'grid',
+        type: 'story-grid',
+        data: { confirmedEpisodeIds: ['ep-1'] },
+      }],
+    })).toBe(false);
+  });
+
+  it('TEST-PIPE-000-live: pb-ai-comic-live 也是核心 6 步', () => {
     const def = PLAYBOOK_DEFINITIONS.find((p) => p.id === 'pb-ai-comic-live');
     expect(def).toBeDefined();
-    expect(def!.steps.length).toBe(13);
-    expect(def!.steps[5].id).toBe('camera-live');
+    expect(def!.steps.length).toBe(6);
+    expect(def!.steps[5].id).toBe('export');
+    expect(def!.bootstrapTemplates[0]?.templateId).toBe('tpl-core-episode');
   });
 
   it('TEST-PIPE-101: scriptPlan v2 往返', () => {
@@ -167,32 +292,51 @@ describe('TEST-PIPE — 13-Step Production Pipeline', () => {
     expect(has_camera_blocks(ctxWrongKind)).toBe(false);
   });
 
-  it('TEST-PIPE-701: has_keyframes >=80% firstFrameAssetId or node done', () => {
-    const ctx: import('@nx9/shared').PlaybookReadinessContext = {
+  it('TEST-PIPE-701: has_keyframes 要求全部镜头有 firstFrameAssetId', () => {
+    const ctxAll: import('@nx9/shared').PlaybookReadinessContext = {
       storyboard: { shots: [
         { id: 's1', status: 'approved', firstFrameAssetId: '/img/s1.png' },
         { id: 's2', status: 'approved', firstFrameAssetId: '/img/s2.png' },
-        { id: 's3', status: 'approved', firstFrameAssetId: '/img/s3.png' },
-        { id: 's4', status: 'approved', firstFrameAssetId: '/img/s4.png' },
-        { id: 's5', status: 'approved' },
       ]},
       voice: { lines: [] },
       nodes: [],
     };
-    // 4/5 = 80% >= 80%, so true
-    expect(has_keyframes(ctx)).toBe(true);
+    expect(has_keyframes(ctxAll)).toBe(true);
 
-    const ctxLow: import('@nx9/shared').PlaybookReadinessContext = {
+    const ctxPartial: import('@nx9/shared').PlaybookReadinessContext = {
       storyboard: { shots: [
         { id: 's1', status: 'approved', firstFrameAssetId: '/img/s1.png' },
         { id: 's2', status: 'approved' },
-        { id: 's3', status: 'approved' },
+      ]},
+      voice: { lines: [] },
+      nodes: [
+        // 节点 done 不得冒充全出
+        { id: 'pg', type: 'picture-gen', data: { status: 'success' } },
+      ],
+    };
+    expect(has_keyframes(ctxPartial)).toBe(false);
+  });
+
+  it('TEST-PIPE-701b: has_video_assets 要求全部镜头有 videoAssetId', () => {
+    const ok: PlaybookReadinessContext = {
+      storyboard: { shots: [
+        { id: 's1', status: 'approved', videoAssetId: '/v/1.mp4' } as any,
+        { id: 's2', status: 'approved', videoAssetId: '/v/2.mp4' } as any,
       ]},
       voice: { lines: [] },
       nodes: [],
     };
-    // 1/3 = 33% < 80%, so false
-    expect(has_keyframes(ctxLow)).toBe(false);
+    expect(has_video_assets(ok)).toBe(true);
+
+    const partial: PlaybookReadinessContext = {
+      storyboard: { shots: [
+        { id: 's1', status: 'approved', videoAssetId: '/v/1.mp4' } as any,
+        { id: 's2', status: 'approved' },
+      ]},
+      voice: { lines: [] },
+      nodes: [{ id: 'cg', type: 'clip-gen', data: { status: 'success' } }],
+    };
+    expect(has_video_assets(partial)).toBe(false);
   });
 
   it('TEST-PIPE-801: keyframeStatus 迁移', () => {
@@ -270,8 +414,15 @@ describe('TEST-PIPE — 13-Step Production Pipeline', () => {
     expect(all_videos_approved(videoDraft)).toBe(false);
   });
 
-  it('TEST-PIPE-000-playbook: 13 步 readiness 全部注册', () => {
-    const keys = ['has_scene_split', 'has_environment_bibles', 'has_character_bibles', 'has_camera_blocks', 'has_keyframes', 'all_keyframes_approved', 'has_video_assets', 'consistency_resolved', 'all_videos_approved', 'export_ready'];
+  it('TEST-PIPE-000-playbook: 核心 6 步 readiness 全部注册', () => {
+    const keys = [
+      'has_source_text',
+      'story_grid_confirmed',
+      'has_keyframes',
+      'all_keyframes_approved',
+      'all_videos_approved',
+      'export_ready',
+    ];
     for (const key of keys) {
       expect(readinessRegistry[key]).toBeDefined();
     }

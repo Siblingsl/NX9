@@ -2,6 +2,9 @@ import { NestFactory } from '@nestjs/core';
 import { json, urlencoded } from 'express';
 import { AppModule } from './app.module';
 import { HOST, LIMITS, PORT } from './config/app.config';
+import { loadServerEnv } from './config/load-env';
+
+loadServerEnv();
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule, { cors: true });

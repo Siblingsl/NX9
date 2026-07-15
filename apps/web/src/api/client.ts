@@ -34,9 +34,21 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   });
   if (!res.ok) {
     const text = await res.text();
-    throw new Error(text || res.statusText);
+    throw new Error(readErrorMessage(text) || res.statusText);
   }
   return res.json() as Promise<T>;
+}
+
+function readErrorMessage(text: string): string {
+  try {
+    const json = JSON.parse(text) as { message?: unknown; error?: unknown };
+    if (typeof json.message === 'string') return json.message;
+    if (Array.isArray(json.message)) return json.message.join('；');
+    if (typeof json.error === 'string') return json.error;
+  } catch {
+    /* response was already plain text */
+  }
+  return text;
 }
 
 export const api = {
@@ -206,6 +218,20 @@ export const api = {
       ok: boolean;
       table: import('@nx9/shared').StoryboardTableRow[];
     }>('/api/agent/production/storyboard-table', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+
+  productionScriptBreakdown: (body: {
+    sourceText: string;
+    config?: Partial<import('@nx9/shared').ScriptBreakdownConfig>;
+    prompts?: Partial<import('@nx9/shared').ScriptBreakdownPromptTemplates>;
+  }) =>
+    request<{
+      ok: boolean;
+      payload: import('@nx9/shared').ScriptBreakdownPayload;
+      stats: { episodeCount: number; sceneCount: number; shotCount: number; warningCount: number };
+    }>('/api/agent/production/script-breakdown', {
       method: 'POST',
       body: JSON.stringify(body),
     }),

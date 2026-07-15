@@ -2,7 +2,7 @@ import type { StepStatus } from '../types/step-status';
 
 export interface WorkflowSchemaV1 {
   workflowId: string;
-  mode: 'live-13' | 'anime-11' | 'free';
+  mode: 'core-6' | 'free';
   steps: Array<{
     id: string;
     title: string;

@@ -2,6 +2,7 @@ import { useCallback, useMemo } from 'react';
 import { useReactFlow } from '@xyflow/react';
 import {
   buildStoryboardPreviewFrames,
+  activeEpisodeShots,
   buildStoryboardPreviewFramesFromBreakdown,
   buildPictureGenDelegatePatch,
   canConfirmStoryboardPreview,
@@ -33,6 +34,13 @@ function nextInsertOrder(frames: StoryboardPreviewFrame[], afterOrder: number): 
   return (afterOrder + next) / 2;
 }
 
+function panoramaScopeKey(
+  activeEpisodeId: string | null | undefined,
+  frame: StoryboardPreviewFrame | undefined,
+): string {
+  return [activeEpisodeId || 'single-episode', frame?.sceneId || frame?.sceneCode || 'default-scene'].join('::');
+}
+
 function previewNodePatch(
   current: StoryboardPreviewPayload,
   frames: StoryboardPreviewFrame[],
@@ -61,7 +69,8 @@ function previewNodePatch(
 export function useStoryboardPreviewState(blockId: string) {
   const { getEdges, getNodes, updateNodeData } = useReactFlow();
   const appendLog = useActivityLog((s) => s.append);
-  const shots = useWorkspaceDocument((s) => s.storyboard.shots);
+  const storyboard = useWorkspaceDocument((s) => s.storyboard);
+  const shots = useMemo(() => activeEpisodeShots(storyboard), [storyboard]);
 
   const upstreamBreakdown = useMemo(() => {
     const nodes = getNodes();
@@ -73,6 +82,14 @@ export function useStoryboardPreviewState(blockId: string) {
     }
     return undefined;
   }, [blockId, getEdges, getNodes]);
+
+  const scopedUpstreamBreakdown = useMemo(() => {
+    if (!upstreamBreakdown || !storyboard.activeEpisodeId) return upstreamBreakdown;
+    const episode = upstreamBreakdown.episodes.find(
+      (item) => item.id === storyboard.activeEpisodeId,
+    );
+    return episode ? { ...upstreamBreakdown, episodes: [episode] } : upstreamBreakdown;
+  }, [storyboard.activeEpisodeId, upstreamBreakdown]);
 
   const connectedPictureNode = useCallback(() => {
     return findConnectedPictureGenNode(blockId, getNodes(), getEdges());
@@ -129,8 +146,8 @@ export function useStoryboardPreviewState(blockId: string) {
   const readBreakdown = useCallback((data: Record<string, unknown>): ScriptBreakdownPayload | undefined => {
     const local = data.scriptBreakdown as ScriptBreakdownPayload | undefined;
     if (local?.version === 1) return local;
-    return upstreamBreakdown;
-  }, [upstreamBreakdown]);
+    return scopedUpstreamBreakdown;
+  }, [scopedUpstreamBreakdown]);
 
   const patchPayload = useCallback(
     (patch: Partial<StoryboardPreviewPayload>) => {
@@ -157,21 +174,29 @@ export function useStoryboardPreviewState(blockId: string) {
   );
 
   const syncFromStoryboard = useCallback(() => {
-    const breakdownShots = flattenScriptBreakdownShots(upstreamBreakdown);
-    const frames = breakdownShots.length
-      ? buildStoryboardPreviewFramesFromBreakdown(breakdownShots)
-      : buildStoryboardPreviewFrames(shots);
+    const breakdownShots = flattenScriptBreakdownShots(scopedUpstreamBreakdown);
+    const frames = shots.length
+      ? buildStoryboardPreviewFrames(shots)
+      : buildStoryboardPreviewFramesFromBreakdown(breakdownShots);
+    const node = getNodes().find((item) => item.id === blockId);
+    const current = readPayload((node?.data ?? {}) as Record<string, unknown>);
+    const selected = frames.find((frame) => frame.id === current.selectedFrameId) ?? frames[0];
+    const scopeKey = panoramaScopeKey(storyboard.activeEpisodeId, selected);
+    const scopedPanorama = current.panorama720ByScope?.[scopeKey]
+      ?? (Object.keys(current.panorama720ByScope ?? {}).length === 0 ? current.panorama720 : null);
     patchPayload({
       frames,
       computedFrameCount: frames.length,
       totalDurationSec: frames.reduce((s, frame) => s + Math.max(0, frame.endSec - frame.startSec), 0),
       confirmed: false,
       confirmedAt: null,
+      selectedFrameId: selected?.id ?? null,
+      panorama720: scopedPanorama ?? null,
     });
-    if (upstreamBreakdown) {
-      updateNodeData(blockId, { scriptBreakdown: upstreamBreakdown });
+    if (scopedUpstreamBreakdown) {
+      updateNodeData(blockId, { scriptBreakdown: scopedUpstreamBreakdown });
     }
-  }, [blockId, patchPayload, shots, upstreamBreakdown, updateNodeData]);
+  }, [blockId, getNodes, patchPayload, readPayload, scopedUpstreamBreakdown, shots, storyboard.activeEpisodeId, updateNodeData]);
 
   const setViewMode = useCallback(
     (viewMode: StoryboardPreviewViewMode) => patchPayload({ viewMode }),
@@ -184,8 +209,26 @@ export function useStoryboardPreviewState(blockId: string) {
   );
 
   const selectFrame = useCallback(
-    (selectedFrameId: string | null) => patchPayload({ selectedFrameId }),
-    [patchPayload],
+    (selectedFrameId: string | null) => {
+      updateNodeData(blockId, (node) => {
+        const data = (node.data ?? {}) as Record<string, unknown>;
+        const current = readPayload(data);
+        const selected = current.frames.find((frame) => frame.id === selectedFrameId);
+        const scopeKey = panoramaScopeKey(storyboard.activeEpisodeId, selected);
+        return {
+          ...node,
+          data: {
+            ...data,
+            storyboardPreview: {
+              ...current,
+              selectedFrameId,
+              panorama720: current.panorama720ByScope?.[scopeKey] ?? null,
+            },
+          },
+        };
+      });
+    },
+    [blockId, readPayload, storyboard.activeEpisodeId, updateNodeData],
   );
 
   const updateFrame = useCallback(
@@ -455,6 +498,13 @@ export function useStoryboardPreviewState(blockId: string) {
           batchCount: 1,
           lastResult: { count: 1, urls: [imageUrl], frameId },
         });
+        if (targetFrame.sourceShotId) {
+          useWorkspaceDocument.getState().updateShot(targetFrame.sourceShotId, {
+            firstFrameAssetId: imageUrl,
+            keyframeStatus: 'review',
+            status: 'review',
+          });
+        }
         appendLog(`已重新生成 ${targetFrame.label}`);
       } catch (e) {
         updateNodeData(blockId, (node) => {
@@ -517,6 +567,14 @@ export function useStoryboardPreviewState(blockId: string) {
             f.id === frame.id ? { ...f, imageUrl, status: 'success' as const, errorMessage: null } : f,
           );
           breakdown = writeBackBreakdownPreviewImage(breakdown, frame.sourceShotId, imageUrl);
+          // 写回故事板 SSOT（核心路径 readiness 依赖 firstFrameAssetId）
+          if (frame.sourceShotId) {
+            useWorkspaceDocument.getState().updateShot(frame.sourceShotId, {
+              firstFrameAssetId: imageUrl,
+              keyframeStatus: 'review',
+              status: 'review',
+            });
+          }
           updateNodeData(pictureNode.id, {
             status: 'success',
             previewUrl: imageUrl,
@@ -569,6 +627,15 @@ export function useStoryboardPreviewState(blockId: string) {
         updateNodeData(blockId, (node) => {
           const data = (node.data ?? {}) as Record<string, unknown>;
           const current = readPayload(data);
+          const selected = current.frames.find((frame) => frame.id === current.selectedFrameId);
+          const scopeKey = panoramaScopeKey(storyboard.activeEpisodeId, selected);
+          const panorama = {
+            imageUrl,
+            prompt: scenePrompt,
+            sourcePictureNodeId: pictureNode.id,
+            scopeKey,
+            updatedAt: new Date().toISOString(),
+          };
           return {
             ...node,
             data: {
@@ -576,11 +643,10 @@ export function useStoryboardPreviewState(blockId: string) {
               status: 'idle',
               storyboardPreview: {
                 ...current,
-                panorama720: {
-                  imageUrl,
-                  prompt: scenePrompt,
-                  sourcePictureNodeId: pictureNode.id,
-                  updatedAt: new Date().toISOString(),
+                panorama720: panorama,
+                panorama720ByScope: {
+                  ...(current.panorama720ByScope ?? {}),
+                  [scopeKey]: panorama,
                 },
               },
             },
@@ -603,7 +669,7 @@ export function useStoryboardPreviewState(blockId: string) {
         return undefined;
       }
     },
-    [appendLog, blockId, connectedPictureNode, readPayload, updateNodeData],
+    [appendLog, blockId, connectedPictureNode, readPayload, storyboard.activeEpisodeId, updateNodeData],
   );
 
   const confirmAll = useCallback(() => {
@@ -611,6 +677,16 @@ export function useStoryboardPreviewState(blockId: string) {
       const data = (node.data ?? {}) as Record<string, unknown>;
       const current = readPayload(data);
       if (!canConfirmStoryboardPreview(current)) return node;
+      // 分镜预览只提交批审；批准动作统一由下游 review-gate 完成。
+      for (const frame of current.frames) {
+        if (frame.sourceShotId && frame.imageUrl) {
+          useWorkspaceDocument.getState().updateShot(frame.sourceShotId, {
+            firstFrameAssetId: frame.imageUrl,
+            keyframeStatus: 'review',
+            status: 'review',
+          });
+        }
+      }
       return {
         ...node,
         data: {
@@ -653,7 +729,8 @@ export function useStoryboardPreviewState(blockId: string) {
     () => ({
       shots,
       shotCount,
-      upstreamBreakdown,
+      activeEpisodeId: storyboard.activeEpisodeId ?? null,
+      upstreamBreakdown: scopedUpstreamBreakdown,
       connectedPictureNode,
       connectedDirector3dNode,
       readPayload,
@@ -681,7 +758,8 @@ export function useStoryboardPreviewState(blockId: string) {
     [
       shots,
       shotCount,
-      upstreamBreakdown,
+      storyboard.activeEpisodeId,
+      scopedUpstreamBreakdown,
       connectedPictureNode,
       connectedDirector3dNode,
       readPayload,

@@ -45,6 +45,18 @@ export class AgentController {
     return this.agent.storyboardTable(body?.sourceText ?? '', userId);
   }
 
+  @Post('production/script-breakdown')
+  productionScriptBreakdown(
+    @Body() body: {
+      sourceText?: string;
+      config?: Partial<import('@nx9/shared').ScriptBreakdownConfig>;
+      prompts?: Partial<import('@nx9/shared').ScriptBreakdownPromptTemplates>;
+    },
+    @Headers('x-nx9-user-id') userId?: string,
+  ) {
+    return this.agent.productionScriptBreakdown(body ?? {}, userId);
+  }
+
   @Post('production/materialize-shots')
   materializeShots(@Body() body: { table?: import('@nx9/shared').StoryboardTableRow[] }) {
     return this.agent.materializeShots(body?.table ?? []);

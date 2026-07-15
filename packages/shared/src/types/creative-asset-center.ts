@@ -67,6 +67,8 @@ export interface CharacterPromptPack {
 /** 角色库 Creative Asset Center 扩展（与 CharacterProfile 合并存储） */
 export interface CharacterCreativeExtension {
   nickname?: string;
+  /** 剧本中的别名 / 称呼 / 错别字候选，例如：老林、林先生、林侦探 */
+  aliases?: string[];
   age?: string;
   height?: string;
   weight?: string;

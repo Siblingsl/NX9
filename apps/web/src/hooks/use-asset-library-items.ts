@@ -2,6 +2,7 @@ import { useMemo } from 'react';
 import type { AssetLibraryItem, AssetLibraryKind, AssetScope } from '@nx9/shared';
 import {
   BUILTIN_BACKLOT_TEMPLATES,
+  BUILTIN_PUBLIC_SOUND_ASSETS,
   characterToItem,
   listBacklotTemplates,
   soundToItem,
@@ -36,6 +37,9 @@ export function useAssetLibraryItems(scope: AssetScope, kind?: AssetLibraryKind)
 
     for (const c of publicPayload.characters) publicItems.push(characterToItem(c, 'public'));
     for (const s of publicPayload.sounds) publicItems.push(soundToItem(s, 'public'));
+    for (const s of BUILTIN_PUBLIC_SOUND_ASSETS) {
+      publicItems.push({ ...soundToItem(s, 'public'), builtin: true });
+    }
     for (const tpl of publicPayload.templates) {
       publicItems.push(templateToAsset(tpl, 'public'));
     }

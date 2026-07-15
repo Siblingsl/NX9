@@ -134,6 +134,15 @@ export const BLOCK_CATALOG: BlockDefinition[] = [
     nx9Native: true,
   },
   {
+    kind: 'asset-gate',
+    label: '设定检查',
+    category: 'craft',
+    hint: '检查新角色 / 新场景，补齐角色库与场景库后放行分镜网格',
+    glyph: 'GitBranch',
+    accent: '#D97706',
+    nx9Native: true,
+  },
+  {
     kind: 'voice-cast',
     label: '多角色配音',
     category: 'craft',

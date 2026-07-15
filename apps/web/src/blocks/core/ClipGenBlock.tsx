@@ -37,9 +37,10 @@ function ClipGenBlock(props: NodeProps) {
   const shots = useWorkspaceDocument((s) => s.storyboard.shots);
   const model = (props.data?.model as string) ?? 'veo';
   const aspect = (props.data?.aspect as string) ?? '16:9';
-  const durationSec = (props.data?.durationSec as number) ?? 6;
+  const durationSec = (props.data?.durationSec as number) ?? 5;
   const resolution = (props.data?.resolution as string) ?? '720';
   const orientation = (props.data?.orientation as string) ?? 'landscape';
+  const generateAudio = (props.data?.generateAudio as boolean | undefined) ?? false;
   const status = props.data?.status as string | undefined;
   const videoUrl = props.data?.videoUrl as string | undefined;
   const taskId = props.data?.taskId as string | undefined;
@@ -110,6 +111,7 @@ function ClipGenBlock(props: NodeProps) {
         aspect_ratio: videoParams.aspect,
         size: videoParams.size,
         resolution: videoParams.resolution,
+        generateAudio,
       });
       updateNodeData(props.id, {
         status: res.status === 'success' ? 'success' : res.status === 'processing' ? 'running' : 'error',
@@ -137,6 +139,7 @@ function ClipGenBlock(props: NodeProps) {
     durationSec,
     resolution,
     orientation,
+    generateAudio,
     localContent,
     props.data,
     props.id,
@@ -190,7 +193,7 @@ function ClipGenBlock(props: NodeProps) {
               <label className="flex items-center gap-2 text-[10px]">
                 <input
                   type="checkbox"
-                  checked={(props.data?.generateAudio as boolean) ?? true}
+                  checked={generateAudio}
                   onChange={(e) => updateNodeData(props.id, { generateAudio: e.target.checked })}
                 />
                 生成音频
@@ -210,7 +213,7 @@ function ClipGenBlock(props: NodeProps) {
             ))}
           </select>
           <p className="text-[10px] text-ink/40">
-            {resolution}p · {orientation === 'landscape' ? '16:9' : orientation === 'portrait' ? '9:16' : '1:1'} · {durationSec}s
+            {resolution}p · {orientation === 'landscape' ? '16:9' : orientation === 'portrait' ? '9:16' : '1:1'} · {durationSec}s · {generateAudio ? '有声' : '无声'}
           </p>
         <p className="text-[10px] text-ink/40">
           {CLIP_GEN_MODELS.find((m) => m.id === model)?.hint}
@@ -267,9 +270,17 @@ function ClipGenBlock(props: NodeProps) {
             value={String(durationSec)}
             onChange={(v) => updateNodeData(props.id, { durationSec: Number(v) })}
           />
+          <label className="mt-2 flex items-center gap-2 text-[10px] text-ink/55">
+            <input
+              type="checkbox"
+              checked={generateAudio}
+              onChange={(e) => updateNodeData(props.id, { generateAudio: e.target.checked })}
+            />
+            生成音频
+          </label>
         </div>
         <p className="text-[10px] text-ink/40">
-          {resolution}p · {orientation === 'landscape' ? '16:9' : orientation === 'portrait' ? '9:16' : '1:1'} · {durationSec}s
+          {resolution}p · {orientation === 'landscape' ? '16:9' : orientation === 'portrait' ? '9:16' : '1:1'} · {durationSec}s · {generateAudio ? '有声' : '无声'}
         </p>
         <CharacterSelect
           characters={characters}

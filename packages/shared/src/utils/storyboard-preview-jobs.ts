@@ -4,6 +4,19 @@ import type {
   StoryboardPreviewPictureSettings,
 } from '../types/storyboard-preview';
 import { EXEC_PICTURE_HANDLES } from '../catalog/socket-registry';
+import type { StoryboardDirector3dGuide } from '../types/storyboard';
+
+export function buildDirectorCharacterPlacementPrompt(
+  guide: StoryboardDirector3dGuide | null | undefined,
+): string {
+  const placements = guide?.characterPlacements ?? [];
+  if (placements.length === 0) return '';
+  return `3D character blocking: ${placements.map((item) => {
+    const [x, y, z] = item.position;
+    const yaw = item.rotation[1];
+    return `${item.name} at (${x.toFixed(2)}, ${y.toFixed(2)}, ${z.toFixed(2)}), yaw ${yaw.toFixed(2)}, pose ${item.posePresetId || 'stand'}`;
+  }).join('; ')}`;
+}
 
 /** 将分镜预览出图参数同步到图像生成节点 data */
 export function buildPictureGenDelegatePatch(
@@ -27,6 +40,8 @@ export function buildStoryboardFramePrompt(frame: StoryboardPreviewFrame): strin
     frame.director3dGuide?.cameraPrompt
       ? `3D camera direction: ${frame.director3dGuide.cameraPrompt}`
       : '',
+    buildDirectorCharacterPlacementPrompt(frame.director3dGuide),
+    frame.reviewNote ? `Revision request from storyboard review: ${frame.reviewNote}` : '',
     frame.stylePreset ? `Style preset: ${frame.stylePreset}` : '',
     frame.sceneAssetRef ? `Scene: ${frame.sceneAssetRef}` : '',
   ]
@@ -113,12 +128,10 @@ function findStoryboardExecEdge(
     if (!isPair) return false;
     return e.source === blockId || e.target === blockId;
   });
-  return (
-    related.find(
-      (e) =>
-        EXEC_PICTURE_HANDLES.has(e.sourceHandle ?? '') ||
-        EXEC_PICTURE_HANDLES.has(e.targetHandle ?? ''),
-    ) ?? related[0]
+  return related.find(
+    (e) =>
+      EXEC_PICTURE_HANDLES.has(e.sourceHandle ?? '') ||
+      EXEC_PICTURE_HANDLES.has(e.targetHandle ?? ''),
   );
 }
 
@@ -146,9 +159,20 @@ export function isPictureGenDelegatedToPreview(
 export function isDirector3dDelegatedToPreview(
   directorBlockId: string,
   nodes: Array<{ id: string; type?: string | null }>,
-  edges: Array<{ source: string; target: string }>,
+  edges: Array<{ source: string; target: string; sourceHandle?: string | null; targetHandle?: string | null }>,
 ): boolean {
-  return Boolean(
-    resolveConnectedStoryboardPreviewForDirector3dId(directorBlockId, nodes, edges),
-  );
+  const byId = new Map(nodes.map((n) => [n.id, n]));
+  return edges.some((edge) => {
+    if (edge.source !== directorBlockId && edge.target !== directorBlockId) return false;
+    const source = byId.get(edge.source);
+    const target = byId.get(edge.target);
+    const isPair =
+      (source?.type === 'director-3d' && target?.type === 'storyboard-preview') ||
+      (source?.type === 'storyboard-preview' && target?.type === 'director-3d');
+    if (!isPair) return false;
+    return (
+      EXEC_PICTURE_HANDLES.has(edge.sourceHandle ?? '') ||
+      EXEC_PICTURE_HANDLES.has(edge.targetHandle ?? '')
+    );
+  });
 }

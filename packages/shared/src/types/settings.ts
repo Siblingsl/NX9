@@ -41,8 +41,28 @@ export type LuxTtsNoGpuFallback = 'cpu' | 'cloud';
 
 export interface AppSettings {
   primaryApiKey?: string;
+  /** Base URL for OpenAI-compatible primary image/video/LLM provider. */
+  primaryBaseUrl?: string;
+  /** Video provider routing: xAI official, local GrokGo test bridge, or custom OpenAI-compatible endpoint. */
+  videoProvider?: 'custom' | 'xai' | 'grokgo';
+  /** Video generation key for OpenAI-compatible /videos/generations providers. */
+  videoApiKey?: string;
+  /** Video generation Base URL; falls back to primaryBaseUrl/OpenAI when empty. */
+  videoBaseUrl?: string;
+  /** xAI official API key for Grok Imagine video. */
+  xaiApiKey?: string;
+  /** xAI official Base URL; defaults to https://api.x.ai/v1. */
+  xaiBaseUrl?: string;
+  /** Local GrokGo bridge API key for test flow. */
+  grokGoApiKey?: string;
+  /** Local GrokGo bridge Base URL; defaults to http://127.0.0.1:8787/v1. */
+  grokGoBaseUrl?: string;
   rhApiKey?: string;
   llmApiKey?: string;
+  /** Base URL for chat/text models; falls back to primaryBaseUrl/OpenAI when empty. */
+  llmBaseUrl?: string;
+  /** Default chat/text model used by script breakdown and LLM helpers. */
+  llmModel?: string;
   /** TTS provider key (OpenAI-compatible /audio/speech). Falls back to primaryApiKey. */
   ttsApiKey?: string;
   /** Base URL for the TTS provider; defaults to https://api.openai.com/v1 */

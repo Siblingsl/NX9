@@ -24,6 +24,7 @@ import { useAssetLibraryModalUi } from '../stores/asset-library-modal-ui';
 import { useCreateWorkspaceDialogUi } from '../stores/create-workspace-dialog-ui';
 import { useSkillVault } from '../stores/skill-vault';
 import { isSurfaceEnabled } from '../config/product-surface';
+import { useWorkspaceDocument } from '../stores/workspace-document';
 
 const StageDeckSurface = lazy(() =>
   import('../engine/stage-deck/StageDeckSurface').then((m) => ({ default: m.StageDeckSurface })),
@@ -103,6 +104,12 @@ export default function AppShell() {
   const userBootstrapped = useRef(false);
   const requestRailTab = useContextRailUi((s) => s.requestTab);
   const openDirector3d = useDirector3dUi((s) => s.openStandalone);
+  const canvasTheme = useWorkspaceDocument((s) => s.canvasAppearance.theme);
+
+  useEffect(() => {
+    document.body.classList.toggle('nx9-app-dark-body', canvasTheme === 'dark');
+    return () => document.body.classList.remove('nx9-app-dark-body');
+  }, [canvasTheme]);
 
   useEffect(() => {
     if (userBootstrapped.current) return;
@@ -193,7 +200,7 @@ export default function AppShell() {
   }, []);
 
   return (
-    <div className="h-full flex flex-col">
+    <div className={`h-full flex flex-col ${canvasTheme === 'dark' ? 'nx9-app-dark' : ''}`}>
       <StudioTopBar
         batchPhase={batchPhase}
         batchProgress={batchProgress}

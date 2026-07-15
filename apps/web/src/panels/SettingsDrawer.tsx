@@ -1,5 +1,6 @@
 import { X, Key, Save, Radio, Image as ImageIcon } from 'lucide-react';
 import { useEffect, useState, useCallback, useRef } from 'react';
+import type { ReactNode } from 'react';
 import type { AppSettings, CanvasAppearance, CanvasGridStyle, CanvasThemeMode } from '@nx9/shared';
 import { translate } from '@nx9/shared';
 import { useCredentialVault } from '../stores/credential-vault';
@@ -118,39 +119,155 @@ function ConnectionSettings({
   setLuxStatus: (v: string | null) => void;
 }) {
   return (
-    <>
-      <Field
-        label="主 API Key"
-        value={draft.primaryApiKey ?? ''}
-        onChange={(v) => setDraft({ ...draft, primaryApiKey: v })}
-      />
-      <Field
-        label="RunningHub Key"
-        value={draft.rhApiKey ?? ''}
-        onChange={(v) => setDraft({ ...draft, rhApiKey: v })}
-      />
-      <Field
-        label="LLM Key"
-        value={draft.llmApiKey ?? ''}
-        onChange={(v) => setDraft({ ...draft, llmApiKey: v })}
-      />
-      <Field
-        label="TTS Key（AI 配音，留空则用主 Key）"
-        value={draft.ttsApiKey ?? ''}
-        onChange={(v) => setDraft({ ...draft, ttsApiKey: v })}
-      />
-      <Field
-        label="TTS Base URL"
-        value={draft.ttsBaseUrl ?? ''}
-        onChange={(v) => setDraft({ ...draft, ttsBaseUrl: v })}
-        placeholder="https://api.openai.com/v1"
-      />
+    <div className="space-y-4">
+      <div className="rounded-2xl border border-brand/15 bg-brand/[0.04] p-3">
+        <p className="text-sm font-semibold text-ink">模型与服务连接</p>
+        <p className="mt-1 text-[11px] leading-relaxed text-ink/50">
+          按生产流程拆开配置：文字负责剧本/提示词，图片负责出图，视频负责成片，音频负责配音。Magic Hour 的 Key 仍从{' '}
+          <code className="text-ink/70">apps/server/.env</code> 读取。
+        </p>
+      </div>
 
-      <div className="rounded-xl border border-line p-3 space-y-2">
-        <div className="flex items-center gap-2 text-sm font-medium">
-          <Radio size={16} className="text-accent" />
-          Voicebox 本地桥接
+      <SettingCard
+        title="对话 / 文字模型"
+        badge="剧本拆分 · 提示词 · 批审"
+        description="这里用于 AI 剧本拆解、分镜文案、导演提示词等文字任务。留空 LLM Key 时，会回退使用主 API Key。"
+      >
+        <Field
+          label="LLM API Key（推荐单独填写）"
+          value={draft.llmApiKey ?? ''}
+          onChange={(v) => setDraft({ ...draft, llmApiKey: v })}
+        />
+        <Field
+          label="LLM Base URL（对话/文字模型）"
+          value={draft.llmBaseUrl ?? ''}
+          onChange={(v) => setDraft({ ...draft, llmBaseUrl: v })}
+          placeholder="https://api.openai.com/v1"
+          plain
+        />
+        <Field
+          label="LLM 默认模型"
+          value={draft.llmModel ?? ''}
+          onChange={(v) => setDraft({ ...draft, llmModel: v })}
+          placeholder="gpt-4o-mini / auto / 供应商模型名"
+          plain
+        />
+        <Field
+          label="通用 / 图片 API Key（兼容旧主 Key）"
+          value={draft.primaryApiKey ?? ''}
+          onChange={(v) => setDraft({ ...draft, primaryApiKey: v })}
+        />
+        <Field
+          label="通用 Base URL"
+          value={draft.primaryBaseUrl ?? ''}
+          onChange={(v) => setDraft({ ...draft, primaryBaseUrl: v })}
+          placeholder="https://api.openai.com/v1"
+          plain
+        />
+      </SettingCard>
+
+      <SettingCard
+        title="图片模型"
+        badge="分镜图 · 角色图 · 720° 全景图"
+        description="OpenAI 兼容图片模型默认使用上面的通用 Key/Base URL；Magic Hour 图片模型会自动走 .env 里的 MAGIC_HOUR_API_KEY。"
+      >
+        <Field
+          label="RunningHub Key（可选）"
+          value={draft.rhApiKey ?? ''}
+          onChange={(v) => setDraft({ ...draft, rhApiKey: v })}
+        />
+        <p className="text-[10px] leading-relaxed text-ink/45">
+          后续如果接 ComfyUI、RunningHub 或专门的全景图服务，会放在这一组，不再混进视频配置里。
+        </p>
+      </SettingCard>
+
+      <SettingCard
+        title="视频模型"
+        badge="图生视频 · 文生视频 · Grok / xAI"
+        description="正式生产建议选 xAI 官方；本地 GrokGo 保留给测试流程。旧自定义视频配置仍然保留。"
+      >
+        <SelectField
+          label="当前视频通道"
+          value={draft.videoProvider ?? 'custom'}
+          onChange={(v) => setDraft({ ...draft, videoProvider: v as AppSettings['videoProvider'] })}
+          options={[
+            { value: 'xai', label: 'xAI 官方 Grok（正式）' },
+            { value: 'grokgo', label: '本地 GrokGo（测试）' },
+            { value: 'custom', label: '自定义兼容通道' },
+          ]}
+        />
+        <div className="rounded-xl bg-surface/80 p-3 space-y-2">
+          <p className="text-xs font-semibold text-ink/70">xAI 官方 Grok</p>
+          <Field
+            label="xAI 官方 API Key"
+            value={draft.xaiApiKey ?? ''}
+            onChange={(v) => setDraft({ ...draft, xaiApiKey: v })}
+          />
+          <Field
+            label="xAI 官方 Base URL"
+            value={draft.xaiBaseUrl ?? ''}
+            onChange={(v) => setDraft({ ...draft, xaiBaseUrl: v })}
+            placeholder="https://api.x.ai/v1"
+            plain
+          />
         </div>
+        <div className="rounded-xl bg-surface/80 p-3 space-y-2">
+          <p className="text-xs font-semibold text-ink/70">本地 GrokGo 测试桥</p>
+          <Field
+            label="GrokGo Key"
+            value={draft.grokGoApiKey ?? ''}
+            onChange={(v) => setDraft({ ...draft, grokGoApiKey: v })}
+          />
+          <Field
+            label="GrokGo Base URL"
+            value={draft.grokGoBaseUrl ?? ''}
+            onChange={(v) => setDraft({ ...draft, grokGoBaseUrl: v })}
+            placeholder="http://127.0.0.1:8787/v1"
+            plain
+          />
+        </div>
+        <details className="rounded-xl border border-line/70 bg-white px-3 py-2">
+          <summary className="cursor-pointer text-xs font-medium text-ink/60">自定义兼容通道 / 旧配置</summary>
+          <div className="mt-3 space-y-2">
+            <Field
+              label="自定义视频 API Key"
+              value={draft.videoApiKey ?? ''}
+              onChange={(v) => setDraft({ ...draft, videoApiKey: v })}
+            />
+            <Field
+              label="自定义视频 API Base URL"
+              value={draft.videoBaseUrl ?? ''}
+              onChange={(v) => setDraft({ ...draft, videoBaseUrl: v })}
+              placeholder="http://127.0.0.1:8787/v1"
+              plain
+            />
+          </div>
+        </details>
+      </SettingCard>
+
+      <SettingCard
+        title="音频模型"
+        badge="AI 配音 · 旁白 · 声音克隆"
+        description="云端 TTS、Voicebox 本地桥、LuxTTS 克隆都集中在这里。"
+      >
+        <Field
+          label="TTS API Key（留空则用通用 Key）"
+          value={draft.ttsApiKey ?? ''}
+          onChange={(v) => setDraft({ ...draft, ttsApiKey: v })}
+        />
+        <Field
+          label="TTS Base URL"
+          value={draft.ttsBaseUrl ?? ''}
+          onChange={(v) => setDraft({ ...draft, ttsBaseUrl: v })}
+          placeholder="https://api.openai.com/v1"
+          plain
+        />
+
+        <div className="rounded-xl border border-line/70 bg-white p-3 space-y-2">
+          <div className="flex items-center gap-2 text-sm font-medium">
+            <Radio size={16} className="text-accent" />
+            Voicebox 本地桥接
+          </div>
         <label className="flex items-center gap-2 text-sm">
           <input
             type="checkbox"
@@ -195,7 +312,7 @@ function ConnectionSettings({
         {vbStatus && <p className="text-[10px] text-ink/50">{vbStatus}</p>}
       </div>
 
-      <div className="rounded-xl border border-line p-3 space-y-2">
+        <div className="rounded-xl border border-line/70 bg-white p-3 space-y-2">
         <div className="flex items-center gap-2 text-sm font-medium">
           <Radio size={16} className="text-brand" />
           LuxTTS 本地克隆
@@ -282,8 +399,14 @@ function ConnectionSettings({
         } className="text-xs text-brand hover:underline">探测 LuxTTS</button>
         {luxStatus && <p className={`text-[10px] leading-relaxed ${luxStatus.includes('未检测到 GPU') ? 'text-amber-700' : 'text-ink/50'}`}>{luxStatus}</p>}
       </div>
+      </SettingCard>
 
-      <div className="rounded-xl border border-line p-3 space-y-2">
+      <SettingCard
+        title="维护 / 诊断"
+        badge="连接检测 · 数据迁移"
+        description="这些不是模型参数，只在排查问题或迁移数据时使用。"
+      >
+      <div className="rounded-xl border border-line/70 bg-white p-3 space-y-2">
         <p className="text-sm font-medium">数据库（Prisma）</p>
         <p className="text-[10px] text-ink/50">将 JSON 工作区迁移到 SQLite。迁移后设置环境变量 NX9_STORAGE=prisma 并重启服务。</p>
         <button type="button" onClick={() => void api.migrateToPrisma().then((r) => alert(`已迁移 ${r.migrated} 个工作区，跳过 ${r.skipped}`))}
@@ -291,13 +414,12 @@ function ConnectionSettings({
       </div>
 
       <ProbeProvidersBlock />
+      </SettingCard>
 
-      <p className="text-xs text-ink/50 mb-2">Stage Deck Canvas 已作为默认画布；旧版左侧模块库与节点内表单已移除。</p>
-      <label className="flex items-center gap-2 text-sm opacity-60">
-        <input type="checkbox" checked disabled readOnly />
-        Stage Deck Canvas（始终启用）
-      </label>
-    </>
+      <div className="rounded-xl bg-surface/80 p-3 text-xs text-ink/50">
+        Stage Deck Canvas 已作为默认画布，始终启用。
+      </div>
+    </div>
   );
 }
 
@@ -490,6 +612,62 @@ function PrefsCheckbox({ draft, setDraft, field, defaultVal, label }: {
         }
       />
       {label}
+    </label>
+  );
+}
+
+function SettingCard({
+  title,
+  badge,
+  description,
+  children,
+}: {
+  title: string;
+  badge: string;
+  description: string;
+  children: ReactNode;
+}) {
+  return (
+    <section className="rounded-2xl border border-line bg-white p-4 shadow-[0_1px_0_rgba(15,23,42,0.03)] space-y-3">
+      <div className="space-y-1">
+        <div className="flex items-center gap-2">
+          <h3 className="text-sm font-semibold text-ink">{title}</h3>
+          <span className="rounded-full bg-brand/8 px-2 py-0.5 text-[10px] font-medium text-brand">
+            {badge}
+          </span>
+        </div>
+        <p className="text-[11px] leading-relaxed text-ink/50">{description}</p>
+      </div>
+      <div className="space-y-3">{children}</div>
+    </section>
+  );
+}
+
+function SelectField({
+  label,
+  value,
+  onChange,
+  options,
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  options: { value: string; label: string }[];
+}) {
+  return (
+    <label className="block">
+      <span className="text-xs font-medium text-ink/60 mb-1 block">{label}</span>
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="w-full rounded-xl border border-line px-3 py-2 text-sm focus:outline-none focus:border-brand/40"
+      >
+        {options.map((option) => (
+          <option key={option.value} value={option.value}>
+            {option.label}
+          </option>
+        ))}
+      </select>
     </label>
   );
 }

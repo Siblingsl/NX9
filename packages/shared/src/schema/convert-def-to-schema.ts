@@ -4,9 +4,8 @@ import type { WorkflowSchemaV1 } from './workflow-schema';
 export function playbookDefToSchema(def: PlaybookDefinition): WorkflowSchemaV1 {
   return {
     workflowId: def.id,
-    mode: def.id === 'pb-ai-comic-3d' ? 'live-13'
-      : def.id === 'pb-ai-comic-live' ? 'live-13'
-      : def.id === 'pb-anime' ? 'anime-11'
+    mode: def.id === 'pb-ai-comic-3d' || def.id === 'pb-ai-comic-live' || def.id === 'pb-anime'
+      ? 'core-6'
       : 'free',
     steps: def.steps.map((s) => ({
       id: s.id,

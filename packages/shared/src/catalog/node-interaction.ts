@@ -107,7 +107,6 @@ export const PROMPT_BAR_KINDS = new Set<string>([
   'style-lab',
   'story-grid',
   'grid-prompt-reverse',
-  'scene-card',
   'shot-script',
   'director-desk',
   'caption-asr',
@@ -293,8 +292,18 @@ export function resolveNodeAssetTags(data: Record<string, unknown> | undefined):
   return tags;
 }
 
-export function resolveNodeThumbUrl(data: Record<string, unknown> | undefined): string | undefined {
+export function resolveNodeThumbUrl(
+  data: Record<string, unknown> | undefined,
+  kind?: string,
+): string | undefined {
   if (!data) return undefined;
+  if (kind === 'clip-gen') {
+    return (
+      (data.previewUrl as string | undefined) ??
+      (data.assetUrl as string | undefined) ??
+      undefined
+    );
+  }
   const previewPayload = data.storyboardPreview as
     | { frames?: Array<{ imageUrl?: string | null }> }
     | undefined;

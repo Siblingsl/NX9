@@ -7,6 +7,6 @@ export const FIXTURE_PR_STORY = {
 
 export const FIXTURE_PR_USER_JOURNEY = {
   playbookId: 'pb-ai-comic-live',
-  expectSteps: 13,
+  expectSteps: 6,
   firstAction: 'paste_script_in_rail',
 };

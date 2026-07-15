@@ -23,7 +23,7 @@ function ExportPackBlock(props: NodeProps) {
   const episodeUrl = props.data?.episodeUrl as string | undefined;
   const [audioUrl, setAudioUrl] = useState((props.data?.episodeAudioUrl as string) ?? '');
   const [busy, setBusy] = useState(false);
-  const [exportMode, setExportMode] = useState<ExportMode>((props.data?.exportMode as ExportMode) ?? 'zip');
+  const [exportMode, setExportMode] = useState<ExportMode>((props.data?.exportMode as ExportMode) ?? 'ffmpeg-episode');
 
   const runExport = useCallback(async () => {
     updateNodeData(props.id, { status: 'running' });

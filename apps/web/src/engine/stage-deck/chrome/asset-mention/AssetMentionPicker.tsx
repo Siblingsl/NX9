@@ -1,8 +1,9 @@
-import { useMemo } from 'react';
+import { useEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import type { AssetLibraryItem, AssetLibraryKind } from '@nx9/shared';
 import { ASSET_LIBRARY_TABS } from '@nx9/shared';
 import { useAllAssetLibraryItems } from '../../../../hooks/use-asset-library-items';
+import { usePublicAssetLibrary } from '../../../../stores/public-asset-library';
 import {
   guessKindFromMentionQuery,
   labelQueryFromMention,
@@ -35,8 +36,15 @@ export function AssetMentionPicker({
   panelRef,
 }: AssetMentionPickerProps) {
   const { allItems } = useAllAssetLibraryItems();
+  const fetchPublic = usePublicAssetLibrary((s) => s.fetch);
+  const publicHydrated = usePublicAssetLibrary((s) => s.hydrated);
   const guessedKind = guessKindFromMentionQuery(query);
   const labelQuery = labelQueryFromMention(query).toLowerCase();
+
+  useEffect(() => {
+    if (!open || publicHydrated) return;
+    void fetchPublic();
+  }, [open, publicHydrated, fetchPublic]);
 
   const tabs = useMemo(
     () => ASSET_LIBRARY_TABS.filter((t) => !kinds || kinds.includes(t.key)),
@@ -47,7 +55,7 @@ export function AssetMentionPicker({
   const pickKind = controlledKind ?? defaultKind;
 
   const pickOptions = useMemo(() => {
-    let pool = allItems.filter((i: AssetLibraryItem) => !i.builtin && i.kind === pickKind);
+    let pool = allItems.filter((i: AssetLibraryItem) => i.kind === pickKind);
     if (labelQuery) {
       pool = pool.filter((i) => i.label.toLowerCase().includes(labelQuery));
     } else if (guessedKind && query && !query.includes(':')) {

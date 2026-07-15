@@ -21,8 +21,18 @@ export interface AppPreferences {
 }
 export interface AppSettings {
     primaryApiKey?: string;
+    primaryBaseUrl?: string;
+    videoProvider?: 'custom' | 'xai' | 'grokgo';
+    videoApiKey?: string;
+    videoBaseUrl?: string;
+    xaiApiKey?: string;
+    xaiBaseUrl?: string;
+    grokGoApiKey?: string;
+    grokGoBaseUrl?: string;
     rhApiKey?: string;
     llmApiKey?: string;
+    llmBaseUrl?: string;
+    llmModel?: string;
     categoryKeys?: Record<string, string>;
     exportPath?: string;
     autoBackupPath?: string;

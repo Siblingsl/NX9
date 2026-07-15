@@ -25,10 +25,13 @@ export function InspectionPanel() {
   const ctx = useMemo(() => ({
     storyboard: {
       title: storyboard.title,
+      activeEpisodeId: storyboard.activeEpisodeId,
       shots: storyboard.shots.map((sh) => ({
         id: sh.id,
+        episodeId: sh.episodeId,
         status: sh.status as string,
         firstFrameAssetId: sh.firstFrameAssetId ?? undefined,
+        videoAssetId: sh.videoAssetId ?? undefined,
         keyframeStatus: sh.keyframeStatus,
         videoStatus: sh.videoStatus,
         linkedBlockId: sh.linkedBlockId ?? undefined,

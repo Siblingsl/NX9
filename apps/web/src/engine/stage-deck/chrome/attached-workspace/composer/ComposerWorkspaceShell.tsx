@@ -80,7 +80,7 @@ export function ComposerWorkspaceShell({
       />
 
       <div
-        className="shrink-0 mt-1.5 rounded-xl border border-line/35 bg-white shadow-[0_1px_8px_rgba(15,15,15,0.03)] flex flex-col overflow-hidden"
+        className="nx9-composer-panel shrink-0 mt-1.5 rounded-xl border border-line/35 bg-white shadow-[0_1px_8px_rgba(15,15,15,0.03)] flex flex-col overflow-hidden"
         onMouseDown={stop}
       >
         {topSlot}

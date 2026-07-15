@@ -69,10 +69,24 @@ export async function runPictureGenJob(input: PictureGenJobInput): Promise<strin
   const res = (await api.proxyImage({
     prompt,
     model: def.model,
+    provider: def.provider,
     size: requestSize,
     n: panorama ? 1 : n,
-  })) as { ok?: boolean; url?: string; urls?: string[] };
-  if (!res.url && !res.urls) throw new Error('图像生成失败');
+  })) as {
+    ok?: boolean;
+    url?: string;
+    urls?: string[];
+    status?: string;
+    taskId?: string;
+    message?: string;
+  };
+  if (res.status === 'processing' && res.taskId) {
+    const url = await pollClipTask(res.taskId);
+    if (!url) throw new Error(res.message ?? 'Magic Hour 图片仍在生成中');
+    const urls = [url];
+    return panorama ? normalizePanoramaUrls(urls) : urls;
+  }
+  if (!res.url && !res.urls) throw new Error(res.message ?? '图像生成失败');
   const urls = res.urls ?? [res.url!];
   return panorama ? normalizePanoramaUrls(urls) : urls;
 }

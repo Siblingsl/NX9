@@ -6,6 +6,8 @@ export type {
   DirectorObject,
   DirectorCameraShot,
   DirectorCameraCapture,
+  DirectorTransform,
+  CharacterBodyType,
   ViewportAspectRatio,
   ViewMode,
 } from './schema/directorProject';

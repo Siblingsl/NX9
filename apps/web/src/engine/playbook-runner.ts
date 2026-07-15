@@ -6,11 +6,18 @@ import { useFlowCommands } from '../stores/flow-commands';
 import { useFlowRuntime, useStoryboardUi, useRemotionUi } from '../stores/flow-runtime';
 import { useWorkspaceDocument } from '../stores/workspace-document';
 import { useDirector3dUi } from '../stores/director3d-ui';
+import { spawnCameraBlocksForShots } from './camera-block-spawn';
+import {
+  approveAllKeyframes,
+  batchGenerateKeyframesFromShots,
+  batchGenerateVideosFromShots,
+  simpleConcatExport,
+  syncPreviewFromStoryboard,
+} from './core-pipeline-runner';
 
 export function executeStepAction(action: PlaybookStepAction, ctx: PlaybookReadinessContext): void {
   switch (action.type) {
     case 'spawn_camera_blocks': {
-      const { spawnCameraBlocksForShots } = require('./camera-block-spawn') as typeof import('./camera-block-spawn');
       const shots = useWorkspaceDocument.getState().storyboard.shots;
       spawnCameraBlocksForShots(action.mode, shots);
       break;
@@ -75,22 +82,31 @@ export function executeStepAction(action: PlaybookStepAction, ctx: PlaybookReadi
       }
       break;
     }
-    case 'storyboard_action':
-      if (action.action === 'approve_all_pending') {
-        const shots = useWorkspaceDocument.getState().storyboard.shots;
-        for (const shot of shots) {
-          if (shot.status === 'review' || shot.status === 'generating') {
-            useWorkspaceDocument.getState().updateShot(shot.id, { status: 'approved', keyframeStatus: 'approved' });
-          }
-        }
-      } else if (action.action === 'batch_line_art') {
-        useContextRailUi.getState().requestTab('storyboard');
+    case 'storyboard_action': {
+      switch (action.action) {
+        case 'approve_all_pending':
+        case 'approve_all_keyframes':
+          approveAllKeyframes();
+          break;
+        case 'batch_line_art':
+          useContextRailUi.getState().requestTab('storyboard');
+          void batchGenerateKeyframesFromShots();
+          break;
+        case 'batch_keyframes':
+          void batchGenerateKeyframesFromShots();
+          break;
+        case 'batch_videos':
+          void batchGenerateVideosFromShots();
+          break;
+        case 'sync_preview':
+          syncPreviewFromStoryboard();
+          break;
+        case 'simple_export':
+          void simpleConcatExport();
+          break;
+        default:
+          break;
       }
-      break;
-    case 'spawn_camera_blocks': {
-      const { spawnCameraBlocksForShots } = require('./camera-block-spawn') as typeof import('./camera-block-spawn');
-      const shots = useWorkspaceDocument.getState().storyboard.shots;
-      spawnCameraBlocksForShots(action.mode, shots);
       break;
     }
     case 'set_view_mode':

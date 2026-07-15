@@ -22,9 +22,9 @@ export const CANVAS_THEMES = {
     nodeBg: '#FFFFFF',
   },
   dark: {
-    canvasBg: '#181715',
-    gridDot: 'rgba(255,255,255,0.08)',
-    gridLine: 'rgba(255,255,255,0.06)',
-    nodeBg: '#222222',
+    canvasBg: '#11100E',
+    gridDot: 'rgba(255,255,255,0.13)',
+    gridLine: 'rgba(255,255,255,0.075)',
+    nodeBg: '#211F1C',
   },
 } as const;

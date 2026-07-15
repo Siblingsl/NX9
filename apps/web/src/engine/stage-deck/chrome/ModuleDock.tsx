@@ -46,7 +46,7 @@ function blocksForLane(lane: LaneId, query: string): BlockDefinition[] {
 const STEP_KINDS: Record<string, string[]> = {
   script: ['shot-script', 'dialogue-sheet'],
   'scene-split': ['text-chunker'],
-  storyboard: ['story-grid'],
+  storyboard: ['asset-gate', 'story-grid'],
   'storyboard-preview': ['storyboard-preview'],
   'character-bible': ['character-sheet'],
   'environment-bible': ['scene-card'],

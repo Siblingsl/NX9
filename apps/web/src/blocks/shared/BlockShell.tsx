@@ -1,6 +1,7 @@
 import { memo, useCallback } from 'react';
 import { Handle, Position, useReactFlow, type NodeProps } from '@xyflow/react';
 import {
+  EXEC_PICTURE_HANDLES,
   lookupBlock,
   resolveAccepts,
   resolveEmits,
@@ -15,6 +16,20 @@ import { useStageDeckFlag } from '../../stores/stage-deck-flag';
 interface BlockShellProps extends NodeProps {
   children: React.ReactNode;
   hideSockets?: boolean;
+}
+
+function isVerticalPortEdgeForNode(
+  edge: { source: string; target: string; sourceHandle?: string | null; targetHandle?: string | null },
+  nodeId: string,
+  handleIds: Set<string>,
+): boolean {
+  if (edge.source !== nodeId && edge.target !== nodeId) return false;
+  return (
+    handleIds.has(edge.sourceHandle ?? '') ||
+    handleIds.has(edge.targetHandle ?? '') ||
+    EXEC_PICTURE_HANDLES.has(edge.sourceHandle ?? '') ||
+    EXEC_PICTURE_HANDLES.has(edge.targetHandle ?? '')
+  );
 }
 
 function SocketHandle({
@@ -49,13 +64,38 @@ function VerticalSocketHandle({
 }) {
   if (hidden) return null;
   const position = spec.position === 'top' ? Position.Top : Position.Bottom;
+  const isDualPurposePort = spec.type === 'both';
+  const commonClass = `nx9-socket nx9-socket-exec ${
+    isDualPurposePort ? '!w-2.5 !h-2.5' : '!w-3 !h-3'
+  } !border-2 !border-white`;
+  const commonStyle = { background: SOCKET_COLORS[spec.kind], left: `${spec.offsetPct ?? 50}%` };
+  if (isDualPurposePort) {
+    return (
+      <>
+        <Handle
+          type="target"
+          position={position}
+          id={spec.id}
+          className={commonClass}
+          style={commonStyle}
+        />
+        <Handle
+          type="source"
+          position={position}
+          id={spec.id}
+          className={commonClass}
+          style={commonStyle}
+        />
+      </>
+    );
+  }
   return (
     <Handle
-      type={spec.type}
+      type={spec.type === 'both' ? 'target' : spec.type}
       position={position}
       id={spec.id}
-      className="nx9-socket nx9-socket-exec !w-3 !h-3 !border-2 !border-white"
-      style={{ background: SOCKET_COLORS[spec.kind], left: '50%' }}
+      className={commonClass}
+      style={commonStyle}
     />
   );
 }
@@ -68,7 +108,7 @@ export const BlockShell = memo(function BlockShell({
   children,
   hideSockets,
 }: BlockShellProps) {
-  const { updateNodeData } = useReactFlow();
+  const { setEdges, updateNodeData } = useReactFlow();
   const meta = lookupBlock(type ?? '');
   const emits = resolveEmits(type ?? '', data as Record<string, unknown>);
   const accepts = resolveAccepts(type ?? '');
@@ -88,9 +128,14 @@ export const BlockShell = memo(function BlockShell({
     (e: React.MouseEvent) => {
       e.stopPropagation();
       if (!id) return;
-      updateNodeData(id, { showExecPorts: !showExecPorts });
+      const nextShowExecPorts = !showExecPorts;
+      if (!nextShowExecPorts) {
+        const handleIds = new Set(verticalSockets.map((spec) => spec.id));
+        setEdges((edges) => edges.filter((edge) => !isVerticalPortEdgeForNode(edge, id, handleIds)));
+      }
+      updateNodeData(id, { showExecPorts: nextShowExecPorts });
     },
-    [id, showExecPorts, updateNodeData],
+    [id, setEdges, showExecPorts, updateNodeData, verticalSockets],
   );
 
   if (studioEmbed) {
@@ -132,7 +177,7 @@ export const BlockShell = memo(function BlockShell({
                 ? 'border-brand/50 bg-brand/10 text-brand font-medium'
                 : 'border-line/60 text-ink/40 hover:text-ink/60 hover:border-line'
             }`}
-            title="显示/隐藏能力连接口（图像生成 / 3D 导演台 → 分镜预览）"
+            title={showExecPorts ? '关闭顶部连接口并切断相关连接' : '打开顶部连接口'}
           >
             执行口
           </button>

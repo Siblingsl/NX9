@@ -18,6 +18,7 @@ import { useTakeStore } from '../engine/stage-deck/stores/take-store';
 import { applyPrimaryTakeToNodeData } from '../engine/stage-deck/utils/take-utils';
 import { isStageDeckEnabled } from '../stores/stage-deck-flag';
 import { syncDirector3dToBlocking } from '../engine/blocking-3d-sync';
+import { extractDirectorCharacterPlacements } from '../engine/director3d-character-sync';
 
 const Director3dShell = lazy(() =>
   import('@nx9/director3d').then((m) => ({ default: m.Director3dShell })),
@@ -107,6 +108,8 @@ export function Director3dPanel() {
           runtime.updateNodeData(blockId, patch);
         }
 
+        const characterPlacements = extractDirectorCharacterPlacements(project);
+        const panoramaUrl = project.panorama?.url;
         let appliedToStoryboardPreview = false;
         if (linkedStoryboardPreviewId && linkedStoryboardPreviewFrameId && runtime && blockId) {
           const previewNode = runtime
@@ -136,6 +139,8 @@ export function Director3dPanel() {
                       cameraPosition: payload.cameraPosition,
                       cameraRotation: payload.cameraRotation,
                       cameraFov: payload.cameraFov,
+                      panoramaUrl,
+                      characterPlacements,
                       appliedAt: new Date().toISOString(),
                     },
                     userModified: true,
@@ -181,6 +186,18 @@ export function Director3dPanel() {
                 ? 'review'
                 : 'approved',
             notes: cameraJson,
+            director3dGuide: {
+              sourceBlockId: blockId ?? 'director-3d',
+              captureId: payload.captureId,
+              captureUrl: uploaded.url,
+              cameraPrompt: payload.cameraPrompt,
+              cameraPosition: payload.cameraPosition,
+              cameraRotation: payload.cameraRotation,
+              cameraFov: payload.cameraFov,
+              panoramaUrl,
+              characterPlacements,
+              appliedAt: new Date().toISOString(),
+            },
             promptEn: payload.cameraPrompt
               ? `${linkedShot?.promptEn ?? ''} ${payload.cameraPrompt}`.trim()
               : undefined,
@@ -202,6 +219,7 @@ export function Director3dPanel() {
       linkedShotId,
       linkedStoryboardPreviewId,
       linkedStoryboardPreviewFrameId,
+      project,
       updateShot,
       appendLog,
     ],

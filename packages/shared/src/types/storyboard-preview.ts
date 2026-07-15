@@ -1,4 +1,4 @@
-import type { StoryboardShot } from './storyboard';
+import type { StoryboardDirector3dGuide, StoryboardShot } from './storyboard';
 import type { ScriptBreakdownShot } from './script-breakdown';
 
 /** 分镜预览帧状态 — Video Proof 专用，区别于 StoryboardShot.status */
@@ -23,22 +23,15 @@ export type StoryboardPreviewPictureSettings = {
 };
 
 /** 3D 导演台写入分镜帧的机位参考；正式成图仍由 picture-gen 执行。 */
-export interface StoryboardPreviewDirector3dGuide {
-  sourceBlockId: string;
-  captureId: string;
-  captureUrl: string;
-  cameraPrompt?: string;
-  cameraPosition?: [number, number, number];
-  cameraRotation?: [number, number, number];
-  cameraFov?: number;
-  appliedAt: string;
-}
+export interface StoryboardPreviewDirector3dGuide extends StoryboardDirector3dGuide {}
 
 /** 分镜预览统一管理的 720°（360×180）2:1 等距柱状场景环境。 */
 export interface StoryboardPreviewPanorama720 {
   imageUrl: string;
   prompt: string;
   sourcePictureNodeId: string;
+  /** episodeId::sceneId；旧数据可为空。 */
+  scopeKey?: string;
   updatedAt: string;
 }
 
@@ -65,11 +58,14 @@ export interface StoryboardPreviewFrame {
   sceneId?: string | null;
   promptSummary: string;
   characterIds?: string[];
+  characterNames?: string[];
   sceneAssetRef?: string | null;
   imageUrl?: string | null;
   referenceImageUrl?: string | null;
   /** 3D 构图与机位数据，作为图像生成参考，不等同于最终分镜图。 */
   director3dGuide?: StoryboardPreviewDirector3dGuide | null;
+  /** 批审退回意见，重新出图时进入 Prompt。 */
+  reviewNote?: string | null;
   stylePreset?: string | null;
   status: StoryboardPreviewFrameStatus;
   /** 🔒 锁定后禁止任何批量/全量/修复触发的重新生成 */
@@ -99,6 +95,8 @@ export interface StoryboardPreviewPayload {
   pictureSettings: StoryboardPreviewPictureSettings;
   /** 可加载至 3D 导演台的全景环境。 */
   panorama720?: StoryboardPreviewPanorama720 | null;
+  /** 不同分集/场景独立保存，panorama720 是当前所选场景投影。 */
+  panorama720ByScope?: Record<string, StoryboardPreviewPanorama720>;
 }
 
 export interface StoryboardPreviewConsistencyDimension {
@@ -152,6 +150,7 @@ export function emptyStoryboardPreview(): StoryboardPreviewPayload {
     lastConsistencyReport: null,
     pictureSettings: { ...DEFAULT_STORYBOARD_PREVIEW_PICTURE_SETTINGS },
     panorama720: null,
+    panorama720ByScope: {},
   };
 }
 
@@ -192,28 +191,34 @@ export function estimateActionComplexity(shots: StoryboardShot[]): number {
   return Math.min(1, Math.max(0.15, closeRatio * 0.45 + durFactor * 0.35 + (shots.length > 12 ? 0.2 : 0)));
 }
 
-/** 从 Storyboard 构建预览帧计划（每帧绑定主 Shot + 时间轴） */
-export function buildStoryboardPreviewFrames(shots: StoryboardShot[]): StoryboardPreviewFrame[] {
+/**
+ * 从 Storyboard 构建预览帧计划（每帧绑定主 Shot + 时间轴）。
+ * 默认 **全部镜头**（核心路径「分镜图全出」要求）；opts.keyOnly 才采样关键镜。
+ */
+export function buildStoryboardPreviewFrames(
+  shots: StoryboardShot[],
+  opts?: { keyOnly?: boolean },
+): StoryboardPreviewFrame[] {
   if (shots.length === 0) return [];
 
   const sorted = [...shots].sort((a, b) => a.index - b.index);
-  const totalDurationSec = sorted.reduce((sum, s) => sum + s.durationSec, 0);
-  const sceneIds = new Set(sorted.map((s) => s.sceneId).filter(Boolean));
-  const cutCount = Math.max(0, sorted.length - 1);
-  const actionComplexity = estimateActionComplexity(sorted);
+  let picked = sorted;
 
-  const targetCount = computeStoryboardPreviewFrameCount({
-    totalDurationSec,
-    shotCount: sorted.length,
-    sceneCount: sceneIds.size || 1,
-    cutCount,
-    actionComplexity,
-  });
-
-  const picked =
-    targetCount >= sorted.length
-      ? sorted
-      : pickKeyShots(sorted, targetCount);
+  if (opts?.keyOnly) {
+    const totalDurationSec = sorted.reduce((sum, s) => sum + s.durationSec, 0);
+    const sceneIds = new Set(sorted.map((s) => s.sceneId).filter(Boolean));
+    const cutCount = Math.max(0, sorted.length - 1);
+    const actionComplexity = estimateActionComplexity(sorted);
+    const targetCount = computeStoryboardPreviewFrameCount({
+      totalDurationSec,
+      shotCount: sorted.length,
+      sceneCount: sceneIds.size || 1,
+      cutCount,
+      actionComplexity,
+    });
+    picked =
+      targetCount >= sorted.length ? sorted : pickKeyShots(sorted, targetCount);
+  }
 
   let cursor = 0;
   return picked.map((shot, i) => {
@@ -232,7 +237,10 @@ export function buildStoryboardPreviewFrames(shots: StoryboardShot[]): Storyboar
       sceneId: shot.sceneId ?? null,
       promptSummary: shot.descriptionZh || shot.promptEn || '',
       characterIds: shot.characterIds ?? [],
+      characterNames: shot.characterNames ?? [],
       imageUrl: shot.firstFrameAssetId ?? null,
+      director3dGuide: shot.director3dGuide ?? null,
+      reviewNote: shot.keyframeReviewNote ?? null,
       status: shot.firstFrameAssetId ? 'success' : 'idle',
       locked,
       userModified: false,

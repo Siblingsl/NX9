@@ -25,6 +25,7 @@ export function newCharacterProfile(name = '新角色'): CharacterProfile {
     },
     creative: {
       ...variants,
+      aliases: [],
       occupation: '',
       identityRole: '',
       personalityText: '',
@@ -48,6 +49,7 @@ export function normalizeCharacterProfile(c: CharacterProfile): CharacterProfile
     creative: {
       ...variants,
       ...creative,
+      aliases: [...new Set((creative.aliases ?? []).map((item) => item.trim()).filter(Boolean))],
       expressions: creative.expressions?.length ? creative.expressions : variants.expressions,
       poses: creative.poses?.length ? creative.poses : variants.poses,
       angles: creative.angles?.length ? creative.angles : variants.angles,

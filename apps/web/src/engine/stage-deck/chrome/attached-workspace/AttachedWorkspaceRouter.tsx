@@ -8,6 +8,9 @@ import { ReportWorkspace } from './report/ReportWorkspace';
 import { ControlWorkspace } from './control/ControlWorkspace';
 import { StoryboardPreviewWorkspace } from './storyboard-preview/StoryboardPreviewWorkspace';
 import { Director3dWorkspace } from './director3d/Director3dWorkspace';
+import { ScriptBreakdownWorkspace } from './table/ScriptBreakdownWorkspace';
+import { StoryGridWorkspace } from './table/StoryGridWorkspace';
+import { ExportWorkspace } from './config/ExportWorkspace';
 
 export interface AttachedWorkspaceRouterProps {
   blockId: string;
@@ -40,6 +43,19 @@ export function AttachedWorkspaceRouter({ blockId, kind, onCollapse }: AttachedW
       return <ToolWorkspace blockId={blockId} kind={kind} onCollapse={onCollapse} />;
     case 'report':
       return <ReportWorkspace blockId={blockId} kind={kind} onCollapse={onCollapse} />;
+    case 'table':
+      if (kind === 'dialogue-sheet') {
+        return <ScriptBreakdownWorkspace blockId={blockId} kind={kind} onCollapse={onCollapse} />;
+      }
+      if (kind === 'story-grid') {
+        return <StoryGridWorkspace blockId={blockId} kind={kind} onCollapse={onCollapse} />;
+      }
+      return null;
+    case 'config':
+      if (kind === 'export-pack') {
+        return <ExportWorkspace blockId={blockId} kind={kind} onCollapse={onCollapse} />;
+      }
+      return null;
     case 'control':
     case 'task':
       return <ControlWorkspace blockId={blockId} kind={kind} onCollapse={onCollapse} />;

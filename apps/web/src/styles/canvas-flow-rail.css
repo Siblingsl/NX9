@@ -397,3 +397,42 @@
     background: rgba(161, 61, 99, 0.12);
   }
 }
+
+.nx9-app-dark .nx9-flow-rail {
+  --nx9-flow-rail-bg: rgba(247, 244, 238, 0.98);
+  --nx9-flow-rail-shadow: 0 8px 28px rgba(0, 0, 0, 0.28);
+  border-color: rgba(255,255,255,0.24);
+}
+
+.nx9-app-dark .nx9-flow-rail-step {
+  color: rgba(36, 34, 31, 0.7);
+}
+
+.nx9-app-dark .nx9-flow-rail-step:hover {
+  background: rgba(36, 34, 31, 0.06);
+}
+
+.nx9-app-dark .nx9-flow-rail-step--current {
+  color: #A13D63;
+}
+
+.nx9-app-dark .nx9-flow-rail-step--done {
+  color: rgba(36, 34, 31, 0.78);
+}
+
+.nx9-app-dark .nx9-flow-rail-step--future,
+.nx9-app-dark .nx9-flow-rail-step--skipped {
+  color: rgba(36, 34, 31, 0.52);
+  opacity: 1;
+}
+
+.nx9-app-dark .nx9-flow-rail-step-badge--future,
+.nx9-app-dark .nx9-flow-rail-step-badge--blocked,
+.nx9-app-dark .nx9-flow-rail-step-badge--skipped {
+  background: rgba(36, 34, 31, 0.11);
+  color: rgba(36, 34, 31, 0.55);
+}
+
+.nx9-app-dark .nx9-flow-rail-step-sep {
+  background: rgba(36, 34, 31, 0.24);
+}

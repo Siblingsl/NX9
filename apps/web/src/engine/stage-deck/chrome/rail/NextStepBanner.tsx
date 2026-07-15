@@ -37,10 +37,13 @@ export function NextStepBanner() {
     return {
       storyboard: {
         title: storyboard.title,
+        activeEpisodeId: storyboard.activeEpisodeId,
         shots: storyboard.shots.map((s) => ({
           id: s.id,
+          episodeId: s.episodeId,
           status: s.status as string,
           firstFrameAssetId: s.firstFrameAssetId ?? undefined,
+          videoAssetId: s.videoAssetId ?? undefined,
           keyframeStatus: s.keyframeStatus,
           videoStatus: s.videoStatus,
           linkedBlockId: s.linkedBlockId ?? undefined,
@@ -96,7 +99,7 @@ export function NextStepBanner() {
           </div>
           <div>
             <h3 className="text-sm font-bold text-ink">生产完成 🎉</h3>
-            <p className="text-[11px] text-ink/50">恭喜！{playbook.label} 所有 13 步已走完</p>
+            <p className="text-[11px] text-ink/50">恭喜！{playbook.label} 全部步骤已完成</p>
           </div>
         </div>
         <div className="mt-3 rounded-lg bg-white/60 border border-ok/20 p-2.5">

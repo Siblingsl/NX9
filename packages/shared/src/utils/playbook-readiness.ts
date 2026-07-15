@@ -4,10 +4,13 @@ import type { PlaybookSession } from '../types/workspace';
 export interface PlaybookReadinessContext {
   storyboard: {
     title?: string;
+    activeEpisodeId?: string | null;
     shots: Array<{
       id: string;
+      episodeId?: string | null;
       status: string;
       firstFrameAssetId?: string;
+      videoAssetId?: string;
       keyframeStatus?: string;
       videoStatus?: string;
       linkedBlockId?: string;
@@ -21,54 +24,76 @@ export interface PlaybookReadinessContext {
   playbookSession?: { completedStepIds: string[] } | null;
 }
 
+function scopedShots(ctx: PlaybookReadinessContext) {
+  const activeEpisodeId = ctx.storyboard.activeEpisodeId;
+  if (!activeEpisodeId) return ctx.storyboard.shots;
+  const scoped = ctx.storyboard.shots.filter((shot) => shot.episodeId === activeEpisodeId);
+  return scoped.length > 0 ? scoped : ctx.storyboard.shots;
+}
+
 export function has_source_text(ctx: PlaybookReadinessContext): boolean {
   return !!(
     ctx.scriptPlan?.sourceText?.trim() ||
-    (ctx.storyboard as any)?.title?.trim()
+    (ctx.storyboard as any)?.title?.trim() ||
+    ctx.nodes.some((node) =>
+      node.type === 'dialogue-sheet' &&
+      (Boolean((node.data?.sourceText as string | undefined)?.trim()) ||
+        Boolean(node.data?.scriptBreakdown)),
+    )
   );
 }
 
 export function has_storyboard_shots(ctx: PlaybookReadinessContext): boolean {
-  return ctx.storyboard.shots.length >= 1;
+  // 核心路径：至少 1 镜即可继续；「全出」覆盖率在后续步骤强制
+  return scopedShots(ctx).length >= 1;
+}
+
+export function story_grid_confirmed(ctx: PlaybookReadinessContext): boolean {
+  const grid = ctx.nodes.find((node) => node.type === 'story-grid');
+  if (!grid || scopedShots(ctx).length === 0) return false;
+  const confirmedEpisodeIds = Array.isArray(grid.data?.confirmedEpisodeIds)
+    ? (grid.data.confirmedEpisodeIds as string[])
+    : [];
+  const activeEpisodeId = ctx.storyboard.activeEpisodeId;
+  return activeEpisodeId
+    ? confirmedEpisodeIds.includes(activeEpisodeId)
+    : grid.data?.gridConfirmed === true || confirmedEpisodeIds.length > 0;
 }
 
 export function has_line_art_thumbnails(ctx: PlaybookReadinessContext): boolean {
-  const shots = ctx.storyboard.shots;
+  const shots = scopedShots(ctx);
   if (shots.length === 0) return false;
   const withThumb = shots.filter(s => !!s.firstFrameAssetId).length;
   return withThumb / shots.length >= 0.5;
 }
 
 export function all_shots_approved(ctx: PlaybookReadinessContext): boolean {
-  return ctx.storyboard.shots.length > 0 && ctx.storyboard.shots.every(s => s.status === 'approved');
+  const shots = scopedShots(ctx);
+  return shots.length > 0 && shots.every(s => s.status === 'approved');
 }
 
 export function all_keyframes_approved(ctx: PlaybookReadinessContext): boolean {
-  return ctx.storyboard.shots.length > 0 && ctx.storyboard.shots.every(s => s.keyframeStatus === 'approved');
+  const shots = scopedShots(ctx);
+  return shots.length > 0 && shots.every(s => s.keyframeStatus === 'approved');
 }
 
 export function all_videos_approved(ctx: PlaybookReadinessContext): boolean {
-  return ctx.storyboard.shots.length > 0 && ctx.storyboard.shots.every(s => s.videoStatus === 'approved');
+  const shots = scopedShots(ctx);
+  return shots.length > 0 && shots.every(s => s.videoStatus === 'approved');
 }
 
 export function has_video_takes(ctx: PlaybookReadinessContext): boolean {
-  const hasApprovedShot = ctx.storyboard.shots.some(s => s.status === 'approved');
-  const hasClipGenDone = ctx.nodes.some(n =>
-    (n.type === 'clip-gen' || n.type === 'motion-story') &&
-    (n.data?.status === 'done' || n.data?.status === 'success')
-  );
-  return hasApprovedShot || hasClipGenDone;
+  const shots = scopedShots(ctx);
+  if (shots.length === 0) return false;
+  // 以 Shot 视频资产为准（不再用节点 done 冒充）
+  return shots.every((s) => !!s.videoAssetId);
 }
 
 export function has_video_assets(ctx: PlaybookReadinessContext): boolean {
-  const shotWithVideo = ctx.storyboard.shots.some(s =>
-    (s as any).videoAssetId && (s as any).videoAssetId !== ''
-  );
-  const nodeDone = ctx.nodes.some(n =>
-    (n.type === 'clip-gen' || n.type === 'motion-story' || n.type === 'picture-gen') &&
-    (n.data?.status === 'done' || n.data?.status === 'success')
-  );
-  return shotWithVideo || nodeDone;
+  const shots = scopedShots(ctx);
+  if (shots.length === 0) return false;
+  // 核心路径：全部镜头必须有 videoAssetId（禁止节点 status 假阳性）
+  return shots.every((s) => !!s.videoAssetId);
 }
 
 export function canvas_node_done(ctx: PlaybookReadinessContext, ...args: string[]): boolean {
@@ -139,7 +164,7 @@ export function has_character_bibles(ctx: PlaybookReadinessContext): boolean {
 }
 
 export function has_camera_blocks(ctx: PlaybookReadinessContext): boolean {
-  const shots = ctx.storyboard.shots;
+  const shots = scopedShots(ctx);
   if (shots.length === 0) return false;
   const cameraKinds = new Set(['director-3d', 'director-desk', 'blocking-stage']);
   const withBlock = shots.filter(s => {
@@ -151,14 +176,10 @@ export function has_camera_blocks(ctx: PlaybookReadinessContext): boolean {
 }
 
 export function has_keyframes(ctx: PlaybookReadinessContext): boolean {
-  const shots = ctx.storyboard.shots;
+  const shots = scopedShots(ctx);
   if (shots.length === 0) return false;
-  const withKF = shots.filter(s => !!s.firstFrameAssetId).length;
-  const nodeDone = ctx.nodes.some(n =>
-    (n.type === 'picture-gen' || n.type === 'director-desk') &&
-    (n.data?.status === 'done' || n.data?.status === 'success')
-  );
-  return withKF / shots.length >= 0.8 || nodeDone;
+  // 核心路径：全部镜头必须有 firstFrameAssetId（禁止节点 done 假阳性）
+  return shots.every((s) => !!s.firstFrameAssetId);
 }
 
 export function consistency_resolved(ctx: PlaybookReadinessContext): boolean {
@@ -181,6 +202,7 @@ type ReadinessFn = (ctx: PlaybookReadinessContext, ...args: string[]) => boolean
 export const readinessRegistry: Record<string, ReadinessFn> = {
   has_source_text,
   has_storyboard_shots,
+  story_grid_confirmed,
   has_line_art_thumbnails,
   all_shots_approved,
   all_keyframes_approved,

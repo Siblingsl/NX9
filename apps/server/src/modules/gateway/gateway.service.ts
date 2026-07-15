@@ -5,12 +5,13 @@ import {
 } from '@nestjs/common';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
 import { join } from 'path';
-import { PATHS } from '../../config/app.config';
+import { HOST, PATHS, PORT } from '../../config/app.config';
 import { resolveMediaUrl } from '../../common/media-path';
 import { resolveReferenceAudioPath } from '../../common/luxtts-path';
 import { SettingsService } from '../settings/settings.service';
 import { UsageService } from '../usage/usage.service';
 import { LuxTtsAdapter, type LuxTtsProbeResult } from './luxtts.adapter';
+import { MagicHourAdapter } from './magic-hour.adapter';
 import { VoiceboxAdapter } from './voicebox.adapter';
 import type { LuxTtsNoGpuFallback } from '@nx9/shared';
 
@@ -21,6 +22,16 @@ export interface TtsFallbackInfo {
   applied: LuxTtsNoGpuFallback;
 }
 
+type VideoProviderKind = 'custom' | 'xai' | 'grokgo';
+
+interface VideoProviderRuntime {
+  kind: VideoProviderKind;
+  apiKey: string;
+  baseUrl: string;
+  label: string;
+  isLocalBridge: boolean;
+}
+
 @Injectable()
 export class GatewayService {
   private luxProbeCache: { url: string; at: number; result: LuxTtsProbeResult } | null = null;
@@ -29,8 +40,22 @@ export class GatewayService {
     private readonly settings: SettingsService,
     private readonly voicebox: VoiceboxAdapter,
     private readonly luxtts: LuxTtsAdapter,
+    private readonly magicHour: MagicHourAdapter,
     private readonly usage: UsageService,
   ) {}
+
+  private shouldUseMagicHour(model?: string, provider?: string): boolean {
+    if (!this.magicHour.hasKey()) return false;
+    const p = (provider || '').toLowerCase();
+    if (p === 'magichour' || p === 'magic-hour') return true;
+    if (this.magicHour.isMagicHourModel(model)) return true;
+    // Env key present + no primary image key → prefer Magic Hour for default models
+    const primary = this.settings.getRaw().primaryApiKey || '';
+    if (!primary && (!model || model === 'dall-e-3' || model === 'veo' || model === 'magic-hour')) {
+      return true;
+    }
+    return false;
+  }
 
   private async track(
     kind: string,
@@ -43,15 +68,151 @@ export class GatewayService {
     }
   }
 
-  private apiKey(kind: 'llm' | 'image' | 'tts' = 'llm'): string {
+  private apiKey(kind: 'llm' | 'image' | 'video' | 'tts' = 'llm'): string {
     const cfg = this.settings.getRaw();
     if (kind === 'llm') return cfg.llmApiKey || cfg.primaryApiKey || '';
     if (kind === 'tts') return cfg.ttsApiKey || cfg.primaryApiKey || '';
+    if (kind === 'video') return cfg.videoApiKey || cfg.primaryApiKey || cfg.llmApiKey || '';
     return cfg.primaryApiKey || cfg.llmApiKey || '';
   }
 
-  private baseUrl(override?: string): string {
-    return (override || 'https://api.openai.com/v1').replace(/\/$/, '');
+  private baseUrl(override?: string, kind: 'primary' | 'video' | 'llm' = 'primary'): string {
+    const cfg = this.settings.getRaw();
+    const configured =
+      kind === 'video'
+        ? cfg.videoBaseUrl || cfg.primaryBaseUrl
+        : kind === 'llm'
+          ? cfg.llmBaseUrl || cfg.primaryBaseUrl
+          : cfg.primaryBaseUrl;
+    return (override || configured || 'https://api.openai.com/v1').replace(/\/$/, '');
+  }
+
+  private normalizeBaseUrl(value: string | undefined, fallback: string): string {
+    return (value || fallback).replace(/\/$/, '');
+  }
+
+  private isLocalBaseUrl(baseUrl: string): boolean {
+    return /^https?:\/\/(127\.0\.0\.1|localhost)(:\d+)?(\/|$)/i.test(baseUrl);
+  }
+
+  private async fetchWithTimeout(
+    url: string,
+    init: RequestInit = {},
+    timeoutMs = 30000,
+  ): Promise<Response> {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      return await fetch(url, { ...init, signal: init.signal ?? controller.signal });
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  private resolveVideoProvider(body: Record<string, unknown>): VideoProviderRuntime {
+    const cfg = this.settings.getRaw();
+    const requested = String(body.provider || cfg.videoProvider || 'custom').toLowerCase();
+    const kind: VideoProviderKind =
+      requested === 'xai' ? 'xai' : requested === 'grokgo' || requested === 'grok-go' ? 'grokgo' : 'custom';
+
+    if (kind === 'xai') {
+      const baseUrl = this.normalizeBaseUrl(body.baseUrl as string || cfg.xaiBaseUrl, 'https://api.x.ai/v1');
+      return {
+        kind,
+        apiKey: cfg.xaiApiKey || cfg.videoApiKey || '',
+        baseUrl,
+        label: 'xAI 官方视频 API',
+        isLocalBridge: false,
+      };
+    }
+
+    if (kind === 'grokgo') {
+      const baseUrl = this.normalizeBaseUrl(
+        (body.baseUrl as string) || cfg.grokGoBaseUrl || cfg.videoBaseUrl,
+        'http://127.0.0.1:8787/v1',
+      );
+      return {
+        kind,
+        apiKey: cfg.grokGoApiKey || cfg.videoApiKey || cfg.primaryApiKey || cfg.llmApiKey || '',
+        baseUrl,
+        label: '本地 GrokGo 测试桥',
+        isLocalBridge: true,
+      };
+    }
+
+    const baseUrl = this.baseUrl(body.baseUrl as string, 'video');
+    return {
+      kind,
+      apiKey: this.apiKey('video'),
+      baseUrl,
+      label: this.isLocalBaseUrl(baseUrl) ? '本地 OpenAI 兼容视频代理' : 'OpenAI 兼容视频 API',
+      isLocalBridge: this.isLocalBaseUrl(baseUrl),
+    };
+  }
+
+  private normalizeOpenAiVideoModel(model: string): string {
+    if (model === 'grok') return 'grok-imagine-video';
+    return model;
+  }
+
+  private normalizeOpenAiVideoResolution(resolution: unknown): string | undefined {
+    const value = String(resolution ?? '').trim().toLowerCase();
+    if (!value) return undefined;
+    if (value.includes('1080')) return '1080p';
+    if (value.includes('720')) return '720p';
+    if (value.includes('480')) return '480p';
+    return value;
+  }
+
+  private normalizeOpenAiVideoSize(
+    size: unknown,
+    opts: { model: string; resolution?: string; aspectRatio?: string },
+  ): string | undefined {
+    const raw = String(size ?? '').trim().toLowerCase();
+    const model = opts.model.toLowerCase();
+    if (!model.startsWith('grok-imagine-video')) return raw || undefined;
+
+    const resolution = this.normalizeOpenAiVideoResolution(opts.resolution);
+    const aspect = String(opts.aspectRatio ?? '').trim();
+    if (aspect === '16:9') {
+      if (resolution === '480p') return '848x480';
+      if (resolution === '720p') return '1280x720';
+      if (resolution === '1080p') return '1920x1080';
+    }
+    if (raw === '854x480') return '848x480';
+    return raw || undefined;
+  }
+
+  private upstreamStatus(value: unknown): string {
+    return String(value ?? '').trim().toLowerCase();
+  }
+
+  private isVideoProcessingStatus(value: unknown): boolean {
+    return ['processing', 'queued', 'pending', 'running', 'in_progress', 'submitted', 'starting']
+      .includes(this.upstreamStatus(value));
+  }
+
+  private isVideoSuccessStatus(value: unknown): boolean {
+    return ['success', 'succeeded', 'completed', 'complete', 'done', 'finished']
+      .includes(this.upstreamStatus(value));
+  }
+
+  private isVideoFailedStatus(value: unknown): boolean {
+    return ['failed', 'error', 'cancelled', 'canceled']
+      .includes(this.upstreamStatus(value));
+  }
+
+  private publicMediaUrl(url: string): string {
+    if (/^https?:\/\//i.test(url)) return url;
+    if (url.startsWith('/media/')) return `http://${HOST}:${PORT}${url}`;
+    return url;
+  }
+
+  private imageUrlForOpenAiVideo(url: string, provider: VideoProviderRuntime, model: string): string {
+    if (provider.isLocalBridge && model.toLowerCase().startsWith('grok-imagine-video') && url.startsWith('/media/')) {
+      return this.mediaUrlToDataUri(url);
+    }
+    return this.publicMediaUrl(url);
   }
 
   async proxyLlmStream(
@@ -61,11 +222,13 @@ export class GatewayService {
   ): Promise<string> {
     const apiKey = this.apiKey('llm');
     if (!apiKey) throw new BadRequestException('LLM API key not configured');
-    const baseUrl = this.baseUrl();
+    const baseUrl = this.baseUrl(undefined, 'llm');
+    const cfg = this.settings.getRaw();
+    const model = cfg.llmModel || 'gpt-4o-mini';
     const res = await fetch(`${baseUrl}/chat/completions`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
-      body: JSON.stringify({ model: 'gpt-4o-mini', messages, stream: true }),
+      body: JSON.stringify({ model, messages, stream: true }),
     });
     if (!res.ok) {
       const text = await res.text();
@@ -96,8 +259,8 @@ export class GatewayService {
     const apiKey = this.apiKey('llm');
     if (!apiKey) throw new BadRequestException('LLM API key not configured');
 
-    const baseUrl = this.baseUrl(body.baseUrl as string);
-    const model = (body.model as string) || 'gpt-4o-mini';
+    const baseUrl = this.baseUrl(body.baseUrl as string, 'llm');
+    const model = (body.model as string) || this.settings.getRaw().llmModel || 'gpt-4o-mini';
     const messages = body.messages;
 
     const res = await fetch(`${baseUrl}/chat/completions`, {
@@ -129,17 +292,30 @@ export class GatewayService {
     url: string;
     urls?: string[];
     revisedPrompt?: string;
+    taskId?: string;
+    status?: 'success' | 'processing' | 'failed';
+    message?: string;
   }> {
-    const apiKey = this.apiKey('image');
-    if (!apiKey) throw new BadRequestException('Primary API key not configured');
-
     const prompt = ((body.prompt as string) ?? '').trim();
     if (!prompt) throw new BadRequestException('Image prompt is required');
 
-    const baseUrl = this.baseUrl(body.baseUrl as string);
     const model = (body.model as string) || 'dall-e-3';
     const size = (body.size as string) || '1024x1024';
     const n = Math.min(4, Math.max(1, (body.n as number) || 1));
+
+    if (this.shouldUseMagicHour(model, body.provider as string | undefined)) {
+      return this.proxyImageMagicHour({ prompt, model, size, n }, userId);
+    }
+
+    const apiKey = this.apiKey('video');
+    if (!apiKey) {
+      if (this.magicHour.hasKey()) {
+        return this.proxyImageMagicHour({ prompt, model: 'magic-hour', size, n }, userId);
+      }
+      throw new BadRequestException('Primary API key not configured');
+    }
+
+    const baseUrl = this.baseUrl(body.baseUrl as string);
 
     const res = await fetch(`${baseUrl}/images/generations`, {
       method: 'POST',
@@ -185,7 +361,56 @@ export class GatewayService {
       url: urls[0],
       urls,
       revisedPrompt: json.data[0].revised_prompt,
+      status: 'success',
     };
+  }
+
+  private async proxyImageMagicHour(
+    opts: { prompt: string; model: string; size: string; n: number },
+    userId?: string,
+  ): Promise<{
+    ok: boolean;
+    url: string;
+    urls?: string[];
+    taskId?: string;
+    status?: 'success' | 'processing' | 'failed';
+    message?: string;
+  }> {
+    const created = await this.magicHour.createImage({
+      prompt: opts.prompt,
+      imageCount: opts.n,
+      orientation: this.magicHour.orientationFromSize(opts.size),
+    });
+    const taskId = this.magicHour.encodeImageTaskId(created.id);
+    const project = await this.magicHour.waitForProject('image', created.id, {
+      attempts: 90,
+      intervalMs: 2000,
+    });
+
+    if (project.status !== 'complete') {
+      if (project.status === 'error' || project.status === 'canceled') {
+        throw new ServiceUnavailableException(this.magicHour.projectErrorMessage(project));
+      }
+      // Leave async task id for client poll via /api/gateway/video/poll
+      return {
+        ok: false,
+        url: '',
+        taskId,
+        status: 'processing',
+        message: `Magic Hour 图片仍在队列中（${taskId}），请稍后重试`,
+      };
+    }
+
+    const remoteUrls = this.magicHour.downloadUrls(project);
+    if (!remoteUrls.length) {
+      throw new ServiceUnavailableException('Magic Hour 图片完成但无下载地址');
+    }
+    const urls: string[] = [];
+    for (const remote of remoteUrls) {
+      urls.push(await this.saveRemoteImage(remote, 'mh'));
+    }
+    void this.track('image', { userId, model: opts.model || 'magic-hour' });
+    return { ok: true, url: urls[0], urls, taskId, status: 'success' };
   }
 
   /**
@@ -199,51 +424,104 @@ export class GatewayService {
     taskId?: string;
     message?: string;
   }> {
-    const apiKey = this.apiKey('image');
-    if (!apiKey) throw new BadRequestException('Primary API key not configured');
-
     const prompt = ((body.prompt as string) ?? '').trim();
     if (!prompt) throw new BadRequestException('Video prompt is required');
 
-    const baseUrl = this.baseUrl(body.baseUrl as string);
-    const model = (body.model as string) || 'veo';
+    const model = this.normalizeOpenAiVideoModel((body.model as string) || 'veo');
+    if (this.shouldUseMagicHour(model, body.provider as string | undefined)) {
+      return this.proxyVideoMagicHour(body, userId);
+    }
+
+    const provider = this.resolveVideoProvider(body);
+    const { apiKey, baseUrl } = provider;
+    if (!apiKey) {
+      if (this.magicHour.hasKey()) return this.proxyVideoMagicHour(body, userId);
+      throw new BadRequestException(`${provider.label} 未配置 API Key`);
+    }
 
     const payload: Record<string, unknown> = { model, prompt };
-    if (body.imageUrl) payload.image_url = body.imageUrl;
-    if (body.size) payload.size = body.size;
+    const imageUrl = typeof body.imageUrl === 'string'
+      ? this.imageUrlForOpenAiVideo(body.imageUrl, provider, model)
+      : '';
+    if (imageUrl) {
+      payload.image_url = imageUrl;
+      if (model.startsWith('grok-imagine-video')) {
+        payload.image = { url: imageUrl };
+        payload.reference_image_url = { url: imageUrl };
+        payload.first_frame_url = { url: imageUrl };
+      }
+    }
     if (body.aspect_ratio) payload.aspect_ratio = body.aspect_ratio;
     if (body.duration) payload.duration = body.duration;
-    if (body.resolution) payload.resolution = body.resolution;
-
-    const res = await fetch(`${baseUrl}/videos/generations`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify(payload),
+    const normalizedResolution = this.normalizeOpenAiVideoResolution(body.resolution);
+    const normalizedSize = this.normalizeOpenAiVideoSize(body.size, {
+      model,
+      resolution: normalizedResolution,
+      aspectRatio: body.aspect_ratio as string | undefined,
     });
+    if (normalizedSize) payload.size = normalizedSize;
+    if (normalizedResolution) payload.resolution = normalizedResolution;
+
+    let res: Response;
+    try {
+      res = await this.fetchWithTimeout(
+        `${baseUrl}/videos/generations`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${apiKey}`,
+          },
+          body: JSON.stringify(payload),
+        },
+        45000,
+      );
+    } catch (e) {
+      throw new ServiceUnavailableException(
+        `视频 API 连接失败：${provider.label}（${baseUrl}）。请确认服务可访问、Base URL 正确。${String(e)}`,
+      );
+    }
 
     if (res.status === 404 || res.status === 405) {
+      if (this.magicHour.hasKey()) return this.proxyVideoMagicHour(body, userId);
       return {
         ok: false,
         status: 'failed',
         message:
-          '当前 API 不支持 /videos/generations。请在设置中配置支持视频生成的 OpenAI 兼容端点，或使用 clip-gen 对接 Seedance。',
+          `当前通道不支持 /videos/generations：${provider.label}。请切换到 xAI 官方、GrokGo 测试桥，或配置支持视频的 OpenAI 兼容端点。`,
       };
     }
 
     if (!res.ok) {
       const text = await res.text();
+      if (
+        model.startsWith('grok-imagine-video') &&
+        /text-to-video is not supported/i.test(text)
+      ) {
+        throw new ServiceUnavailableException(
+          'Grok Imagine 需要图生视频，但代理没有识别到首图。请确认视频节点已连接图像节点，或上传首图后重试。',
+        );
+      }
+      if (provider.kind === 'xai' && /\/\/(127\.0\.0\.1|localhost)(:\d+)?\//i.test(imageUrl)) {
+        throw new ServiceUnavailableException(
+          'xAI 官方接口无法读取本机图片地址。请先使用可公网访问的图片 URL，或切换到本地 GrokGo 测试桥。',
+        );
+      }
       throw new ServiceUnavailableException(`Upstream video error: ${text.slice(0, 300)}`);
     }
 
     const json = (await res.json()) as Record<string, unknown>;
-    const taskId = (json.id as string) || (json.task_id as string);
+    const taskId =
+      (json.id as string) ||
+      (json.task_id as string) ||
+      (json.taskId as string) ||
+      (json.video_id as string) ||
+      (json.request_id as string) ||
+      (json.requestId as string);
 
-    if (json.status === 'processing' || json.status === 'queued') {
+    if (this.isVideoProcessingStatus(json.status) || (taskId && !this.isVideoSuccessStatus(json.status))) {
       if (taskId) {
-        const polled = await this.pollVideoTask(baseUrl, apiKey, taskId);
+        const polled = await this.pollVideoTask(provider, taskId);
         if (polled) return polled;
       }
       return { ok: true, status: 'processing', taskId, message: '视频生成中，请稍后重试查询' };
@@ -251,15 +529,89 @@ export class GatewayService {
 
     const url = await this.extractVideoUrl(json);
     if (url) {
-      const local = await this.saveVideoFromUrl(url);
+      const local = await this.saveVideoFromUrl(url, baseUrl);
       void this.track('video', { userId, model });
       return { ok: true, status: 'success', url: local, taskId };
     }
 
     return {
       ok: false,
-      status: 'failed',
-      message: '视频 API 返回格式无法识别',
+      status: taskId ? 'processing' : 'failed',
+      taskId,
+      message: `视频 API 返回格式无法识别（字段: ${Object.keys(json).join(', ') || '空响应'}）`,
+    };
+  }
+
+  private async proxyVideoMagicHour(
+    body: Record<string, unknown>,
+    userId?: string,
+  ): Promise<{
+    ok: boolean;
+    url?: string;
+    status: 'success' | 'processing' | 'failed';
+    taskId?: string;
+    message?: string;
+  }> {
+    const prompt = ((body.prompt as string) ?? '').trim();
+    const model = (body.model as string) || 'magic-hour';
+    const endSeconds = Number(body.duration) || 5;
+    const aspectRatio = (body.aspect_ratio as string) || '16:9';
+    const resolution = (body.resolution as string) || '480p';
+    const generateAudio = (body.generateAudio as boolean | undefined) ?? false;
+    const imageUrl = typeof body.imageUrl === 'string' ? body.imageUrl.trim() : '';
+
+    let created: { id: string };
+    if (imageUrl) {
+      const imageFilePath = await this.magicHour.resolveImageFilePath(imageUrl);
+      created = await this.magicHour.createImageToVideo({
+        prompt,
+        imageFilePath,
+        endSeconds,
+        resolution,
+        model,
+        audio: generateAudio,
+      });
+    } else {
+      created = await this.magicHour.createTextToVideo({
+        prompt,
+        endSeconds,
+        aspectRatio,
+        resolution,
+        model,
+        audio: generateAudio,
+      });
+    }
+
+    const taskId = this.magicHour.encodeVideoTaskId(created.id);
+    const project = await this.magicHour.waitForProject('video', created.id, {
+      attempts: 40,
+      intervalMs: 3000,
+    });
+
+    if (project.status === 'complete') {
+      const remote = this.magicHour.downloadUrls(project)[0];
+      if (!remote) {
+        return { ok: false, status: 'failed', taskId, message: 'Magic Hour 视频完成但无下载地址' };
+      }
+      const local = await this.saveVideoFromUrl(remote);
+      void this.track('video', { userId, model });
+      return { ok: true, status: 'success', url: local, taskId };
+    }
+
+    if (project.status === 'error' || project.status === 'canceled') {
+      return {
+        ok: false,
+        status: 'failed',
+        taskId,
+        message: this.magicHour.projectErrorMessage(project),
+      };
+    }
+
+    return {
+      ok: true,
+      status: 'processing',
+      taskId,
+      message: 'Magic Hour 视频生成中，请稍后轮询',
     };
   }
 
@@ -274,10 +626,52 @@ export class GatewayService {
     taskId: string;
     message?: string;
   }> {
-    const apiKey = this.apiKey('image');
-    if (!apiKey) throw new BadRequestException('Primary API key not configured');
-    const baseUrl = this.baseUrl(baseUrlOverride);
-    const polled = await this.pollVideoTask(baseUrl, apiKey, taskId);
+    const mh = this.magicHour.decodeTaskId(taskId);
+    if (mh) {
+      const project =
+        mh.kind === 'image'
+          ? await this.magicHour.getImageProject(mh.id)
+          : await this.magicHour.getVideoProject(mh.id);
+
+      if (project.status === 'complete') {
+        const remote = this.magicHour.downloadUrls(project)[0];
+        if (!remote) {
+          return {
+            ok: false,
+            status: 'failed',
+            taskId,
+            message: 'Magic Hour 完成但无下载地址',
+          };
+        }
+        const local =
+          mh.kind === 'image'
+            ? await this.saveRemoteImage(remote, 'mh')
+            : await this.saveVideoFromUrl(remote);
+        if (mh.kind === 'video') void this.track('video', { userId });
+        if (mh.kind === 'image') void this.track('image', { userId });
+        return { ok: true, status: 'success', url: local, taskId };
+      }
+
+      if (project.status === 'error' || project.status === 'canceled') {
+        return {
+          ok: false,
+          status: 'failed',
+          taskId,
+          message: this.magicHour.projectErrorMessage(project),
+        };
+      }
+
+      return {
+        ok: true,
+        status: 'processing',
+        taskId,
+        message: `Magic Hour 状态: ${project.status}`,
+      };
+    }
+
+    const provider = this.resolveVideoProvider(baseUrlOverride ? { baseUrl: baseUrlOverride } : {});
+    if (!provider.apiKey) throw new BadRequestException(`${provider.label} 未配置 API Key`);
+    const polled = await this.pollVideoTask(provider, taskId);
     if (polled?.status === 'success' && polled.url) {
       void this.track('video', { userId });
     }
@@ -292,48 +686,119 @@ export class GatewayService {
   }
 
   private async pollVideoTask(
-    baseUrl: string,
-    apiKey: string,
+    provider: VideoProviderRuntime,
     taskId: string,
-  ): Promise<{ ok: boolean; url?: string; status: 'success' | 'processing' | 'failed'; taskId: string } | null> {
+  ): Promise<{ ok: boolean; url?: string; status: 'success' | 'processing' | 'failed'; taskId: string; message?: string } | null> {
     for (let i = 0; i < 18; i++) {
       await new Promise((r) => setTimeout(r, 5000));
-      const res = await fetch(`${baseUrl}/videos/generations/${taskId}`, {
-        headers: { Authorization: `Bearer ${apiKey}` },
-      });
-      if (!res.ok) continue;
-      const json = (await res.json()) as Record<string, unknown>;
-      if (json.status === 'failed') {
-        return { ok: false, status: 'failed', taskId };
+      const json = await this.fetchVideoTaskStatus(provider, taskId);
+      if (!json) continue;
+      const message = this.upstreamErrorMessage(json);
+      if (this.isVideoFailedStatus(json.status)) {
+        return { ok: false, status: 'failed', taskId, message };
       }
-      if (json.status === 'completed' || json.status === 'succeeded') {
+      if (this.isVideoSuccessStatus(json.status)) {
         const url = await this.extractVideoUrl(json);
         if (url) {
-          const local = await this.saveVideoFromUrl(url);
+          const local = await this.saveVideoFromUrl(url, provider.baseUrl);
           return { ok: true, status: 'success', url: local, taskId };
         }
+        return { ok: false, status: 'failed', taskId, message: '视频任务完成但未返回可下载地址' };
+      }
+      const url = await this.extractVideoUrl(json);
+      if (url) {
+        const local = await this.saveVideoFromUrl(url, provider.baseUrl);
+        return { ok: true, status: 'success', url: local, taskId };
       }
     }
     return null;
   }
 
-  private async extractVideoUrl(json: Record<string, unknown>): Promise<string | null> {
-    const data = json.data as { url?: string }[] | undefined;
-    if (data?.[0]?.url) return data[0].url;
-    if (typeof json.url === 'string') return json.url;
-    if (typeof json.video_url === 'string') return json.video_url;
-    const output = json.output as { url?: string } | undefined;
-    if (output?.url) return output.url;
+  private async fetchVideoTaskStatus(
+    provider: VideoProviderRuntime,
+    taskId: string,
+  ): Promise<Record<string, unknown> | null> {
+    for (const path of [`/videos/generations/${taskId}`, `/videos/${taskId}`]) {
+      let res: Response;
+      try {
+        res = await this.fetchWithTimeout(
+          `${provider.baseUrl}${path}`,
+          { headers: { Authorization: `Bearer ${provider.apiKey}` } },
+          15000,
+        );
+      } catch {
+        continue;
+      }
+      if (!res.ok) continue;
+      return (await res.json()) as Record<string, unknown>;
+    }
     return null;
   }
 
-  private async saveVideoFromUrl(url: string): Promise<string> {
+  private upstreamErrorMessage(json: Record<string, unknown>): string | undefined {
+    if (typeof json.message === 'string') return json.message;
+    if (typeof json.error === 'string') return json.error;
+    const error = json.error as { message?: unknown; code?: unknown } | undefined;
+    if (typeof error?.message === 'string') return error.message;
+    if (typeof error?.code === 'string') return error.code;
+    return undefined;
+  }
+
+  private async extractVideoUrl(json: Record<string, unknown>): Promise<string | null> {
+    const data = json.data as { url?: string; b64_json?: string; content?: string; video?: { url?: string; video_url?: string } }[] | undefined;
+    if (data?.[0]?.url) return data[0].url;
+    if (data?.[0]?.video?.url) return data[0].video.url;
+    if (data?.[0]?.video?.video_url) return data[0].video.video_url;
+    if (data?.[0]?.b64_json) return `data:video/mp4;base64,${data[0].b64_json}`;
+    if (data?.[0]?.content) return data[0].content;
+    if (typeof json.url === 'string') return json.url;
+    if (typeof json.video_url === 'string') return json.video_url;
+    if (typeof json.download_url === 'string') return json.download_url;
+    if (typeof json.output_url === 'string') return json.output_url;
+    const video = json.video as { url?: string; video_url?: string } | undefined;
+    if (video?.url) return video.url;
+    if (video?.video_url) return video.video_url;
+    const output = json.output as { url?: string; video_url?: string } | undefined;
+    if (output?.url) return output.url;
+    if (output?.video_url) return output.video_url;
+    const result = json.result as { url?: string; video_url?: string } | undefined;
+    if (result?.url) return result.url;
+    if (result?.video_url) return result.video_url;
+    const videos = json.videos as { url?: string; video_url?: string }[] | undefined;
+    if (videos?.[0]?.url) return videos[0].url;
+    if (videos?.[0]?.video_url) return videos[0].video_url;
+    const artifacts = json.artifacts as { url?: string }[] | undefined;
+    if (artifacts?.[0]?.url) return artifacts[0].url;
+    return null;
+  }
+
+  private async saveVideoFromUrl(url: string, baseUrl?: string): Promise<string> {
     if (!existsSync(PATHS.videos)) mkdirSync(PATHS.videos, { recursive: true });
     const name = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}.mp4`;
-    const res = await fetch(url);
-    if (!res.ok) throw new ServiceUnavailableException('Failed to download video');
+    if (url.startsWith('data:video/')) {
+      const base64 = url.split(',')[1] ?? '';
+      if (!base64) throw new ServiceUnavailableException('视频返回了空的 base64 数据');
+      writeFileSync(join(PATHS.videos, name), Buffer.from(base64, 'base64'));
+      return `/media/videos/${encodeURIComponent(name)}`;
+    }
+    const absoluteUrl = this.resolveUpstreamUrl(url, baseUrl);
+    let res: Response;
+    try {
+      res = await this.fetchWithTimeout(absoluteUrl, {}, 60000);
+    } catch {
+      return absoluteUrl;
+    }
+    if (!res.ok) return absoluteUrl;
     writeFileSync(join(PATHS.videos, name), Buffer.from(await res.arrayBuffer()));
     return `/media/videos/${encodeURIComponent(name)}`;
+  }
+
+  private resolveUpstreamUrl(url: string, baseUrl?: string): string {
+    if (/^https?:\/\//i.test(url)) return url;
+    if (!baseUrl) return url;
+    const base = new URL(baseUrl);
+    if (url.startsWith('/')) return `${base.origin}${url}`;
+    return new URL(url, `${base.href.replace(/\/+$/, '')}/`).toString();
   }
 
   private saveAudioBuffer(buffer: Buffer, prefix: string, ext = 'wav'): string {
@@ -600,12 +1065,29 @@ export class GatewayService {
         }
         try {
           const res = await fetch(p.baseUrl ?? '', { method: 'HEAD', signal: AbortSignal.timeout(5000) });
-          return { id: p.id, label: p.label, available: res.ok, message: res.ok ? '已连接' : `HTTP ${res.status}` };
+          return { id: p.id, label: p.label, available: true, message: res.ok ? '已连接' : `HTTP ${res.status}` };
         } catch (e) {
           return { id: p.id, label: p.label, available: false, message: String(e) };
         }
       }),
     );
+
+    if (this.magicHour.hasKey()) {
+      results.unshift({
+        id: 'magic-hour',
+        label: 'Magic Hour',
+        available: true,
+        message: 'MAGIC_HOUR_API_KEY 已加载（apps/server/.env）',
+      });
+    } else {
+      results.unshift({
+        id: 'magic-hour',
+        label: 'Magic Hour',
+        available: false,
+        message: '未配置 MAGIC_HOUR_API_KEY',
+      });
+    }
+
     return { providers: results };
   }
 

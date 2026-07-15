@@ -77,10 +77,10 @@ export function VideoParamChips({ blockId, onPatch }: VideoParamChipsProps) {
   const data = useAttachedNodeData(blockId);
 
   const aspect = (data.aspect as string) ?? '16:9';
-  const durationSec = (data.durationSec as number) ?? 6;
+  const durationSec = (data.durationSec as number) ?? 5;
   const resolution = (data.resolution as string) ?? '720';
   const imageCount = (data.imageCount as number) ?? 1;
-  const generateAudio = (data.generateAudio as boolean | undefined) ?? true;
+  const generateAudio = (data.generateAudio as boolean | undefined) ?? false;
 
   const resLabel =
     VIDEO_RESOLUTION_OPTIONS.find((o) => o.id === resolution)?.label ?? `${resolution}p`;

@@ -18,6 +18,7 @@ const blockLoaders: Record<string, () => Promise<{ default: ComponentType<NodePr
   'grid-split': () => import('./utility/GridSplitBlock').then((m) => ({ default: m.default })),
   'grid-compose': () => import('./utility/GridComposeBlock').then((m) => ({ default: m.default })),
   'story-grid': () => import('./craft/StoryGridBlock').then((m) => ({ default: m.default })),
+  'asset-gate': () => import('./craft/AssetGateBlock').then((m) => ({ default: m.default })),
   'storyboard-preview': () =>
     import('./nx9/StoryboardPreviewBlock').then((m) => ({ default: m.default })),
   'asset-import': () => import('./input/AssetImportBlock').then((m) => ({ default: m.default })),

@@ -32,8 +32,14 @@ import {
   emptySoundLibrary,
   emptyStoryboard,
   emptyVoice,
+  activeEpisodeShots,
+  migrateStoryboardPayload,
   PLAYBOOK_DEFINITIONS,
   resolveNextStep,
+  resolveActiveEpisodeId,
+  hydrateEpisodePlaybookProgress,
+  switchPlaybookEpisode,
+  syncCurrentEpisodePlaybookProgress,
   migrateEnvironmentProfile,
   type PlaybookReadinessContext,
 } from '@nx9/shared';
@@ -57,6 +63,7 @@ interface WorkspaceDocumentState {
   hydrate: (workspaceId: string, payload: WorkspacePayload) => void;
   reset: () => void;
   setStoryboard: (sb: StoryboardPayload) => void;
+  setActiveEpisodeId: (episodeId: string | null) => void;
   setVoice: (v: VoicePayload) => void;
   setReviewMode: (mode: 'manual' | 'auto') => void;
   updateShot: (id: string, patch: Partial<StoryboardShot>) => void;
@@ -99,6 +106,23 @@ interface WorkspaceDocumentState {
   };
 }
 
+function syncSessionForStoryboard(
+  session: PlaybookSession,
+  storyboard: StoryboardPayload,
+): PlaybookSession {
+  return syncCurrentEpisodePlaybookProgress(session, resolveActiveEpisodeId(storyboard));
+}
+
+function switchSessionEpisode(
+  session: PlaybookSession,
+  currentEpisodeId: string | null,
+  targetEpisodeId: string | null,
+): PlaybookSession {
+  const def = PLAYBOOK_DEFINITIONS.find((playbook) => playbook.id === session.playbookId);
+  if (!def) return syncCurrentEpisodePlaybookProgress(session, currentEpisodeId);
+  return switchPlaybookEpisode(session, currentEpisodeId, targetEpisodeId, def);
+}
+
 export const useWorkspaceDocument = create<WorkspaceDocumentState>((set, get) => ({
   workspaceId: null,
   storyboard: emptyStoryboard(),
@@ -115,10 +139,17 @@ export const useWorkspaceDocument = create<WorkspaceDocumentState>((set, get) =>
   projectStatus: 'draft' as ProjectStatus,
   hydrated: false,
 
-  hydrate: (workspaceId, payload) =>
+  hydrate: (workspaceId, payload) => {
+    const storyboard = payload.storyboard
+      ? migrateStoryboardPayload(payload.storyboard)
+      : emptyStoryboard();
+    const rawSession = (payload as any).playbookSession as PlaybookSession | null | undefined;
+    const playbookSession = rawSession
+      ? hydrateEpisodePlaybookProgress(rawSession, resolveActiveEpisodeId(storyboard))
+      : null;
     set({
       workspaceId,
-      storyboard: payload.storyboard ?? emptyStoryboard(),
+      storyboard,
       voice: payload.voice ?? emptyVoice(),
       characters: payload.characters ?? emptyCharacterLibrary(),
       soundLibrary: payload.soundLibrary ?? emptySoundLibrary(),
@@ -132,10 +163,11 @@ export const useWorkspaceDocument = create<WorkspaceDocumentState>((set, get) =>
             environments: ((payload as any).environments.environments as EnvironmentProfile[] ?? []).map(migrateEnvironmentProfile),
           }
         : null,
-      playbookSession: (payload as any).playbookSession ?? null,
+      playbookSession,
       projectStatus: (payload as any).projectStatus ?? ('draft' as ProjectStatus),
       hydrated: true,
-    }),
+    });
+  },
 
   reset: () =>
     set({
@@ -153,7 +185,32 @@ export const useWorkspaceDocument = create<WorkspaceDocumentState>((set, get) =>
       hydrated: false,
     }),
 
-  setStoryboard: (sb) => set({ storyboard: sb }),
+  setStoryboard: (sb) =>
+    set((state) => {
+      if (!state.playbookSession) return { storyboard: sb };
+      return {
+        storyboard: sb,
+        playbookSession: switchSessionEpisode(
+          state.playbookSession,
+          resolveActiveEpisodeId(state.storyboard),
+          resolveActiveEpisodeId(sb),
+        ),
+      };
+    }),
+
+  setActiveEpisodeId: (activeEpisodeId) =>
+    set((state) => {
+      const storyboard = { ...state.storyboard, activeEpisodeId };
+      if (!state.playbookSession) return { storyboard };
+      return {
+        storyboard,
+        playbookSession: switchSessionEpisode(
+          state.playbookSession,
+          resolveActiveEpisodeId(state.storyboard),
+          resolveActiveEpisodeId(storyboard),
+        ),
+      };
+    }),
 
   setVoice: (v) => set({ voice: v }),
 
@@ -169,8 +226,9 @@ export const useWorkspaceDocument = create<WorkspaceDocumentState>((set, get) =>
     }));
     const state = get();
     if (patch.status === 'approved' && state.playbookSession && !state.playbookSession.dismissed) {
-      const allApproved = state.storyboard.shots.length > 0 &&
-        state.storyboard.shots.every((sh) => sh.status === 'approved');
+      const scopedShots = activeEpisodeShots(state.storyboard);
+      const allApproved = scopedShots.length > 0 &&
+        scopedShots.every((sh) => sh.status === 'approved');
       if (allApproved) {
         const def = PLAYBOOK_DEFINITIONS.find((p) => p.id === state.playbookSession!.playbookId);
         if (!def) return;
@@ -178,17 +236,14 @@ export const useWorkspaceDocument = create<WorkspaceDocumentState>((set, get) =>
         if (currentIdx === -1) return;
         const completed = [...new Set([...state.playbookSession!.completedStepIds, state.playbookSession!.currentStepId])];
         const nextIdx = currentIdx + 1;
-        if (nextIdx >= def.steps.length) {
-          set({ playbookSession: { ...state.playbookSession!, completedStepIds: completed } });
-        } else {
-          set({
-            playbookSession: {
+        const nextSession = nextIdx >= def.steps.length
+          ? { ...state.playbookSession!, completedStepIds: completed }
+          : {
               ...state.playbookSession!,
               currentStepId: def.steps[nextIdx].id,
               completedStepIds: completed,
-            },
-          });
-        }
+            };
+        set({ playbookSession: syncSessionForStoryboard(nextSession, state.storyboard) });
       }
     }
   },
@@ -331,18 +386,19 @@ export const useWorkspaceDocument = create<WorkspaceDocumentState>((set, get) =>
     set((s) => {
       const def = PLAYBOOK_DEFINITIONS.find((p) => p.id === playbookId);
       if (!def || def.steps.length === 0) return {};
+      const session: PlaybookSession = {
+        playbookId,
+        startedAt: new Date().toISOString(),
+        currentStepId: def.steps[0].id,
+        completedStepIds: [],
+        skippedStepIds: [],
+        failedStepIds: [],
+        waitingStepIds: [],
+        workflowStatus: 'idle',
+        dismissed: false,
+      };
       return {
-        playbookSession: {
-          playbookId,
-          startedAt: new Date().toISOString(),
-          currentStepId: def.steps[0].id,
-          completedStepIds: [],
-          skippedStepIds: [],
-          failedStepIds: [],
-          waitingStepIds: [],
-          workflowStatus: 'idle',
-          dismissed: false,
-        },
+        playbookSession: syncSessionForStoryboard(session, s.storyboard),
       };
     }),
 
@@ -357,40 +413,37 @@ export const useWorkspaceDocument = create<WorkspaceDocumentState>((set, get) =>
       const idx = def.steps.findIndex((st) => st.id === stepId);
       const nextIdx = idx + 1;
       const nextStepId = nextIdx < def.steps.length ? def.steps[nextIdx].id : session.currentStepId;
-      return {
-        playbookSession: {
+      const nextSession: PlaybookSession = {
           ...session,
           currentStepId: nextStepId,
           skippedStepIds: [...skipped],
           completedStepIds: [...new Set([...session.completedStepIds, stepId])],
-        },
       };
+      return { playbookSession: syncSessionForStoryboard(nextSession, s.storyboard) };
     }),
 
   markStepFailed: (stepId: string) =>
     set((s) => {
       const session = s.playbookSession;
       if (!session) return {};
-      return {
-        playbookSession: {
+      const nextSession: PlaybookSession = {
           ...session,
           failedStepIds: [...new Set([...(session.failedStepIds ?? []), stepId])],
           workflowStatus: 'error',
-        },
       };
+      return { playbookSession: syncSessionForStoryboard(nextSession, s.storyboard) };
     }),
 
   markStepWaiting: (stepId: string) =>
     set((s) => {
       const session = s.playbookSession;
       if (!session) return {};
-      return {
-        playbookSession: {
+      const nextSession: PlaybookSession = {
           ...session,
           waitingStepIds: [...new Set([...(session.waitingStepIds ?? []), stepId])],
           workflowStatus: 'blocked',
-        },
       };
+      return { playbookSession: syncSessionForStoryboard(nextSession, s.storyboard) };
     }),
 
   setProjectStatus: (status) => set({ projectStatus: status }),
@@ -402,7 +455,7 @@ export const useWorkspaceDocument = create<WorkspaceDocumentState>((set, get) =>
       const def = PLAYBOOK_DEFINITIONS.find((p) => p.id === session.playbookId);
       if (!def) return {};
       const ctx: PlaybookReadinessContext = ctxOverride ?? {
-        storyboard: { title: s.storyboard.title, shots: s.storyboard.shots.map((sh) => ({ id: sh.id, status: sh.status as string, firstFrameAssetId: sh.firstFrameAssetId ?? undefined, keyframeStatus: sh.keyframeStatus, videoStatus: sh.videoStatus, linkedBlockId: sh.linkedBlockId ?? undefined })) },
+        storyboard: { title: s.storyboard.title, activeEpisodeId: s.storyboard.activeEpisodeId, shots: s.storyboard.shots.map((sh) => ({ id: sh.id, episodeId: sh.episodeId, status: sh.status as string, firstFrameAssetId: sh.firstFrameAssetId ?? undefined, videoAssetId: sh.videoAssetId ?? undefined, keyframeStatus: sh.keyframeStatus, videoStatus: sh.videoStatus, linkedBlockId: sh.linkedBlockId ?? undefined })) },
         voice: s.voice,
         nodes: [],
         scriptPlan: s.scriptPlan ?? undefined,
@@ -413,21 +466,24 @@ export const useWorkspaceDocument = create<WorkspaceDocumentState>((set, get) =>
       const nextStep = resolveNextStep(def, session, ctx);
       if (nextStep.allDone) {
         const isExport = def.steps[def.steps.length - 1]?.readinessKey === 'export_ready';
+        const nextSession: PlaybookSession = { ...session, workflowStatus: 'done' };
         return {
           projectStatus: isExport ? 'exported' : 'completed',
-          playbookSession: { ...session, workflowStatus: 'done' },
+          playbookSession: syncSessionForStoryboard(nextSession, s.storyboard),
         };
       }
       const completed = [...new Set([...session.completedStepIds, session.currentStepId])];
       if (nextStep.step.id === session.currentStepId) {
-        return { playbookSession: { ...session, completedStepIds: completed } };
+        const nextSession: PlaybookSession = { ...session, completedStepIds: completed };
+        return { playbookSession: syncSessionForStoryboard(nextSession, s.storyboard) };
       }
+      const nextSession: PlaybookSession = {
+        ...session,
+        currentStepId: nextStep.step.id,
+        completedStepIds: completed,
+      };
       return {
-        playbookSession: {
-          ...session,
-          currentStepId: nextStep.step.id,
-          completedStepIds: completed,
-        },
+        playbookSession: syncSessionForStoryboard(nextSession, s.storyboard),
       };
     }),
 
@@ -441,7 +497,8 @@ export const useWorkspaceDocument = create<WorkspaceDocumentState>((set, get) =>
     set((s) => {
       const session = s.playbookSession;
       if (!session) return {};
-      return { playbookSession: { ...session, currentStepId: stepId } };
+      const nextSession: PlaybookSession = { ...session, currentStepId: stepId };
+      return { playbookSession: syncSessionForStoryboard(nextSession, s.storyboard) };
     }),
 
   getSnapshotForSave: () => {
@@ -451,7 +508,9 @@ export const useWorkspaceDocument = create<WorkspaceDocumentState>((set, get) =>
       scriptPlan: scriptPlan ?? undefined,
       environments: environments ?? undefined,
       backlotCustom, backlotWorkspace, canvasAppearance,
-      playbookSession: playbookSession ?? undefined,
+      playbookSession: playbookSession
+        ? syncSessionForStoryboard(playbookSession, storyboard)
+        : undefined,
       projectStatus,
     } as any;
   },

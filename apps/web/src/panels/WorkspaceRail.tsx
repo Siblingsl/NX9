@@ -19,7 +19,7 @@ export function WorkspaceRail({
   onClose,
 }: WorkspaceRailProps) {
   return (
-    <div className="nx9-workspace-rail flex items-center gap-1.5 px-4 py-1.5 border-b border-line/60 bg-surface/30 overflow-x-auto nx9-scroll">
+    <div className="nx9-workspace-rail flex items-center gap-1.5 px-4 py-1.5 border-b border-line/60 bg-white/90 backdrop-blur-md overflow-x-auto nx9-scroll">
       <span className="text-[10px] font-medium text-ink/35 uppercase tracking-wider shrink-0 pr-1 hidden sm:inline">
         工作区
       </span>

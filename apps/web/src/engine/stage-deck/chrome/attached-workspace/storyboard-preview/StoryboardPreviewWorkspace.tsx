@@ -18,6 +18,8 @@ import { StoryboardPreviewTimeline } from './StoryboardPreviewTimeline';
 import { StoryboardPreviewFrameEditor } from './StoryboardPreviewFrameEditor';
 import { StoryboardPreviewGenSettings } from './StoryboardPreviewGenSettings';
 import { StoryboardPreviewDirector3dPanel } from './StoryboardPreviewDirector3dPanel';
+import { useWorkspaceDocument } from '../../../../../stores/workspace-document';
+import { prepareDirectorProjectForShot } from '../../../../director3d-character-sync';
 
 function stop(e: React.SyntheticEvent) {
   e.stopPropagation();
@@ -48,6 +50,7 @@ export function StoryboardPreviewWorkspace({
   const openDirector3d = useDirector3dUi((state) => state.openForBlock);
   const setDirector3dHostBridge = useDirector3dUi((state) => state.setHostBridge);
   const actions = useStoryboardPreviewState(blockId);
+  const characters = useWorkspaceDocument((state) => state.characters.characters);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [batchStyle, setBatchStyle] = useState('');
   const [generating, setGenerating] = useState(false);
@@ -65,6 +68,12 @@ export function StoryboardPreviewWorkspace({
   const pictureNode = actions.connectedPictureNode();
   const director3dNode = actions.connectedDirector3dNode();
   const { model, pictureGenMode, quality, aspectRatio } = payload.pictureSettings;
+  const unboundCharacterShotCount = actions.shots.filter(
+    (shot) => (shot.characterNames?.length ?? 0) > (shot.characterIds?.length ?? 0),
+  ).length;
+  const unboundSceneShotCount = actions.shots.filter(
+    (shot) => Boolean(shot.sceneName) && !shot.sceneAssetId,
+  ).length;
 
   useEffect(() => {
     if (!pictureNode) return;
@@ -78,6 +87,12 @@ export function StoryboardPreviewWorkspace({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- init once when shots available
   }, [blockId, actions.shotCount, actions.upstreamBreakdown, payload.frames.length]);
+
+  useEffect(() => {
+    if (actions.shotCount > 0) actions.syncFromStoryboard();
+    // activeEpisodeId 是唯一切集触发器；syncFromStoryboard 本身保持稳定。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [actions.activeEpisodeId]);
 
   const framesByScene = useMemo(() => {
     const map = new Map<string, typeof payload.frames>();
@@ -138,7 +153,6 @@ export function StoryboardPreviewWorkspace({
     : undefined;
 
   useEffect(() => {
-    if (panoramaPrompt.trim()) return;
     if (payload.panorama720?.prompt) {
       setPanoramaPrompt(payload.panorama720.prompt);
       return;
@@ -147,8 +161,10 @@ export function StoryboardPreviewWorkspace({
       setPanoramaPrompt(
         [selectedFrame.sceneAssetRef, selectedFrame.promptSummary].filter(Boolean).join(' · '),
       );
+      return;
     }
-  }, [panoramaPrompt, payload.panorama720?.prompt, selectedFrame]);
+    setPanoramaPrompt('');
+  }, [payload.panorama720?.imageUrl, payload.panorama720?.prompt, selectedFrame?.id]);
 
   const loadPanoramaIntoDirector = useCallback(
     (imageUrl: string) => {
@@ -186,11 +202,18 @@ export function StoryboardPreviewWorkspace({
     const project = normalizeDirectorProject(directorData.scene);
     const referenceUrl = selectedFrame?.imageUrl ?? selectedFrame?.referenceImageUrl ?? undefined;
     const panoramaUrl = payload.panorama720?.imageUrl;
-    const nextProject = panoramaUrl
+    const environmentProject = panoramaUrl
       ? { ...project, panorama: { url: panoramaUrl, yaw: 0, exposure: 1 } }
       : referenceUrl && !project.panorama
         ? { ...project, panorama: { url: referenceUrl, yaw: 0, exposure: 1 } }
         : project;
+    const nextProject = prepareDirectorProjectForShot(
+      environmentProject,
+      selectedFrame?.characterIds,
+      characters,
+      selectedFrame?.director3dGuide?.characterPlacements,
+      selectedFrame?.characterNames,
+    );
     updateNodeData(director3dNode.id, {
       linkedStoryboardPreviewId: blockId,
       linkedStoryboardPreviewFrameId: selectedFrame?.id ?? null,
@@ -205,6 +228,7 @@ export function StoryboardPreviewWorkspace({
     setDirector3dHostBridge(panoramaUrl ?? referenceUrl ?? null);
   }, [
     blockId,
+    characters,
     director3dNode,
     openDirector3d,
     payload.panorama720?.imageUrl,
@@ -248,6 +272,14 @@ export function StoryboardPreviewWorkspace({
         {director3dNode && (
           <span className="text-[9px] px-1.5 py-0.5 rounded bg-violet-500/10 text-violet-700">
             已连接 3D 导演台
+          </span>
+        )}
+        {(unboundCharacterShotCount > 0 || unboundSceneShotCount > 0) && (
+          <span
+            className="text-[9px] px-1.5 py-0.5 rounded bg-warn/10 text-warn"
+            title="在角色库/场景库补齐同名资产后，回到分镜网格点击同步重新绑定"
+          >
+            资产待绑定 {unboundCharacterShotCount + unboundSceneShotCount}
           </span>
         )}
         <span className="text-[10px] text-ink/45 tabular-nums">
@@ -486,7 +518,7 @@ export function StoryboardPreviewWorkspace({
             onClick={actions.confirmAll}
             className="px-3 py-1.5 rounded-lg bg-brand text-white text-[11px] font-medium hover:bg-brand/90 disabled:opacity-40"
           >
-            确认进入视频生成
+            提交分镜批审
           </button>
         </div>
       </div>

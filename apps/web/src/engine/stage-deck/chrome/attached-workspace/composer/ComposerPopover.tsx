@@ -65,7 +65,7 @@ export function ComposerPopover({
       />
       <div
         ref={panelRef}
-        className="fixed z-[121] rounded-xl border border-line/60 bg-white shadow-panel py-1 nodrag nopan"
+        className="nx9-composer-popover fixed z-[121] rounded-xl border border-line/60 bg-white shadow-panel py-1 nodrag nopan"
         style={{
           top: pos?.top ?? -9999,
           left: pos?.left ?? 0,

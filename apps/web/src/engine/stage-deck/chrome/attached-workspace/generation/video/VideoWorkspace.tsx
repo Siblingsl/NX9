@@ -1,6 +1,12 @@
-import { useCallback, useEffect, useMemo, useRef } from 'react';
-import type { AssetLibraryKind } from '@nx9/shared';
-import { CLIP_GEN_MODELS, lookupBlock } from '@nx9/shared';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { AssetLibraryKind, StoryboardShot } from '@nx9/shared';
+import {
+  activeEpisodeShots,
+  adoptStoryboardVideoVersion,
+  CLIP_GEN_MODELS,
+  lookupBlock,
+  resolveStoryboardVideoVersions,
+} from '@nx9/shared';
 import { useReactFlow } from '@xyflow/react';
 import { AssetMentionInput } from '../../../asset-mention/AssetMentionInput';
 import { ComposerModelSelect } from '../../composer/ComposerModelSelect';
@@ -21,6 +27,8 @@ import {
   showVideoFrameStrip,
   type VideoGenMode,
 } from './video-gen-modes';
+import { useWorkspaceDocument } from '../../../../../../stores/workspace-document';
+import { batchGenerateVideosFromShots } from '../../../../../core-pipeline-runner';
 
 const EMPTY_HISTORY: { id: string; blockId: string; text: string; savedAt: number }[] = [];
 const VIDEO_MENTION_KINDS: AssetLibraryKind[] = [
@@ -53,6 +61,11 @@ export function VideoWorkspace({ blockId, kind, onCollapse }: VideoWorkspaceProp
   const handleAiAction = useWorkspaceAiLog();
 
   const data = useAttachedNodeData(blockId);
+  const storyboard = useWorkspaceDocument((state) => state.storyboard);
+  const shots = useMemo(() => activeEpisodeShots(storyboard), [storyboard]);
+  const updateShot = useWorkspaceDocument((state) => state.updateShot);
+  const [retryingShotId, setRetryingShotId] = useState<string | null>(null);
+  const [previewVersionIds, setPreviewVersionIds] = useState<Record<string, string>>({});
 
   const history = useMemo(
     () => (promptEntries ?? EMPTY_HISTORY).filter((e) => e.blockId === blockId).slice(0, 20),
@@ -92,6 +105,11 @@ export function VideoWorkspace({ blockId, kind, onCollapse }: VideoWorkspaceProp
     flushNow();
     if (!runtime) return;
     try {
+      if (shots.length > 0) {
+        await batchGenerateVideosFromShots();
+        appendLog(`当前集视频生成完成 · ${shots.length} 镜`);
+        return;
+      }
       const { runCascadeFromBlock } = await import('../../../../execution/cascade-runner');
       await runCascadeFromBlock({
         blockId,
@@ -108,7 +126,31 @@ export function VideoWorkspace({ blockId, kind, onCollapse }: VideoWorkspaceProp
     } catch (e) {
       appendLog(`运行失败: ${String(e)}`);
     }
-  }, [blockId, runtime, meta, kind, appendLog, flushNow]);
+  }, [blockId, runtime, meta, kind, appendLog, flushNow, shots.length]);
+
+  const retryShot = useCallback(async (shotId: string) => {
+    setRetryingShotId(shotId);
+    try {
+      await batchGenerateVideosFromShots([shotId], true);
+    } finally {
+      setRetryingShotId(null);
+    }
+  }, []);
+
+  const approveAllVideos = useCallback(() => {
+    for (const shot of shots) {
+      const versions = resolveStoryboardVideoVersions(shot);
+      const selected = versions.find((version) => version.url === shot.videoAssetId) ?? versions.at(-1);
+      if (!selected) continue;
+      const patch = adoptStoryboardVideoVersion(shot, selected.id);
+      if (patch) updateShot(shot.id, patch);
+    }
+  }, [shots, updateShot]);
+
+  const adoptVersion = useCallback((shot: StoryboardShot, versionId: string) => {
+    const patch = adoptStoryboardVideoVersion(shot, versionId);
+    if (patch) updateShot(shot.id, patch);
+  }, [updateShot]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -192,16 +234,101 @@ export function VideoWorkspace({ blockId, kind, onCollapse }: VideoWorkspaceProp
         />
       }
       topSlot={
-        showFrames ? (
-          <VideoFrameStrip
-            startFrameUrl={data.startFrameUrl as string | undefined}
-            endFrameUrl={data.endFrameUrl as string | undefined}
-            referenceFrameUrl={data.referenceFrameUrl as string | undefined}
-            onStartChange={(url) => handlePatch({ startFrameUrl: url })}
-            onEndChange={(url) => handlePatch({ endFrameUrl: url })}
-            onReferenceChange={(url) => handlePatch({ referenceFrameUrl: url })}
-          />
-        ) : undefined
+        <>
+          {showFrames && (
+            <VideoFrameStrip
+              startFrameUrl={data.startFrameUrl as string | undefined}
+              endFrameUrl={data.endFrameUrl as string | undefined}
+              referenceFrameUrl={data.referenceFrameUrl as string | undefined}
+              onStartChange={(url) => handlePatch({ startFrameUrl: url })}
+              onEndChange={(url) => handlePatch({ endFrameUrl: url })}
+              onReferenceChange={(url) => handlePatch({ referenceFrameUrl: url })}
+            />
+          )}
+          {shots.length > 0 && (
+            <div className="border-b border-line/25 px-3 py-2">
+              <div className="mb-1.5 flex items-center gap-2">
+                <p className="text-[10px] font-medium text-ink/65">
+                  当前集 {shots.length} 镜 · 已生成 {shots.filter((shot) => shot.videoAssetId).length}
+                </p>
+                <button
+                  type="button"
+                  disabled={shots.some((shot) => !shot.videoAssetId)}
+                  onClick={approveAllVideos}
+                  className="ml-auto rounded-md bg-ok/10 px-2 py-0.5 text-[9px] text-ok disabled:opacity-35"
+                >
+                  全部采用
+                </button>
+              </div>
+              <div className="max-h-52 space-y-1 overflow-y-auto nx9-scroll">
+                {shots.map((shot) => {
+                  const versions = resolveStoryboardVideoVersions(shot);
+                  const defaultVersion = versions.find((version) => version.url === shot.videoAssetId) ?? versions.at(-1);
+                  const displayVersion = versions.find((version) => version.id === previewVersionIds[shot.id]) ?? defaultVersion;
+                  return (
+                  <div key={shot.id} className="rounded-lg bg-surface/45 p-1.5">
+                    <div className="flex items-center gap-2">
+                    <div className="h-9 w-14 shrink-0 overflow-hidden rounded bg-black/5">
+                      {displayVersion?.url ? (
+                        <video src={displayVersion.url} controls className="h-full w-full object-cover" />
+                      ) : shot.firstFrameAssetId ? (
+                        <img src={shot.firstFrameAssetId} alt="" className="h-full w-full object-cover" />
+                      ) : null}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-[9px] text-ink/65">#{shot.index + 1} {shot.descriptionZh}</p>
+                      <p className="text-[8px] text-ink/35">
+                        {shot.videoStatus ?? 'draft'} · {versions.length} 个版本
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      disabled={!displayVersion || (
+                        shot.videoStatus === 'approved' && (
+                          displayVersion.id === shot.adoptedVideoVersionId ||
+                          (!shot.adoptedVideoVersionId && displayVersion.status === 'adopted')
+                        )
+                      )}
+                      onClick={() => displayVersion && adoptVersion(shot, displayVersion.id)}
+                      className="rounded border border-ok/25 px-1 py-0.5 text-[8px] text-ok disabled:opacity-35"
+                    >
+                      采用
+                    </button>
+                    <button
+                      type="button"
+                      disabled={retryingShotId === shot.id || shot.keyframeStatus !== 'approved'}
+                      onClick={() => void retryShot(shot.id)}
+                      className="rounded border border-brand/20 px-1 py-0.5 text-[8px] text-brand disabled:opacity-35"
+                    >
+                      {retryingShotId === shot.id ? '生成中' : '重生成'}
+                    </button>
+                    </div>
+                    {versions.length > 0 && (
+                      <div className="mt-1 flex items-center gap-1 overflow-x-auto nx9-scroll">
+                        {versions.map((version, index) => (
+                          <button
+                            key={version.id}
+                            type="button"
+                            onClick={() => setPreviewVersionIds((current) => ({ ...current, [shot.id]: version.id }))}
+                            title={new Date(version.createdAt).getTime() > 0 ? new Date(version.createdAt).toLocaleString() : '历史版本'}
+                            className={`shrink-0 rounded px-1.5 py-0.5 text-[8px] ${
+                              displayVersion?.id === version.id
+                                ? 'bg-brand text-white'
+                                : version.status === 'adopted'
+                                  ? 'bg-ok/10 text-ok'
+                                  : 'bg-white text-ink/45'
+                            }`}
+                          >V{index + 1}{version.status === 'adopted' ? ' ✓' : ''}</button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+        </>
       }
       toolbarLeft={toolbarLeft}
       toolbarAdvanced={toolbarAdvanced}

@@ -6,13 +6,15 @@ export function ProductionProgressWall() {
   const progress = useExecutionQueue((s) => s.progress);
   const currentLabel = useExecutionQueue((s) => s.currentLabel);
   const error = useExecutionQueue((s) => s.error);
+  const activeBlockIds = useExecutionQueue((s) => s.activeBlockIds);
   const runtime = useFlowRuntime((s) => s.runtime);
 
-  if (phase !== 'running' && phase !== 'cancelled' && !error) return null;
+  if (phase !== 'running' && phase !== 'cancelled' && phase !== 'paused' && !error) return null;
 
   const pct =
     progress.total > 0 ? Math.min(100, Math.round((progress.done / progress.total) * 100)) : 0;
   const running = phase === 'running';
+  const paused = phase === 'paused';
 
   return (
     <div
@@ -24,11 +26,11 @@ export function ProductionProgressWall() {
         <div className="flex items-center gap-2 min-w-0">
           <span
             className={`inline-block w-2 h-2 rounded-full shrink-0 ${
-              running ? 'bg-brand animate-pulse' : 'bg-warn'
+              running ? 'bg-brand animate-pulse' : paused ? 'bg-accent' : 'bg-warn'
             }`}
           />
           <span className="text-sm font-medium text-ink">
-            {running ? '批量生产进行中' : phase === 'cancelled' ? '正在停止…' : '运行中断'}
+            {running ? '批量生产进行中' : phase === 'cancelled' ? '正在安全停止…' : paused ? '运行已暂停' : '运行中断'}
           </span>
           {currentLabel && running && (
             <span className="text-xs text-ink/50 truncate max-w-[240px]" title={currentLabel}>
@@ -56,6 +58,16 @@ export function ProductionProgressWall() {
             className="shrink-0 text-xs rounded-lg border border-line px-3 py-1 hover:bg-surface text-ink/70"
           >
             停止
+          </button>
+        )}
+
+        {paused && activeBlockIds.size > 0 && (
+          <button
+            type="button"
+            onClick={() => runtime?.runSelected?.([...activeBlockIds])}
+            className="shrink-0 text-xs rounded-lg border border-brand/30 bg-brand/5 px-3 py-1 hover:bg-brand/10 text-brand"
+          >
+            继续运行
           </button>
         )}
 

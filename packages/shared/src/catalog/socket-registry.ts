@@ -24,6 +24,7 @@ export const SOCKET_REGISTRY: Record<string, SocketProfile> = {
   'continuity-check': { accepts: ['prompt', 'picture', 'clip'], emits: ['prompt', 'meta'] },
   'scene-card': { accepts: ['prompt', 'picture'], emits: ['prompt', 'meta'] },
   'dialogue-sheet': { accepts: ['prompt'], emits: ['prompt', 'meta'] },
+  'asset-gate': { accepts: ['prompt', 'meta'], emits: ['prompt', 'meta'] },
   'voice-cast': { accepts: ['prompt', 'sound'], emits: ['sound', 'meta'] },
   'bridge-clip': { accepts: ['prompt', 'clip'], emits: ['prompt', 'picture', 'meta'] },
   'caption-asr': { accepts: ['clip', 'sound'], emits: ['prompt', 'meta'] },
@@ -191,9 +192,10 @@ export function validateLink(
 export type VerticalSocketSpec = {
   kind: SocketKind;
   position: 'top' | 'bottom';
-  type: 'source' | 'target';
+  type: 'source' | 'target' | 'both';
   id: string;
   label?: string;
+  offsetPct?: number;
 };
 
 export const EXEC_PICTURE_HANDLES = new Set([
@@ -203,6 +205,24 @@ export const EXEC_PICTURE_HANDLES = new Set([
 ]);
 
 export const VERTICAL_SOCKETS: Record<string, VerticalSocketSpec[]> = {
+  'character-sheet': [
+    {
+      kind: 'meta',
+      position: 'bottom',
+      type: 'source',
+      id: 'asset-gate',
+      label: '角色设定',
+    },
+  ],
+  'scene-card': [
+    {
+      kind: 'meta',
+      position: 'bottom',
+      type: 'source',
+      id: 'asset-gate',
+      label: '场景设定',
+    },
+  ],
   'picture-gen': [
     {
       kind: 'picture',
@@ -228,6 +248,15 @@ export const VERTICAL_SOCKETS: Record<string, VerticalSocketSpec[]> = {
       type: 'target',
       id: 'exec-picture',
       // label: '预览',
+    },
+  ],
+  'asset-gate': [
+    {
+      kind: 'meta',
+      position: 'top',
+      type: 'both',
+      id: 'asset-gate',
+      label: '设定门禁',
     },
   ],
 };

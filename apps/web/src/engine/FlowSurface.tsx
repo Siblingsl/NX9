@@ -97,6 +97,20 @@ import { computeGroupBounds } from './stage-deck/canvas/SceneGroup';
 import { StageDeckInteractionBridge } from './stage-deck/StageDeckInteractionBridge';
 import { normalizeDirectorProject } from '@nx9/director3d';
 import { useDirector3dUi } from '../stores/director3d-ui';
+import { auditCorePipeline, repairCorePipeline } from './core-pipeline-graph';
+
+const CANVAS_GRID = {
+  light: {
+    background: '#FAFAF8',
+    dots: { gap: 24, size: 1.3, color: 'rgba(34,34,34,0.12)' },
+    lines: { gap: 36, size: 1.15, color: 'rgba(34,34,34,0.11)' },
+  },
+  dark: {
+    background: '#11100E',
+    dots: { gap: 28, size: 1.35, color: 'rgba(255,255,255,0.13)' },
+    lines: { gap: 40, size: 1.2, color: 'rgba(255,255,255,0.085)' },
+  },
+} as const;
 
 export interface FlowSurfaceProps {
   workspaceId: string;
@@ -267,11 +281,16 @@ const FlowSurfaceInner = memo(function FlowSurfaceInner({
   const characters = useWorkspaceDocument((s) => s.characters);
   const canvasAppearance = useWorkspaceDocument((s) => s.canvasAppearance);
   const startBatch = useExecutionQueue((s) => s.startBatch);
+  const resumeBatch = useExecutionQueue((s) => s.resumeBatch);
   const finishBatch = useExecutionQueue((s) => s.finish);
   const reportProgress = useExecutionQueue((s) => s.reportProgress);
+  const reportCompleted = useExecutionQueue((s) => s.reportCompleted);
   const reportError = useExecutionQueue((s) => s.reportError);
   const cancelBatch = useExecutionQueue((s) => s.cancel);
+  const pauseBatch = useExecutionQueue((s) => s.pause);
   const isBatchRunning = useExecutionQueue((s) => s.phase === 'running');
+  const batchPhase = useExecutionQueue((s) => s.phase);
+  const activeBatchBlockIds = useExecutionQueue((s) => s.activeBlockIds);
 
   const perf = usePerfController(nodes, edges, dragging, reduceMotion);
   const effectiveIntensive =
@@ -638,17 +657,29 @@ const FlowSurfaceInner = memo(function FlowSurfaceInner({
   );
 
   const runBatchInternal = useCallback(
-    async (onlyIds?: Set<string>, label = '画布批量运行') => {
+    async (
+      onlyIds?: Set<string>,
+      label = '画布批量运行',
+      options?: { resume?: boolean },
+    ) => {
       const currentNodes = nodesRef.current;
       const currentEdges = edgesRef.current;
+      const queueSnapshot = useExecutionQueue.getState();
+      const resume = Boolean(options?.resume && queueSnapshot.phase === 'paused');
+      const completedBefore = resume
+        ? new Set(queueSnapshot.completedBlockIds)
+        : new Set<string>();
       const session = useWorkspaceDocument.getState().playbookSession;
       const ctx: import('@nx9/shared').PlaybookReadinessContext = {
         storyboard: {
           title: useWorkspaceDocument.getState().storyboard.title,
+          activeEpisodeId: useWorkspaceDocument.getState().storyboard.activeEpisodeId,
           shots: useWorkspaceDocument.getState().storyboard.shots.map((sh) => ({
             id: sh.id,
+            episodeId: sh.episodeId,
             status: sh.status as string,
             firstFrameAssetId: sh.firstFrameAssetId ?? undefined,
+            videoAssetId: sh.videoAssetId ?? undefined,
             keyframeStatus: sh.keyframeStatus,
             videoStatus: sh.videoStatus,
             linkedBlockId: sh.linkedBlockId ?? undefined,
@@ -658,13 +689,15 @@ const FlowSurfaceInner = memo(function FlowSurfaceInner({
         nodes: currentNodes.map((n) => ({ id: n.id, type: n.type ?? '', data: n.data as Record<string, unknown> })),
         playbookSession: session,
       };
-      let taskId: string | null = null;
+      let taskId: string | null = resume ? queueSnapshot.taskId : null;
       cancelRunRef.current = false;
-      try {
-        const task = await api.createTask('batch', label);
-        taskId = task.id;
-      } catch {
-        /* task queue optional */
+      if (!resume) {
+        try {
+          const task = await api.createTask('batch', label);
+          taskId = task.id;
+        } catch {
+          /* task queue optional */
+        }
       }
       const runnableIds = onlyIds
         ? [...onlyIds].filter((id) => {
@@ -679,8 +712,13 @@ const FlowSurfaceInner = memo(function FlowSurfaceInner({
             }
             return execCheck.ok;
           }).map((n) => n.id);
-      startBatch(runnableIds, taskId);
-      appendLog(onlyIds ? '运行选中模块' : '批量运行开始');
+      if (resume) {
+        resumeBatch();
+        appendLog(`继续上次运行 · 剩余 ${Math.max(0, runnableIds.length - completedBefore.size)} 模块`);
+      } else {
+        startBatch(runnableIds, taskId, label);
+        appendLog(onlyIds ? '运行选中模块' : '批量运行开始');
+      }
 
       const reportTask = async (patch: {
         progress?: number;
@@ -701,6 +739,7 @@ const FlowSurfaceInner = memo(function FlowSurfaceInner({
         updateNodeDataStable,
         (p) => {
           if (p.phase === 'running') {
+            if (p.completedIds) reportCompleted(p.completedIds);
             const node = p.currentId
               ? currentNodes.find((n) => n.id === p.currentId)
               : undefined;
@@ -718,6 +757,11 @@ const FlowSurfaceInner = memo(function FlowSurfaceInner({
                 message: label ? `执行 · ${label}` : `执行模块 ${p.current + 1}/${p.total}`,
               });
             }
+          }
+          if (p.phase === 'paused') {
+            if (p.completedIds) reportCompleted(p.completedIds);
+            appendLog(`运行已暂停 · 已完成 ${p.current}/${p.total}，可继续运行`);
+            void reportTask({ status: 'paused', message: `已暂停 · ${p.current}/${p.total}` });
           }
           if (p.phase === 'done') {
             appendLog(`批量运行完成 (${p.total} 模块)`);
@@ -738,17 +782,36 @@ const FlowSurfaceInner = memo(function FlowSurfaceInner({
         },
         { get cancelled() { return cancelRunRef.current; } },
         onlyIds,
+        completedBefore,
       );
-      finishBatch();
+      if (cancelRunRef.current) {
+        pauseBatch();
+      } else {
+        finishBatch();
+      }
     },
-    [startBatch, finishBatch, reportProgress, reportError, updateNodeDataStable, appendLog, highlightBlock],
+    [startBatch, resumeBatch, finishBatch, pauseBatch, reportProgress, reportCompleted, reportError, updateNodeDataStable, appendLog, highlightBlock],
   );
 
   const runBatch = useCallback(() => runBatchInternal(), [runBatchInternal]);
 
   const runSelected = useCallback(
     (ids: string[]) => {
-      void runBatchInternal(new Set(ids), '运行选中模块');
+      const queue = useExecutionQueue.getState();
+      const sameCheckpoint =
+        queue.phase === 'paused' &&
+        ids.length === queue.activeBlockIds.size &&
+        ids.every((id) => queue.activeBlockIds.has(id));
+      void runBatchInternal(new Set(ids), sameCheckpoint ? queue.runLabel ?? '运行选中模块' : '运行选中模块', {
+        resume: sameCheckpoint,
+      });
+    },
+    [runBatchInternal],
+  );
+
+  const rerunSelected = useCallback(
+    (ids: string[]) => {
+      void runBatchInternal(new Set(ids), '重新运行选中模块');
     },
     [runBatchInternal],
   );
@@ -1195,6 +1258,7 @@ const FlowSurfaceInner = memo(function FlowSurfaceInner({
   const handleRedoRef = useRef(handleRedo);
   const runBatchRef = useRef(runBatch);
   const runSelectedRef = useRef(runSelected);
+  const rerunSelectedRef = useRef(rerunSelected);
   const runCascadeRef = useRef(runCascade);
   const stopRunRef = useRef(stopRun);
   const deleteNodesRef = useRef(deleteNodes);
@@ -1208,6 +1272,7 @@ const FlowSurfaceInner = memo(function FlowSurfaceInner({
   handleRedoRef.current = handleRedo;
   runBatchRef.current = runBatch;
   runSelectedRef.current = runSelected;
+  rerunSelectedRef.current = rerunSelected;
   runCascadeRef.current = runCascade;
   stopRunRef.current = stopRun;
   deleteNodesRef.current = deleteNodes;
@@ -1265,6 +1330,7 @@ const FlowSurfaceInner = memo(function FlowSurfaceInner({
       },
       runBatch: () => Promise.resolve(runBatchRef.current ? runBatchRef.current() : undefined),
       runSelected: (ids) => void runSelectedRef.current(ids),
+      rerunSelected: (ids) => void rerunSelectedRef.current(ids),
       get runCascade() {
         return isStageDeckRef.current
           ? (blockId: string) => void runCascadeRef.current(blockId)
@@ -1663,10 +1729,29 @@ const FlowSurfaceInner = memo(function FlowSurfaceInner({
     [setNodes, appendLog, isStageDeck, openDirector3dForBlock, viewMode, updateNodeDataStable, syncSelectedBlockId, setDeckSelection],
   );
 
+  const corePipelineAudit = useMemo(
+    () => auditCorePipeline(nodes, edges),
+    [edges, nodes],
+  );
+  const canvasGrid = CANVAS_GRID[canvasAppearance.theme === 'dark' ? 'dark' : 'light'];
+
+  const handleRepairCorePipeline = useCallback(async () => {
+    const repaired = repairCorePipeline(nodesRef.current, edgesRef.current);
+    await preloadBlockTypes(repaired.nodes.map((node) => node.type).filter(Boolean) as string[]);
+    pushFlowSnapshot(nodesRef.current, edgesRef.current);
+    setNodes(repaired.nodes);
+    setEdges(repaired.edges);
+    useWorkspaceDocument.getState().startPlaybook('pb-ai-comic-live');
+    appendLog(
+      `核心流程已修复 · 新增 ${repaired.addedNodeCount} 节点 / ${repaired.addedLinkCount} 连线 / 移除 ${repaired.removedBypassCount} 条绕过线`,
+    );
+    setTimeout(() => void fitView({ duration: 300, padding: 0.2 }), 100);
+  }, [appendLog, fitView, pushFlowSnapshot, setEdges, setNodes]);
+
   return (
     <div
       className={`relative h-full w-full ${flowClass} ${canvasAppearance.theme === 'dark' ? 'nx9-theme-dark' : ''}`}
-      style={canvasAppearance.theme === 'dark' ? { background: '#181715' } : undefined}
+      style={{ background: canvasGrid.background }}
       onDragOver={onDragOver}
       onDrop={onDrop}
       onDoubleClick={onPaneDoubleClick}
@@ -1675,6 +1760,24 @@ const FlowSurfaceInner = memo(function FlowSurfaceInner({
       {!ready && (
         <div className="absolute inset-0 z-10 flex items-center justify-center bg-surface/90 text-sm text-ink/50">
           加载工作区…
+        </div>
+      )}
+      {isStageDeck && ready && corePipelineAudit.resemblesCore && !corePipelineAudit.valid && (
+        <div className="absolute left-4 top-14 z-[14] flex items-center gap-3 rounded-xl border border-warn/25 bg-white/95 px-3 py-2 shadow-panel backdrop-blur">
+          <div>
+            <p className="text-[11px] font-medium text-ink">当前画布缺少核心生产环节</p>
+            <p className="text-[9px] text-ink/45">
+              缺 {corePipelineAudit.missingKinds.length} 个节点 · {corePipelineAudit.missingLinkCount} 条连线
+              {corePipelineAudit.hasBypass ? ' · 存在绕过批审连线' : ''}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => void handleRepairCorePipeline()}
+            className="rounded-lg bg-brand px-2.5 py-1 text-[10px] font-medium text-white"
+          >
+            一键修复
+          </button>
         </div>
       )}
       {isStageDeck && ready && nodes.length === 0 && !recipePickerDismissed && (
@@ -1705,6 +1808,10 @@ const FlowSurfaceInner = memo(function FlowSurfaceInner({
         ) : isSurfaceEnabled('workflowTemplates') ? (
         <RecipePickerOverlay
           onPick={(templateId) => {
+            if (templateId === 'tpl-core-episode') {
+              useWorkspaceDocument.getState().startPlaybook('pb-ai-comic-live');
+              useWorkspaceDocument.getState().setProjectStatus('draft');
+            }
             void loadWorkflowTemplate(templateId, 'replace');
             setRecipePickerDismissed(true);
             setTimeout(() => {
@@ -1762,9 +1869,19 @@ const FlowSurfaceInner = memo(function FlowSurfaceInner({
         elevateNodesOnSelect={!effectiveIntensive}
       >
         {canvasAppearance.gridStyle === 'blank' ? null : canvasAppearance.gridStyle === 'lines' ? (
-          <Background variant={BackgroundVariant.Lines} gap={PERF.gridStep} size={1} color={canvasAppearance.theme === 'dark' ? 'rgba(255,255,255,0.06)' : '#E0E0E0'} />
+          <Background
+            variant={BackgroundVariant.Lines}
+            gap={canvasGrid.lines.gap}
+            size={canvasGrid.lines.size}
+            color={canvasGrid.lines.color}
+          />
         ) : (
-          <Background variant={BackgroundVariant.Dots} gap={PERF.gridStep} size={1} color={canvasAppearance.theme === 'dark' ? 'rgba(255,255,255,0.08)' : '#E6E6E6'} />
+          <Background
+            variant={BackgroundVariant.Dots}
+            gap={canvasGrid.dots.gap}
+            size={canvasGrid.dots.size}
+            color={canvasGrid.dots.color}
+          />
         )}
         {canvasAppearance.backgroundImageUrl && (
           <div
@@ -1834,7 +1951,14 @@ const FlowSurfaceInner = memo(function FlowSurfaceInner({
             const n = nodes.find((node) => node.id === id);
             return n?.type && RUNNABLE_BLOCKS.has(n.type);
           }).length}
-          isRunning={isBatchRunning}
+          isRunning={
+            isBatchRunning && contextMenu.ids.some((id) => activeBatchBlockIds.has(id))
+          }
+          canResume={
+            batchPhase === 'paused' &&
+            contextMenu.ids.length === activeBatchBlockIds.size &&
+            contextMenu.ids.every((id) => activeBatchBlockIds.has(id))
+          }
           storyboardActionCount={contextMenu.ids.filter((id) => {
             const n = nodes.find((node) => node.id === id);
             if (!n) return false;
@@ -1860,6 +1984,7 @@ const FlowSurfaceInner = memo(function FlowSurfaceInner({
           onClose={closeMenus}
           onRun={() => runSelected(contextMenu.ids)}
           onStop={stopRun}
+          onRerun={() => rerunSelected(contextMenu.ids)}
           onCascade={() => {
             const id = contextMenu.ids[0];
             if (id) void runCascade(id);

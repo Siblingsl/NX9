@@ -1,8 +1,36 @@
 import { Injectable, StreamableFile } from '@nestjs/common';
 import { BadRequestException, ServiceUnavailableException } from '@nestjs/common';
 import { GatewayService } from '../gateway/gateway.service';
-import type { StorySkeleton, AdaptationStrategy, StoryboardTableRow, ScriptPlanPayload, StoryboardShot, CharacterProfile, SceneSplitRecord } from '@nx9/shared';
-import { scenesToStoryboardShots, parseChineseScript } from '@nx9/shared';
+import type {
+  StorySkeleton,
+  AdaptationStrategy,
+  StoryboardTableRow,
+  ScriptPlanPayload,
+  StoryboardShot,
+  CharacterProfile,
+  SceneSplitRecord,
+  ScriptBreakdownConfig,
+  ScriptBreakdownPromptTemplates,
+  ScriptBreakdownEpisode,
+  ScriptBreakdownScene,
+  ScriptBreakdownShot,
+  ScriptBreakdownDiagnostic,
+  ScriptBreakdownStoryAnalysis,
+  ScriptBreakdownCharacterProfile,
+  ScriptBreakdownAct,
+} from '@nx9/shared';
+import {
+  scenesToStoryboardShots,
+  parseChineseScript,
+  buildEpisodePlannerUserPrompt,
+  buildEpisodeBreakdownUserPrompt,
+  buildScriptBreakdownFromText,
+  normalizeScriptBreakdownConfig,
+  normalizeScriptBreakdownPrompts,
+  splitLongEpisodeText,
+  splitSourceIntoEpisodeChunks,
+  validateScriptBreakdownPayload,
+} from '@nx9/shared';
 
 export interface AgentShotScriptRow {
   durationSec: number;
@@ -45,9 +73,212 @@ function extractJsonArray(text: string): unknown[] {
   return [];
 }
 
+function extractJsonObject(text: string): Record<string, unknown> | null {
+  try {
+    const parsed = JSON.parse(text) as unknown;
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) return parsed as Record<string, unknown>;
+  } catch { /* fall through */ }
+  const start = text.indexOf('{');
+  const end = text.lastIndexOf('}');
+  if (start >= 0 && end > start) {
+    try {
+      const parsed = JSON.parse(text.slice(start, end + 1)) as unknown;
+      return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+        ? parsed as Record<string, unknown>
+        : null;
+    } catch { /* fall through */ }
+  }
+  return null;
+}
+
+function stringArray(value: unknown): string[] {
+  if (Array.isArray(value)) return value.map(String).map((item) => item.trim()).filter(Boolean);
+  if (typeof value === 'string') {
+    return value.split(/[、,，/｜|]/).map((item) => item.trim()).filter(Boolean);
+  }
+  return [];
+}
+
+function normalizeDialogue(value: unknown) {
+  if (!Array.isArray(value)) return [];
+  return value.map((item) => {
+    const row = item as Record<string, unknown>;
+    return {
+      speaker: String(row.speaker ?? '').trim(),
+      text: String(row.text ?? row.dialogue ?? '').trim(),
+      emotion: String(row.emotion ?? '').trim() || undefined,
+    };
+  }).filter((item) => item.speaker && item.text).slice(0, 8);
+}
+
+function normalizeStoryAnalysis(plan: Record<string, unknown> | null): ScriptBreakdownStoryAnalysis | undefined {
+  const raw = (plan?.storyAnalysis ?? plan?.analysis) as Record<string, unknown> | undefined;
+  if (!raw || typeof raw !== 'object') return undefined;
+  const background = (raw.background ?? {}) as Record<string, unknown>;
+  return {
+    title: String(raw.title ?? plan?.title ?? '').trim() || undefined,
+    genre: String(raw.genre ?? raw.type ?? '').trim() || undefined,
+    coreTheme: String(raw.coreTheme ?? raw.theme ?? '').trim() || undefined,
+    background: {
+      era: String(background.era ?? raw.era ?? '').trim() || undefined,
+      location: String(background.location ?? raw.location ?? '').trim() || undefined,
+      worldview: String(background.worldview ?? raw.worldview ?? '').trim() || undefined,
+    },
+    visualStyle: String(raw.visualStyle ?? '').trim() || undefined,
+  };
+}
+
+function normalizePlanCharacters(plan: Record<string, unknown> | null): ScriptBreakdownCharacterProfile[] | undefined {
+  const raw = Array.isArray(plan?.characters) ? plan!.characters : [];
+  const characters = raw.map((item) => {
+    const row = item as Record<string, unknown>;
+    return {
+      name: String(row.name ?? row['角色名称'] ?? '').trim(),
+      identity: String(row.identity ?? row.role ?? row['身份'] ?? '').trim() || undefined,
+      age: String(row.age ?? row['年龄'] ?? '').trim() || undefined,
+      appearance: String(row.appearance ?? row.description ?? row['外貌特征'] ?? '').trim() || undefined,
+      height: String(row.height ?? row['身高'] ?? '').trim() || undefined,
+      bodyType: String(row.bodyType ?? row['体型'] ?? '').trim() || undefined,
+      hairstyle: String(row.hairstyle ?? row['发型'] ?? '').trim() || undefined,
+      costume: String(row.costume ?? row.clothing ?? row['服装'] ?? '').trim() || undefined,
+      signatureElements: String(row.signatureElements ?? row['标志性元素'] ?? '').trim() || undefined,
+      personality: String(row.personality ?? row['性格'] ?? '').trim() || undefined,
+      relationships: String(row.relationships ?? row['人物关系'] ?? '').trim() || undefined,
+      goal: String(row.goal ?? row['人物目标'] ?? '').trim() || undefined,
+      currentEmotion: String(row.currentEmotion ?? row['人物当前情绪'] ?? '').trim() || undefined,
+      fixedVisualKeywords: String(row.fixedVisualKeywords ?? row.consistencyPrompt ?? row['固定视觉关键词'] ?? '').trim() || undefined,
+    };
+  }).filter((item) => item.name).slice(0, 40);
+  return characters.length ? characters : undefined;
+}
+
+function normalizePlanActs(plan: Record<string, unknown> | null): ScriptBreakdownAct[] | undefined {
+  const raw = Array.isArray(plan?.acts) ? plan!.acts : [];
+  const acts = raw.map((item, index) => {
+    const row = item as Record<string, unknown>;
+    return {
+      name: String(row.name ?? `第 ${index + 1} 幕`).trim(),
+      title: String(row.title ?? row['章节标题'] ?? '').trim() || undefined,
+      storyGoal: String(row.storyGoal ?? row.goal ?? row['剧情目标'] ?? '').trim() || undefined,
+      conflict: String(row.conflict ?? row['冲突'] ?? '').trim() || undefined,
+      emotionalShift: String(row.emotionalShift ?? row['情绪变化'] ?? '').trim() || undefined,
+      keyEvents: stringArray(row.keyEvents ?? row['关键事件']),
+      characterChange: String(row.characterChange ?? row['角色变化'] ?? '').trim() || undefined,
+    };
+  }).filter((item) => item.name).slice(0, 20);
+  return acts.length ? acts : undefined;
+}
+
+export function normalizeProductionEpisode(args: {
+  raw: Record<string, unknown>;
+  episodeIndex: number;
+  title: string;
+  logline?: string;
+  sourceText: string;
+  config: ScriptBreakdownConfig;
+  sceneOffset?: number;
+  shotOffset?: number;
+}): { scenes: ScriptBreakdownScene[]; shots: ScriptBreakdownShot[] } {
+  const episodeId = `ep-${args.episodeIndex}`;
+  const rawScenes = Array.isArray(args.raw.scenes) ? args.raw.scenes : [];
+  let globalShotIndex = args.shotOffset ?? 0;
+  const scenes: ScriptBreakdownScene[] = [];
+  for (let scenePosition = 0; scenePosition < rawScenes.length; scenePosition++) {
+    const sceneRow = rawScenes[scenePosition] as Record<string, unknown>;
+    const sceneIndex = (args.sceneOffset ?? 0) + scenePosition + 1;
+    const sceneId = `${episodeId}-scene-${sceneIndex}`;
+    const sceneCode = `${args.episodeIndex}-${sceneIndex}`;
+    const rawShots = Array.isArray(sceneRow.shots) ? sceneRow.shots : [];
+    const shots = rawShots.map((item) => {
+      const row = item as Record<string, unknown>;
+      globalShotIndex += 1;
+      const dialogue = normalizeDialogue(row.dialogue);
+      const durationSec = Math.max(
+        args.config.minShotDurationSec,
+        Math.min(args.config.maxShotDurationSec, Math.round(Number(row.durationSec) || 5)),
+      );
+      const scriptText = String(row.scriptText ?? row.action ?? row.descriptionZh ?? row.visual ?? row.title ?? '').trim();
+      const characters = stringArray(row.characters ?? row.characterNames);
+      for (const line of dialogue) if (!characters.includes(line.speaker)) characters.push(line.speaker);
+      const visual = String(row.imagePrompt ?? row.image_prompt ?? '').trim() || `${args.config.visualStyle}，${scriptText}`;
+      const motion = String(row.videoPrompt ?? row.video_prompt ?? row.videoDesc ?? '').trim() || `根据关键帧生成 ${durationSec} 秒视频：${scriptText}，动作自然，镜头连续`;
+      return {
+        id: `${episodeId}-shot-${globalShotIndex}`,
+        episodeId,
+        episodeIndex: args.episodeIndex,
+        index: globalShotIndex,
+        sceneId,
+        sceneCode,
+        title: String(row.title ?? scriptText.slice(0, 28) ?? `镜头 ${globalShotIndex}`).trim(),
+        purpose: String(row.purpose ?? row.shotPurpose ?? '').trim() || undefined,
+        durationSec,
+        shotSize: ['ECU', 'CU', 'MS', 'FS', 'WS', 'OTS'].includes(String(row.shotSize).toUpperCase())
+          ? String(row.shotSize).toUpperCase() as ScriptBreakdownShot['shotSize']
+          : 'MS',
+        cameraMove: ['固定', '推', '拉', '摇', '移', '跟', '手持'].includes(String(row.cameraMove))
+          ? String(row.cameraMove) as ScriptBreakdownShot['cameraMove']
+          : '固定',
+        cameraAngle: String(row.cameraAngle ?? '').trim() || undefined,
+        cameraLens: String(row.cameraLens ?? '').trim() || undefined,
+        characters: characters.slice(0, 12),
+        scene: String(sceneRow.location ?? sceneRow.title ?? '未指定场景').trim(),
+        scriptText,
+        visual: String(row.visual ?? '').trim() || undefined,
+        action: String(row.action ?? '').trim() || undefined,
+        dialogue,
+        narration: String(row.narration ?? '').trim() || undefined,
+        sound: String(row.sound ?? '').trim() || undefined,
+        imagePrompt: visual,
+        videoPrompt: motion,
+        negativePrompt: String(row.negativePrompt ?? '').trim() || undefined,
+        continuityNotes: stringArray(row.continuityNotes),
+        referenceImageUrl: null,
+        previewImageUrl: null,
+        status: 'draft' as const,
+      } satisfies ScriptBreakdownShot;
+    });
+    if (shots.length === 0) continue;
+    scenes.push({
+      id: sceneId,
+      episodeId,
+      index: sceneIndex,
+      code: sceneCode,
+      title: String(sceneRow.title ?? `场景 ${sceneIndex}`).trim(),
+      location: String(sceneRow.location ?? sceneRow.title ?? '未指定场景').trim(),
+      timeOfDay: String(sceneRow.timeOfDay ?? '未指定').trim(),
+      interiorExterior: ['INT', 'EXT', 'INT/EXT'].includes(String(sceneRow.interiorExterior).toUpperCase())
+        ? String(sceneRow.interiorExterior).toUpperCase() as ScriptBreakdownScene['interiorExterior']
+        : 'INT',
+      summary: String(sceneRow.summary ?? '').trim() || undefined,
+      shots,
+    });
+  }
+  const shots = scenes.flatMap((scene) => scene.shots).slice(0, args.config.maxShotsPerEpisode);
+  const allowed = new Set(shots.map((shot) => shot.id));
+  return {
+    shots,
+    scenes: scenes.map((scene) => ({ ...scene, shots: scene.shots.filter((shot) => allowed.has(shot.id)) }))
+      .filter((scene) => scene.shots.length > 0),
+  };
+}
+
 @Injectable()
 export class AgentService {
   constructor(private readonly gateway: GatewayService) {}
+
+  private async llmJsonObject(system: string, user: string, userId?: string) {
+    const res = (await this.gateway.proxyLlm({
+      response_format: { type: 'json_object' },
+      messages: [
+        { role: 'system', content: system },
+        { role: 'user', content: user },
+      ],
+    }, userId)) as { choices?: { message?: { content?: string } }[] };
+    const content = res.choices?.[0]?.message?.content ?? '';
+    const parsed = extractJsonObject(content);
+    if (!parsed) throw new ServiceUnavailableException('LLM 返回的 JSON 对象无法解析');
+    return parsed;
+  }
 
   async dialogueFromText(
     text: string,
@@ -249,6 +480,175 @@ export class AgentService {
 
     if (rows.length === 0) throw new ServiceUnavailableException('LLM 未生成有效分镜表');
     return { ok: true, table: rows };
+  }
+
+  /** 生产级两阶段拆分：稳定本地预分集 → AI 分集规划 → 逐集/逐窗口拆场景与镜头。 */
+  async productionScriptBreakdown(
+    body: {
+      sourceText?: string;
+      config?: Partial<ScriptBreakdownConfig>;
+      prompts?: Partial<ScriptBreakdownPromptTemplates>;
+    },
+    userId?: string,
+  ) {
+    const sourceText = String(body.sourceText ?? '').trim();
+    if (sourceText.length < 20) throw new BadRequestException('请输入至少 20 字的小说、剧本或大纲');
+    const config = normalizeScriptBreakdownConfig(body.config);
+    const prompts = normalizeScriptBreakdownPrompts(body.prompts);
+    const chunks = splitSourceIntoEpisodeChunks(sourceText, config);
+    if (chunks.length === 0) throw new BadRequestException('无法从原文规划分集');
+    const diagnostics: ScriptBreakdownDiagnostic[] = [];
+
+    let plan: Record<string, unknown> | null = null;
+    try {
+      plan = await this.llmJsonObject(
+        prompts.episodePlannerSystem,
+        buildEpisodePlannerUserPrompt(chunks, config),
+        userId,
+      );
+    } catch (error) {
+      if (!config.allowRuleFallback) throw error;
+      diagnostics.push({
+        level: 'warning',
+        code: 'planner_fallback',
+        message: `AI 分集规划不可用，保留本地分集边界：${String(error)}`,
+      });
+    }
+
+    const rawPlans = Array.isArray(plan?.episodes) ? plan!.episodes as Record<string, unknown>[] : [];
+    const planByChunk = new Map(rawPlans.map((item) => [String(item.chunkId ?? ''), item]));
+    const episodes: ScriptBreakdownEpisode[] = [];
+
+    for (let position = 0; position < chunks.length; position++) {
+      const chunk = chunks[position];
+      const episodeIndex = position + 1;
+      const planned = planByChunk.get(chunk.id) ?? rawPlans[position];
+      const title = String(planned?.title ?? chunk.explicitTitle ?? `第 ${episodeIndex} 集`).trim();
+      const logline = String(planned?.logline ?? '').trim() || undefined;
+      const episodeId = `ep-${episodeIndex}`;
+      let scenes: ScriptBreakdownScene[] = [];
+      let shots: ScriptBreakdownShot[] = [];
+
+      try {
+        const windows = splitLongEpisodeText(chunk.text);
+        for (const window of windows) {
+          const raw = await this.llmJsonObject(
+            prompts.episodeBreakdownSystem,
+            buildEpisodeBreakdownUserPrompt({
+              episodeIndex,
+              title,
+              logline,
+              sourceText: window.text,
+              contextBefore: window.contextBefore,
+              config,
+            }),
+            userId,
+          );
+          const normalized = normalizeProductionEpisode({
+            raw,
+            episodeIndex,
+            title,
+            logline,
+            sourceText: chunk.text,
+            config,
+            sceneOffset: scenes.length,
+            shotOffset: shots.length,
+          });
+          scenes.push(...normalized.scenes);
+          shots.push(...normalized.shots);
+        }
+        shots = shots.slice(0, config.maxShotsPerEpisode);
+        const allowed = new Set(shots.map((shot) => shot.id));
+        scenes = scenes.map((scene) => ({ ...scene, shots: scene.shots.filter((shot) => allowed.has(shot.id)) }))
+          .filter((scene) => scene.shots.length > 0);
+        if (shots.length === 0) throw new Error('AI 未生成有效镜头');
+      } catch (error) {
+        if (!config.allowRuleFallback) throw error;
+        const local = buildScriptBreakdownFromText(chunk.text).episodes[0];
+        const localScenes = (local?.shots ?? []).map((shot, index) => ({
+          code: `${episodeIndex}-${index + 1}`,
+          title: shot.scene || `场景 ${index + 1}`,
+          location: shot.scene || '未指定场景',
+          timeOfDay: '未指定',
+          interiorExterior: 'INT',
+          summary: shot.title,
+          shots: [{
+            title: shot.title,
+            durationSec: shot.durationSec,
+            shotSize: 'MS',
+            cameraMove: '固定',
+            characters: shot.characters,
+            scriptText: shot.scriptText,
+            dialogue: shot.dialogue,
+            imagePrompt: shot.imagePrompt,
+            videoPrompt: shot.videoPrompt,
+            continuityNotes: [],
+          }],
+        }));
+        const normalized = normalizeProductionEpisode({
+          raw: { scenes: localScenes },
+          episodeIndex,
+          title,
+          logline,
+          sourceText: chunk.text,
+          config,
+        });
+        scenes = normalized.scenes;
+        shots = normalized.shots;
+        diagnostics.push({
+          level: 'warning',
+          code: 'episode_rule_fallback',
+          episodeId,
+          message: `${title} 的 AI 镜头拆分失败，已使用本地规则保底：${String(error)}`,
+        });
+      }
+
+      const totalDuration = shots.reduce((sum, shot) => sum + shot.durationSec, 0);
+      if (Math.abs(totalDuration - config.targetEpisodeDurationSec) > config.targetEpisodeDurationSec * 0.5) {
+        diagnostics.push({
+          level: 'warning',
+          code: 'duration_deviation',
+          episodeId,
+          message: `${title} 当前约 ${totalDuration} 秒，与目标 ${config.targetEpisodeDurationSec} 秒偏差较大，建议在分镜网格复核。`,
+        });
+      }
+      episodes.push({
+        id: episodeId,
+        index: episodeIndex,
+        title,
+        logline,
+        sourceText: chunk.text,
+        scenes,
+        shots,
+      });
+    }
+
+    const payload = {
+      version: 1 as const,
+      title: String(plan?.title ?? '').trim() || '剧本拆分',
+      sourceText,
+      storyAnalysis: normalizeStoryAnalysis(plan),
+      characters: normalizePlanCharacters(plan),
+      acts: normalizePlanActs(plan),
+      episodes,
+      config,
+      diagnostics,
+      promptVersion: 'production-director-v2',
+      generatedAt: new Date().toISOString(),
+    };
+    diagnostics.push(...validateScriptBreakdownPayload(payload).filter((item) =>
+      !diagnostics.some((existing) => existing.code === item.code && existing.episodeId === item.episodeId && existing.message === item.message),
+    ));
+    return {
+      ok: true as const,
+      payload,
+      stats: {
+        episodeCount: episodes.length,
+        sceneCount: episodes.reduce((sum, episode) => sum + (episode.scenes?.length ?? 0), 0),
+        shotCount: episodes.reduce((sum, episode) => sum + episode.shots.length, 0),
+        warningCount: diagnostics.filter((item) => item.level === 'warning').length,
+      },
+    };
   }
 
   async adaptation(

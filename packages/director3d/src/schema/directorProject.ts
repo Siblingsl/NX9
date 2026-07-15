@@ -46,6 +46,8 @@ export interface DirectorObject {
   id: string;
   name: string;
   kind: DirectorObjectKind;
+  /** 绑定工作区角色，便于按分镜恢复人物摆位。 */
+  sourceCharacterId?: string;
   visible: boolean;
   locked: boolean;
   transform: DirectorTransform;

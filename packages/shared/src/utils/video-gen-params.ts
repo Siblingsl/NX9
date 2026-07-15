@@ -1,4 +1,4 @@
-export const VIDEO_DURATION_OPTIONS = [6, 10, 15, 30] as const;
+export const VIDEO_DURATION_OPTIONS = [5, 6, 10, 15, 30] as const;
 
 export const VIDEO_RESOLUTION_OPTIONS = [
   { id: '480', label: '480p' },
@@ -31,7 +31,7 @@ export function resolveVideoGenParams(data: {
   return {
     size: preset,
     aspect: data.aspect || aspectMap[orient] || '16:9',
-    durationSec: data.durationSec || 6,
+    durationSec: data.durationSec || 5,
     resolution: res,
   };
 }

@@ -1,4 +1,12 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
+import {
+  createScriptBreakdownExportEnvelope,
+  createScriptBreakdownPromptPack,
+  parseScriptBreakdownExportEnvelope,
+  parseScriptBreakdownPromptPack,
+  splitSourceIntoEpisodeChunks,
+} from '@nx9/shared';
+import { AgentService } from '../src/modules/agent/agent.service';
 
 describe('TEST-AG — Agent Service (pure function tests)', () => {
 
@@ -149,5 +157,79 @@ describe('TEST-AG — Agent Service (pure function tests)', () => {
     expect(shots[0].shotType).toBe('wide');
     expect(shots[1].shotType).toBe('medium');
     expect(shots[0].promptEn).toContain('slow push in');
+  });
+
+  it('TEST-AG-008: production splitter never collapses explicit episodes into episode 1', () => {
+    const source = `第1集 雨夜相遇\n林夏走进咖啡馆。她发现桌上的旧照片。\n\n第2集 真相逼近\n林夏找到周远。两人在车站发生争执。\n\n第3集 最终选择\n周远说出真相。林夏在天台做出选择。`;
+    const chunks = splitSourceIntoEpisodeChunks(source, { episodeMode: 'auto' });
+    expect(chunks).toHaveLength(3);
+    expect(chunks.map((chunk) => chunk.text.match(/第\d集/)?.[0])).toEqual(['第1集', '第2集', '第3集']);
+  });
+
+  it('TEST-AG-009: fixed episode count creates exact independent source chunks', () => {
+    const source = Array.from({ length: 18 }, (_, index) => `第${index + 1}段剧情发生推进，角色完成动作。`).join('\n\n');
+    const chunks = splitSourceIntoEpisodeChunks(source, { episodeMode: 'fixed', episodeCount: 3 });
+    expect(chunks).toHaveLength(3);
+    expect(chunks.every((chunk) => chunk.text.length > 0)).toBe(true);
+    expect(chunks.map((chunk) => chunk.text).join('\n').length).toBeGreaterThan(source.length * 0.9);
+  });
+
+  it('TEST-AG-010: production two-stage service preserves two episodes', async () => {
+    let call = 0;
+    const proxyLlm = vi.fn(async () => {
+      call += 1;
+      const content = call === 1
+        ? JSON.stringify({
+            title: '双集测试',
+            episodes: [
+              { index: 1, chunkId: 'chunk-1', title: '雨夜相遇', logline: '林夏发现照片' },
+              { index: 2, chunkId: 'chunk-2', title: '车站争执', logline: '林夏质问周远' },
+            ],
+          })
+        : JSON.stringify({
+            episode: { title: call === 2 ? '雨夜相遇' : '车站争执', logline: '测试梗概' },
+            scenes: [{
+              code: call === 2 ? '1-1' : '2-1',
+              title: '室内对话', location: '咖啡馆', timeOfDay: '夜', interiorExterior: 'INT', summary: '推进冲突',
+              shots: [{
+                title: '人物中景', durationSec: 5, shotSize: 'MS', cameraMove: '固定', characters: ['林夏'],
+                scriptText: '林夏拿起照片', dialogue: [{ speaker: '林夏', text: '这是谁？', emotion: '疑惑' }],
+                imagePrompt: 'Lin Xia holding an old photo, medium shot',
+                videoPrompt: '5s, Lin Xia slowly raises the photo, static camera',
+                continuityNotes: ['黑色外套保持一致'],
+              }],
+            }],
+          });
+      return { choices: [{ message: { content } }] };
+    });
+    const service = new AgentService({ proxyLlm } as any);
+    const result = await service.productionScriptBreakdown({
+      sourceText: '第1集 雨夜相遇\n林夏进入咖啡馆并发现照片，故事由此开始。\n第2集 车站争执\n林夏在车站质问周远，二人的矛盾升级。',
+      config: { episodeMode: 'auto', allowRuleFallback: false },
+    });
+    expect(result.payload.episodes).toHaveLength(2);
+    expect(result.payload.episodes.map((episode) => episode.id)).toEqual(['ep-1', 'ep-2']);
+    expect(result.payload.episodes.every((episode) => episode.scenes?.length === 1)).toBe(true);
+    expect(result.payload.episodes.every((episode) => episode.shots[0].imagePrompt.length > 10)).toBe(true);
+    expect(proxyLlm).toHaveBeenCalledTimes(3);
+  });
+
+  it('TEST-AG-011: prompt pack and breakdown result support import/export round trips', () => {
+    const promptPack = createScriptBreakdownPromptPack({ episodeMode: 'fixed', episodeCount: 6 });
+    expect(parseScriptBreakdownPromptPack(JSON.parse(JSON.stringify(promptPack)))?.config.episodeCount).toBe(6);
+    const payload = {
+      version: 1 as const,
+      title: '测试剧本', sourceText: '测试原文', generatedAt: new Date().toISOString(),
+      episodes: [{
+        id: 'ep-1', index: 1, title: '第一集', shots: [{
+          id: 'ep-1-shot-1', episodeId: 'ep-1', episodeIndex: 1, index: 1,
+          sceneId: 'ep-1-scene-1', sceneCode: '1-1', title: '镜头', durationSec: 5,
+          characters: ['林夏'], scene: '咖啡馆', scriptText: '林夏进入咖啡馆', dialogue: [],
+          imagePrompt: 'Lin Xia enters a cafe', videoPrompt: '5s, Lin Xia walks into cafe', status: 'draft' as const,
+        }],
+      }],
+    };
+    const envelope = createScriptBreakdownExportEnvelope(payload);
+    expect(parseScriptBreakdownExportEnvelope(JSON.parse(JSON.stringify(envelope)))?.title).toBe('测试剧本');
   });
 });

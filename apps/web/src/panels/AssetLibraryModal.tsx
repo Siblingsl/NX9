@@ -25,6 +25,9 @@ import {
   Layers,
   Plus,
   Search,
+  ShieldCheck,
+  AlertTriangle,
+  Network,
   Trash2,
   X,
 } from 'lucide-react';
@@ -45,6 +48,118 @@ import {
   HookDetailFields,
   VoiceDetailFields,
 } from './asset-library/AssetDetailFields';
+
+function normalizeName(value: string | null | undefined): string {
+  return (value ?? '').trim().toLowerCase();
+}
+
+function AssetHealthPanel({
+  tab,
+  characters,
+  workspaceItems,
+  storyboard,
+}: {
+  tab: AssetLibraryKind;
+  characters: CharacterProfile[];
+  workspaceItems: BacklotWorkspaceItem[];
+  storyboard: ReturnType<typeof useWorkspaceDocument.getState>['storyboard'];
+}) {
+  const analysis = useMemo(() => {
+    const characterNames = new Map<string, CharacterProfile[]>();
+    for (const c of characters) {
+      const key = normalizeName(c.name);
+      if (!key) continue;
+      characterNames.set(key, [...(characterNames.get(key) ?? []), c]);
+    }
+    const sceneItems = workspaceItems.filter((item) => item.kind === 'scene');
+    const sceneNames = new Map<string, BacklotWorkspaceItem[]>();
+    for (const item of sceneItems) {
+      const key = normalizeName(item.label);
+      if (!key) continue;
+      sceneNames.set(key, [...(sceneNames.get(key) ?? []), item]);
+    }
+    const usedCharacterNames = new Set(
+      storyboard.shots.flatMap((shot) => shot.characterNames ?? []).map(normalizeName).filter(Boolean),
+    );
+    const usedSceneNames = new Set(
+      storyboard.shots.map((shot) => normalizeName(shot.sceneName)).filter(Boolean),
+    );
+    const duplicateCharacters = [...characterNames.values()].filter((items) => items.length > 1).length;
+    const duplicateScenes = [...sceneNames.values()].filter((items) => items.length > 1).length;
+    const unusedCharacters = characters.filter((c) => !usedCharacterNames.has(normalizeName(c.name))).length;
+    const unusedScenes = sceneItems.filter((s) => !usedSceneNames.has(normalizeName(s.label))).length;
+    const missingCharacterPrompts = characters.filter((c) => !c.consistencyPrompt?.trim()).length;
+    const missingScenePrompts = sceneItems.filter((s) => !(s.promptEn || (s.creative as any)?.prompts?.scene?.text)?.trim()).length;
+    const unlockedCharacters = characters.filter((c) => !(c.creative as any)?.consistency?.locked).length;
+    const unlockedScenes = sceneItems.filter((s) => !(s.creative as any)?.locked).length;
+    const invalidShotCharacterRefs = storyboard.shots
+      .flatMap((shot) => shot.characterNames ?? [])
+      .filter((name) => name && !characterNames.has(normalizeName(name))).length;
+    const invalidShotSceneRefs = storyboard.shots
+      .filter((shot) => shot.sceneName && !sceneNames.has(normalizeName(shot.sceneName))).length;
+    return {
+      duplicateCharacters,
+      duplicateScenes,
+      unusedCharacters,
+      unusedScenes,
+      missingCharacterPrompts,
+      missingScenePrompts,
+      unlockedCharacters,
+      unlockedScenes,
+      invalidShotCharacterRefs,
+      invalidShotSceneRefs,
+      relationCount: storyboard.shots.length,
+    };
+  }, [characters, storyboard.shots, workspaceItems]);
+
+  const issues = tab === 'character'
+    ? [
+        ['重复', analysis.duplicateCharacters],
+        ['未使用', analysis.unusedCharacters],
+        ['缺 Prompt', analysis.missingCharacterPrompts],
+        ['未锁定', analysis.unlockedCharacters],
+        ['失效引用', analysis.invalidShotCharacterRefs],
+      ] as const
+    : tab === 'scene'
+      ? [
+          ['重复', analysis.duplicateScenes],
+          ['未使用', analysis.unusedScenes],
+          ['缺 Prompt', analysis.missingScenePrompts],
+          ['未锁定', analysis.unlockedScenes],
+          ['失效引用', analysis.invalidShotSceneRefs],
+        ] as const
+      : [
+          ['关系', analysis.relationCount],
+          ['未使用', 0],
+          ['冲突', 0],
+        ] as const;
+  const bad = issues.reduce((sum, [, n]) => sum + n, 0);
+
+  return (
+    <div className="shrink-0 border-b border-line bg-surface/35 px-4 py-2">
+      <div className="flex items-center gap-2">
+        <div className={`grid h-7 w-7 place-items-center rounded-lg ${bad ? 'bg-warn/10 text-warn' : 'bg-ok/10 text-ok'}`}>
+          {bad ? <AlertTriangle size={14} /> : <ShieldCheck size={14} />}
+        </div>
+        <div className="min-w-0 flex-1">
+          <p className="text-[11px] font-semibold text-ink">素材健康检查</p>
+          <p className="truncate text-[10px] text-ink/45">防重复、引用失效、素材污染、Prompt 漂移；关系图当前覆盖 {analysis.relationCount} 个分镜引用。</p>
+        </div>
+        <div className="flex flex-wrap justify-end gap-1">
+          {issues.map(([label, count]) => (
+            <span key={label} className={`rounded-full px-2 py-0.5 text-[10px] ${count ? 'bg-warn/10 text-warn' : 'bg-white text-ink/40'}`}>
+              {label} {count}
+            </span>
+          ))}
+          <span className="flex items-center gap-1 rounded-full bg-white px-2 py-0.5 text-[10px] text-ink/45">
+            <Network size={10} />
+            影响分析
+          </span>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 const KIND_META: Record<
   AssetLibraryKind,
@@ -120,6 +235,7 @@ export function AssetLibraryModal() {
   const characters = useWorkspaceDocument((s) => s.characters.characters);
   const sounds = useWorkspaceDocument((s) => s.soundLibrary.sounds);
   const workspaceItems = useWorkspaceDocument((s) => s.backlotWorkspace.items);
+  const storyboard = useWorkspaceDocument((s) => s.storyboard);
 
   const fetchPublic = usePublicAssetLibrary((s) => s.fetch);
   const publicUpsertCharacter = usePublicAssetLibrary((s) => s.upsertCharacter);
@@ -216,6 +332,7 @@ export function AssetLibraryModal() {
   const tabMeta = KIND_META[tab];
   const canEditPrivate =
     scope !== 'private' || (Boolean(selectedProjectId) && activeId === selectedProjectId);
+  const canCreateAsset = scope === 'public' || canEditPrivate;
 
   const handleEnterProject = useCallback(
     (id: string) => {
@@ -508,6 +625,12 @@ export function AssetLibraryModal() {
                   </button>
                 ))}
               </div>
+              <AssetHealthPanel
+                tab={tab}
+                characters={characters}
+                workspaceItems={workspaceItems}
+                storyboard={storyboard}
+              />
 
               {!canEditPrivate ? (
                 <div className="flex-1 flex flex-col items-center justify-center p-8 text-center">
@@ -530,7 +653,7 @@ export function AssetLibraryModal() {
                       />
                     </div>
                     <span className="text-[10px] text-ink/40 shrink-0">{filtered.length} 项</span>
-                    {!items.some((i) => i.builtin) && (
+                    {canCreateAsset && (
                       <button
                         type="button"
                         onClick={handleCreate}

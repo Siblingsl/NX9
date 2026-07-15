@@ -22,11 +22,14 @@ import {
   type FlowLink,
   type TextSplitMode,
   type StoryboardShot,
-  buildScriptBreakdownFromText,
   flattenScriptBreakdownShots,
+  storyboardShotsFromScriptBreakdown,
+  bindStoryboardShotAssets,
   buildStoryboardPreviewFramesFromBreakdown,
+  buildStoryboardPreviewFrames,
   emptyStoryboardPreview,
   resolveStoryboardPreviewPictureSettings,
+  activeEpisodeShots,
 } from '@nx9/shared';
 import { buildCameraPrompt, normalizeDirectorProject } from '@nx9/director3d';
 import { api } from '../api/client';
@@ -38,6 +41,50 @@ function linkedShotForBlock(blockId: string, data: Record<string, unknown>): Sto
   const shots = useWorkspaceDocument.getState().storyboard.shots;
   const linkedShotId = data.linkedShotId as string | undefined;
   return shots.find((s) => s.id === linkedShotId || s.linkedBlockId === blockId);
+}
+
+function syncBreakdownToStoryboard(
+  payload: import('@nx9/shared').ScriptBreakdownPayload,
+): void {
+  const doc = useWorkspaceDocument.getState();
+  const previousById = new Map(doc.storyboard.shots.map((shot) => [shot.id, shot]));
+  const rawShots = storyboardShotsFromScriptBreakdown(payload).map((base) => {
+    const previous = previousById.get(base.id);
+    if (!previous) return base;
+    return {
+      ...base,
+      ...previous,
+      episodeId: base.episodeId,
+      episodeIndex: base.episodeIndex,
+      episodeTitle: base.episodeTitle,
+      index: base.index,
+      durationSec: base.durationSec,
+      descriptionZh: base.descriptionZh,
+      promptEn: base.promptEn,
+      videoPromptEn: base.videoPromptEn,
+      characterNames: base.characterNames,
+      sceneName: base.sceneName,
+      sceneId: base.sceneId,
+      sceneCode: base.sceneCode,
+    };
+  });
+  const shots = bindStoryboardShotAssets(
+    rawShots,
+    doc.characters.characters,
+    doc.environments?.environments ?? [],
+  );
+  const episodeIds = new Set(shots.map((shot) => shot.episodeId).filter(Boolean));
+  const activeEpisodeId =
+    doc.storyboard.activeEpisodeId && episodeIds.has(doc.storyboard.activeEpisodeId)
+      ? doc.storyboard.activeEpisodeId
+      : shots.find((shot) => shot.episodeId)?.episodeId ?? null;
+  doc.setStoryboard({
+    ...doc.storyboard,
+    version: 3,
+    title: payload.title,
+    activeEpisodeId,
+    shots,
+  });
 }
 
 function characterContextForBlock(
@@ -90,6 +137,7 @@ export const RUNNABLE_BLOCKS = new Set([
   'character-sheet',
   'scene-card',
   'dialogue-sheet',
+  'asset-gate',
   'voice-cast',
   'bridge-clip',
   'caption-asr',
@@ -138,10 +186,11 @@ function toLinks(edges: Edge[]): FlowLink[] {
 }
 
 export type RunProgress = {
-  phase: 'idle' | 'running' | 'done' | 'error' | 'blocked';
+  phase: 'idle' | 'running' | 'paused' | 'done' | 'error' | 'blocked';
   current: number;
   total: number;
   currentId?: string;
+  completedIds?: string[];
   error?: string;
   pendingShots?: number[];
 };
@@ -218,15 +267,12 @@ async function executeBlock(
   if (kind === 'dialogue-sheet') {
     const source = ((d.sourceText as string) || prompt).trim();
     if (!source) throw new Error('剧本拆分缺少文本');
-    const payload = (d.scriptBreakdown as import('@nx9/shared').ScriptBreakdownPayload | undefined) ?? buildScriptBreakdownFromText(source);
-    const shots = flattenScriptBreakdownShots(payload);
-    updateNodeData(block.id, {
-      status: 'success',
+    const { runProductionScriptBreakdown } = await import('./script-breakdown-runner');
+    await runProductionScriptBreakdown({
+      blockId: block.id,
       sourceText: source,
-      scriptBreakdown: payload,
-      content: `${payload.title} · ${payload.episodes.length} 集 · ${shots.length} 个分镜`,
-      output: shots.map((shot) => shot.imagePrompt).join('\n\n'),
-      meta: { episodeCount: payload.episodes.length, shotCount: shots.length },
+      config: d.scriptBreakdownConfig as Partial<import('@nx9/shared').ScriptBreakdownConfig> | undefined,
+      prompts: d.scriptBreakdownPrompts as Partial<import('@nx9/shared').ScriptBreakdownPromptTemplates> | undefined,
     });
     return;
   }
@@ -237,6 +283,7 @@ async function executeBlock(
       (d.scriptBreakdown as import('@nx9/shared').ScriptBreakdownPayload | undefined);
     if (!payload) throw new Error('分镜网格缺少剧本拆分数据');
     const shots = flattenScriptBreakdownShots(payload);
+    syncBreakdownToStoryboard(payload);
     updateNodeData(block.id, {
       status: 'success',
       scriptBreakdown: payload,
@@ -247,16 +294,54 @@ async function executeBlock(
     return;
   }
 
-  if (kind === 'storyboard-preview') {
+  if (kind === 'asset-gate') {
     const payload =
       upstream.scriptBreakdowns?.[0] ??
       (d.scriptBreakdown as import('@nx9/shared').ScriptBreakdownPayload | undefined);
+    if (!payload) throw new Error('设定检查缺少剧本拆分数据');
+    const { syncBreakdownAssets } = await import('./asset-gate-runner');
+    const result = syncBreakdownAssets(block.id, payload);
+    updateNodeData(block.id, {
+      status: 'success',
+      scriptBreakdown: payload,
+      assetGate: {
+        missingCharacters: result.missingCharacters,
+        missingScenes: result.missingScenes,
+        syncedCharacters: result.syncedCharacters,
+        syncedScenes: result.syncedScenes,
+        checkedAt: new Date().toISOString(),
+      },
+      content: `设定检查完成 · 角色 ${result.requiredCharacters.length} / 场景 ${result.requiredScenes.length}`,
+      output: payload.episodes.flatMap((episode) => episode.shots.map((shot) => shot.imagePrompt)).join('\n\n'),
+      meta: {
+        requiredCharacters: result.requiredCharacters.length,
+        requiredScenes: result.requiredScenes.length,
+        missingCharacters: result.missingCharacters.length,
+        missingScenes: result.missingScenes.length,
+      },
+    });
+    return;
+  }
+
+  if (kind === 'storyboard-preview') {
+    const rawPayload =
+      upstream.scriptBreakdowns?.[0] ??
+      (d.scriptBreakdown as import('@nx9/shared').ScriptBreakdownPayload | undefined);
+    const activeEpisodeId = useWorkspaceDocument.getState().storyboard.activeEpisodeId;
+    const activeBreakdownEpisode = activeEpisodeId
+      ? rawPayload?.episodes.find((episode) => episode.id === activeEpisodeId)
+      : undefined;
+    const payload = rawPayload && activeBreakdownEpisode
+      ? { ...rawPayload, episodes: [activeBreakdownEpisode] }
+      : rawPayload;
     const current =
       (d.storyboardPreview as import('@nx9/shared').StoryboardPreviewPayload | undefined) ??
       emptyStoryboardPreview();
     const breakdownShots = flattenScriptBreakdownShots(payload);
-    const frames =
-      breakdownShots.length > 0
+    const scopedStoryboardShots = activeEpisodeShots(useWorkspaceDocument.getState().storyboard);
+    const frames = scopedStoryboardShots.length > 0
+      ? buildStoryboardPreviewFrames(scopedStoryboardShots)
+      : breakdownShots.length > 0
         ? buildStoryboardPreviewFramesFromBreakdown(breakdownShots)
         : current.frames;
     const totalDurationSec = frames.reduce((sum, f) => sum + Math.max(0, f.endSec - f.startSec), 0);
@@ -299,6 +384,13 @@ async function executeBlock(
           );
           nextFrames[i] = { ...frame, imageUrl, status: 'success', errorMessage: null };
           nextBreakdown = writeBackBreakdownPreviewImage(nextBreakdown, frame.sourceShotId, imageUrl) ?? nextBreakdown;
+          if (frame.sourceShotId) {
+            useWorkspaceDocument.getState().updateShot(frame.sourceShotId, {
+              firstFrameAssetId: imageUrl,
+              keyframeStatus: 'review',
+              status: 'review',
+            });
+          }
           updateNodeData(pictureNode.id, {
             status: 'success',
             previewUrl: imageUrl,
@@ -443,6 +535,15 @@ async function executeBlock(
     }
     if (urls.length === 0) throw new Error('图像生成失败');
 
+    const linkedPicShot = linkedShotForBlock(block.id, d);
+    if (linkedPicShot && urls[0]) {
+      useWorkspaceDocument.getState().updateShot(linkedPicShot.id, {
+        firstFrameAssetId: urls[0],
+        keyframeStatus: 'review',
+        status: 'review',
+      });
+    }
+
     updateNodeData(block.id, {
       status: 'success',
       previewUrls: urls,
@@ -481,18 +582,23 @@ async function executeBlock(
       for (let i = 0; i < count; i++) {
         const shot = breakdownShots[i];
         const imageUrl = upstream.pictures[i];
+        const modelId = (d.model as string) || 'veo';
+        if (modelId.startsWith('grok-imagine-video') && !imageUrl) {
+          throw new Error('Grok Imagine 当前需要首图，请先连接图像生成节点或使用分镜预览生成首图');
+        }
         const finalPrompt = enrichPromptWithCharacters(
           shot.videoPrompt || shot.imagePrompt || prompt || 'cinematic scene',
           charCtx.characters,
         );
         const res = (await api.proxyVideo({
           prompt: finalPrompt,
-          model: (d.model as string) || 'veo',
+          model: modelId,
           imageUrl,
           duration: shot.durationSec || videoParams.durationSec,
           aspect_ratio: videoParams.aspect,
           size: videoParams.size,
           resolution: videoParams.resolution,
+          generateAudio: (d.generateAudio as boolean | undefined) ?? false,
         })) as { ok?: boolean; url?: string; status?: string; taskId?: string; message?: string };
         let videoUrl = res.url;
         if (!videoUrl && res.taskId && (res.status === 'processing' || res.status === 'queued')) {
@@ -500,6 +606,17 @@ async function executeBlock(
         }
         if (!videoUrl) throw new Error(res.message ?? `镜头 ${i + 1} 视频生成失败`);
         clips.push(videoUrl);
+        // 写回故事板 SSOT
+        const boardShot = useWorkspaceDocument.getState().storyboard.shots.find(
+          (s) => s.id === shot.id || s.index === i,
+        );
+        if (boardShot) {
+          useWorkspaceDocument.getState().updateShot(boardShot.id, {
+            videoAssetId: videoUrl,
+            videoStatus: 'review',
+            status: 'review',
+          });
+        }
       }
       updateNodeData(block.id, {
         status: 'success',
@@ -518,6 +635,10 @@ async function executeBlock(
       charCtx.characters,
     );
     const imageUrl = upstream.pictures[0] ?? charCtx.referenceImageUrl;
+    const modelId = (d.model as string) || 'veo';
+    if (modelId.startsWith('grok-imagine-video') && !imageUrl) {
+      throw new Error('Grok Imagine 当前需要首图，请先连接图像生成节点或上传参考图');
+    }
     const videoParams = resolveVideoGenParams({
       resolution: d.resolution as string | undefined,
       orientation: d.orientation as string | undefined,
@@ -526,12 +647,13 @@ async function executeBlock(
     });
     const res = (await api.proxyVideo({
       prompt: finalPrompt,
-      model: (d.model as string) || 'veo',
+      model: modelId,
       imageUrl,
       duration: videoParams.durationSec,
       aspect_ratio: videoParams.aspect,
       size: videoParams.size,
       resolution: videoParams.resolution,
+      generateAudio: (d.generateAudio as boolean | undefined) ?? false,
     })) as { ok?: boolean; url?: string; status?: string; taskId?: string; message?: string };
     let videoUrl = res.url;
     if (!videoUrl && res.taskId && (res.status === 'processing' || res.status === 'queued')) {
@@ -547,6 +669,15 @@ async function executeBlock(
       error: videoUrl ? undefined : res.message ?? '视频生成未完成或失败',
     });
     if (!videoUrl) throw new Error(res.message ?? '视频生成失败');
+    // 单镜绑定写回
+    const linkedClipShot = linkedShotForBlock(block.id, d);
+    if (linkedClipShot) {
+      useWorkspaceDocument.getState().updateShot(linkedClipShot.id, {
+        videoAssetId: videoUrl,
+        videoStatus: 'review',
+        status: 'review',
+      });
+    }
     return;
   }
 
@@ -1119,7 +1250,7 @@ async function executeBlock(
   }
 
   if (kind === 'export-pack') {
-    const shots = useWorkspaceDocument.getState().storyboard.shots;
+    const shots = activeEpisodeShots(useWorkspaceDocument.getState().storyboard);
     const { runExportPack } = await import('./export-pack-runner');
     const mode = (d.exportMode as string) || 'zip';
     const prefix = (d.exportPrefix as string) || 'nx9-shot';
@@ -1244,15 +1375,16 @@ async function executeBlock(
   }
 
   if (kind === 'review-gate') {
-    const shots = useWorkspaceDocument.getState().storyboard.shots;
+    const shots = activeEpisodeShots(useWorkspaceDocument.getState().storyboard);
     if (shots.length === 0) throw new Error('故事板无镜头');
-    const res = await api.checkReviewGate(shots);
+    const gateMode = d.gateMode === 'video' ? 'video' : 'keyframe';
+    const res = await api.checkReviewGate(shots, gateMode);
     if (!res.ok) {
       updateNodeData(block.id, {
         status: 'blocked',
         gatePassed: false,
         pendingShots: res.pending,
-        meta: { pending: res.pending },
+        meta: { pending: res.pending, gateMode },
       });
       throw new ReviewGateBlockedError(res.pending);
     }
@@ -1260,7 +1392,7 @@ async function executeBlock(
       status: 'success',
       gatePassed: true,
       pendingShots: [],
-      meta: { gatePassed: true },
+      meta: { gatePassed: true, gateMode },
       upstream,
     });
     return;
@@ -1680,6 +1812,7 @@ export async function runFlowBatch(
   onProgress: (p: RunProgress) => void,
   signal?: { cancelled: boolean },
   onlyBlockIds?: Set<string>,
+  skipBlockIds: Set<string> = new Set(),
 ): Promise<void> {
   const blockMap = new Map(toBlocks(nodes).map((b) => [b.id, { ...b, data: { ...b.data } }]));
   const links = toLinks(edges);
@@ -1690,18 +1823,23 @@ export async function runFlowBatch(
     return true;
   };
 
-  const layers = topologicalLayers([...blockMap.values()], links)
-    .map((layer) => layer.filter(runnable))
+  const allLayers = topologicalLayers([...blockMap.values()], links)
+    .map((layer) => layer.filter(runnable));
+  const allRunnableIds = allLayers.flat();
+  const skippedIds = allRunnableIds.filter((id) => skipBlockIds.has(id));
+  const layers = allLayers
+    .map((layer) => layer.filter((id) => !skipBlockIds.has(id)))
     .filter((layer) => layer.length > 0);
 
-  const total = layers.reduce((n, layer) => n + layer.length, 0);
-  onProgress({ phase: 'running', current: 0, total });
+  const total = allRunnableIds.length;
+  const completedIds = new Set(skippedIds);
+  onProgress({ phase: 'running', current: completedIds.size, total, completedIds: [...completedIds] });
 
-  let completed = 0;
+  let completed = completedIds.size;
 
   for (const layer of layers) {
     if (signal?.cancelled) {
-      onProgress({ phase: 'error', current: completed, total, error: '已取消' });
+      onProgress({ phase: 'paused', current: completed, total, completedIds: [...completedIds] });
       return;
     }
 
@@ -1725,6 +1863,7 @@ export async function runFlowBatch(
             },
             { nodes, edges },
           );
+          completedIds.add(id);
         } catch (e) {
           errors.push({
             id,
@@ -1760,9 +1899,13 @@ export async function runFlowBatch(
       return;
     }
 
-    completed += layer.length;
-    onProgress({ phase: 'running', current: completed, total });
+    completed = completedIds.size;
+    if (signal?.cancelled) {
+      onProgress({ phase: 'paused', current: completed, total, completedIds: [...completedIds] });
+      return;
+    }
+    onProgress({ phase: 'running', current: completed, total, completedIds: [...completedIds] });
   }
 
-  onProgress({ phase: 'done', current: total, total });
+  onProgress({ phase: 'done', current: total, total, completedIds: [...completedIds] });
 }

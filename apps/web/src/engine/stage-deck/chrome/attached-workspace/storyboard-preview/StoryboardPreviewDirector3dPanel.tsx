@@ -50,6 +50,11 @@ export function StoryboardPreviewDirector3dPanel({
     panorama?.imageUrl && project.panorama?.url === panorama.imageUrl,
   );
   const characterCount = project.objects.filter((object) => object.kind === 'character').length;
+  const requiredCharacterCount = Math.max(
+    selectedFrame?.characterIds?.length ?? 0,
+    selectedFrame?.characterNames?.length ?? 0,
+  );
+  const savedPlacementCount = selectedFrame?.director3dGuide?.characterPlacements?.length ?? 0;
 
   return (
     <div className="p-3 space-y-3 nodrag nopan" onMouseDown={stop}>
@@ -163,8 +168,8 @@ export function StoryboardPreviewDirector3dPanel({
           <div className="flex-1 min-w-0">
             <p className="text-[11px] font-medium text-ink">实时摆位与机位</p>
             <p className="mt-1 text-[9px] leading-relaxed text-ink/40">
-              {project.cameras.length} 个机位 · {characterCount} 个人物 · 画幅{' '}
-              {project.viewportAspectRatio}
+              本镜 {requiredCharacterCount} 人 · 场景已有 {characterCount} 人 · {project.cameras.length} 个机位
+              {savedPlacementCount > 0 ? ` · 已保存 ${savedPlacementCount} 人摆位` : ''}
             </p>
             <p className="mt-1 text-[9px] leading-relaxed text-ink/40 line-clamp-2">
               {selectedFrame?.director3dGuide?.cameraPrompt ??
@@ -180,7 +185,7 @@ export function StoryboardPreviewDirector3dPanel({
             className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-violet-700 text-white text-[11px] font-medium disabled:opacity-40"
           >
             <Play size={11} fill="currentColor" />
-            {selectedFrame ? `摆位 ${selectedFrame.label}` : '打开 3D 场景'}
+            {selectedFrame ? `带入人物并摆位 ${selectedFrame.label}` : '打开 3D 场景'}
           </button>
         </div>
       </div>

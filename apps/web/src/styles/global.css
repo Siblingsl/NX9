@@ -41,14 +41,14 @@ body {
 
 /* Dark theme overrides */
 .nx9-theme-dark {
-  --nx9-bg: #181715;
+  --nx9-bg: #11100e;
   --nx9-ink: #e8e6e3;
   --nx9-line: rgba(255,255,255,0.08);
   --nx9-glass: rgba(34, 34, 34, 0.85);
-  --nx9-lane-character: rgba(94, 77, 138, 0.15);
-  --nx9-lane-scene: rgba(161, 61, 99, 0.15);
-  --nx9-lane-gen: rgba(217, 119, 6, 0.15);
-  --nx9-lane-output: rgba(46, 139, 87, 0.15);
+  --nx9-lane-character: rgba(94, 77, 138, 0.035);
+  --nx9-lane-scene: rgba(161, 61, 99, 0.04);
+  --nx9-lane-gen: rgba(217, 119, 6, 0.04);
+  --nx9-lane-output: rgba(46, 139, 87, 0.035);
 }
 
 /* React Flow performance overrides */
@@ -285,13 +285,353 @@ body {
 
 /* CardShell / BlockShell 深色适配 */
 .nx9-theme-dark .nx9-stage-deck .bg-white,
+.nx9-theme-dark.nx9-stage-deck .bg-white,
 .nx9-theme-dark .bg-white.nx9-context-rail {
-  background: #222 !important;
+  background: #24221f !important;
+  color: #e8e6e3 !important;
 }
 
 .nx9-theme-dark .bg-surface,
 .nx9-theme-dark .bg-surface\/80 {
-  background: rgba(255,255,255,0.05) !important;
+  background: rgba(255,255,255,0.075) !important;
+}
+
+.nx9-theme-dark.nx9-stage-deck .text-ink,
+.nx9-theme-dark.nx9-stage-deck .text-ink\/80,
+.nx9-theme-dark.nx9-stage-deck .text-ink\/85,
+.nx9-theme-dark.nx9-stage-deck .text-ink\/90 {
+  color: rgba(245, 242, 236, 0.92) !important;
+}
+
+.nx9-theme-dark.nx9-stage-deck .text-ink\/70,
+.nx9-theme-dark.nx9-stage-deck .text-ink\/75,
+.nx9-theme-dark.nx9-stage-deck .text-ink\/60 {
+  color: rgba(232, 230, 227, 0.72) !important;
+}
+
+.nx9-theme-dark.nx9-stage-deck .text-ink\/50,
+.nx9-theme-dark.nx9-stage-deck .text-ink\/45,
+.nx9-theme-dark.nx9-stage-deck .text-ink\/40 {
+  color: rgba(232, 230, 227, 0.58) !important;
+}
+
+.nx9-theme-dark.nx9-stage-deck .text-ink\/35,
+.nx9-theme-dark.nx9-stage-deck .text-ink\/30 {
+  color: rgba(232, 230, 227, 0.46) !important;
+}
+
+.nx9-theme-dark.nx9-stage-deck .border-line,
+.nx9-theme-dark.nx9-stage-deck .border-line\/60,
+.nx9-theme-dark.nx9-stage-deck .border-line\/70,
+.nx9-theme-dark.nx9-stage-deck .border-line\/80 {
+  border-color: rgba(255,255,255,0.14) !important;
+}
+
+.nx9-theme-dark.nx9-stage-deck textarea,
+.nx9-theme-dark.nx9-stage-deck input,
+.nx9-theme-dark.nx9-stage-deck select,
+.nx9-theme-dark.nx9-stage-deck .bg-black\/5 {
+  background: rgba(255,255,255,0.08) !important;
+  border-color: rgba(255,255,255,0.14) !important;
+  color: rgba(245,242,236,0.9) !important;
+}
+
+.nx9-theme-dark.nx9-stage-deck textarea::placeholder,
+.nx9-theme-dark.nx9-stage-deck input::placeholder {
+  color: rgba(232,230,227,0.45) !important;
+}
+
+.nx9-theme-dark.nx9-stage-deck .bg-brand\/10,
+.nx9-theme-dark.nx9-stage-deck .bg-accent\/5 {
+  background: rgba(161,61,99,0.18) !important;
+}
+
+.nx9-theme-dark.nx9-stage-deck .border-dashed {
+  border-color: rgba(255,255,255,0.18) !important;
+}
+
+.nx9-theme-dark.nx9-stage-deck .bg-black {
+  background: #0b0b0a !important;
+}
+
+.nx9-theme-dark.nx9-stage-deck button:not(.bg-brand):not([class*='text-white']) {
+  color: rgba(232,230,227,0.72);
+}
+
+.nx9-theme-dark.nx9-stage-deck button:not(.bg-brand):not([class*='text-white']):hover {
+  color: #f5f2ec;
+}
+
+.nx9-theme-dark.nx9-stage-deck .react-flow__minimap {
+  background: #24221f !important;
+}
+
+.nx9-theme-dark.nx9-stage-deck .react-flow__controls {
+  background: #24221f !important;
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.nx9-theme-dark.nx9-stage-deck .react-flow__controls-button {
+  background: #24221f !important;
+  border-bottom-color: rgba(255,255,255,0.1) !important;
+  color: rgba(245,242,236,0.82) !important;
+}
+
+.nx9-theme-dark.nx9-stage-deck .nx9-attached-prompt-bar {
+  background: rgba(36,34,31,0.96) !important;
+  border-color: rgba(255,255,255,0.16) !important;
+  color: #e8e6e3 !important;
+  box-shadow: 0 18px 44px rgba(0,0,0,0.42);
+}
+
+.nx9-theme-dark.nx9-stage-deck .nx9-composer-panel {
+  background: rgba(27,26,23,0.96) !important;
+  border-color: rgba(255,255,255,0.14) !important;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.04);
+}
+
+.nx9-theme-dark.nx9-stage-deck .nx9-attached-prompt-bar .text-ink\/20,
+.nx9-theme-dark.nx9-stage-deck .nx9-attached-prompt-bar .text-ink\/25,
+.nx9-theme-dark.nx9-stage-deck .nx9-attached-prompt-bar .text-ink\/28,
+.nx9-theme-dark.nx9-stage-deck .nx9-attached-prompt-bar .text-ink\/30,
+.nx9-theme-dark.nx9-stage-deck .nx9-attached-prompt-bar .text-ink\/35,
+.nx9-theme-dark.nx9-stage-deck .nx9-attached-prompt-bar .text-ink\/40,
+.nx9-theme-dark.nx9-stage-deck .nx9-attached-prompt-bar .text-ink\/50,
+.nx9-theme-dark.nx9-stage-deck .nx9-attached-prompt-bar .text-ink\/60 {
+  color: rgba(232,230,227,0.62) !important;
+}
+
+.nx9-theme-dark.nx9-stage-deck .nx9-attached-prompt-bar textarea,
+.nx9-theme-dark.nx9-stage-deck .nx9-attached-prompt-bar input,
+.nx9-theme-dark.nx9-stage-deck .nx9-attached-prompt-bar select {
+  background: transparent !important;
+  color: rgba(245,242,236,0.9) !important;
+}
+
+.nx9-theme-dark.nx9-stage-deck .nx9-attached-prompt-bar button:not(.bg-brand):not([class*='text-white']) {
+  color: rgba(232,230,227,0.7);
+}
+
+.nx9-app-dark-body .nx9-composer-popover {
+  background: rgba(36,34,31,0.98) !important;
+  border-color: rgba(255,255,255,0.14) !important;
+  color: #e8e6e3 !important;
+  box-shadow: 0 18px 44px rgba(0,0,0,0.42);
+}
+
+.nx9-app-dark-body .nx9-composer-popover .text-ink\/75,
+.nx9-app-dark-body .nx9-composer-popover .text-ink\/65,
+.nx9-app-dark-body .nx9-composer-popover .text-ink\/50,
+.nx9-app-dark-body .nx9-composer-popover .text-ink\/40 {
+  color: rgba(232,230,227,0.68) !important;
+}
+
+.nx9-app-dark-body .nx9-composer-popover button:hover,
+.nx9-app-dark-body .nx9-composer-popover .hover\:bg-surface:hover {
+  background: rgba(255,255,255,0.08) !important;
+}
+
+/* Full studio shell follows dark canvas theme */
+.nx9-app-dark {
+  background: #11100e;
+  color: #e8e6e3;
+}
+
+.nx9-app-dark .nx9-topbar {
+  background: rgba(17, 16, 14, 0.92) !important;
+  border-color: rgba(255,255,255,0.08) !important;
+  box-shadow: 0 1px 0 rgba(255,255,255,0.04);
+}
+
+.nx9-app-dark .nx9-workspace-rail,
+.nx9-app-dark .nx9-module-dock,
+.nx9-app-dark main.bg-surface {
+  background: #151411 !important;
+  border-color: rgba(255,255,255,0.08) !important;
+}
+
+.nx9-app-dark .nx9-workspace-rail {
+  background: rgba(17, 16, 14, 0.92) !important;
+  border-color: rgba(255,255,255,0.08) !important;
+}
+
+.nx9-app-dark .nx9-workspace-rail .bg-white,
+.nx9-app-dark .nx9-workspace-rail [class*='hover:bg-white']:hover {
+  background: rgba(255,255,255,0.08) !important;
+}
+
+.nx9-app-dark .nx9-workspace-rail .text-ink\/30,
+.nx9-app-dark .nx9-workspace-rail .text-ink\/35,
+.nx9-app-dark .nx9-workspace-rail .text-ink\/45,
+.nx9-app-dark .nx9-workspace-rail .text-ink\/60,
+.nx9-app-dark .nx9-topbar .text-ink\/45,
+.nx9-app-dark .nx9-topbar .text-ink\/50,
+.nx9-app-dark .nx9-topbar .text-ink\/60,
+.nx9-app-dark .nx9-module-dock .text-ink\/60 {
+  color: rgba(232,230,227,0.55) !important;
+}
+
+.nx9-app-dark .nx9-topbar .text-ink,
+.nx9-app-dark .nx9-workspace-rail .text-ink,
+.nx9-app-dark .nx9-module-dock .text-ink {
+  color: #e8e6e3 !important;
+}
+
+.nx9-app-dark .nx9-workspace-rail button,
+.nx9-app-dark .nx9-workspace-rail span {
+  color: rgba(232,230,227,0.68) !important;
+}
+
+.nx9-app-dark .nx9-workspace-rail .text-brand {
+  color: #d86b98 !important;
+}
+
+.nx9-app-dark .nx9-topbar .bg-surface,
+.nx9-app-dark .nx9-topbar .bg-surface\/50,
+.nx9-app-dark .nx9-module-dock .hover\:bg-surface:hover {
+  background: rgba(255,255,255,0.06) !important;
+}
+
+.nx9-app-dark .nx9-topbar .border-line,
+.nx9-app-dark .nx9-workspace-rail .border-line,
+.nx9-app-dark .nx9-workspace-rail .border-line\/80,
+.nx9-app-dark .nx9-module-dock .border-line {
+  border-color: rgba(255,255,255,0.1) !important;
+}
+
+.nx9-app-dark .nx9-context-rail,
+.nx9-app-dark .bg-white.nx9-context-rail {
+  background: #171613 !important;
+  border-color: rgba(255,255,255,0.08) !important;
+  color: #e8e6e3 !important;
+}
+
+.nx9-app-dark .nx9-module-dock [class*='bg-[var(--nx9-glass)]'] {
+  background: rgba(21, 20, 17, 0.96) !important;
+  border-color: rgba(255,255,255,0.1) !important;
+  color: #e8e6e3 !important;
+  backdrop-filter: blur(18px);
+}
+
+.nx9-app-dark .nx9-module-dock .shadow-panel {
+  box-shadow: 18px 0 40px rgba(0,0,0,0.36) !important;
+}
+
+.nx9-app-dark .nx9-module-dock input {
+  background: rgba(255,255,255,0.08) !important;
+  border-color: rgba(255,255,255,0.14) !important;
+  color: #f5f2ec !important;
+}
+
+.nx9-app-dark .nx9-module-dock input::placeholder {
+  color: rgba(232,230,227,0.5) !important;
+}
+
+.nx9-app-dark .nx9-module-dock button.hover\:bg-white:hover,
+.nx9-app-dark .nx9-module-dock button:hover {
+  background: rgba(255,255,255,0.08) !important;
+}
+
+.nx9-app-dark .nx9-module-dock .text-ink\/50,
+.nx9-app-dark .nx9-module-dock .text-ink\/40 {
+  color: rgba(232,230,227,0.62) !important;
+}
+
+.nx9-app-dark .nx9-module-dock .font-medium,
+.nx9-app-dark .nx9-module-dock .font-semibold {
+  color: rgba(245,242,236,0.92) !important;
+}
+
+.nx9-app-dark .nx9-module-dock .text-accent {
+  color: #b9a7ff !important;
+}
+
+.nx9-app-dark .nx9-module-dock [style*='background'] {
+  background-color: rgba(255,255,255,0.08);
+}
+
+.nx9-app-dark .nx9-mode-capsule {
+  background: rgba(255,255,255,0.08) !important;
+  border-color: rgba(255,255,255,0.16) !important;
+}
+
+.nx9-app-dark .nx9-topbar button:disabled,
+.nx9-app-dark .nx9-topbar [disabled] {
+  color: rgba(232,230,227,0.42) !important;
+  opacity: 0.9;
+}
+
+.nx9-app-dark .nx9-topbar-icon-btn {
+  color: rgba(232,230,227,0.5) !important;
+}
+
+.nx9-app-dark .nx9-topbar-icon-btn:hover:not(:disabled) {
+  background: rgba(255,255,255,0.08) !important;
+  color: #f5f2ec !important;
+}
+
+.nx9-app-dark .nx9-topbar button[aria-haspopup='menu'] {
+  background: rgba(255,255,255,0.06) !important;
+  border-color: rgba(255,255,255,0.22) !important;
+}
+
+.nx9-app-dark .nx9-topbar button[aria-haspopup='menu'] .text-ink\/70,
+.nx9-app-dark .nx9-topbar button[aria-haspopup='menu'] .text-ink\/35 {
+  color: rgba(232,230,227,0.72) !important;
+}
+
+.nx9-app-dark .nx9-topbar button[aria-haspopup='menu']:hover {
+  background: rgba(255,255,255,0.1) !important;
+  border-color: rgba(216,107,152,0.55) !important;
+}
+
+.nx9-app-dark .nx9-topbar .border-line\/80,
+.nx9-app-dark .nx9-topbar .border-line\/70,
+.nx9-app-dark .nx9-topbar .border-line {
+  border-color: rgba(255,255,255,0.12) !important;
+}
+
+.nx9-theme-dark.nx9-stage-deck .absolute.left-4.top-14,
+.nx9-theme-dark.nx9-stage-deck .nx9-pipeline-capsule,
+.nx9-theme-dark.nx9-stage-deck .nx9-card-highlight {
+  color: #24221f;
+}
+
+.nx9-theme-dark.nx9-stage-deck .absolute.left-4.top-14 .text-ink,
+.nx9-theme-dark.nx9-stage-deck .absolute.left-4.top-14 .text-ink\/45 {
+  color: #24221f !important;
+}
+
+.nx9-app-dark .nx9-context-menu {
+  background: rgba(245,242,236,0.96) !important;
+  border-color: rgba(255,255,255,0.18) !important;
+  color: #2a2723 !important;
+  box-shadow: 0 18px 48px rgba(0,0,0,0.36);
+}
+
+.nx9-app-dark .nx9-context-menu__header {
+  color: #fff !important;
+}
+
+.nx9-app-dark .nx9-context-menu__item {
+  color: rgba(42,39,35,0.72) !important;
+}
+
+.nx9-app-dark .nx9-context-menu__item:hover:not(:disabled),
+.nx9-app-dark .nx9-context-menu__item:focus-visible:not(:disabled) {
+  background: rgba(161,61,99,0.09) !important;
+  color: #2a2723 !important;
+}
+
+.nx9-app-dark .nx9-context-menu__item:disabled {
+  color: rgba(42,39,35,0.34) !important;
+  opacity: 1;
+}
+
+.nx9-app-dark .nx9-menu-icon {
+  background: rgba(161,61,99,0.11) !important;
 }
 
 .nx9-theme-dark input,

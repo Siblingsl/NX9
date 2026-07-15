@@ -19,7 +19,7 @@ import { isSurfaceEnabled } from '../config/product-surface';
 import type { UserSummary } from '@nx9/shared';
 
 export interface StudioTopBarProps {
-  batchPhase: 'idle' | 'running' | 'cancelled';
+  batchPhase: 'idle' | 'running' | 'cancelled' | 'paused';
   batchProgress: { done: number; total: number };
   batchTaskProgress?: number;
   storyboardOpen: boolean;

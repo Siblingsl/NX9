@@ -5,6 +5,9 @@ import { PATHS } from '../../config/app.config';
 
 const SECRET_KEYS = [
   'primaryApiKey',
+  'videoApiKey',
+  'xaiApiKey',
+  'grokGoApiKey',
   'rhApiKey',
   'llmApiKey',
   'ttsApiKey',
@@ -39,6 +42,9 @@ export class SettingsService {
     return {
       ...raw,
       primaryApiKey: maskSecret(raw.primaryApiKey),
+      videoApiKey: maskSecret(raw.videoApiKey),
+      xaiApiKey: maskSecret(raw.xaiApiKey),
+      grokGoApiKey: maskSecret(raw.grokGoApiKey),
       rhApiKey: maskSecret(raw.rhApiKey),
       llmApiKey: maskSecret(raw.llmApiKey),
       ttsApiKey: maskSecret(raw.ttsApiKey),

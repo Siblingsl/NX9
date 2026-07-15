@@ -33,8 +33,7 @@ interface CommandPaletteProps {
 }
 
 const FEATURED_RECIPE_IDS = [
-  'tpl-pipeline-13-3d',
-  'tpl-pipeline-13-live',
+  'tpl-core-episode',
   'tpl-nx9-character-pipeline',
   'tpl-shot-script-desk',
   'tpl-text-to-picture',

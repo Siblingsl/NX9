@@ -11,6 +11,8 @@ import {
 import { normalizeDirectorProject } from '@nx9/director3d';
 import { useDeckUi } from '../../../stores/deck-ui';
 import { useDirector3dUi } from '../../../../../stores/director3d-ui';
+import { useWorkspaceDocument } from '../../../../../stores/workspace-document';
+import { prepareDirectorProjectForShot } from '../../../../director3d-character-sync';
 
 function stop(e: React.SyntheticEvent) {
   e.stopPropagation();
@@ -34,6 +36,7 @@ export function Director3dWorkspace({
   const collapsePromptBar = useDeckUi((state) => state.collapsePromptBar);
   const openForBlock = useDirector3dUi((state) => state.openForBlock);
   const setHostBridge = useDirector3dUi((state) => state.setHostBridge);
+  const characters = useWorkspaceDocument((state) => state.characters.characters);
 
   const node = nodes.find((item) => item.id === blockId);
   const data = (node?.data ?? {}) as Record<string, unknown>;
@@ -102,10 +105,19 @@ export function Director3dWorkspace({
 
   const openStage = useCallback(() => {
     const referenceUrl = linkedFrame?.imageUrl ?? linkedFrame?.referenceImageUrl ?? undefined;
-    const nextProject =
-      referenceUrl && !project.panorama
+    const panoramaUrl = previewPayload.panorama720?.imageUrl;
+    const environmentProject = panoramaUrl
+      ? { ...project, panorama: { url: panoramaUrl, yaw: 0, exposure: 1 } }
+      : referenceUrl && !project.panorama
         ? { ...project, panorama: { url: referenceUrl, yaw: 0, exposure: 1 } }
         : project;
+    const nextProject = prepareDirectorProjectForShot(
+      environmentProject,
+      linkedFrame?.characterIds,
+      characters,
+      linkedFrame?.director3dGuide?.characterPlacements,
+      linkedFrame?.characterNames,
+    );
 
     updateNodeData(blockId, {
       linkedStoryboardPreviewId: previewBlockId ?? null,
@@ -125,9 +137,10 @@ export function Director3dWorkspace({
         ? { previewBlockId, frameId: linkedFrame.id }
         : undefined,
     );
-    setHostBridge(referenceUrl ?? null);
+    setHostBridge(panoramaUrl ?? referenceUrl ?? null);
   }, [
     blockId,
+    characters,
     linkedFrame,
     openForBlock,
     previewBlockId,

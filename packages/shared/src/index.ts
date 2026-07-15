@@ -13,6 +13,8 @@ export type {
   TakeRecord,
   SceneGroupRecord,
   LaneConfig,
+  EpisodePlaybookProgress,
+  PlaybookWorkflowStatus,
   PlaybookSession,
 } from './types/workspace';
 export {
@@ -20,11 +22,26 @@ export {
   migrateV2ToV3,
   isWorkspaceV3,
 } from './types/workspace';
+export {
+  snapshotPlaybookProgress,
+  projectPlaybookProgress,
+  createInitialEpisodePlaybookProgress,
+  syncCurrentEpisodePlaybookProgress,
+  hydrateEpisodePlaybookProgress,
+  switchPlaybookEpisode,
+} from './utils/playbook-episode-progress';
 
 export type {
   ShotStatus,
   ShotType,
   SketchSource,
+  StoryboardReviewStage,
+  StoryboardReviewDecision,
+  StoryboardReviewEvent,
+  StoryboardVideoVersion,
+  StoryboardDirectorCharacterPlacement,
+  EpisodeExportRecord,
+  StoryboardDirector3dGuide,
   StoryboardShot,
   StoryboardPayload,
   VoiceProfile,
@@ -33,19 +50,57 @@ export type {
   VoiceLineStatus,
   WorkspacePreferences,
 } from './types/storyboard';
-export { emptyStoryboard, emptyVoice, migrateStoryboardPayload } from './types/storyboard';
+export {
+  emptyStoryboard,
+  emptyVoice,
+  migrateStoryboardPayload,
+  resolveActiveEpisodeId,
+  activeEpisodeShots,
+  resolveStoryboardVideoVersions,
+  appendStoryboardVideoVersion,
+  adoptStoryboardVideoVersion,
+  appendStoryboardReviewEvent,
+  appendEpisodeExportRecord,
+} from './types/storyboard';
 
 export type {
   ScriptBreakdownDialogueLine,
+  ScriptBreakdownStoryAnalysis,
+  ScriptBreakdownCharacterProfile,
+  ScriptBreakdownAct,
   ScriptBreakdownShot,
   ScriptBreakdownEpisode,
   ScriptBreakdownPayload,
+  ScriptBreakdownScene,
+  ScriptBreakdownConfig,
+  ScriptBreakdownPromptTemplates,
+  ScriptBreakdownPromptPack,
+  ScriptBreakdownExportEnvelope,
+  ScriptBreakdownDiagnostic,
 } from './types/script-breakdown';
 export {
   emptyScriptBreakdown,
+  DEFAULT_SCRIPT_BREAKDOWN_CONFIG,
+  DEFAULT_SCRIPT_BREAKDOWN_PROMPTS,
   flattenScriptBreakdownShots,
+  storyboardShotsFromScriptBreakdown,
+  bindStoryboardShotAssets,
 } from './types/script-breakdown';
 export { buildScriptBreakdownFromText } from './utils/script-breakdown';
+export {
+  normalizeScriptBreakdownConfig,
+  normalizeScriptBreakdownPrompts,
+  splitSourceIntoEpisodeChunks,
+  splitLongEpisodeText,
+  buildEpisodePlannerUserPrompt,
+  buildEpisodeBreakdownUserPrompt,
+  createScriptBreakdownPromptPack,
+  parseScriptBreakdownPromptPack,
+  createScriptBreakdownExportEnvelope,
+  parseScriptBreakdownExportEnvelope,
+  validateScriptBreakdownPayload,
+  type ScriptEpisodeChunk,
+} from './utils/script-breakdown-production';
 
 export type {
   StoryboardPreviewFrameStatus,
@@ -75,6 +130,7 @@ export {
 } from './types/storyboard-preview';
 export {
   buildStoryboardFramePrompt,
+  buildDirectorCharacterPlacementPrompt,
   writeBackBreakdownPreviewImage,
   resolveConnectedPictureGenId,
   resolveConnectedStoryboardPreviewId,
@@ -265,7 +321,7 @@ export { isPrivateWorkspace, computeWorkspaceAssetCount } from './utils/workspac
 export type { CharacterProfile, CharacterLibraryPayload, CharacterBible } from './types/character';
 export { emptyCharacterLibrary } from './types/character';
 export type { SoundAssetProfile, SoundLibraryPayload } from './types/sound-library';
-export { emptySoundLibrary, newSoundAsset } from './types/sound-library';
+export { BUILTIN_PUBLIC_SOUND_ASSETS, emptySoundLibrary, newSoundAsset } from './types/sound-library';
 export type {
   StructuredPrompt,
   CreativeVariantEntry,
@@ -372,6 +428,7 @@ export {
   type PlaybookReadinessContext,
   has_source_text,
   has_storyboard_shots,
+  story_grid_confirmed,
   has_line_art_thumbnails,
   all_shots_approved,
   all_keyframes_approved,

@@ -233,6 +233,7 @@ interface SelectionContextMenuProps {
   nodes: Node[];
   executableCount: number;
   isRunning: boolean;
+  canResume?: boolean;
   storyboardActionCount: number;
   cascadeEnabled?: boolean;
   expandLabel?: string;
@@ -240,6 +241,7 @@ interface SelectionContextMenuProps {
   onClose: () => void;
   onRun: () => void;
   onStop: () => void;
+  onRerun: () => void;
   onCascade?: () => void;
   onRerunDownstream?: () => void;
   onToggleExpand?: () => void;
@@ -257,6 +259,7 @@ export function SelectionContextMenu({
   nodes,
   executableCount,
   isRunning,
+  canResume,
   storyboardActionCount,
   cascadeEnabled,
   expandLabel,
@@ -264,6 +267,7 @@ export function SelectionContextMenu({
   onClose,
   onRun,
   onStop,
+  onRerun,
   onCascade,
   onRerunDownstream,
   onToggleExpand,
@@ -293,7 +297,7 @@ export function SelectionContextMenu({
   const menuWidth = 208;
   const alignWidth = 238;
   const menuLeft = Math.max(8, Math.min(x, window.innerWidth - menuWidth - 20));
-  const menuTop = Math.max(8, Math.min(y, window.innerHeight - 280));
+  const menuTop = Math.max(8, Math.min(y, window.innerHeight - 340));
   const alignOpensLeft = menuLeft + menuWidth + alignWidth > window.innerWidth - 8;
   const alignLeft = alignOpensLeft
     ? Math.max(8, menuLeft - alignWidth + 2)
@@ -362,20 +366,37 @@ export function SelectionContextMenu({
           </button>
         </div>
 
-        {isRunning ? (
-          <button type="button" className="nx9-context-menu__item" onClick={() => { onStop(); onClose(); }}>
-            <Pause size={13} />
-            <span>停止运行</span>
-          </button>
-        ) : (
+        <button
+          type="button"
+          className="nx9-context-menu__item"
+          disabled={executableCount === 0 || isRunning}
+          onClick={() => { onRun(); onClose(); }}
+        >
+          <Play size={13} fill="currentColor" />
+          <span>{canResume ? '继续运行' : `运行选中 (${executableCount})`}</span>
+        </button>
+
+        <button
+          type="button"
+          className="nx9-context-menu__item"
+          disabled={!isRunning}
+          title={isRunning ? '在当前安全点停止，并保留已完成进度' : '当前选中模块没有运行中的任务'}
+          onClick={() => { onStop(); onClose(); }}
+        >
+          <Pause size={13} />
+          <span>停止运行（保留进度）</span>
+        </button>
+
+        {!isRunning && (
           <button
             type="button"
             className="nx9-context-menu__item"
             disabled={executableCount === 0}
-            onClick={() => { onRun(); onClose(); }}
+            title="清除上次运行检查点并从头开始"
+            onClick={() => { onRerun(); onClose(); }}
           >
-            <Play size={13} fill="currentColor" />
-            <span>运行选中 ({executableCount})</span>
+            <RefreshCw size={13} />
+            <span>重新运行（从头开始）</span>
           </button>
         )}
 

@@ -91,6 +91,16 @@ export async function runPictureGenExecutor(ctx: BlockExecutorContext): Promise<
   }
   if (urls.length === 0) throw new Error('图像生成失败');
 
+  // 绑定镜头时写回故事板 firstFrame（核心路径 SSOT）
+  const linked = linkedShotForBlock(block.id, d);
+  if (linked && urls[0] && pictureGenMode !== 'panorama-720') {
+    useWorkspaceDocument.getState().updateShot(linked.id, {
+      firstFrameAssetId: urls[0],
+      keyframeStatus: 'review',
+      status: 'review',
+    });
+  }
+
   updateNodeData(block.id, {
     status: 'success',
     previewUrls: urls,

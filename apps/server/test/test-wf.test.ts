@@ -6,6 +6,9 @@ import {
   type PlaybookSession,
   type PlaybookReadinessContext,
   WORKFLOW_TEMPLATES,
+  syncCurrentEpisodePlaybookProgress,
+  switchPlaybookEpisode,
+  hydrateEpisodePlaybookProgress,
 } from '@nx9/shared';
 import type { PlaybookStepAction } from '@nx9/shared';
 
@@ -139,6 +142,66 @@ describe('TEST-WF — Playbook orchestration', () => {
 
     const shouldShowBanner = !session.dismissed;
     expect(shouldShowBanner).toBe(false);
+  });
+
+  it('TEST-WF-008: each episode restores its own playbook progress', () => {
+    const playbook = PLAYBOOK_DEFINITIONS.find((p) => p.id === 'pb-ai-comic-live');
+    expect(playbook).toBeDefined();
+    if (!playbook) return;
+
+    const episodeOneAtVideo: PlaybookSession = {
+      playbookId: 'pb-ai-comic-live',
+      startedAt: '2026-07-14T00:00:00Z',
+      currentStepId: 'video-gen',
+      completedStepIds: [
+        'script-breakdown',
+        'story-grid',
+        'storyboard-preview',
+        'keyframe-review',
+      ],
+      skippedStepIds: [],
+      failedStepIds: [],
+      waitingStepIds: [],
+      workflowStatus: 'running',
+    };
+    const savedEpisodeOne = syncCurrentEpisodePlaybookProgress(episodeOneAtVideo, 'episode-1');
+
+    const episodeTwo = switchPlaybookEpisode(
+      savedEpisodeOne,
+      'episode-1',
+      'episode-2',
+      playbook,
+    );
+    expect(episodeTwo.currentStepId).toBe('story-grid');
+    expect(episodeTwo.completedStepIds).toEqual(['script-breakdown']);
+    expect(episodeTwo.episodeProgress?.['episode-1'].currentStepId).toBe('video-gen');
+
+    const restoredEpisodeOne = switchPlaybookEpisode(
+      episodeTwo,
+      'episode-2',
+      'episode-1',
+      playbook,
+    );
+    expect(restoredEpisodeOne.currentStepId).toBe('video-gen');
+    expect(restoredEpisodeOne.completedStepIds).toContain('keyframe-review');
+    expect(restoredEpisodeOne.workflowStatus).toBe('running');
+  });
+
+  it('TEST-WF-009: legacy global progress migrates into the active episode', () => {
+    const legacySession: PlaybookSession = {
+      playbookId: 'pb-ai-comic-live',
+      startedAt: '2026-07-13T00:00:00Z',
+      currentStepId: 'keyframe-review',
+      completedStepIds: ['script-breakdown', 'story-grid', 'storyboard-preview'],
+    };
+
+    const migrated = hydrateEpisodePlaybookProgress(legacySession, 'episode-1');
+    expect(migrated.currentStepId).toBe('keyframe-review');
+    expect(migrated.episodeProgress?.['episode-1']).toMatchObject({
+      currentStepId: 'keyframe-review',
+      completedStepIds: ['script-breakdown', 'story-grid', 'storyboard-preview'],
+      workflowStatus: 'idle',
+    });
   });
 
 });

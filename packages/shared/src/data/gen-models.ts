@@ -1,8 +1,8 @@
 export interface PictureGenModelDef {
   id: string;
   label: string;
-  provider: 'openai' | 'fal';
-  /** OpenAI model id 或 Fal model path */
+  provider: 'openai' | 'fal' | 'magichour';
+  /** OpenAI model id、Fal model path，或 Magic Hour 路由名 */
   model: string;
   supportsReference?: boolean;
   defaultSize?: string;
@@ -16,6 +16,13 @@ export const PICTURE_GEN_MODELS: PictureGenModelDef[] = [
     label: 'DALL·E 3',
     provider: 'openai',
     model: 'dall-e-3',
+    defaultSize: '1024x1024',
+  },
+  {
+    id: 'magic-hour',
+    label: 'Magic Hour',
+    provider: 'magichour',
+    model: 'magic-hour',
     defaultSize: '1024x1024',
   },
   {
@@ -55,8 +62,12 @@ export interface ClipGenModelDef {
 }
 
 export const CLIP_GEN_MODELS: ClipGenModelDef[] = [
+  { id: 'magic-hour', label: 'Magic Hour', hint: '文生视频 / 图生视频（需 MAGIC_HOUR_API_KEY）' },
+  { id: 'mh-ltx-2.3', label: 'MH LTX 2.3', hint: 'Magic Hour 免费层推荐，速度快' },
   { id: 'veo', label: 'Veo', hint: 'OpenAI 兼容 /videos/generations' },
-  { id: 'grok', label: 'Grok Video', hint: '需网关支持对应 model 名' },
+  { id: 'grok-imagine-video', label: 'Grok Imagine', hint: 'xAI 官方 / GrokGo 测试通道' },
+  { id: 'grok-imagine-video-1.5', label: 'Grok Imagine 1.5', hint: 'xAI 官方 / GrokGo 测试通道，图生视频更稳定' },
+  { id: 'grok', label: 'Grok Video', hint: '兼容旧节点，自动映射到 Grok Imagine' },
   { id: 'seedance', label: 'Seedance', hint: '分镜连续链请用 motion-story' },
 ];
 

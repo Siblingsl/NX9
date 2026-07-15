@@ -403,159 +403,77 @@ export const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
     },
   },
   {
-    id: 'tpl-pipeline-13-3d',
-    label: '13 步 3D 管线',
-    description: '剧本→场次→分镜→角色→环境→3D 机位→关键帧→审阅→视频→连贯→成片→门控→导出（13 步单链）',
+    id: 'tpl-core-episode',
+    label: '核心 6 步成片',
+    description: '剧本拆分 → 设定检查 → 分镜网格 → 分镜预览（图像生成 + 3D 导演台）→ 批审 → 视频生成 → 简单拼接导出',
     category: 'story',
     build() {
-      const PIPELINE_DX = 280;
-      const PIPELINE_Y = 200;
-      const node = (type: string, stepIndex: number, extra: Record<string, unknown> = {}) => {
-        const col = stepIndex - 1;
-        return {
-          id: uid(`pipe-${type}`),
-          type,
-          position: { x: 80 + col * PIPELINE_DX, y: PIPELINE_Y },
-          data: {
-            blockIndex: stepIndex,
-            status: 'idle',
-            playbookStepIndex: stepIndex,
-            ...extra,
-          },
-        } as FlowBlock;
-      };
-      const edge = (source: FlowBlock, target: FlowBlock): FlowLink => ({
-        id: uid('pipe-e'),
-        source: source.id,
-        target: target.id,
-        sourceHandle: 'out',
-        targetHandle: 'in',
+      const script = node('dialogue-sheet', 0, 2, {
+        playbookStepId: 'script-breakdown',
+        playbookStepIndex: 1,
       });
-
-      const s1 = node('shot-script', 1, { playbookStepId: 'script' });
-      const s2 = node('text-chunker', 2, { playbookStepId: 'scene-split' });
-      const s3 = node('story-grid', 3, { playbookStepId: 'storyboard' });
-      const s4 = node('character-sheet', 4, { playbookStepId: 'character-bible' });
-      const s5 = node('scene-card', 5, { playbookStepId: 'environment-bible' });
-      const s6 = node('director-3d', 6, { playbookStepId: 'camera-3d' });
-      const s7 = node('picture-gen', 7, { playbookStepId: 'keyframe-gen' });
-      const s8 = node('review-gate', 8, { playbookStepId: 'keyframe-review', gateMode: 'keyframe', label: '关键帧审阅' });
-      const s9 = node('motion-story', 9, { playbookStepId: 'video-gen' });
-      const s10 = node('continuity-check', 10, { playbookStepId: 'consistency' });
-      const s11 = node('clip-editor', 11, { playbookStepId: 'episode-studio' });
-      const s12 = node('review-gate', 12, { playbookStepId: 'review-gate', gateMode: 'video', label: '成片审阅' });
-      const s13 = node('export-pack', 13, { playbookStepId: 'export' });
-
-      const blocks = [s1, s2, s3, s4, s5, s6, s7, s8, s9, s10, s11, s12, s13];
-      const links = [
-        edge(s1, s2), edge(s2, s3), edge(s3, s4), edge(s4, s5), edge(s5, s6),
-        edge(s6, s7), edge(s7, s8), edge(s8, s9), edge(s9, s10), edge(s10, s11),
-        edge(s11, s12), edge(s12, s13),
-      ];
-      return { blocks, links };
-    },
-  },
-  {
-    id: 'tpl-pipeline-13-live',
-    label: '13 步真人管线',
-    description: '剧本→场次→分镜→角色→环境→导演台→关键帧→审阅→视频→连贯→成片→门控→导出（13 步单链）',
-    category: 'story',
-    build() {
-      const PIPELINE_DX = 280;
-      const PIPELINE_Y = 200;
-      const node = (type: string, stepIndex: number, extra: Record<string, unknown> = {}) => {
-        const col = stepIndex - 1;
-        return {
-          id: uid(`pipe-${type}`),
-          type,
-          position: { x: 80 + col * PIPELINE_DX, y: PIPELINE_Y },
-          data: {
-            blockIndex: stepIndex,
-            status: 'idle',
-            playbookStepIndex: stepIndex,
-            ...extra,
-          },
-        } as FlowBlock;
-      };
-      const edge = (source: FlowBlock, target: FlowBlock): FlowLink => ({
-        id: uid('pipe-e'),
-        source: source.id,
-        target: target.id,
-        sourceHandle: 'out',
-        targetHandle: 'in',
+      const gate = node('asset-gate', 1, 2, {
+        playbookStepId: 'story-grid',
+        playbookStepIndex: 2,
       });
-
-      const s1 = node('shot-script', 1, { playbookStepId: 'script' });
-      const s2 = node('text-chunker', 2, { playbookStepId: 'scene-split' });
-      const s3 = node('story-grid', 3, { playbookStepId: 'storyboard' });
-      const s4 = node('character-sheet', 4, { playbookStepId: 'character-bible' });
-      const s5 = node('scene-card', 5, { playbookStepId: 'environment-bible' });
-      const s6 = node('director-desk', 6, { playbookStepId: 'camera-live' });
-      const s7 = node('picture-gen', 7, { playbookStepId: 'keyframe-gen' });
-      const s8 = node('review-gate', 8, { playbookStepId: 'keyframe-review', gateMode: 'keyframe', label: '关键帧审阅' });
-      const s9 = node('clip-gen', 9, { playbookStepId: 'video-gen' });
-      const s10 = node('continuity-check', 10, { playbookStepId: 'consistency' });
-      const s11 = node('clip-editor', 11, { playbookStepId: 'episode-studio' });
-      const s12 = node('review-gate', 12, { playbookStepId: 'review-gate', gateMode: 'video', label: '成片审阅' });
-      const s13 = node('export-pack', 13, { playbookStepId: 'export' });
-
-      const blocks = [s1, s2, s3, s4, s5, s6, s7, s8, s9, s10, s11, s12, s13];
-      const links = [
-        edge(s1, s2), edge(s2, s3), edge(s3, s4), edge(s4, s5), edge(s5, s6),
-        edge(s6, s7), edge(s7, s8), edge(s8, s9), edge(s9, s10), edge(s10, s11),
-        edge(s11, s12), edge(s12, s13),
-      ];
-      return { blocks, links };
-    },
-  },
-  {
-    id: 'tpl-pipeline-11-anime',
-    label: '11 步动漫管线',
-    description: '剧本→场次→分镜→角色→环境→关键帧→审阅→视频→连贯→门控→导出（动漫 11 步）',
-    category: 'story',
-    build() {
-      const PIPELINE_DX = 280;
-      const PIPELINE_Y = 200;
-      const node = (type: string, stepIndex: number, extra: Record<string, unknown> = {}) => {
-        const col = stepIndex - 1;
-        return {
-          id: uid(`pipe-${type}`),
-          type,
-          position: { x: 80 + col * PIPELINE_DX, y: PIPELINE_Y },
-          data: {
-            blockIndex: stepIndex,
-            status: 'idle',
-            playbookStepIndex: stepIndex,
-            ...extra,
-          },
-        } as FlowBlock;
-      };
-      const edge = (source: FlowBlock, target: FlowBlock): FlowLink => ({
-        id: uid('pipe-e'),
-        source: source.id,
-        target: target.id,
-        sourceHandle: 'out',
-        targetHandle: 'in',
+      const grid = node('story-grid', 2, 2, {
+        playbookStepId: 'story-grid',
+        playbookStepIndex: 2,
       });
-
-      const s1 = node('shot-script', 1, { playbookStepId: 'script' });
-      const s2 = node('text-chunker', 2, { playbookStepId: 'scene-split' });
-      const s3 = node('story-grid', 3, { playbookStepId: 'storyboard' });
-      const s4 = node('character-sheet', 4, { playbookStepId: 'character-bible' });
-      const s5 = node('scene-card', 5, { playbookStepId: 'environment-bible' });
-      const s6 = node('picture-gen', 6, { playbookStepId: 'keyframe-gen' });
-      const s7 = node('review-gate', 7, { playbookStepId: 'keyframe-review', gateMode: 'keyframe', label: '关键帧审阅' });
-      const s8 = node('clip-gen', 8, { playbookStepId: 'video-gen' });
-      const s9 = node('continuity-check', 9, { playbookStepId: 'consistency' });
-      const s10 = node('review-gate', 10, { playbookStepId: 'review-gate', gateMode: 'video', label: '成片审阅' });
-      const s11 = node('export-pack', 11, { playbookStepId: 'export' });
-
-      const blocks = [s1, s2, s3, s4, s5, s6, s7, s8, s9, s10, s11];
-      const links = [
-        edge(s1, s2), edge(s2, s3), edge(s3, s4), edge(s4, s5), edge(s5, s6),
-        edge(s6, s7), edge(s7, s8), edge(s8, s9), edge(s9, s10), edge(s10, s11),
-      ];
-      return { blocks, links };
+      const preview = node('storyboard-preview', 3, 2, {
+        playbookStepId: 'storyboard-preview',
+        playbookStepIndex: 3,
+      });
+      const picture = node('picture-gen', 2.55, 0, {
+        playbookStepId: 'storyboard-preview',
+        playbookStepIndex: 3,
+      });
+      const director = node('director-3d', 3.45, 0, {
+        playbookStepId: 'storyboard-preview',
+        playbookStepIndex: 3,
+      });
+      const review = node('review-gate', 4, 2, {
+        playbookStepId: 'keyframe-review',
+        playbookStepIndex: 4,
+        gateMode: 'keyframe',
+        label: '分镜批审',
+      });
+      const video = node('clip-gen', 5, 2, {
+        playbookStepId: 'video-gen',
+        playbookStepIndex: 5,
+      });
+      const pack = node('export-pack', 6, 2, {
+        playbookStepId: 'export',
+        playbookStepIndex: 6,
+        exportMode: 'ffmpeg-episode',
+      });
+      return {
+        blocks: [script, gate, grid, preview, picture, director, review, video, pack],
+        links: [
+          {
+            ...edge(script.id, gate.id),
+            targetHandle: 'asset-gate',
+          },
+          {
+            ...edge(gate.id, grid.id),
+            sourceHandle: 'asset-gate',
+          },
+          edge(grid.id, preview.id),
+          {
+            ...edge(picture.id, preview.id),
+            sourceHandle: 'exec-picture',
+            targetHandle: 'exec-picture',
+          },
+          {
+            ...edge(director.id, preview.id),
+            sourceHandle: 'exec-picture',
+            targetHandle: 'exec-picture',
+          },
+          edge(preview.id, review.id),
+          edge(review.id, video.id),
+          edge(video.id, pack.id),
+        ],
+      };
     },
   },
 ];

@@ -15,6 +15,7 @@ export interface FlowRuntimeApi {
   intensive: boolean;
   runBatch: () => Promise<void>;
   runSelected: (ids: string[]) => void | Promise<void>;
+  rerunSelected: (ids: string[]) => void | Promise<void>;
   runCascade?: (blockId: string) => void | Promise<void>;
   stopRun: () => void;
   deleteNodes: (ids: string[]) => void;

@@ -66,7 +66,7 @@ export function GenConfigPillBar({ blockId, kind, embedded = false }: GenConfigP
 
   const model = (data.model as string) ?? 'veo';
   const aspect = (data.aspect as string) ?? '16:9';
-  const durationSec = (data.durationSec as number) ?? 6;
+  const durationSec = (data.durationSec as number) ?? 5;
   const resolution = (data.resolution as string) ?? '720';
   const imageCount = (data.imageCount as number) ?? 1;
   const frameMode = (data.frameMode as string) ?? '首尾帧';
