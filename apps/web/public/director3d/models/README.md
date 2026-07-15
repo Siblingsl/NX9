@@ -1,8 +1,5 @@
 # 3D 模型资源
 
-此目录存放内置 3D 角色/道具模型文件，从 storyai-3d-director-desk 参考项目移植。
+此目录存放 NX9 导演台内置 3D 角色/道具模型文件。
 
 支持的格式：.glb, .gltf, .obj, .fbx
-
-参考项目模型源：
-https://github.com/jiguang132/storyai-3d-director-desk/tree/main/public/models

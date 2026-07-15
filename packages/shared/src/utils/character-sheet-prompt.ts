@@ -28,7 +28,7 @@ export interface CharacterBibleLayer {
   placeholder: string;
 }
 
-/** Character Bible 六层锚点（moyin 借鉴，语义融入） */
+/** Character Bible 六层锚点（NX9 角色设定结构） */
 export const CHARACTER_BIBLE_LAYERS: CharacterBibleLayer[] = [
   { key: 'identity', label: '基础设定', placeholder: '姓名 / 年龄 / 职业 / 身份…' },
   { key: 'appearance', label: '外貌', placeholder: '识别特征、发色、瞳色、身材、色板…' },

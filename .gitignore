@@ -23,5 +23,5 @@ services/luxtts/__pycache__/
 # OS
 .DS_Store
 
-# local reference projects
+# local scratch / offline archives (not part of NX9 product source)
 Reference_Projects/

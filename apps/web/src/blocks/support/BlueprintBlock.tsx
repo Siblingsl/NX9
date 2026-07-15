@@ -20,7 +20,7 @@ function BlueprintBlock(props: NodeProps) {
     <BlockShell {...props}>
       <div className="space-y-2 nodrag nopan text-xs">
         <p className="text-ink/60 leading-relaxed">
-          生产蓝图（对标 LibTV / 小云雀短剧 Agent 流程）。点击下方步骤可快速在画布添加对应模块。
+          生产蓝图：按短剧生产步骤快速在画布添加对应模块。
         </p>
         <ul className="space-y-1">
           {STEPS.map((s) => (

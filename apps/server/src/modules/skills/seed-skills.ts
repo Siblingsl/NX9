@@ -1,6 +1,6 @@
-/** Seed skills written on first boot. Authored as NX9-native methodology files,
- *  adapted from the huobao-drama skill set (cinema prompt, storyboard, script rewrite,
- *  voice assignment, prompt polish). Never overwrites existing skill files. */
+/** Seed skills written on first boot. NX9-native methodology files
+ *  (cinema prompt, storyboard, script rewrite, voice assignment, prompt polish).
+ *  Never overwrites existing skill files. */
 export interface SeedSkill {
   id: string;
   content: string;

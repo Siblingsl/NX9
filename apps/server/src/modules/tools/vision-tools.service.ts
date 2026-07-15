@@ -72,7 +72,7 @@ export class VisionToolsService {
       messages: [
         {
           role: 'system',
-          content: `你是短视频导演（对标智能成片）。根据主题生成 ${Math.max(3, Math.min(12, Math.round(durationSec / 5)))} 个镜头的 Markdown 分镜表。
+          content: `你是短视频导演。根据主题生成 ${Math.max(3, Math.min(12, Math.round(durationSec / 5)))} 个镜头的 Markdown 分镜表。
 表头：| 镜号 | 景别 | 画面描述 | 英文提示词 | 时长 |
 只输出表格。`,
         },
@@ -91,7 +91,7 @@ export class VisionToolsService {
         {
           role: 'system',
           content:
-            '你是爆款视频复刻分析师（对标小云雀/LibTV）。根据链接与备注，输出 JSON：{"title":"","rhythm":"剪辑节奏描述","structure":["段落1","段落2"],"storyboardMarkdown":"完整分镜 Markdown 表","promptPack":"英文风格 prompt 摘要"}',
+            '你是爆款视频复刻分析师。根据链接与备注，输出 JSON：{"title":"","rhythm":"剪辑节奏描述","structure":["段落1","段落2"],"storyboardMarkdown":"完整分镜 Markdown 表","promptPack":"英文风格 prompt 摘要"}',
         },
         {
           role: 'user',

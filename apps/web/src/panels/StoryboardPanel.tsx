@@ -661,7 +661,7 @@ export function StoryboardPanel() {
               <p className="text-xs text-ink/60">
                 {importMode === 'markdown'
                   ? '粘贴分镜 Markdown 表格（storyboard-breaker 输出）'
-                  : '粘贴完整中文剧本（第X集、场景头、对白）— 对标小云雀短剧 Agent'}
+                  : '粘贴完整中文剧本（第X集、场景头、对白）'}
               </p>
               <textarea
                 value={importText}

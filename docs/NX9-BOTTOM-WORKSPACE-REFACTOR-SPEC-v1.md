@@ -91,7 +91,7 @@
 | 组件边界 | `NodeAttachedPromptBar` 外壳 + 标题栏 + 折叠 | `AttachedWorkspaceRouter` 路由子面板 |
 | CSS | `overflow: visible` 防裁剪（`nx9-node-with-prompt`） | 内部 scroll、max-height 可调 |
 
-**参考实现**：`Reference_Projects/infinite-canvas-main` 的节点跟随编辑条；NX9 壳层保持同款交互，内部换成 NX9 设计系统。
+**交互约束（NX9 自研）**：节点选中后，编辑区以节点跟随条（Attached Workspace / Prompt Bar）形式出现；壳层与内部 UI 均使用 NX9 设计系统与 `ATTACHED_WORKSPACE_REGISTRY` 映射，不依赖任何外部仓库实现。
 
 ### 2.3 与旧架构的关键差异
 

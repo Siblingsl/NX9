@@ -1,7 +1,5 @@
 # NX9 Studio
 
-AI 节点工作流工具 — 自 T8-penguin-canvas 功能重构而来，采用全新架构与 UI。
-
 ## 架构
 
 ```
@@ -61,16 +59,16 @@ npm run build -w @nx9/shared
 
 `npm run dev` 已自动在启动前构建 shared。
 
-## 与原项目差异
+## 技术栈（NX9 自研）
 
-| 维度 | 原项目 | NX9 |
-|------|--------|-----|
-| 后端 | Express | NestJS |
-| 画布 | Canvas.tsx 单体 | FlowSurface + perf-controller |
-| 节点 | nodes/ | blocks/ |
-| 状态 | 14 个 store | workspace-catalog, credential-vault 等 |
-| 主题 | 13 套主题模板 | 无，仅基础配色 |
-| 桌面 | Electron 内置 | 预留 bridge，暂未实现 |
+| 维度 | NX9 |
+|------|-----|
+| 后端 | NestJS |
+| 画布 | FlowSurface + perf-controller |
+| 节点 | blocks/ |
+| 状态 | workspace-catalog, credential-vault 等 |
+| 主题 | 无主题包，仅基础配色 |
+| 桌面 | 预留 `runtime-bridge`，暂未接入 Electron |
 
 ## 后续扩展
 

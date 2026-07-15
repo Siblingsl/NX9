@@ -1,4 +1,4 @@
-/** 宫格单格三层 Prompt（对标 moyin scene-prompt-generator） */
+/** 宫格单格三层 Prompt（图 / 尾帧 / 视频） */
 export interface GridCellPrompt {
   index: number;
   row: number;
