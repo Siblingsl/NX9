@@ -38,7 +38,7 @@ export function HomeDashboard() {
               className="rounded-xl border border-line p-4 hover:border-brand/30 transition-colors"
             >
               <span className="font-medium text-sm">{ws.title}</span>
-              <span className="text-[11px] text-ink/40 block mt-1">{ws.blockCount} 模块 · {ws.shotCount ?? 0} 镜头</span>
+              <span className="text-[11px] text-ink/40 block mt-1">{ws.blockCount} 工具 · {ws.shotCount ?? 0} 镜头</span>
             </a>
           ))
         )}

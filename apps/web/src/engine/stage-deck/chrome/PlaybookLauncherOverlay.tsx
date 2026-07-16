@@ -98,9 +98,9 @@ export function PlaybookLauncherOverlay({ onStartPlaybook, onOpenLibrary, onDism
             <Sparkles size={20} />
           </span>
           <div>
-            <h2 className="text-base font-semibold text-ink">开始创作你的 AI 漫剧</h2>
+            <h2 className="text-base font-semibold text-ink">从制作路径开始</h2>
             <p className="text-sm text-ink/55 mt-0.5">
-              按步骤引导完成创作流程，无需操心模块搭建
+              推荐「AI 漫剧（核心流程）」：剧本 → 分镜 → 出图批审 → 视频 → 导出。画布用于精调，右侧编剧/分镜为主入口。
             </p>
           </div>
         </div>

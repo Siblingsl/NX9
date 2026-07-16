@@ -1,0 +1,105 @@
+/* ── NX9 Desk 色板 · 全节点统一 ──
+ * 深色默认：冷静炭黑 + 暖金（剧本拆分同源）
+ * 浅色：暖纸白 + 古铜金（新浅色节点语言）
+ * 由 .nx9-theme-dark / .nx9-app-dark 切换
+ */
+
+:root {
+  /* 浅色 desk（默认变量，无 dark class 时） */
+  --desk-bg: #f7f4ee;
+  --desk-bg-2: #f0ebe3;
+  --desk-bg-3: #e8e2d8;
+  --desk-ink: rgba(32, 28, 24, 0.92);
+  --desk-muted: rgba(32, 28, 24, 0.55);
+  --desk-faint: rgba(32, 28, 24, 0.36);
+  --desk-line: rgba(42, 36, 28, 0.1);
+  --desk-line-strong: rgba(42, 36, 28, 0.16);
+  --desk-accent: #a67c4a;
+  --desk-accent-soft: rgba(166, 124, 74, 0.12);
+  --desk-accent-line: rgba(166, 124, 74, 0.38);
+  --desk-warn: #c4834a;
+  --desk-ok: #4a8a62;
+  --desk-run: #5a7a96;
+  --desk-shadow: 0 10px 28px rgba(42, 36, 28, 0.1), 0 0 0 1px rgba(42, 36, 28, 0.04);
+  --desk-shadow-sel: 0 14px 36px rgba(42, 36, 28, 0.14), 0 0 0 1px rgba(166, 124, 74, 0.28);
+  --desk-card-bg: linear-gradient(180deg, #fbf9f5 0%, #f3efe7 100%);
+  --desk-card-border: rgba(42, 36, 28, 0.12);
+  --desk-head-bg: rgba(255, 255, 255, 0.55);
+  --desk-media-bg: #ebe6dc;
+  --desk-stage-bg: #e8e4db;
+  --desk-btn-primary-ink: #fffaf3;
+  --desk-panel: rgba(42, 36, 28, 0.04);
+}
+
+/* 浅色作用域（可被深色父级覆盖） */
+.nx9-theme-light {
+  --desk-bg: #f7f4ee;
+  --desk-bg-2: #f0ebe3;
+  --desk-bg-3: #e8e2d8;
+  --desk-ink: rgba(32, 28, 24, 0.92);
+  --desk-muted: rgba(32, 28, 24, 0.55);
+  --desk-faint: rgba(32, 28, 24, 0.36);
+  --desk-line: rgba(42, 36, 28, 0.1);
+  --desk-line-strong: rgba(42, 36, 28, 0.16);
+  --desk-accent: #a67c4a;
+  --desk-accent-soft: rgba(166, 124, 74, 0.12);
+  --desk-accent-line: rgba(166, 124, 74, 0.38);
+  --desk-warn: #c4834a;
+  --desk-ok: #4a8a62;
+  --desk-run: #5a7a96;
+  --desk-shadow: 0 10px 28px rgba(42, 36, 28, 0.1), 0 0 0 1px rgba(42, 36, 28, 0.04);
+  --desk-shadow-sel: 0 14px 36px rgba(42, 36, 28, 0.14), 0 0 0 1px rgba(166, 124, 74, 0.28);
+  --desk-card-bg: linear-gradient(180deg, #fbf9f5 0%, #f3efe7 100%);
+  --desk-card-border: rgba(42, 36, 28, 0.12);
+  --desk-head-bg: rgba(255, 255, 255, 0.55);
+  --desk-media-bg: #ebe6dc;
+  --desk-stage-bg: #e8e4db;
+  --desk-btn-primary-ink: #fffaf3;
+  --desk-panel: rgba(42, 36, 28, 0.04);
+  --nx9-brand: #a67c4a;
+  --nx9-accent: #a67c4a;
+}
+
+.nx9-theme-dark,
+.nx9-app-dark,
+.nx9-app-dark-body {
+  --desk-bg: #161719;
+  --desk-bg-2: #1c1e21;
+  --desk-bg-3: #222428;
+  --desk-ink: rgba(236, 232, 224, 0.92);
+  --desk-muted: rgba(236, 232, 224, 0.55);
+  --desk-faint: rgba(236, 232, 224, 0.36);
+  --desk-line: rgba(255, 255, 255, 0.08);
+  --desk-line-strong: rgba(255, 255, 255, 0.12);
+  --desk-accent: #c4a574;
+  --desk-accent-soft: rgba(196, 165, 116, 0.14);
+  --desk-accent-line: rgba(196, 165, 116, 0.35);
+  --desk-warn: #d4a574;
+  --desk-ok: #8fb89a;
+  --desk-run: #9ab0c4;
+  --desk-shadow: 0 12px 32px rgba(0, 0, 0, 0.45), 0 0 0 1px rgba(0, 0, 0, 0.35);
+  --desk-shadow-sel: 0 14px 36px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(196, 165, 116, 0.2);
+  --desk-card-bg: linear-gradient(180deg, #1a1c1f 0%, #141618 100%);
+  --desk-card-border: rgba(255, 255, 255, 0.1);
+  --desk-head-bg: rgba(0, 0, 0, 0.22);
+  --desk-media-bg: #0f1012;
+  --desk-stage-bg: #0c0e12;
+  --desk-btn-primary-ink: #1a1610;
+  --desk-panel: rgba(255, 255, 255, 0.04);
+
+  /* 全局 token 对齐 desk */
+  --nx9-brand: #c4a574;
+  --nx9-accent: #c4a574;
+  --nx9-bg: #0c0e12;
+  --nx9-ink: rgba(236, 232, 224, 0.92);
+  --nx9-line: rgba(255, 255, 255, 0.08);
+  --nx9-surface: rgba(255, 255, 255, 0.04);
+  --nx9-glass: rgba(22, 23, 25, 0.88);
+}
+
+/* 浅色模式 brand 略偏古铜，与 desk 一致 */
+body:not(.nx9-app-dark-body),
+.nx9-theme-light {
+  --nx9-brand: #a67c4a;
+  --nx9-accent: #a67c4a;
+}

@@ -72,7 +72,7 @@ export function LensMenu({ x, y, filterKinds, onPick, onClose }: LensMenuProps) 
             >
               <span
                 className="w-10 h-10 rounded-xl flex items-center justify-center shadow-panel border border-line bg-white hover:border-brand/40"
-                style={{ color: meta?.accent ?? '#5E4D8A' }}
+                style={{ color: meta?.accent ?? 'var(--nx9-accent)' }}
               >
                 <Glyph name={def.glyph} />
               </span>

@@ -46,23 +46,32 @@ describe('TEST-PIPE — Core 6-Step Production Pipeline', () => {
     expect(flow.blocks.map((block) => block.type)).toEqual([
       'dialogue-sheet',
       'asset-gate',
-      'story-grid',
-      'storyboard-preview',
+      'storyboard-desk',
       'picture-gen',
       'director-3d',
+      'director-desk',
       'review-gate',
       'clip-gen',
       'export-pack',
     ]);
-    const preview = flow.blocks.find((block) => block.type === 'storyboard-preview')!;
+    const desk = flow.blocks.find((block) => block.type === 'storyboard-desk')!;
+    const directorDesk = flow.blocks.find((block) => block.type === 'director-desk')!;
     const gate = flow.blocks.find((block) => block.type === 'asset-gate')!;
     expect(flow.links.some((link) => link.target === gate.id && link.targetHandle === 'asset-gate')).toBe(true);
     expect(flow.links.some((link) => link.source === gate.id && link.sourceHandle === 'asset-gate')).toBe(true);
     const capabilityLinks = flow.links.filter(
-      (link) => link.target === preview.id && link.targetHandle === 'exec-picture',
+      (link) => link.target === desk.id && link.targetHandle === 'exec-picture',
     );
     expect(capabilityLinks).toHaveLength(2);
     expect(capabilityLinks.every((link) => link.sourceHandle === 'exec-picture')).toBe(true);
+    expect(flow.links.some((link) => link.source === desk.id && link.target === directorDesk.id)).toBe(true);
+    expect(
+      flow.links.some(
+        (link) =>
+          link.source === directorDesk.id
+          && flow.blocks.find((b) => b.id === link.target)?.type === 'review-gate',
+      ),
+    ).toBe(true);
   });
 
   it('TEST-PIPE-000-episode: 批量生产只处理 activeEpisodeId', () => {

@@ -59,7 +59,7 @@ export function toPayload(
       ...base,
       version: 3,
       aliases: options.aliases ?? {},
-      viewMode: options.viewMode ?? 'explore',
+      viewMode: options.viewMode ?? 'produce',
       takes: options.takes ?? [],
       groups: options.groups ?? [],
       lanes: options.lanes,

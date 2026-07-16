@@ -24,7 +24,7 @@ describe('TEST-WS — Workspace fixtures & contracts', () => {
 
     expect(FIXTURE_WS_IMPORT.storyboard).toBeDefined();
     expect(FIXTURE_WS_IMPORT.voice.profiles).toHaveLength(1);
-    expect(FIXTURE_WS_IMPORT.canvasAppearance.theme).toBe('light');
+    expect(FIXTURE_WS_IMPORT.canvasAppearance.theme).toBe('dark');
   });
 
   it('TEST-WS-003: FIXTURE_SHOTS has 3 shots with correct indices & statuses', () => {

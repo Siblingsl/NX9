@@ -30,7 +30,7 @@ export function ProductionProgressWall() {
             }`}
           />
           <span className="text-sm font-medium text-ink">
-            {running ? '批量生产进行中' : phase === 'cancelled' ? '正在安全停止…' : paused ? '运行已暂停' : '运行中断'}
+            {running ? '批量生成进行中' : phase === 'cancelled' ? '正在安全停止…' : paused ? '生成已暂停' : '生成中断'}
           </span>
           {currentLabel && running && (
             <span className="text-xs text-ink/50 truncate max-w-[240px]" title={currentLabel}>

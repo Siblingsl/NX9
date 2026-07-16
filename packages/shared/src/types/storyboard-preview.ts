@@ -73,6 +73,16 @@ export interface StoryboardPreviewFrame {
   errorMessage?: string | null;
   /** 用户手动修改标记 */
   userModified?: boolean;
+  /** 关键帧一致性综合分 0–100（角色/场景/其它） */
+  consistencyScore?: number | null;
+  /** 分项评分 */
+  scoreBreakdown?: {
+    character: number;
+    scene: number;
+    other: number;
+  } | null;
+  /** 综合分 < 80 时建议重生成 */
+  suggestRegenerate?: boolean;
 }
 
 /** 节点 data.storyboardPreview 载荷 */
@@ -100,7 +110,7 @@ export interface StoryboardPreviewPayload {
 }
 
 export interface StoryboardPreviewConsistencyDimension {
-  id: 'character' | 'costume' | 'scene' | 'camera' | 'lighting' | 'timeline';
+  id: 'character' | 'costume' | 'scene' | 'camera' | 'lighting' | 'timeline' | 'other';
   label: string;
   score: number;
   issues: Array<{ frameId: string; message: string }>;
@@ -110,7 +120,14 @@ export interface StoryboardPreviewConsistencyReport {
   checkedAt: string;
   overallScore: number;
   dimensions: StoryboardPreviewConsistencyDimension[];
+  /** 低于此分建议重生成（默认 80） */
+  threshold?: number;
+  /** 建议重生成的帧 id */
+  suggestRegenerateFrameIds?: string[];
 }
+
+/** 关键帧评分及格线：低于此分建议重新生成 */
+export const KEYFRAME_SCORE_THRESHOLD = 80;
 
 /** AI 自动计算帧数输入 */
 export interface StoryboardPreviewComputeInput {

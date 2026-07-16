@@ -432,7 +432,11 @@ function CanvasSettings() {
 
   const update = useCallback(
     (patch: Partial<CanvasAppearance>) => {
-      setCanvasAppearance({ ...canvasAppearance, ...patch });
+      const next = { ...canvasAppearance, ...patch };
+      setCanvasAppearance(next);
+      if (patch.theme) {
+        localStorage.setItem('nx9:canvas_theme', patch.theme);
+      }
     },
     [canvasAppearance, setCanvasAppearance],
   );
@@ -452,7 +456,7 @@ function CanvasSettings() {
     [update],
   );
 
-  const theme = canvasAppearance.theme || 'light';
+  const theme = canvasAppearance.theme || 'dark';
 
   return (
     <div className="space-y-4">
@@ -464,8 +468,9 @@ function CanvasSettings() {
 
       <div className="space-y-1">
         <p className="text-xs font-medium text-ink/60">主题模式</p>
+        <p className="text-[10px] text-ink/40">默认深色 desk · 浅色为暖纸新风格 · 全部节点同步</p>
         <div className="flex gap-1">
-          {(['light', 'dark'] as CanvasThemeMode[]).map((mode) => (
+          {(['dark', 'light'] as CanvasThemeMode[]).map((mode) => (
             <button
               key={mode}
               type="button"
@@ -476,7 +481,7 @@ function CanvasSettings() {
                   : 'border-line text-ink/60 hover:border-brand/30'
               }`}
             >
-              {mode === 'light' ? '浅色' : '深色'}
+              {mode === 'light' ? '浅色' : '深色（默认）'}
             </button>
           ))}
         </div>
@@ -496,7 +501,7 @@ function CanvasSettings() {
                   : 'border-line text-ink/60 hover:border-brand/30'
               }`}
             >
-              {style === 'dots' ? '点' : style === 'lines' ? '线' : '空白'}
+              {style === 'dots' ? '点阵' : style === 'lines' ? '线格' : '空白'}
             </button>
           ))}
         </div>
@@ -547,6 +552,9 @@ function CanvasSettings() {
               onChange={(e) => update({ backgroundImageOpacity: Number(e.target.value) / 100 })}
               className="flex-1 accent-brand"
             />
+            <span className="text-[10px] text-ink/40 tabular-nums w-8 text-right">
+              {Math.round((canvasAppearance.backgroundImageOpacity ?? 0.35) * 100)}%
+            </span>
           </div>
         )}
       </div>

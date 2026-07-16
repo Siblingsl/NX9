@@ -88,7 +88,19 @@ export const ATTACHED_WORKSPACE_REGISTRY: Record<string, AttachedWorkspaceSpec> 
     showRun: true,
     showPreview: true,
     phase: 'P1',
-    note: 'Video Proof · 分镜图网格 + 时间轴 + 单张编辑',
+    note: '已合并至 storyboard-desk',
+  },
+  'storyboard-desk': {
+    kind: 'storyboard-desk',
+    functionalClass: 'media-editor',
+    workspaceType: 'preview',
+    /** 自有 ScreenModal 分镜台，预览也可内嵌；底部工作区作兼容 */
+    attachToNode: false,
+    compactCanvas: false,
+    showRun: true,
+    showPreview: true,
+    phase: 'P1',
+    note: '分镜台：分镜表编辑 + 关键帧预览出图 + 顶部 exec-picture + 一致性评分',
   },
   'motion-story': {
     kind: 'motion-story',
@@ -155,11 +167,14 @@ export const ATTACHED_WORKSPACE_REGISTRY: Record<string, AttachedWorkspaceSpec> 
     kind: 'scene-card',
     functionalClass: 'resource-editor',
     workspaceType: 'editor',
+    /** 自有 ScreenModal 场记台，不走底部 Attached Workspace */
     attachToNode: false,
+    /** 必须 false：保留暗色场记表节点 UI */
     compactCanvas: false,
-    showRun: true,
+    showRun: false,
     showPreview: false,
     phase: 'P2',
+    note: '场景设定：画布暗色场记表 + ScreenModal 库/设定/参考',
   },
   'style-lab': {
     kind: 'style-lab',
@@ -174,13 +189,13 @@ export const ATTACHED_WORKSPACE_REGISTRY: Record<string, AttachedWorkspaceSpec> 
   'story-grid': {
     kind: 'story-grid',
     functionalClass: 'generation',
-    workspaceType: 'generation',
+    workspaceType: 'table',
     attachToNode: false,
     compactCanvas: false,
-    showRun: true,
+    showRun: false,
     showPreview: false,
     phase: 'P2',
-    note: '集数/分镜结构浏览器 · 点击分镜卡片就地弹出轻量编辑器',
+    note: '已合并至 storyboard-desk',
   },
   'prompt-studio': {
     kind: 'prompt-studio',
@@ -246,13 +261,14 @@ export const ATTACHED_WORKSPACE_REGISTRY: Record<string, AttachedWorkspaceSpec> 
   'director-desk': {
     kind: 'director-desk',
     functionalClass: 'generation',
-    workspaceType: 'editor',
-    attachToNode: true,
-    compactCanvas: true,
+    workspaceType: 'none',
+    /** 节点卡自包含批出队列，不挂底部工作区 */
+    attachToNode: false,
+    compactCanvas: false,
     showRun: true,
     showPreview: true,
-    phase: 'P3',
-    note: '多镜头，Editor 为主',
+    phase: 'P1',
+    note: '关键帧批生产：镜头队列 + 批量出图 + 写回故事板',
   },
   'thumbnail-maker': {
     kind: 'thumbnail-maker',
@@ -271,12 +287,26 @@ export const ATTACHED_WORKSPACE_REGISTRY: Record<string, AttachedWorkspaceSpec> 
     kind: 'character-sheet',
     functionalClass: 'resource-editor',
     workspaceType: 'editor',
+    /** 自有 ScreenModal 档案台，不走底部 Attached Workspace */
     attachToNode: false,
+    /** 必须 false：保留暗色迷你档案表节点 UI */
     compactCanvas: false,
     showRun: false,
     showPreview: false,
     phase: 'P3',
-    note: '禁止压成 Prompt',
+    note: '角色设定：画布暗色档案表 + ScreenModal 库/设定/参考',
+  },
+  'asset-gate': {
+    kind: 'asset-gate',
+    functionalClass: 'analysis-report',
+    workspaceType: 'report',
+    /** 自有 ScreenModal 门禁台 */
+    attachToNode: false,
+    compactCanvas: false,
+    showRun: false,
+    showPreview: false,
+    phase: 'P2',
+    note: '设定检查：画布暗色门禁表 + ScreenModal 总览/角色/场景',
   },
   'reference-board': {
     kind: 'reference-board',
@@ -292,11 +322,14 @@ export const ATTACHED_WORKSPACE_REGISTRY: Record<string, AttachedWorkspaceSpec> 
     kind: 'dialogue-sheet',
     functionalClass: 'resource-editor',
     workspaceType: 'table',
-    attachToNode: true,
-    compactCanvas: true,
+    /** 自有 ScreenModal 分镜台，不走底部 Attached Workspace */
+    attachToNode: false,
+    /** 必须 false：否则 StageDeck 用 CanvasNodeShell 盖掉暗色分镜表节点 UI */
+    compactCanvas: false,
     showRun: false,
     showPreview: false,
     phase: 'P3',
+    note: '剧本拆分：画布暗色迷你表 + ScreenModal 导演/文本/分镜表',
   },
   'voice-cast': {
     kind: 'voice-cast',
@@ -325,13 +358,13 @@ export const ATTACHED_WORKSPACE_REGISTRY: Record<string, AttachedWorkspaceSpec> 
   'director-3d': {
     kind: 'director-3d',
     functionalClass: 'media-editor',
-    workspaceType: 'preview',
-    attachToNode: true,
-    compactCanvas: true,
+    workspaceType: 'none',
+    attachToNode: false,
+    compactCanvas: false,
     showRun: false,
     showPreview: true,
     phase: 'P3',
-    note: '预览+机位',
+    note: '节点卡自含 + 全屏 3D 舞台，无底部工作区',
   },
   'mesh-viewer': {
     kind: 'mesh-viewer',
@@ -774,7 +807,7 @@ export function resolveAttachedWorkspace(kind: string): AttachedWorkspaceSpec | 
   return ATTACHED_WORKSPACE_REGISTRY[kind] ?? null;
 }
 
-/** Phase 1/2 已实现的工作区内容类型（P3 专属编辑器未就绪前不压成紧凑卡片） */
+/** 已实现屏幕弹窗工作区内容类型（功能在 AttachedWorkspaceRouter） */
 const IMPLEMENTED_WORKSPACE_TYPES = new Set<AttachedWorkspaceType>([
   'generation',
   'tool',
@@ -782,11 +815,19 @@ const IMPLEMENTED_WORKSPACE_TYPES = new Set<AttachedWorkspaceType>([
   'control',
   'task',
   'preview',
+  'table',
+  'config',
 ]);
 
-/** 是否使用紧凑画布 + 节点跟随工作区；否则保留完整 Block UI */
+/**
+ * 是否使用 L1 统一摘要卡（CanvasNodeShell）。
+ * 生成类等：摘要 + 底部工作区；完整表单不进画布卡。
+ * 见 docs/NX9-CANVAS-NODE-CONTRACT.md
+ */
 export function shouldUseCompactNodeShell(kind: string): boolean {
   const spec = resolveAttachedWorkspace(kind);
-  if (!spec?.attachToNode || !spec.compactCanvas) return false;
+  if (!spec?.attachToNode) return false;
+  if (spec.workspaceType === 'none') return false;
+  if (spec.compactCanvas) return true;
   return IMPLEMENTED_WORKSPACE_TYPES.has(spec.workspaceType);
 }

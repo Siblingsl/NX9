@@ -19,15 +19,21 @@ interface ContextRailProps {
   selectedBlockId: string | null;
 }
 
+function defaultProductionTab(): ContextRailTab {
+  if (isSurfaceEnabled('scriptStudio')) return 'script';
+  if (isSurfaceEnabled('storyboard')) return 'storyboard';
+  return 'inspector';
+}
+
 export function ContextRail({ selectedBlockId }: ContextRailProps) {
   const [collapsed, setCollapsed] = useState(false);
-  const [tab, setTab] = useState<ContextRailTab>('inspector');
+  const [tab, setTab] = useState<ContextRailTab>(() => defaultProductionTab());
   const [railWidth, setRailWidth] = useState(RAIL_DEFAULT);
   const requestedTab = useContextRailUi((s) => s.requestedTab);
   const clearRailRequest = useContextRailUi((s) => s.clearRequest);
   const theme = useWorkspaceDocument((s) => s.canvasAppearance.theme);
   const isDark = theme === 'dark';
-  const railBg = isDark ? 'bg-[#222]' : 'bg-white';
+  const railBg = isDark ? 'bg-[#222]' : 'bg-[#FFFCFA]';
   const railBorder = isDark ? 'border-white/10' : 'border-line';
 
   const hiddenTabs = useMemo((): ContextRailTab[] => {
@@ -71,7 +77,7 @@ export function ContextRail({ selectedBlockId }: ContextRailProps) {
 
   useEffect(() => {
     if (hiddenTabs.includes(tab)) {
-      setTab('inspector');
+      setTab(defaultProductionTab());
     }
   }, [hiddenTabs, tab]);
 
@@ -93,7 +99,7 @@ export function ContextRail({ selectedBlockId }: ContextRailProps) {
           type="button"
           onClick={() => setCollapsed(false)}
           className="p-1 rounded-lg hover:bg-surface text-ink/50"
-          title="展开属性栏"
+          title="展开制作侧栏（编剧 / 分镜）"
         >
           <ChevronLeft size={16} />
         </button>

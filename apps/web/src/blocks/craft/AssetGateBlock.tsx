@@ -1,10 +1,20 @@
-import { memo, useCallback, useMemo } from 'react';
-import { CheckCircle2, GitBranch, Loader2, MapPin, UserRound } from 'lucide-react';
+import { memo, useCallback, useMemo, useState } from 'react';
+import { Loader2, ShieldCheck } from 'lucide-react';
 import { type NodeProps, useReactFlow } from '@xyflow/react';
 import type { ScriptBreakdownPayload } from '@nx9/shared';
 import { BlockShell } from '../shared/BlockShell';
+import { ScreenModal } from '../../components/ui/ScreenModal';
 import { useActivityLog } from '../../stores/activity-log';
 import { inspectBreakdownAssets, syncBreakdownAssets } from '../../engine/asset-gate-runner';
+import './asset-gate.css';
+
+/** 总览 · 角色清单 · 场景清单 */
+type StudioTab = 'overview' | 'characters' | 'scenes';
+
+function compact(text: string, max = 28) {
+  const t = text.replace(/\s+/g, ' ').trim();
+  return t.length > max ? `${t.slice(0, max)}…` : t;
+}
 
 function useUpstreamBreakdown(blockId: string): ScriptBreakdownPayload | undefined {
   const { getEdges, getNodes } = useReactFlow();
@@ -13,33 +23,55 @@ function useUpstreamBreakdown(blockId: string): ScriptBreakdownPayload | undefin
     const byId = new Map(nodes.map((node) => [node.id, node]));
     const incoming = getEdges().filter((edge) => edge.target === blockId);
     for (const edge of incoming) {
-      const payload = (byId.get(edge.source)?.data as Record<string, unknown> | undefined)?.scriptBreakdown as ScriptBreakdownPayload | undefined;
+      const payload = (byId.get(edge.source)?.data as Record<string, unknown> | undefined)
+        ?.scriptBreakdown as ScriptBreakdownPayload | undefined;
       if (payload?.version === 1) return payload;
     }
     return undefined;
   }, [blockId, getEdges, getNodes]);
 }
 
-function compactList(items: string[], fallback: string) {
-  if (items.length === 0) return fallback;
-  return items.slice(0, 3).join('、') + (items.length > 3 ? ` 等 ${items.length} 项` : '');
-}
-
 function AssetGateBlock(props: NodeProps) {
   const { updateNodeData } = useReactFlow();
   const appendLog = useActivityLog((state) => state.append);
+  const [studioOpen, setStudioOpen] = useState(false);
+  const [studioTab, setStudioTab] = useState<StudioTab>('overview');
   const upstream = useUpstreamBreakdown(props.id);
   const local = props.data?.scriptBreakdown as ScriptBreakdownPayload | undefined;
   const payload = upstream ?? local;
   const status = (props.data?.status as string | undefined) ?? 'idle';
-  const report = useMemo(() => payload ? inspectBreakdownAssets(payload) : null, [payload]);
+  const liveReport = useMemo(() => (payload ? inspectBreakdownAssets(payload) : null), [payload]);
   const lastGate = props.data?.assetGate as {
     missingCharacters?: string[];
     missingScenes?: string[];
     syncedCharacters?: number;
     syncedScenes?: number;
     checkedAt?: string;
+    requiredCharacters?: string[];
+    requiredScenes?: string[];
   } | undefined;
+
+  const requiredCharacters = lastGate?.requiredCharacters
+    ?? liveReport?.requiredCharacters
+    ?? [];
+  const requiredScenes = lastGate?.requiredScenes
+    ?? liveReport?.requiredScenes
+    ?? [];
+  // 实时缺口优先用 live inspect，保证库变更后卡面立刻更新
+  const missingCharacters = liveReport?.missingCharacters
+    ?? lastGate?.missingCharacters
+    ?? [];
+  const missingScenes = liveReport?.missingScenes
+    ?? lastGate?.missingScenes
+    ?? [];
+  const charN = requiredCharacters.length || (liveReport?.requiredCharacters.length ?? 0);
+  const sceneN = requiredScenes.length || (liveReport?.requiredScenes.length ?? 0);
+  const missC = missingCharacters.length;
+  const missS = missingScenes.length;
+  const hasChecked = Boolean(lastGate?.checkedAt) || status === 'success';
+  const passed = hasChecked && missC === 0 && missS === 0 && Boolean(payload);
+  const syncedC = lastGate?.syncedCharacters ?? 0;
+  const syncedS = lastGate?.syncedScenes ?? 0;
 
   const runCheck = useCallback(() => {
     if (!payload) {
@@ -55,74 +87,464 @@ function AssetGateBlock(props: NodeProps) {
       assetGate: {
         missingCharacters: result.missingCharacters,
         missingScenes: result.missingScenes,
+        requiredCharacters: result.requiredCharacters,
+        requiredScenes: result.requiredScenes,
         syncedCharacters: result.syncedCharacters,
         syncedScenes: result.syncedScenes,
         checkedAt: new Date().toISOString(),
       },
       content: `设定检查完成 · 角色 ${result.requiredCharacters.length} / 场景 ${result.requiredScenes.length}`,
-      output: payload.episodes.flatMap((episode) => episode.shots.map((shot) => shot.imagePrompt)).join('\n\n'),
+      output: payload.episodes
+        .flatMap((episode) => episode.shots.map((shot) => shot.imagePrompt))
+        .join('\n\n'),
       meta: {
         requiredCharacters: result.requiredCharacters.length,
         requiredScenes: result.requiredScenes.length,
         missingCharacters: result.missingCharacters.length,
         missingScenes: result.missingScenes.length,
+        syncedCharacters: result.syncedCharacters,
+        syncedScenes: result.syncedScenes,
       },
     });
     appendLog(`设定检查完成 · 新角色 ${result.syncedCharacters} / 新场景 ${result.syncedScenes}`);
+    setStudioTab(result.missingCharacters.length ? 'characters'
+      : result.missingScenes.length ? 'scenes'
+        : 'overview');
+    setStudioOpen(true);
   }, [appendLog, payload, props.id, updateNodeData]);
 
-  const missingCharacters = lastGate?.missingCharacters ?? report?.missingCharacters ?? [];
-  const missingScenes = lastGate?.missingScenes ?? report?.missingScenes ?? [];
-  const passed = Boolean(payload) && missingCharacters.length === 0 && missingScenes.length === 0;
+  const openStudio = useCallback(() => {
+    setStudioOpen(true);
+    if (!payload) setStudioTab('overview');
+  }, [payload]);
+
+  const cardStatusText = !payload
+    ? '待接拆分'
+    : status === 'running'
+      ? '检查中'
+      : passed
+        ? '可放行'
+        : hasChecked
+          ? `缺口 ${missC + missS}`
+          : '待检查';
+  const cardStatusClass = !payload
+    ? ''
+    : status === 'running'
+      ? 'is-run'
+      : passed
+        ? 'is-ready'
+        : hasChecked
+          ? 'is-warn'
+          : '';
+
+  const miniRows = useMemo(() => {
+    if (!payload) return [];
+    return [
+      {
+        code: '角',
+        title: charN ? `${charN} 个角色` : '未识别角色',
+        detail: missC ? `缺 ${missC}` : charN ? '库内齐' : '—',
+        tone: missC ? 'warn' as const : charN ? 'ok' as const : 'todo' as const,
+      },
+      {
+        code: '场',
+        title: sceneN ? `${sceneN} 个场景` : '未识别场景',
+        detail: missS ? `缺 ${missS}` : sceneN ? '库内齐' : '—',
+        tone: missS ? 'warn' as const : sceneN ? 'ok' as const : 'todo' as const,
+      },
+      {
+        code: '门',
+        title: passed ? '放行分镜网格' : hasChecked ? '需补齐资产' : '等待检查',
+        detail: hasChecked ? (passed ? '通过' : '阻断') : '未跑',
+        tone: passed ? 'ok' as const : hasChecked ? 'warn' as const : 'todo' as const,
+      },
+    ];
+  }, [charN, hasChecked, missC, missS, passed, payload, sceneN]);
+
+  const charRows = useMemo(() => {
+    const names = requiredCharacters.length
+      ? requiredCharacters
+      : (liveReport?.requiredCharacters ?? []);
+    const miss = new Set(missingCharacters);
+    return names.map((name) => ({
+      name,
+      ok: !miss.has(name),
+      status: miss.has(name) ? '缺口' : '已有',
+      tone: (miss.has(name) ? 'warn' : 'ok') as 'warn' | 'ok',
+    }));
+  }, [liveReport?.requiredCharacters, missingCharacters, requiredCharacters]);
+
+  const sceneRows = useMemo(() => {
+    const names = requiredScenes.length
+      ? requiredScenes
+      : (liveReport?.requiredScenes ?? []);
+    const miss = new Set(missingScenes);
+    return names.map((name) => ({
+      name,
+      ok: !miss.has(name),
+      status: miss.has(name) ? '缺口' : '已有',
+      tone: (miss.has(name) ? 'warn' : 'ok') as 'warn' | 'ok',
+    }));
+  }, [liveReport?.requiredScenes, missingScenes, requiredScenes]);
 
   return (
-    <BlockShell {...props}>
-      <div className="w-[300px] space-y-2 nodrag nopan text-xs">
-        <div className="rounded-xl border border-line/50 bg-white p-2.5">
-          <div className="flex items-start gap-2">
-            <div className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-brand/10 text-brand">
-              <GitBranch size={16} />
-            </div>
-            <div className="min-w-0 flex-1">
-              <p className="text-[13px] font-semibold text-ink">设定检查</p>
-              <p className="mt-0.5 text-[10px] leading-relaxed text-ink/45">检查新角色 / 新场景，补齐资产后放行到分镜网格</p>
-            </div>
-            {status === 'running' ? <Loader2 size={14} className="animate-spin text-brand" /> : passed ? <CheckCircle2 size={15} className="text-ok" /> : null}
+    <div className="relative">
+      <BlockShell {...props}>
+        <div className="ag ag-card nodrag nopan">
+          <div className="ag-card__toolbar">
+            <span className={`ag-card__status ${cardStatusClass}`}>{cardStatusText}</span>
+            <span className="ag-card__counts">
+              角 <b>{charN}</b>
+              {' · '}
+              场 <b>{sceneN}</b>
+            </span>
           </div>
-        </div>
 
-        <div className="grid grid-cols-2 gap-2">
-          <div className="rounded-xl border border-line/45 bg-surface/35 p-2">
-            <div className="mb-1 flex items-center gap-1 text-[10px] font-medium text-ink/55"><UserRound size={11} />角色</div>
-            <p className="text-[16px] font-semibold text-ink">{report?.requiredCharacters.length ?? 0}</p>
-            <p className={`mt-0.5 text-[9px] ${missingCharacters.length ? 'text-warn' : 'text-ok'}`}>
-              {missingCharacters.length ? `新增 ${missingCharacters.length}` : '已齐'}
+          <button
+            type="button"
+            className="ag-mini"
+            onClick={openStudio}
+            title="打开设定检查台"
+          >
+            {payload ? (
+              <>
+                <div className="ag-mini__head ag-mini__head--roster">
+                  <span>项</span>
+                  <span>内容</span>
+                  <span>状态</span>
+                </div>
+                {miniRows.map((row) => (
+                  <div key={row.code} className="ag-mini__row ag-mini__row--roster">
+                    <span className="is-code" style={{ color: 'var(--ag-accent)', fontWeight: 650 }}>
+                      {row.code}
+                    </span>
+                    <span className="is-title">{row.title}</span>
+                    <span className={`ag-mini__badge is-${row.tone}`}>{row.detail}</span>
+                  </div>
+                ))}
+              </>
+            ) : (
+              <div className="ag-mini__empty">
+                等待上游剧本拆分
+                <br />
+                连接后检查角色 / 场景缺口
+              </div>
+            )}
+          </button>
+
+          {payload && (missC > 0 || missS > 0) ? (
+            <p className="ag-card__hint is-warn">
+              {missC > 0 ? `缺 ${missC} 角色` : ''}
+              {missC > 0 && missS > 0 ? ' · ' : ''}
+              {missS > 0 ? `缺 ${missS} 场景` : ''}
+              {' · 检查并同步可入库'}
             </p>
+          ) : null}
+
+          <div className="ag-card__actions">
+            <button
+              type="button"
+              className="ag-btn ag-btn--ghost"
+              onClick={(e) => {
+                e.stopPropagation();
+                openStudio();
+              }}
+            >
+              报告
+            </button>
+            <button
+              type="button"
+              className="ag-btn ag-btn--primary"
+              disabled={status === 'running' || !payload}
+              onClick={(e) => {
+                e.stopPropagation();
+                runCheck();
+              }}
+            >
+              {status === 'running' ? (
+                <>
+                  <Loader2 size={12} className="animate-spin" /> 检查中
+                </>
+              ) : payload ? (
+                '检查'
+              ) : (
+                '等待拆分'
+              )}
+            </button>
           </div>
-          <div className="rounded-xl border border-line/45 bg-surface/35 p-2">
-            <div className="mb-1 flex items-center gap-1 text-[10px] font-medium text-ink/55"><MapPin size={11} />场景</div>
-            <p className="text-[16px] font-semibold text-ink">{report?.requiredScenes.length ?? 0}</p>
-            <p className={`mt-0.5 text-[9px] ${missingScenes.length ? 'text-warn' : 'text-ok'}`}>
-              {missingScenes.length ? `新增 ${missingScenes.length}` : '已齐'}
+        </div>
+      </BlockShell>
+
+      <ScreenModal
+        open={studioOpen}
+        onClose={() => setStudioOpen(false)}
+        title="设定检查 · 门禁台"
+        subtitle="角色 / 场景缺口 · 同步入库 · 放行分镜"
+        width={920}
+        variant="default"
+        className="ag-modal"
+      >
+        <div className="ag ag-studio">
+          <div className="ag-studio__tabs" role="tablist">
+            {(
+              [
+                { id: 'overview' as const, label: '总览' },
+                { id: 'characters' as const, label: '角色' },
+                { id: 'scenes' as const, label: '场景' },
+              ] as const
+            ).map((tab) => (
+              <button
+                key={tab.id}
+                type="button"
+                role="tab"
+                className={`ag-studio__tab ${studioTab === tab.id ? 'is-on' : ''}`}
+                onClick={() => setStudioTab(tab.id)}
+              >
+                {tab.label}
+                {tab.id === 'characters' && charN ? ` · ${charN}` : ''}
+                {tab.id === 'scenes' && sceneN ? ` · ${sceneN}` : ''}
+                {tab.id === 'characters' && missC ? ` · 缺${missC}` : ''}
+                {tab.id === 'scenes' && missS ? ` · 缺${missS}` : ''}
+              </button>
+            ))}
+          </div>
+
+          <div className="ag-studio__body">
+            <div className="ag-stats">
+              <div className="ag-stats__cell">
+                <span className="ag-stats__val">{charN}</span>
+                <span className="ag-stats__lab">角色需求</span>
+              </div>
+              <div className="ag-stats__cell">
+                <span className="ag-stats__val" style={missC ? { color: 'var(--ag-warn)' } : undefined}>
+                  {missC}
+                </span>
+                <span className="ag-stats__lab">角色缺口</span>
+              </div>
+              <div className="ag-stats__cell">
+                <span className="ag-stats__val">{sceneN}</span>
+                <span className="ag-stats__lab">场景需求</span>
+              </div>
+              <div className="ag-stats__cell">
+                <span className="ag-stats__val" style={missS ? { color: 'var(--ag-warn)' } : undefined}>
+                  {missS}
+                </span>
+                <span className="ag-stats__lab">场景缺口</span>
+              </div>
+            </div>
+
+            {!payload && (
+              <p className="ag-warn">
+                请先连接上游「剧本拆分」节点（需已有拆分结果），再运行检查。
+              </p>
+            )}
+
+            {payload && hasChecked && passed && (
+              <p className="ag-session-bar" style={{ borderColor: 'rgba(143,184,154,0.35)' }}>
+                <ShieldCheck size={14} style={{ color: 'var(--ag-ok)' }} />
+                门禁通过 · 角色 / 场景已齐，可放行分镜网格
+                {syncedC || syncedS
+                  ? ` · 本轮同步 角色 ${syncedC} / 场景 ${syncedS}`
+                  : ''}
+              </p>
+            )}
+
+            {payload && (missC > 0 || missS > 0) && (
+              <p className="ag-warn">
+                存在资产缺口。点「检查并同步」可将拆分候选写入角色库 / 场景库。
+              </p>
+            )}
+
+            {studioTab === 'overview' && (
+              <>
+                <div className="ag-panel">
+                  <div className="ag-panel__head">
+                    <h3 className="ag-panel__title">门禁摘要</h3>
+                    <span className="ag-panel__meta">
+                      {payload?.title ? compact(payload.title, 24) : '无拆分标题'}
+                    </span>
+                  </div>
+                  <div className="ag-mini" style={{ cursor: 'default' }}>
+                    <div className="ag-mini__head ag-mini__head--roster">
+                      <span>维度</span>
+                      <span>需求</span>
+                      <span>判定</span>
+                    </div>
+                    <div className="ag-mini__row ag-mini__row--roster">
+                      <span className="is-title">角色库</span>
+                      <span>{charN} 个</span>
+                      <span className={`ag-mini__badge is-${missC ? 'warn' : charN ? 'ok' : 'todo'}`}>
+                        {missC ? `缺 ${missC}` : charN ? '齐' : '—'}
+                      </span>
+                    </div>
+                    <div className="ag-mini__row ag-mini__row--roster">
+                      <span className="is-title">场景库</span>
+                      <span>{sceneN} 个</span>
+                      <span className={`ag-mini__badge is-${missS ? 'warn' : sceneN ? 'ok' : 'todo'}`}>
+                        {missS ? `缺 ${missS}` : sceneN ? '齐' : '—'}
+                      </span>
+                    </div>
+                    <div className="ag-mini__row ag-mini__row--roster">
+                      <span className="is-title">分镜放行</span>
+                      <span>{hasChecked ? '已检查' : '未检查'}</span>
+                      <span className={`ag-mini__badge is-${passed ? 'ok' : hasChecked ? 'warn' : 'todo'}`}>
+                        {passed ? '可放行' : hasChecked ? '阻断' : '待命'}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                {(missC > 0 || missS > 0) && (
+                  <div className="ag-panel">
+                    <div className="ag-panel__head">
+                      <h3 className="ag-panel__title">当前缺口速览</h3>
+                    </div>
+                    {missC > 0 && (
+                      <p className="ag-lib-meta" style={{ marginBottom: 8 }}>
+                        角色：{missingCharacters.slice(0, 8).join('、')}
+                        {missC > 8 ? ` 等 ${missC} 人` : ''}
+                      </p>
+                    )}
+                    {missS > 0 && (
+                      <p className="ag-lib-meta">
+                        场景：{missingScenes.slice(0, 8).join('、')}
+                        {missS > 8 ? ` 等 ${missS} 场` : ''}
+                      </p>
+                    )}
+                  </div>
+                )}
+
+                {hasChecked && (
+                  <div className="ag-panel">
+                    <div className="ag-panel__head">
+                      <h3 className="ag-panel__title">最近一次同步</h3>
+                      <span className="ag-panel__meta">
+                        {lastGate?.checkedAt
+                          ? new Date(lastGate.checkedAt).toLocaleString()
+                          : '—'}
+                      </span>
+                    </div>
+                    <p className="ag-lib-meta">
+                      新入库角色 {syncedC} · 新入库场景 {syncedS}
+                    </p>
+                  </div>
+                )}
+              </>
+            )}
+
+            {studioTab === 'characters' && (
+              <>
+                <div className="ag-panel__head" style={{ marginBottom: 10 }}>
+                  <h3 className="ag-panel__title">角色清单</h3>
+                  <span className="ag-panel__meta">
+                    需求 {charRows.length} · 缺口 {missC}
+                  </span>
+                </div>
+                {charRows.length === 0 ? (
+                  <div className="ag-empty">
+                    {payload ? '拆分结果中未识别到角色' : '等待剧本拆分'}
+                  </div>
+                ) : (
+                  <ul className="ag-lib-list">
+                    {charRows.map((row) => (
+                      <li key={row.name}>
+                        <div className={`ag-lib-item ${row.ok ? '' : 'is-on'}`} style={{ cursor: 'default' }}>
+                          <span className="ag-lib-body">
+                            <span className="ag-lib-name">{row.name}</span>
+                            <span className="ag-lib-meta">
+                              {row.ok ? '角色库已有 · 可跨镜保持一致' : '库内缺失 · 同步后可去角色设定完善'}
+                            </span>
+                          </span>
+                          <span className={`ag-mini__badge is-${row.tone}`}>{row.status}</span>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </>
+            )}
+
+            {studioTab === 'scenes' && (
+              <>
+                <div className="ag-panel__head" style={{ marginBottom: 10 }}>
+                  <h3 className="ag-panel__title">场景清单</h3>
+                  <span className="ag-panel__meta">
+                    需求 {sceneRows.length} · 缺口 {missS}
+                  </span>
+                </div>
+                {sceneRows.length === 0 ? (
+                  <div className="ag-empty">
+                    {payload ? '拆分结果中未识别到场景' : '等待剧本拆分'}
+                  </div>
+                ) : (
+                  <ul className="ag-lib-list">
+                    {sceneRows.map((row) => (
+                      <li key={row.name}>
+                        <div className={`ag-lib-item ${row.ok ? '' : 'is-on'}`} style={{ cursor: 'default' }}>
+                          <span className="ag-lib-body">
+                            <span className="ag-lib-name">{row.name}</span>
+                            <span className="ag-lib-meta">
+                              {row.ok ? '场景库已有 · 空间锚点可复用' : '库内缺失 · 同步后可去场景设定完善'}
+                            </span>
+                          </span>
+                          <span className={`ag-mini__badge is-${row.tone}`}>{row.status}</span>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </>
+            )}
+          </div>
+
+          <div className="ag-studio__foot">
+            <p className="ag-studio__foot-hint">
+              {!payload
+                ? '连接剧本拆分后，可核对角色 / 场景是否入库'
+                : passed
+                  ? '门禁通过 · 可进入分镜网格生产'
+                  : `角色缺口 ${missC} · 场景缺口 ${missS} · 同步后写入库`}
             </p>
+            <div className="ag-studio__foot-actions">
+              {studioTab === 'overview' && missC > 0 ? (
+                <button
+                  type="button"
+                  className="ag-btn ag-btn--ghost"
+                  onClick={() => setStudioTab('characters')}
+                >
+                  看角色
+                </button>
+              ) : null}
+              {studioTab === 'overview' && missS > 0 ? (
+                <button
+                  type="button"
+                  className="ag-btn ag-btn--ghost"
+                  onClick={() => setStudioTab('scenes')}
+                >
+                  看场景
+                </button>
+              ) : null}
+              <button
+                type="button"
+                className="ag-btn ag-btn--primary"
+                disabled={status === 'running' || !payload}
+                onClick={runCheck}
+              >
+                {status === 'running' ? (
+                  <>
+                    <Loader2 size={13} className="animate-spin" /> 检查中
+                  </>
+                ) : (
+                  <>
+                    <ShieldCheck size={13} /> 检查并同步
+                  </>
+                )}
+              </button>
+            </div>
           </div>
         </div>
-
-        <div className="rounded-xl border border-line/40 bg-white p-2 text-[10px] leading-relaxed text-ink/55">
-          <p><span className="text-ink/35">新角色：</span>{compactList(missingCharacters, '无')}</p>
-          <p className="mt-1"><span className="text-ink/35">新场景：</span>{compactList(missingScenes, '无')}</p>
-        </div>
-
-        <button
-          type="button"
-          onClick={runCheck}
-          disabled={status === 'running' || !payload}
-          className="w-full rounded-lg bg-brand px-3 py-2 text-[12px] font-medium text-white disabled:bg-ink/10 disabled:text-ink/35"
-        >
-          {payload ? '检查并同步设定' : '等待剧本拆分'}
-        </button>
-      </div>
-    </BlockShell>
+      </ScreenModal>
+    </div>
   );
 }
 

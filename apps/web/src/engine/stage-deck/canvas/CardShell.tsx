@@ -5,6 +5,7 @@ import { Loader2 } from 'lucide-react';
 import { useViewMode } from '../stores/view-mode';
 import { shouldCollapseCards } from '../modes/produce-mode';
 import { formatPendingElapsed } from '../execution/pending-take';
+import '../../../styles/node-stage-card.css';
 
 interface CardShellProps extends NodeProps {
   children: React.ReactNode;
@@ -29,7 +30,7 @@ function SocketHandle({
       type={type}
       position={type === 'target' ? Position.Left : Position.Right}
       id={id ?? kind}
-      className="nx9-socket !w-2.5 !h-2.5 !border-2 !border-white"
+      className="nx9-socket !w-2.5 !h-2.5 !border-2 !border-[#1a1d24]"
       style={{ background: SOCKET_COLORS[kind] }}
     />
   );
@@ -64,6 +65,7 @@ export const CardShell = memo(function CardShell({
   const displayName = alias || meta?.label || type;
   const thumb = thumbFromData(data as Record<string, unknown>);
   const hideSocketInProduce = mode === 'produce';
+  const accent = meta?.accent ?? 'var(--nx9-accent, #2dd4bf)';
 
   const [, setTick] = useState(0);
   useEffect(() => {
@@ -79,43 +81,41 @@ export const CardShell = memo(function CardShell({
   }, [highlightUntil]);
 
   const shellOpacity = dimmed ? 0.35 : 1;
+  const statusClass =
+    status === 'running'
+      ? 'is-running'
+      : status === 'done' || status === 'success'
+        ? 'is-done'
+        : status === 'error' || status === 'blocked' || status === 'stale'
+          ? 'is-error'
+          : '';
 
   if (collapsed) {
     return (
       <div
-        className={`w-[180px] rounded-2xl border bg-white shadow-panel transition-all nowheel ${
-          selected ? 'border-brand ring-2 ring-brand/20' : 'border-line'
-        } ${status === 'running' ? 'nx9-card-pending' : ''} ${status === 'stale' ? 'nx9-card-stale' : ''} ${highlighted ? 'nx9-card-highlight' : ''}`}
-        style={{ opacity: shellOpacity }}
-        title="双击展开完整表单"
+        className={`nx9-stage-card nowheel ${selected ? 'is-selected' : ''} ${
+          status === 'running' ? 'is-running' : ''
+        } ${highlighted ? 'nx9-card-highlight' : ''}`}
+        style={{ opacity: shellOpacity, width: 200, minWidth: 200 }}
+        title="双击展开"
       >
-        <div className="p-2 space-y-2">
-          <div className="flex items-center gap-2">
-            <span
-              className="w-2 h-2 rounded-full shrink-0"
-              style={{ background: meta?.accent ?? '#5E4D8A' }}
-            />
-            <span className="text-xs font-semibold text-ink truncate flex-1">{displayName}</span>
-            {status === 'running' && pendingSince && (
-              <span className="text-[9px] font-mono text-brand bg-brand/10 px-1 rounded">
-                {formatPendingElapsed(pendingSince)}
-              </span>
-            )}
-            {status === 'running' && !pendingSince && (
-              <Loader2 size={12} className="animate-spin text-brand" />
-            )}
-            {status === 'done' && <span className="w-2 h-2 rounded-full bg-ok" />}
-            {status === 'blocked' && <span className="w-2 h-2 rounded-full bg-warn" title="审阅关卡阻塞" />}
-            {status === 'stale' && <span className="w-2 h-2 rounded-full bg-warn" title="上游已变更" />}
-            {status === 'error' && <span className="w-2 h-2 rounded-full bg-warn" />}
-          </div>
-          <div className="aspect-video rounded-xl bg-surface overflow-hidden border border-line/60">
+        <div className="nx9-stage-card__accent" style={{ background: accent }} aria-hidden />
+        <div className="nx9-stage-card__head">
+          <span className="nx9-stage-card__title">{displayName}</span>
+          {status === 'running' && pendingSince ? (
+            <span className="nx9-stage-card__badge">{formatPendingElapsed(pendingSince)}</span>
+          ) : status === 'running' ? (
+            <Loader2 size={12} className="animate-spin text-teal-300" />
+          ) : (
+            <span className={`nx9-stage-card__status ${statusClass}`} />
+          )}
+        </div>
+        <div className="nx9-stage-card__body">
+          <div className="nx9-stage-card__media" style={{ marginBottom: 0 }}>
             {thumb ? (
-              <img src={thumb} alt="" className="w-full h-full object-cover" />
+              <img src={thumb} alt="" draggable={false} />
             ) : (
-              <div className="w-full h-full flex items-center justify-center text-[10px] text-ink/30">
-                {meta?.label ?? '模块'}
-              </div>
+              <div className="nx9-stage-card__media-empty">{meta?.label ?? '模块'}</div>
             )}
           </div>
         </div>
@@ -125,25 +125,21 @@ export const CardShell = memo(function CardShell({
 
   return (
     <div
-      className={`min-w-[220px] max-w-[360px] rounded-2xl border bg-white shadow-panel transition-shadow nowheel ${
-        selected ? 'border-brand ring-2 ring-brand/20' : 'border-line'
-      } ${status === 'stale' ? 'nx9-card-stale' : ''} ${highlighted ? 'nx9-card-highlight' : ''}`}
-      style={{ opacity: shellOpacity }}
+      className={`nx9-stage-card nowheel ${selected ? 'is-selected' : ''} ${
+        highlighted ? 'nx9-card-highlight' : ''
+      }`}
+      style={{ opacity: shellOpacity, maxWidth: 320, width: 'auto', minWidth: 220 }}
     >
-      <div className="flex items-center gap-2 px-3 py-2 border-b border-line bg-surface/80 rounded-t-2xl cursor-grab active:cursor-grabbing">
-        <span
-          className="w-2 h-2 rounded-full shrink-0"
-          style={{ background: meta?.accent ?? '#5E4D8A' }}
-        />
-        <span className="text-sm font-semibold text-ink truncate flex-1">{displayName}</span>
-        {status === 'running' && <Loader2 size={14} className="animate-spin text-brand" />}
-        {status === 'done' && <span className="w-2 h-2 rounded-full bg-ok" />}
-        {status === 'blocked' && <span className="w-2 h-2 rounded-full bg-warn" title="审阅关卡阻塞" />}
-        {status === 'stale' && <span className="w-2 h-2 rounded-full bg-warn" title="上游已变更" />}
-        {status === 'error' && <span className="w-2 h-2 rounded-full bg-warn" />}
+      <div className="nx9-stage-card__accent" style={{ background: accent }} aria-hidden />
+      <div className="nx9-stage-card__head">
+        <span className="nx9-stage-card__title">{displayName}</span>
+        {status === 'running' ? (
+          <Loader2 size={13} className="animate-spin text-teal-300" />
+        ) : (
+          <span className={`nx9-stage-card__status ${statusClass}`} />
+        )}
       </div>
-
-      <div className="relative px-3 py-3 nodrag nopan nowheel">
+      <div className="nx9-stage-card__body nodrag nopan nowheel nx9-stage-card-fallback">
         {accepts.map((kind) => (
           <SocketHandle
             key={`in-${kind}`}

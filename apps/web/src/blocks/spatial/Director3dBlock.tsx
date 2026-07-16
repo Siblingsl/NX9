@@ -1,80 +1,184 @@
-import { memo, useCallback } from 'react';
-import { type NodeProps, useReactFlow } from '@xyflow/react';
-import { Box, Image } from 'lucide-react';
+import { memo, useCallback, useMemo } from 'react';
+import { type NodeProps, useReactFlow, useStore } from '@xyflow/react';
+import { Box, ExternalLink, Image as ImageIcon } from 'lucide-react';
 import {
-  emptyDirectorProject,
-  normalizeDirectorProject,
-  type DirectorProject,
-} from '@nx9/director3d';
+  emptyStoryboardPreview,
+  resolveConnectedStoryboardPreviewForDirector3dId,
+  type StoryboardPreviewPayload,
+} from '@nx9/shared';
+import { normalizeDirectorProject } from '@nx9/director3d';
 import { BlockShell } from '../shared/BlockShell';
-import { useDirector3dUi } from '../../stores/director3d-ui';
-import { useWorkspaceDocument } from '../../stores/workspace-document';
+import { openDirector3dStage } from '../../engine/director3d-open';
+import './director-3d.css';
 
 function Director3dBlock(props: NodeProps) {
-  const openForBlock = useDirector3dUi((s) => s.openForBlock);
-  const setHostBridge = useDirector3dUi((s) => s.setHostBridge);
-  const storyboardShots = useWorkspaceDocument((s) => s.storyboard.shots);
-  const project = normalizeDirectorProject(props.data?.scene);
-  const linkedShotId = props.data?.linkedShotId as string | undefined;
-  const lastCaptureUrl = props.data?.lastCaptureUrl as string | undefined;
-  const activeCam = project.cameras.find((c) => c.id === project.activeCameraId);
-  const captureCount = project.cameras.reduce((n, c) => n + c.captures.length, 0);
+  const nodes = useStore((s) => s.nodes);
+  const edges = useStore((s) => s.edges);
+  const { updateNodeData } = useReactFlow();
 
-  const linkedShot = linkedShotId ? storyboardShots.find((s) => s.id === linkedShotId) : undefined;
-  const lineArtUrl = linkedShot?.firstFrameAssetId;
+  const data = (props.data ?? {}) as Record<string, unknown>;
+  const project = useMemo(() => normalizeDirectorProject(data.scene), [data.scene]);
+  const lastCaptureUrl = data.lastCaptureUrl as string | undefined;
+  const lastCameraPrompt = data.lastCameraPrompt as string | undefined;
 
-  const open = useCallback(() => {
-    const base = lineArtUrl
-      ? { ...project, panorama: { url: lineArtUrl, yaw: 0, exposure: 1 } }
-      : project;
-    openForBlock(props.id, base, linkedShotId);
-    if (lineArtUrl) setHostBridge(lineArtUrl);
-  }, [openForBlock, setHostBridge, props.id, project, linkedShotId, lineArtUrl]);
+  const previewBlockId = useMemo(
+    () => resolveConnectedStoryboardPreviewForDirector3dId(props.id, nodes, edges),
+    [props.id, nodes, edges],
+  );
+
+  const previewNode = previewBlockId
+    ? nodes.find((item) => item.id === previewBlockId)
+    : undefined;
+  const previewPayload = useMemo(() => {
+    const raw = (previewNode?.data as Record<string, unknown> | undefined)
+      ?.storyboardPreview as StoryboardPreviewPayload | undefined;
+    if (raw?.version === 1 && Array.isArray(raw.frames)) {
+      return { ...emptyStoryboardPreview(), ...raw };
+    }
+    return emptyStoryboardPreview();
+  }, [previewNode?.data]);
+
+  const linkedFrameId =
+    (data.linkedStoryboardPreviewFrameId as string | undefined) ??
+    previewPayload.selectedFrameId ??
+    null;
+  const linkedFrame = previewPayload.frames.find((frame) => frame.id === linkedFrameId);
+
+  const previewUrl =
+    lastCaptureUrl ??
+    linkedFrame?.director3dGuide?.captureUrl ??
+    linkedFrame?.imageUrl ??
+    linkedFrame?.referenceImageUrl ??
+    undefined;
+
+  const captureCount = project.cameras.reduce(
+    (total, camera) => total + camera.captures.length,
+    0,
+  );
+  const characterCount = project.objects.filter((o) => o.kind === 'character').length;
+  const cameraPrompt =
+    linkedFrame?.director3dGuide?.cameraPrompt ??
+    lastCameraPrompt ??
+    project.cameras
+      .find((c) => c.id === project.activeCameraId)
+      ?.captures.slice(-1)[0]?.cameraPrompt;
+
+  const selectFrame = useCallback(
+    (frameId: string) => {
+      updateNodeData(props.id, {
+        linkedStoryboardPreviewId: previewBlockId ?? null,
+        linkedStoryboardPreviewFrameId: frameId || null,
+      });
+      if (!previewBlockId) return;
+      updateNodeData(previewBlockId, {
+        storyboardPreview: {
+          ...previewPayload,
+          selectedFrameId: frameId || null,
+        },
+      });
+    },
+    [props.id, previewBlockId, previewPayload, updateNodeData],
+  );
+
+  const openStage = useCallback(() => {
+    openDirector3dStage({
+      blockId: props.id,
+      nodes,
+      edges,
+      updateNodeData: (id, patch) => updateNodeData(id, patch),
+      frameIdOverride: linkedFrameId,
+    });
+  }, [props.id, nodes, edges, updateNodeData, linkedFrameId]);
+
+  const sortedFrames = useMemo(
+    () => [...previewPayload.frames].sort((a, b) => a.order - b.order),
+    [previewPayload.frames],
+  );
 
   return (
     <BlockShell {...props}>
-      <div className="space-y-2 text-sm">
-        <div className="rounded-xl border border-line bg-surface/80 aspect-video flex flex-col items-center justify-center gap-2 text-ink/40 overflow-hidden">
-          {lastCaptureUrl ? (
-            <img
-              src={lastCaptureUrl}
-              alt=""
-              className="w-full h-full object-cover"
-            />
-          ) : (
-            <>
-              <Box size={28} className="text-brand/60" />
-              <span className="text-[10px]">双击或点击下方按钮打开 3D 预演</span>
-            </>
-          )}
-        </div>
-        <p className="text-[10px] text-ink/50">
-          画幅 {project.viewportAspectRatio} · 角色{' '}
-          {project.objects.filter((o) => o.kind === 'character').length} · 机位{' '}
-          {project.cameras.length} · 截图 {captureCount}
-        </p>
-        {lineArtUrl && (
-          <p className="text-[10px] text-accent/70 flex items-center gap-1">
-            <Image size={12} /> 已绑定线稿背景参考
-          </p>
-        )}
-        {activeCam?.captures[activeCam.captures.length - 1]?.cameraPrompt && (
-          <p className="text-[10px] text-ink/40 line-clamp-2">
-            机位: {activeCam.captures[activeCam.captures.length - 1].cameraPrompt}
-          </p>
-        )}
-        {(props.data?.lastCameraPrompt as string) && (
-          <p className="text-[10px] text-brand/70 line-clamp-2">
-            输出机位 → 可连 camera-prompt / picture-gen
-          </p>
-        )}
-        <button
-          type="button"
-          onClick={open}
-          className="w-full rounded-xl bg-brand text-white text-sm py-2 hover:bg-brand/90"
+      <div className="d3 d3-card nodrag nopan">
+        <div
+          className="d3-preview"
+          onDoubleClick={openStage}
+          onClick={openStage}
+          role="button"
+          title="打开 3D 舞台"
         >
-          打开 3D 预演
-        </button>
+          {previewUrl ? (
+            <img src={previewUrl} alt="" className="d3-preview__img" draggable={false} />
+          ) : (
+            <div className="d3-preview__empty">
+              <Box size={26} strokeWidth={1.25} />
+              <span>打开 3D 舞台摆位</span>
+            </div>
+          )}
+          <div className="d3-preview__badges">
+            <span className="d3-badge">{project.viewportAspectRatio}</span>
+            <span className="d3-badge">
+              {project.cameras.length} 机位 · {captureCount} 快照 · {characterCount}{' '}
+              角色 · {sortedFrames.length} 分镜帧
+            </span>
+            {linkedFrame?.director3dGuide && (
+              <span className="d3-badge is-accent">已应用到 {linkedFrame.label}</span>
+            )}
+          </div>
+        </div>
+
+        {previewBlockId && sortedFrames.length > 0 && (
+          <div className="d3-field">
+            <label htmlFor={`d3-frame-${props.id}`}>分镜</label>
+            <select
+              id={`d3-frame-${props.id}`}
+              className="d3-select"
+              value={linkedFrameId ?? ''}
+              onChange={(e) => selectFrame(e.target.value)}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <option value="">选择帧</option>
+              {sortedFrames.map((frame) => (
+                <option key={frame.id} value={frame.id} disabled={frame.locked}>
+                  {frame.label}
+                  {frame.locked ? ' · 锁' : ''}
+                  {frame.director3dGuide ? ' · 已设' : ''}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
+
+        {cameraPrompt ? (
+          <p className="d3-prompt" title={cameraPrompt}>
+            {cameraPrompt}
+          </p>
+        ) : (
+          <p className="d3-hint">
+            {linkedFrame
+              ? `设计 ${linkedFrame.label} 机位后写回分镜`
+              : previewBlockId
+                ? '选择分镜帧，或直接进入 3D 舞台'
+                : '独立搭建场景 · 可连分镜台 / 图像生成'}
+          </p>
+        )}
+
+        <div className="d3-acts">
+          {lastCaptureUrl && (
+            <a
+              href={lastCaptureUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="d3-btn is-ghost"
+              onClick={(e) => e.stopPropagation()}
+              title="导出快照"
+            >
+              <ImageIcon size={12} />
+            </a>
+          )}
+          <button type="button" className="d3-btn is-primary" onClick={openStage}>
+            <ExternalLink size={12} />
+            打开 3D 舞台
+          </button>
+        </div>
       </div>
     </BlockShell>
   );

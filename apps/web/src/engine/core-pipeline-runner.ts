@@ -41,15 +41,15 @@ export function ensureCorePipelineNodes(): void {
   for (const kind of [
     'dialogue-sheet',
     'asset-gate',
-    'story-grid',
-    'storyboard-preview',
+    'storyboard-desk',
     'picture-gen',
     'director-3d',
+    'director-desk',
     'review-gate',
     'clip-gen',
     'export-pack',
   ] as const) {
-    if (!kinds.has(kind)) {
+    if (!kinds.has(kind) && !(kind === 'storyboard-desk' && (kinds.has('story-grid') || kinds.has('storyboard-preview')))) {
       spawn(kind);
       log(`核心流程缺少“${kind}”，已补充节点；建议重新加载核心流程模板以恢复完整连线`);
       break;
@@ -57,23 +57,25 @@ export function ensureCorePipelineNodes(): void {
   }
 }
 
-/** 把故事板镜头同步进 storyboard-preview 节点（若存在） */
+/** 把故事板镜头同步进分镜台 / 预览节点（若存在） */
 export function syncPreviewFromStoryboard(): void {
   const runtime = useFlowRuntime.getState().runtime;
   if (!runtime) {
     useContextRailUi.getState().requestTab('storyboard');
-    log('已打开故事板；请在分镜预览中「从故事板同步」');
+    log('已打开故事板；请在分镜台中同步后出图');
     return;
   }
   const nodes = runtime.getNodes();
-  const preview = nodes.find((n) => n.type === 'storyboard-preview');
+  const preview = nodes.find(
+    (n) => n.type === 'storyboard-desk' || n.type === 'storyboard-preview' || n.type === 'story-grid',
+  );
   if (preview) {
     runtime.focusBlock(preview.id);
-    log('已聚焦分镜预览节点 · 请点「从故事板同步」后批量出图');
+    log('已聚焦分镜台 · 请在「关键帧」Tab 同步并批量出图');
   } else {
-    useFlowCommands.getState().requestSpawn('storyboard-preview');
+    useFlowCommands.getState().requestSpawn('storyboard-desk');
     useContextRailUi.getState().requestTab('storyboard');
-    log('已创建分镜预览节点并打开故事板');
+    log('已创建分镜台节点并打开故事板');
   }
 }
 

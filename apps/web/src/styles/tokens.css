@@ -1,13 +1,30 @@
 :root {
   --nx9-btn-h: 36px;
-  --nx9-radius: 12px;
+  --nx9-radius: 14px;
   --nx9-card-padding: 16px;
-  --nx9-status-ok: #2E8B57;
-  --nx9-status-warn: #D97706;
-  --nx9-status-error: #DC2626;
-  --nx9-brand: #A13D63;
-  --nx9-accent: #7C3AED;
-  --nx9-ink: #1A1A1A;
-  --nx9-line: rgba(0, 0, 0, 0.08);
-  --nx9-surface: rgba(0, 0, 0, 0.03);
+  /* Film / storyboard slate — distinct from generic rose-canvas shells */
+  --nx9-status-ok: #15803d;
+  --nx9-status-warn: #c2410c;
+  --nx9-status-error: #b91c1c;
+  /* 默认偏 desk 暖金；深色主题由 desk-palette 覆盖 */
+  --nx9-brand: #a67c4a;
+  --nx9-accent: #a67c4a;
+  --nx9-ink: #1a1814;
+  --nx9-line: rgba(26, 24, 20, 0.1);
+  --nx9-surface: rgba(26, 24, 20, 0.035);
+  --nx9-bg: #f4f1ea;
+  --nx9-ok: #15803d;
+  --nx9-warn: #c2410c;
+  --nx9-glass: rgba(255, 252, 247, 0.82);
+  --nx9-glass-blur: 18px;
+  --nx9-lane-character: rgba(30, 58, 95, 0.07);
+  --nx9-lane-scene: rgba(15, 118, 110, 0.07);
+  --nx9-lane-gen: rgba(194, 65, 12, 0.07);
+  --nx9-lane-output: rgba(21, 128, 61, 0.07);
+  /* 全屏舞台：不再预留旧底部编辑器高度 */
+  --nx9-deck-height: 0px;
+  --nx9-dock-width: 48px;
+  --nx9-rail-width: 320px;
+  --nx9-node-radius: 16px;
+  --nx9-socket-opacity: 0.55;
 }

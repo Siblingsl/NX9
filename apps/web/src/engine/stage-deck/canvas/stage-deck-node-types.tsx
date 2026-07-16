@@ -30,7 +30,17 @@ export function createStageDeckNodeTypes(): Record<string, ComponentType<NodePro
             </CardShell>
           );
         } else if (canvasFirst && shouldUseCompactNodeShell(kind)) {
+          /* 紧凑舞台卡 + 节点下方底部跟随工作区（非弹窗） */
           inner = <CanvasNodeShell {...props} alias={alias} />;
+        } else if (canvasFirst && shouldCollapseCards(mode, expanded)) {
+          inner = (
+            <CardShell {...props} alias={alias} hideSockets>
+              {null}
+            </CardShell>
+          );
+        } else if (canvasFirst) {
+          /* 全屏画布：其余节点也走舞台卡壳，避免编辑器白卡 */
+          inner = <Block {...props} />;
         } else if (shouldCollapseCards(mode, expanded)) {
           inner = (
             <CardShell {...props} alias={alias} hideSockets>

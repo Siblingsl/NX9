@@ -7,7 +7,7 @@ import { ToolWorkspace } from './tool/ToolWorkspace';
 import { ReportWorkspace } from './report/ReportWorkspace';
 import { ControlWorkspace } from './control/ControlWorkspace';
 import { StoryboardPreviewWorkspace } from './storyboard-preview/StoryboardPreviewWorkspace';
-import { Director3dWorkspace } from './director3d/Director3dWorkspace';
+
 import { ScriptBreakdownWorkspace } from './table/ScriptBreakdownWorkspace';
 import { StoryGridWorkspace } from './table/StoryGridWorkspace';
 import { ExportWorkspace } from './config/ExportWorkspace';
@@ -20,7 +20,7 @@ export interface AttachedWorkspaceRouterProps {
 
 /**
  * AttachedWorkspaceRouter — 按 workspaceType 路由到对应内容面板。
- * 渲染在 NodeAttachedPromptBar 内部（壳层不变）。
+ * 由节点下方底部跟随工作区（NodeAttachedPromptBar）挂载；禁止改成屏幕弹窗。
  */
 export function AttachedWorkspaceRouter({ blockId, kind, onCollapse }: AttachedWorkspaceRouterProps) {
   const spec = resolveAttachedWorkspace(kind);
@@ -60,11 +60,8 @@ export function AttachedWorkspaceRouter({ blockId, kind, onCollapse }: AttachedW
     case 'task':
       return <ControlWorkspace blockId={blockId} kind={kind} onCollapse={onCollapse} />;
     case 'preview':
-      if (kind === 'storyboard-preview') {
+      if (kind === 'storyboard-preview' || kind === 'storyboard-desk') {
         return <StoryboardPreviewWorkspace blockId={blockId} kind={kind} onCollapse={onCollapse} />;
-      }
-      if (kind === 'director-3d') {
-        return <Director3dWorkspace blockId={blockId} kind={kind} onCollapse={onCollapse} />;
       }
       return null;
     default:

@@ -47,6 +47,23 @@ export interface EpisodeExportRecord {
   createdAt: string;
 }
 
+/** 剧集元数据（制作台剧集架；镜头仍以 shots[].episodeId 归属） */
+export type EpisodeStatus = 'draft' | 'in_progress' | 'completed' | 'archived';
+
+export interface EpisodeMeta {
+  id: string;
+  index: number;
+  title: string;
+  status: EpisodeStatus;
+  logline?: string;
+  /** 本集整体色调 / 美术方向（写入专业提示词） */
+  artDirection?: string;
+  /** 本集运镜偏好摘要 */
+  cameraStyle?: string;
+  completedAt?: string | null;
+  lastExportUrl?: string | null;
+}
+
 /** 3D 导演台写回 Shot 的持久机位；切换分集后仍可还原到分镜预览。 */
 export interface StoryboardDirector3dGuide {
   sourceBlockId: string;
@@ -102,10 +119,22 @@ export interface StoryboardShot {
   sceneId?: string | null;
   /** 显示用 "1-3" */
   sceneCode?: string | null;
-  /** 双阶段审阅：关键帧状态 */
+  /** 双阶段审阅：关键帧状态（= 分镜预览图 / 故事板图） */
   keyframeStatus?: 'draft' | 'review' | 'approved' | 'failed';
   /** 双阶段审阅：视频状态 */
   videoStatus?: 'draft' | 'review' | 'approved' | 'failed';
+  /** 运镜：推/拉/摇/移/跟/固定/手持… */
+  cameraMove?: string | null;
+  /** 镜头色调 / 调色关键词 */
+  colorGrade?: string | null;
+  /** 光影：顶光/侧逆光/霓虹… */
+  lighting?: string | null;
+  /** 声音方向：对白/旁白/SFX/BGM 提示 */
+  audioDirection?: string | null;
+  /** 专业成图提示词（可自动生成后手改） */
+  imagePromptPro?: string | null;
+  /** 专业视频提示词 */
+  videoPromptPro?: string | null;
 }
 
 export type StoryboardPayloadVersion = 1 | 2 | 3;
@@ -116,6 +145,12 @@ export interface StoryboardPayload {
   reviewMode: 'manual' | 'auto';
   /** 当前生产作用域；批量出图、批审、视频和导出只处理这一集。 */
   activeEpisodeId?: string | null;
+  /** 剧集架（制作台独立管理；可与 shots 推导结果合并） */
+  episodes?: EpisodeMeta[];
+  /** 全剧默认美术/色调（各集可覆盖） */
+  globalArtDirection?: string;
+  /** 已导出成片历史 */
+  exportHistory?: EpisodeExportRecord[];
   shots: StoryboardShot[];
 }
 
@@ -152,7 +187,60 @@ export interface WorkspacePreferences {
 }
 
 export function emptyStoryboard(): StoryboardPayload {
-  return { version: 3, title: '', reviewMode: 'manual', activeEpisodeId: null, shots: [] };
+  return {
+    version: 3,
+    title: '',
+    reviewMode: 'manual',
+    activeEpisodeId: null,
+    episodes: [],
+    exportHistory: [],
+    shots: [],
+  };
+}
+
+/** 从镜头归属 + 显式剧集元数据合并出剧集列表 */
+export function listEpisodeMetas(storyboard: StoryboardPayload): EpisodeMeta[] {
+  const byId = new Map<string, EpisodeMeta>();
+  for (const ep of storyboard.episodes ?? []) {
+    byId.set(ep.id, { ...ep });
+  }
+  for (const shot of storyboard.shots) {
+    const id = shot.episodeId;
+    if (!id) continue;
+    const existing = byId.get(id);
+    if (existing) {
+      if (!existing.title && shot.episodeTitle) existing.title = shot.episodeTitle;
+      if (existing.index <= 0 && shot.episodeIndex) existing.index = shot.episodeIndex;
+      continue;
+    }
+    byId.set(id, {
+      id,
+      index: shot.episodeIndex ?? byId.size + 1,
+      title: shot.episodeTitle || `第 ${shot.episodeIndex ?? byId.size + 1} 集`,
+      status: 'in_progress',
+    });
+  }
+  // 无 episodeId 的旧单集：合成默认集
+  const orphan = storyboard.shots.filter((s) => !s.episodeId);
+  if (orphan.length > 0 && byId.size === 0) {
+    const id = 'ep-default';
+    byId.set(id, {
+      id,
+      index: 1,
+      title: storyboard.title || '第 1 集',
+      status: 'in_progress',
+    });
+  }
+  return [...byId.values()].sort((a, b) => a.index - b.index || a.title.localeCompare(b.title));
+}
+
+export function createEpisodeMeta(index: number, title?: string): EpisodeMeta {
+  return {
+    id: `ep-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+    index,
+    title: title?.trim() || `第 ${index} 集`,
+    status: 'draft',
+  };
 }
 
 export function migrateStoryboardPayload(payload: StoryboardPayload): StoryboardPayload {

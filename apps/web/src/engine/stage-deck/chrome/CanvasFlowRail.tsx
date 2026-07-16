@@ -287,7 +287,7 @@ export function CanvasFlowRail() {
     return (
       <div className="nx9-flow-rail" ref={railRef}>
         <div className="nx9-flow-rail-free">
-          <div>自由模式 · 从左侧 Dock 拖入节点，或 ⌘K 搜索命令</div>
+          <div>制作进度 · 按阶段推进；需要自由连线时点顶栏「专家编排」或 ⌘K</div>
           <div className="nx9-flow-rail-free-modes">
             {PIPELINE_STAGES.map((stage, i) => {
               const state = freeStageStates?.[i] ?? 'pending';

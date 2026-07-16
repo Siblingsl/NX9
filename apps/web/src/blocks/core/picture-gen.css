@@ -1,0 +1,354 @@
+/* ── 图像生成 · desk 工作台（随主题深/浅） ── */
+
+.pg {
+  --pg-bg: var(--desk-bg);
+  --pg-bg-2: var(--desk-bg-2);
+  --pg-bg-3: var(--desk-bg-3);
+  --pg-ink: var(--desk-ink);
+  --pg-muted: var(--desk-muted);
+  --pg-faint: var(--desk-faint);
+  --pg-line: var(--desk-line);
+  --pg-line-strong: var(--desk-line-strong);
+  --pg-accent: var(--desk-accent);
+  --pg-accent-soft: var(--desk-accent-soft);
+  --pg-accent-line: var(--desk-accent-line);
+  --pg-warn: var(--desk-warn);
+  --pg-ok: var(--desk-ok);
+  --pg-run: var(--desk-run);
+  color: var(--pg-ink);
+  font-size: 12px;
+  line-height: 1.4;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── 简洁图卡：只展示图片 ── */
+.pg-only {
+  margin: -2px -2px 0;
+}
+
+.pg-only__frame {
+  position: relative;
+  aspect-ratio: 1 / 1;
+  border-radius: 10px;
+  overflow: hidden;
+  background: var(--desk-media-bg);
+  border: 1px solid var(--desk-line);
+  cursor: pointer;
+}
+
+.pg-only__img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.pg-only__empty {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: var(--desk-faint);
+  background: var(--desk-card-bg);
+  font-size: 11px;
+  letter-spacing: 0.02em;
+  user-select: none;
+}
+
+.pg-only__busy {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: color-mix(in srgb, var(--desk-stage-bg) 55%, transparent);
+  color: var(--desk-accent);
+  pointer-events: none;
+}
+
+.pg-only__count {
+  position: absolute;
+  right: 6px;
+  bottom: 6px;
+  z-index: 1;
+  min-width: 20px;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--desk-stage-bg) 70%, transparent);
+  border: 1px solid var(--desk-line-strong);
+  color: var(--desk-ink);
+  font-size: 10px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+
+/* 多图宫格 */
+.pg-media-grid {
+  width: 100%;
+  height: 100%;
+  display: grid;
+  gap: 1px;
+  background: var(--desk-line);
+}
+
+.pg-media-grid.is-2 {
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: 1fr;
+}
+
+.pg-media-grid.is-3 {
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: 1fr 1fr;
+}
+
+.pg-media-grid.is-3 .pg-media-grid__cell:first-child {
+  grid-row: 1 / 3;
+}
+
+.pg-media-grid.is-4 {
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: 1fr 1fr;
+}
+
+.pg-media-grid__cell {
+  position: relative;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--desk-media-bg);
+}
+
+.pg-media-grid__cell img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.pg-media-grid__more {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: color-mix(in srgb, var(--desk-stage-bg) 55%, transparent);
+  color: var(--desk-ink);
+  font-size: 14px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ========== 底部跟随工作区 · desk 台 ========== */
+.nx9-attached-prompt-bar.is-picture-desk {
+  --pg-bg: var(--desk-bg);
+  --pg-bg-2: var(--desk-bg-2);
+  --pg-bg-3: var(--desk-bg-3);
+  --pg-ink: var(--desk-ink);
+  --pg-muted: var(--desk-muted);
+  --pg-faint: var(--desk-faint);
+  --pg-line: var(--desk-line);
+  --pg-accent: var(--desk-accent);
+  --pg-accent-soft: var(--desk-accent-soft);
+  --pg-accent-line: var(--desk-accent-line);
+  --pg-ok: var(--desk-ok);
+  background: var(--desk-card-bg) !important;
+  border-color: var(--desk-card-border) !important;
+  color: var(--desk-ink);
+  box-shadow: var(--desk-shadow) !important;
+  backdrop-filter: blur(12px);
+}
+
+.nx9-attached-prompt-bar.is-picture-desk .nx9-composer-panel {
+  background: var(--desk-bg-2) !important;
+  border-color: var(--desk-line) !important;
+  box-shadow: none !important;
+}
+
+.nx9-attached-prompt-bar.is-picture-desk .text-ink,
+.nx9-attached-prompt-bar.is-picture-desk .text-ink\/85 {
+  color: var(--desk-ink) !important;
+}
+
+.nx9-attached-prompt-bar.is-picture-desk .text-ink\/20,
+.nx9-attached-prompt-bar.is-picture-desk .text-ink\/25,
+.nx9-attached-prompt-bar.is-picture-desk .text-ink\/28,
+.nx9-attached-prompt-bar.is-picture-desk .text-ink\/30,
+.nx9-attached-prompt-bar.is-picture-desk .text-ink\/35,
+.nx9-attached-prompt-bar.is-picture-desk .text-ink\/40,
+.nx9-attached-prompt-bar.is-picture-desk .text-ink\/45,
+.nx9-attached-prompt-bar.is-picture-desk .text-ink\/50,
+.nx9-attached-prompt-bar.is-picture-desk .text-ink\/55,
+.nx9-attached-prompt-bar.is-picture-desk .text-ink\/60,
+.nx9-attached-prompt-bar.is-picture-desk .text-ink\/65 {
+  color: var(--desk-faint) !important;
+}
+
+.nx9-attached-prompt-bar.is-picture-desk .placeholder\:text-ink\/28::placeholder,
+.nx9-attached-prompt-bar.is-picture-desk textarea::placeholder,
+.nx9-attached-prompt-bar.is-picture-desk input::placeholder {
+  color: var(--desk-faint) !important;
+}
+
+.nx9-attached-prompt-bar.is-picture-desk textarea,
+.nx9-attached-prompt-bar.is-picture-desk input,
+.nx9-attached-prompt-bar.is-picture-desk select {
+  color: var(--desk-ink) !important;
+  background: transparent;
+  border-color: var(--desk-line);
+  caret-color: var(--desk-accent);
+}
+
+.nx9-attached-prompt-bar.is-picture-desk .bg-surface,
+.nx9-attached-prompt-bar.is-picture-desk .bg-surface\/30,
+.nx9-attached-prompt-bar.is-picture-desk .bg-surface\/40,
+.nx9-attached-prompt-bar.is-picture-desk .bg-surface\/50,
+.nx9-attached-prompt-bar.is-picture-desk .bg-surface\/60,
+.nx9-attached-prompt-bar.is-picture-desk .bg-surface\/80,
+.nx9-attached-prompt-bar.is-picture-desk .bg-surface\/90,
+.nx9-attached-prompt-bar.is-picture-desk .hover\:bg-surface\/80:hover,
+.nx9-attached-prompt-bar.is-picture-desk .hover\:bg-surface\/90:hover {
+  background-color: var(--desk-panel) !important;
+}
+
+.nx9-attached-prompt-bar.is-picture-desk .border-line,
+.nx9-attached-prompt-bar.is-picture-desk .border-line\/25,
+.nx9-attached-prompt-bar.is-picture-desk .border-line\/30,
+.nx9-attached-prompt-bar.is-picture-desk .border-line\/35,
+.nx9-attached-prompt-bar.is-picture-desk .border-line\/40,
+.nx9-attached-prompt-bar.is-picture-desk .border-line\/45,
+.nx9-attached-prompt-bar.is-picture-desk .border-line\/50 {
+  border-color: var(--desk-line) !important;
+}
+
+.nx9-attached-prompt-bar.is-picture-desk .bg-line\/50 {
+  background-color: var(--desk-line-strong) !important;
+}
+
+/* brand → desk 强调色 */
+.nx9-attached-prompt-bar.is-picture-desk .text-brand,
+.nx9-attached-prompt-bar.is-picture-desk .hover\:text-brand:hover {
+  color: var(--desk-accent) !important;
+}
+
+.nx9-attached-prompt-bar.is-picture-desk .bg-brand {
+  background-color: var(--desk-accent) !important;
+  color: var(--desk-btn-primary-ink) !important;
+}
+
+.nx9-attached-prompt-bar.is-picture-desk .bg-brand\/5,
+.nx9-attached-prompt-bar.is-picture-desk .bg-brand\/10,
+.nx9-attached-prompt-bar.is-picture-desk .hover\:bg-brand\/5:hover,
+.nx9-attached-prompt-bar.is-picture-desk .hover\:bg-brand\/\[0\.03\]:hover {
+  background-color: var(--desk-accent-soft) !important;
+}
+
+.nx9-attached-prompt-bar.is-picture-desk .border-brand\/20,
+.nx9-attached-prompt-bar.is-picture-desk .border-brand\/25,
+.nx9-attached-prompt-bar.is-picture-desk .border-brand\/30,
+.nx9-attached-prompt-bar.is-picture-desk .border-brand\/35,
+.nx9-attached-prompt-bar.is-picture-desk .border-brand\/40,
+.nx9-attached-prompt-bar.is-picture-desk .border-brand\/50,
+.nx9-attached-prompt-bar.is-picture-desk .hover\:border-brand\/25:hover,
+.nx9-attached-prompt-bar.is-picture-desk .hover\:border-brand\/30:hover {
+  border-color: var(--desk-accent-line) !important;
+}
+
+.nx9-attached-prompt-bar.is-picture-desk .ring-brand\/20,
+.nx9-attached-prompt-bar.is-picture-desk .ring-brand\/25 {
+  --tw-ring-color: var(--desk-accent-soft);
+}
+
+.nx9-attached-prompt-bar.is-picture-desk .bg-violet-500\/10 {
+  background-color: var(--desk-accent-soft) !important;
+}
+
+.nx9-attached-prompt-bar.is-picture-desk .text-violet-700 {
+  color: var(--desk-accent) !important;
+}
+
+.nx9-attached-prompt-bar.is-picture-desk .border-violet-500\/20 {
+  border-color: var(--desk-accent-line) !important;
+}
+
+.nx9-attached-prompt-bar.is-picture-desk .border-sky-500\/20 {
+  border-color: color-mix(in srgb, var(--desk-run) 35%, transparent) !important;
+}
+
+.nx9-attached-prompt-bar.is-picture-desk .bg-sky-500\/5 {
+  background-color: color-mix(in srgb, var(--desk-run) 12%, transparent) !important;
+}
+
+.nx9-attached-prompt-bar.is-picture-desk .text-sky-800 {
+  color: var(--desk-run) !important;
+}
+
+/* 结果区 / 参考槽 */
+.nx9-attached-prompt-bar.is-picture-desk .aspect-\[16\/9\] {
+  background: var(--desk-media-bg);
+}
+
+/* 运行按钮 */
+.nx9-attached-prompt-bar.is-picture-desk button.bg-brand {
+  background-color: var(--desk-accent) !important;
+  color: var(--desk-btn-primary-ink) !important;
+  font-weight: 600;
+}
+
+.nx9-attached-prompt-bar.is-picture-desk button.bg-brand:hover:not(:disabled) {
+  filter: brightness(1.06);
+}
+
+/* 专业工具弹层（portal 到 body，需自带 desk 变量） */
+.nx9-composer-popover.is-picture-desk {
+  background: var(--desk-bg-2) !important;
+  border-color: var(--desk-line-strong) !important;
+  color: var(--desk-ink);
+  box-shadow: var(--desk-shadow) !important;
+}
+
+.nx9-composer-popover.is-picture-desk .text-ink,
+.nx9-composer-popover.is-picture-desk .text-ink\/70,
+.nx9-composer-popover.is-picture-desk .text-ink\/65 {
+  color: var(--desk-ink) !important;
+}
+
+.nx9-composer-popover.is-picture-desk .text-ink\/40,
+.nx9-composer-popover.is-picture-desk .text-ink\/35,
+.nx9-composer-popover.is-picture-desk .text-ink\/45,
+.nx9-composer-popover.is-picture-desk .text-ink\/50,
+.nx9-composer-popover.is-picture-desk .text-ink\/55,
+.nx9-composer-popover.is-picture-desk .text-ink\/60 {
+  color: var(--desk-faint) !important;
+}
+
+.nx9-composer-popover.is-picture-desk .bg-surface,
+.nx9-composer-popover.is-picture-desk .hover\:bg-surface\/90:hover,
+.nx9-composer-popover.is-picture-desk .hover\:bg-surface\/80:hover {
+  background-color: var(--desk-panel) !important;
+}
+
+.nx9-composer-popover.is-picture-desk .bg-brand\/10,
+.nx9-composer-popover.is-picture-desk .bg-brand\/15 {
+  background-color: var(--desk-accent-soft) !important;
+}
+
+.nx9-composer-popover.is-picture-desk .text-brand {
+  color: var(--desk-accent) !important;
+}
+
+.nx9-composer-popover.is-picture-desk .border-line\/40,
+.nx9-composer-popover.is-picture-desk .border-line\/35 {
+  border-color: var(--desk-line) !important;
+}
+
+.nx9-composer-popover.is-picture-desk .border-brand\/35 {
+  border-color: var(--desk-accent-line) !important;
+}

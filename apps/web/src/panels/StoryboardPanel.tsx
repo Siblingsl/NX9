@@ -186,16 +186,41 @@ export function StoryboardPanel() {
 
   const handleApprove = useCallback(
     (id: string) => {
-      updateShot(id, { status: 'approved' });
+      const shot = storyboard.shots.find((s) => s.id === id);
+      // 有视频时按成片审阅写 videoStatus；否则关键帧审阅写 keyframeStatus
+      if (shot?.videoAssetId) {
+        updateShot(id, {
+          status: 'approved',
+          videoStatus: 'approved',
+          keyframeStatus: shot.keyframeStatus === 'approved' ? 'approved' : (shot.keyframeStatus ?? 'approved'),
+        });
+      } else {
+        updateShot(id, {
+          status: 'approved',
+          keyframeStatus: 'approved',
+          keyframeReviewNote: null,
+        });
+      }
     },
-    [updateShot],
+    [updateShot, storyboard.shots],
   );
 
   const handleReject = useCallback(
     (id: string) => {
-      updateShot(id, { status: 'draft' });
+      const shot = storyboard.shots.find((s) => s.id === id);
+      if (shot?.videoAssetId) {
+        updateShot(id, {
+          status: 'draft',
+          videoStatus: 'draft',
+        });
+      } else {
+        updateShot(id, {
+          status: 'draft',
+          keyframeStatus: 'draft',
+        });
+      }
     },
-    [updateShot],
+    [updateShot, storyboard.shots],
   );
 
   const toggleShotChecked = useCallback((id: string) => {
@@ -215,20 +240,38 @@ export function StoryboardPanel() {
   const batchApprove = useCallback(() => {
     if (checkedShotIds.size === 0) return;
     for (const id of checkedShotIds) {
-      updateShot(id, { status: 'approved' });
+      const shot = storyboard.shots.find((s) => s.id === id);
+      if (shot?.videoAssetId) {
+        updateShot(id, {
+          status: 'approved',
+          videoStatus: 'approved',
+          keyframeStatus: shot.keyframeStatus === 'approved' ? 'approved' : (shot.keyframeStatus ?? 'approved'),
+        });
+      } else {
+        updateShot(id, {
+          status: 'approved',
+          keyframeStatus: 'approved',
+          keyframeReviewNote: null,
+        });
+      }
     }
     appendLog(`已批量通过 ${checkedShotIds.size} 个镜头`);
     setCheckedShotIds(new Set());
-  }, [checkedShotIds, updateShot, appendLog]);
+  }, [checkedShotIds, updateShot, appendLog, storyboard.shots]);
 
   const batchReject = useCallback(() => {
     if (checkedShotIds.size === 0) return;
     for (const id of checkedShotIds) {
-      updateShot(id, { status: 'draft' });
+      const shot = storyboard.shots.find((s) => s.id === id);
+      if (shot?.videoAssetId) {
+        updateShot(id, { status: 'draft', videoStatus: 'draft' });
+      } else {
+        updateShot(id, { status: 'draft', keyframeStatus: 'draft' });
+      }
     }
     appendLog(`已批量打回 ${checkedShotIds.size} 个镜头`);
     setCheckedShotIds(new Set());
-  }, [checkedShotIds, updateShot, appendLog]);
+  }, [checkedShotIds, updateShot, appendLog, storyboard.shots]);
 
   const handleExportContactSheet = useCallback(async () => {
     if (storyboard.shots.length === 0) return;

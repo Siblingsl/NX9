@@ -11,6 +11,7 @@ export interface ComposerModelSelectProps {
   options: { id: string; label: string }[];
   onChange: (id: string) => void;
   width?: number;
+  tone?: 'default' | 'desk';
 }
 
 export function ComposerModelSelect({
@@ -18,6 +19,7 @@ export function ComposerModelSelect({
   options,
   onChange,
   width = 168,
+  tone = 'default',
 }: ComposerModelSelectProps) {
   const btnRef = useRef<HTMLButtonElement>(null);
   const [open, setOpen] = useState(false);
@@ -41,6 +43,7 @@ export function ComposerModelSelect({
         anchorRef={btnRef}
         align="end"
         width={width}
+        tone={tone}
       >
         {options.map((o) => (
           <PopoverItem

@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import type { PlaybookId } from '@nx9/shared';
 
 interface FlowCommandState {
   spawnKind: string | null;
@@ -11,6 +12,8 @@ interface FlowCommandState {
   templateMode: 'merge' | 'replace';
   /** 每次请求递增，确保 FlowSurface 在 ready 后能可靠消费模板 */
   templateRequestId: number;
+  /** 模板加载后启动的 playbook（在 workspace hydrate 之后消费，避免被 reset 冲掉） */
+  pendingPlaybookId: PlaybookId | null;
   requestSpawn: (
     kind: string,
     at?: { x: number; y: number },
@@ -25,6 +28,8 @@ interface FlowCommandState {
     exact?: boolean,
   ) => void;
   requestLoadTemplate: (templateId: string, mode?: 'merge' | 'replace') => void;
+  /** 新建项目：载入核心模板 + 绑定 playbook（跨 remount 安全） */
+  requestBootstrapCorePipeline: () => void;
   consumeSpawn: () => {
     kind: string;
     at: { x: number; y: number } | null;
@@ -33,6 +38,7 @@ interface FlowCommandState {
     exact: boolean;
   } | null;
   consumeTemplate: () => { templateId: string; mode: 'merge' | 'replace' } | null;
+  consumePendingPlaybook: () => PlaybookId | null;
 }
 
 export const useFlowCommands = create<FlowCommandState>((set, get) => ({
@@ -44,6 +50,7 @@ export const useFlowCommands = create<FlowCommandState>((set, get) => ({
   templateId: null,
   templateMode: 'merge' as const,
   templateRequestId: 0,
+  pendingPlaybookId: null,
 
   requestSpawn: (kind, at, data, exact) =>
     set({
@@ -70,6 +77,14 @@ export const useFlowCommands = create<FlowCommandState>((set, get) => ({
       templateRequestId: s.templateRequestId + 1,
     })),
 
+  requestBootstrapCorePipeline: () =>
+    set((s) => ({
+      templateId: 'tpl-core-episode',
+      templateMode: 'replace' as const,
+      templateRequestId: s.templateRequestId + 1,
+      pendingPlaybookId: 'pb-ai-comic-live',
+    })),
+
   consumeSpawn: () => {
     const { spawnKind, spawnAt, spawnShotId, spawnData, spawnExact } = get();
     if (!spawnKind) return null;
@@ -82,5 +97,12 @@ export const useFlowCommands = create<FlowCommandState>((set, get) => ({
     if (!templateId) return null;
     set({ templateId: null });
     return { templateId, mode: templateMode };
+  },
+
+  consumePendingPlaybook: () => {
+    const id = get().pendingPlaybookId;
+    if (!id) return null;
+    set({ pendingPlaybookId: null });
+    return id;
   },
 }));

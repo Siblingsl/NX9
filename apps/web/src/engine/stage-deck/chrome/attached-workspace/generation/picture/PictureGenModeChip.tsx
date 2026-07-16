@@ -36,7 +36,10 @@ export function PictureGenModeChip({ mode, onChange, modes }: PictureGenModeChip
       >
         <Icon size={12} className="text-ink/45 shrink-0" />
         <span>{current.label}</span>
-        <ChevronUp size={10} className={`text-ink/30 transition-transform ${open ? '' : 'rotate-180'}`} />
+        <ChevronUp
+          size={10}
+          className={`text-ink/30 transition-transform ${open ? '' : 'rotate-180'}`}
+        />
       </button>
 
       <VideoPopover
@@ -44,7 +47,7 @@ export function PictureGenModeChip({ mode, onChange, modes }: PictureGenModeChip
         onClose={() => setOpen(false)}
         anchorRef={btnRef}
         placement="above"
-        width={148}
+        width={200}
       >
         <p className="px-3 pt-2 pb-1 text-[10px] text-ink/40">图像生成模式</p>
         {PICTURE_GEN_MODES.filter((m) => !modes || modes.includes(m.id)).map((m) => {
@@ -58,12 +61,20 @@ export function PictureGenModeChip({ mode, onChange, modes }: PictureGenModeChip
                 onChange(m.id);
                 setOpen(false);
               }}
-              className={`w-[calc(100%-8px)] flex items-center gap-2 px-2.5 py-1.5 mx-1 rounded-lg text-[11px] transition-colors ${
-                active ? 'bg-surface text-ink font-medium' : 'text-ink/65 hover:bg-surface/80'
+              className={`w-[calc(100%-8px)] flex items-start gap-2 px-2.5 py-1.5 mx-1 rounded-lg text-left transition-colors ${
+                active ? 'bg-surface text-ink' : 'text-ink/65 hover:bg-surface/80'
               }`}
             >
-              <ItemIcon size={14} className={active ? 'text-ink/70' : 'text-ink/40'} />
-              {m.label}
+              <ItemIcon
+                size={14}
+                className={`mt-0.5 shrink-0 ${active ? 'text-ink/70' : 'text-ink/40'}`}
+              />
+              <span className="min-w-0">
+                <span className={`block text-[11px] ${active ? 'font-medium' : ''}`}>
+                  {m.label}
+                </span>
+                <span className="block text-[9px] text-ink/40 leading-snug">{m.hint}</span>
+              </span>
             </button>
           );
         })}

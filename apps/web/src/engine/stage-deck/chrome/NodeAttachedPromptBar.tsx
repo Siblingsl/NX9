@@ -8,7 +8,7 @@ export interface NodeAttachedPromptBarProps {
   onCollapse?: () => void;
 }
 
-/** Prompt Bar 壳层 — 挂载在节点下方，随节点移动；内部内容由 AttachedWorkspaceRouter 路由 */
+/** 底部工作区壳层 — 挂载在节点下方，随节点移动；内部内容由 AttachedWorkspaceRouter 路由 */
 export function NodeAttachedPromptBar({ blockId, kind, onCollapse }: NodeAttachedPromptBarProps) {
   const collapsePromptBar = useDeckUi((s) => s.collapsePromptBar);
   const visible = useDeckUi((s) => s.promptBarVisible);
@@ -30,9 +30,12 @@ export function NodeAttachedPromptBar({ blockId, kind, onCollapse }: NodeAttache
     return () => window.removeEventListener('keydown', onKey);
   }, [visible, handleCollapse]);
 
+  const deskClass =
+    kind === 'picture-gen' ? 'is-picture-desk' : '';
+
   return (
     <div
-      className="nx9-attached-prompt-bar rounded-2xl border border-line dark:border-[#333] bg-white/95 dark:bg-[#222222]/95 backdrop-blur-md shadow-panel nx9-deck-enter"
+      className={`nx9-attached-prompt-bar rounded-2xl border border-line dark:border-[#333] bg-white/95 dark:bg-[#222222]/95 backdrop-blur-md shadow-panel nx9-deck-enter ${deskClass}`}
       onMouseDown={(e) => e.stopPropagation()}
       onPointerDown={(e) => e.stopPropagation()}
       onWheel={(e) => e.stopPropagation()}

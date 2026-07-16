@@ -1,0 +1,386 @@
+/* ── 导演台 · 关键帧批生产 ── */
+
+.dd {
+  --dd-ink: var(--desk-ink);
+  --dd-muted: var(--desk-muted);
+  --dd-faint: var(--desk-faint);
+  --dd-line: var(--desk-line);
+  --dd-accent: var(--desk-accent);
+  --dd-accent-soft: var(--desk-accent-soft);
+  --dd-accent-line: var(--desk-accent-line);
+  --dd-ok: var(--desk-ok);
+  --dd-warn: var(--desk-warn);
+  --dd-run: var(--desk-run);
+  color: var(--dd-ink);
+  font-size: 12px;
+  line-height: 1.4;
+  font-variant-numeric: tabular-nums;
+}
+
+.dd-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: -2px -2px 0;
+  min-width: 0;
+}
+
+/* 进度总览 */
+.dd-progress {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 4px;
+}
+
+.dd-stat {
+  text-align: center;
+  padding: 6px 2px;
+  border-radius: 8px;
+  background: var(--desk-panel);
+  border: 1px solid var(--dd-line);
+}
+
+.dd-stat b {
+  display: block;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.2;
+  color: var(--dd-ink);
+}
+
+.dd-stat span {
+  display: block;
+  margin-top: 1px;
+  font-size: 9px;
+  color: var(--dd-faint);
+}
+
+.dd-stat.is-ok b {
+  color: var(--dd-ok);
+}
+.dd-stat.is-warn b {
+  color: var(--dd-warn);
+}
+.dd-stat.is-run b {
+  color: var(--dd-run);
+}
+
+.dd-bar {
+  height: 4px;
+  border-radius: 99px;
+  background: var(--desk-panel);
+  border: 1px solid var(--dd-line);
+  overflow: hidden;
+}
+
+.dd-bar__fill {
+  height: 100%;
+  background: var(--dd-accent);
+  border-radius: 99px;
+  transition: width 0.2s ease;
+}
+
+.dd-bar__fill.is-run {
+  background: var(--dd-run);
+  animation: dd-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes dd-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.55;
+  }
+}
+
+/* 筛选 / 策略 */
+.dd-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: center;
+}
+
+.dd-chip {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 3px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--dd-line);
+  background: var(--desk-panel);
+  color: var(--dd-faint);
+  cursor: pointer;
+}
+
+.dd-chip:hover {
+  border-color: var(--dd-accent-line);
+  color: var(--dd-ink);
+}
+
+.dd-chip.is-on {
+  color: var(--dd-accent);
+  border-color: var(--dd-accent-line);
+  background: var(--dd-accent-soft);
+}
+
+.dd-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  color: var(--dd-muted);
+  cursor: pointer;
+  user-select: none;
+}
+
+.dd-check input {
+  accent-color: var(--dd-accent);
+}
+
+.dd-meta {
+  margin: 0;
+  font-size: 10px;
+  color: var(--dd-faint);
+  line-height: 1.4;
+}
+
+/* 镜头队列 */
+.dd-queue {
+  max-height: 220px;
+  overflow-y: auto;
+  border: 1px solid var(--dd-line);
+  border-radius: 10px;
+  background: var(--desk-bg-2);
+}
+
+.dd-queue__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 5px 8px;
+  border-bottom: 1px solid var(--dd-line);
+  position: sticky;
+  top: 0;
+  background: var(--desk-bg-2);
+  z-index: 1;
+}
+
+.dd-queue__head button {
+  font-size: 10px;
+  color: var(--dd-accent);
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+}
+
+.dd-item {
+  display: grid;
+  grid-template-columns: 16px 36px 1fr auto;
+  gap: 6px;
+  align-items: center;
+  padding: 5px 8px;
+  border-bottom: 1px solid color-mix(in srgb, var(--dd-line) 70%, transparent);
+  cursor: pointer;
+}
+
+.dd-item:last-child {
+  border-bottom: none;
+}
+
+.dd-item:hover {
+  background: var(--dd-accent-soft);
+}
+
+.dd-item.is-active {
+  background: var(--dd-accent-soft);
+}
+
+.dd-item.is-running {
+  outline: 1px solid color-mix(in srgb, var(--dd-run) 45%, transparent);
+}
+
+.dd-item input {
+  accent-color: var(--dd-accent);
+}
+
+.dd-thumb {
+  width: 36px;
+  height: 24px;
+  border-radius: 4px;
+  object-fit: cover;
+  background: var(--desk-media-bg);
+  border: 1px solid var(--dd-line);
+}
+
+.dd-thumb.is-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 9px;
+  color: var(--dd-faint);
+}
+
+.dd-item__body {
+  min-width: 0;
+}
+
+.dd-item__title {
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--dd-ink);
+}
+
+.dd-item__sub {
+  font-size: 9px;
+  color: var(--dd-faint);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dd-badge {
+  font-size: 9px;
+  font-weight: 650;
+  padding: 1px 5px;
+  border-radius: 5px;
+  border: 1px solid var(--dd-line);
+  color: var(--dd-faint);
+  flex-shrink: 0;
+}
+
+.dd-badge.is-ok {
+  color: var(--dd-ok);
+  border-color: color-mix(in srgb, var(--dd-ok) 35%, transparent);
+}
+.dd-badge.is-warn {
+  color: var(--dd-warn);
+  border-color: color-mix(in srgb, var(--dd-warn) 35%, transparent);
+}
+.dd-badge.is-run {
+  color: var(--dd-run);
+  border-color: color-mix(in srgb, var(--dd-run) 35%, transparent);
+}
+.dd-badge.is-miss {
+  color: var(--dd-accent);
+  border-color: var(--dd-accent-line);
+}
+
+/* 预览 */
+.dd-preview {
+  aspect-ratio: 16 / 9;
+  border-radius: 10px;
+  overflow: hidden;
+  background: var(--desk-media-bg);
+  border: 1px solid var(--dd-line);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.dd-preview img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.dd-preview__empty {
+  font-size: 11px;
+  color: var(--dd-faint);
+  text-align: center;
+  padding: 12px;
+}
+
+/* 操作 */
+.dd-acts {
+  display: flex;
+  gap: 6px;
+}
+
+.dd-btn {
+  height: 32px;
+  padding: 0 10px;
+  border-radius: 8px;
+  border: 1px solid var(--desk-line-strong);
+  background: var(--desk-bg-2);
+  color: var(--dd-ink);
+  font-size: 11px;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.dd-btn:hover:not(:disabled) {
+  border-color: var(--dd-accent-line);
+  background: var(--dd-accent-soft);
+}
+
+.dd-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.dd-btn.is-primary {
+  flex: 1;
+  background: var(--dd-accent);
+  border-color: transparent;
+  color: var(--desk-btn-primary-ink);
+}
+
+.dd-btn.is-primary:hover:not(:disabled) {
+  filter: brightness(1.06);
+}
+
+.dd-btn.is-ghost {
+  background: transparent;
+  color: var(--dd-muted);
+}
+
+.dd-error {
+  margin: 0;
+  font-size: 10px;
+  color: var(--dd-warn);
+  line-height: 1.4;
+}
+
+.dd-advanced {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  border: 1px solid var(--dd-line);
+  background: var(--desk-panel);
+}
+
+.dd-input {
+  width: 100%;
+  height: 28px;
+  border-radius: 6px;
+  border: 1px solid var(--dd-line);
+  background: var(--desk-bg-2);
+  color: var(--dd-ink);
+  font-size: 11px;
+  padding: 0 8px;
+  outline: none;
+}
+
+.dd-input:focus {
+  border-color: var(--dd-accent-line);
+}
+
+.dd-input.is-seed {
+  width: 100px;
+  flex: 0 0 auto;
+}

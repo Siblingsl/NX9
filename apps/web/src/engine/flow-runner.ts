@@ -30,6 +30,7 @@ import {
   emptyStoryboardPreview,
   resolveStoryboardPreviewPictureSettings,
   activeEpisodeShots,
+  migrateBlockKind,
 } from '@nx9/shared';
 import { buildCameraPrompt, normalizeDirectorProject } from '@nx9/director3d';
 import { api } from '../api/client';
@@ -211,7 +212,8 @@ async function executeBlock(
   updateNodeData: (id: string, data: Record<string, unknown>) => void,
   ctx?: { nodes: Node[]; edges: Edge[] },
 ): Promise<void> {
-  const kind = block.type;
+  /** 旧 kind 在未迁移工作区中仍可按合并目标执行 */
+  const kind = migrateBlockKind(block.type);
   const d = block.data ?? {};
   const prompt = mergeUpstreamPrompt(upstream, d.content as string | undefined);
 
@@ -221,8 +223,12 @@ async function executeBlock(
     status: 'running',
   });
 
-  if (kind === 'passthrough') {
-    updateNodeData(block.id, { upstream, status: 'success' });
+  if (kind === 'passthrough' || kind === 'memo') {
+    updateNodeData(block.id, {
+      upstream,
+      status: 'success',
+      content: (d.content as string) ?? prompt,
+    });
     return;
   }
 
@@ -249,21 +255,6 @@ async function executeBlock(
     return;
   }
 
-  if (kind === 'memo') {
-    updateNodeData(block.id, { status: 'success', output: d.content });
-    return;
-  }
-
-  if (kind === 'preview-sink') {
-    updateNodeData(block.id, {
-      status: 'success',
-      previewPrompt: prompt,
-      previewPictures: upstream.pictures,
-      previewClips: upstream.clips,
-    });
-    return;
-  }
-
   if (kind === 'dialogue-sheet') {
     const source = ((d.sourceText as string) || prompt).trim();
     if (!source) throw new Error('剧本拆分缺少文本');
@@ -273,23 +264,6 @@ async function executeBlock(
       sourceText: source,
       config: d.scriptBreakdownConfig as Partial<import('@nx9/shared').ScriptBreakdownConfig> | undefined,
       prompts: d.scriptBreakdownPrompts as Partial<import('@nx9/shared').ScriptBreakdownPromptTemplates> | undefined,
-    });
-    return;
-  }
-
-  if (kind === 'story-grid') {
-    const payload =
-      upstream.scriptBreakdowns?.[0] ??
-      (d.scriptBreakdown as import('@nx9/shared').ScriptBreakdownPayload | undefined);
-    if (!payload) throw new Error('分镜网格缺少剧本拆分数据');
-    const shots = flattenScriptBreakdownShots(payload);
-    syncBreakdownToStoryboard(payload);
-    updateNodeData(block.id, {
-      status: 'success',
-      scriptBreakdown: payload,
-      content: `${payload.title} · ${payload.episodes.length} 集 · ${shots.length} 个分镜`,
-      output: shots.map((shot) => shot.imagePrompt).join('\n\n'),
-      meta: { episodeCount: payload.episodes.length, shotCount: shots.length },
     });
     return;
   }
@@ -323,10 +297,11 @@ async function executeBlock(
     return;
   }
 
-  if (kind === 'storyboard-preview') {
+  if (kind === 'storyboard-desk' || kind === 'storyboard-preview' || kind === 'story-grid') {
     const rawPayload =
       upstream.scriptBreakdowns?.[0] ??
       (d.scriptBreakdown as import('@nx9/shared').ScriptBreakdownPayload | undefined);
+    if (rawPayload) syncBreakdownToStoryboard(rawPayload);
     const activeEpisodeId = useWorkspaceDocument.getState().storyboard.activeEpisodeId;
     const activeBreakdownEpisode = activeEpisodeId
       ? rawPayload?.episodes.find((episode) => episode.id === activeEpisodeId)
@@ -487,6 +462,15 @@ async function executeBlock(
     const customW = (d.width as number) || 1024;
     const customH = (d.height as number) || 1024;
     const snapToStep = (d.snapToStep as boolean) ?? true;
+    const imageStrength = (d.imageStrength as number) || 0.85;
+    const styleImageUrl = (d.styleImageUrl as string | undefined)?.trim();
+    const multiRefs = Array.isArray(d.referenceImageUrls)
+      ? (d.referenceImageUrls as string[]).filter((u) => typeof u === 'string' && u.trim())
+      : [];
+    const excludedRefs = new Set(
+      Array.isArray(d.excludedRefUrls) ? (d.excludedRefUrls as string[]) : [],
+    );
+    const upstreamPics = (upstream.pictures ?? []).filter((u) => !excludedRefs.has(u));
     const resolvedSize = resolveImageRequestSize({
       quality,
       aspectRatio: aspectRatio === 'custom' ? undefined : aspectRatio,
@@ -495,43 +479,103 @@ async function executeBlock(
       snapToStep,
     });
     const size = resolvedSize.size;
-    const shotRef = linkedShotId ? useWorkspaceDocument.getState().storyboard.shots.find((s) => s.id === linkedShotId)?.firstFrameAssetId : undefined;
-    const charRef = enhancedCtx.referenceImageUrl ?? upstream.pictures[0] ?? envRefUrl ?? shotRef;
+    const shotRef = linkedShotId
+      ? useWorkspaceDocument.getState().storyboard.shots.find((s) => s.id === linkedShotId)
+          ?.firstFrameAssetId
+      : undefined;
+    const nodeRef = (d.referenceImageUrl as string | undefined)?.trim();
+    const charRef =
+      enhancedCtx.referenceImageUrl ?? upstreamPics[0] ?? envRefUrl ?? shotRef;
+    const needsRef =
+      pictureGenMode === 'image-to-image' ||
+      pictureGenMode === 'multi-ref' ||
+      pictureGenMode === 'style-ref' ||
+      pictureGenMode === 'upscale-hd';
+
+    const { composePictureProPrompt, lookupPictureProAction } = await import(
+      './stage-deck/chrome/attached-workspace/generation/picture/picture-pro-actions'
+    );
+    const proAction = lookupPictureProAction(d.pictureProAction as string | undefined);
 
     const urls: string[] = [];
     let lastPrompt = '';
 
-    for (const job of finalJobs) {
-      let finalPrompt = enrichPromptWithCharacters(job.prompt, enhancedCtx.characters);
-      if (envPromptSuffix) finalPrompt = `${finalPrompt}\n${envPromptSuffix}`;
-      lastPrompt = finalPrompt;
-      let refImage = job.imageUrls?.[0] || charRef;
+    const { runPictureGenJob } = await import('./picture-gen-runner');
 
-      if (job.imageUrls && job.imageUrls.length >= 2) {
-        if (composeAction === 'merge' || composeAction === 'merge-then-generate') {
-          const merged = await api.mergeImages({
-            imageUrls: job.imageUrls,
-            direction: 'horizontal',
-          });
-          if (composeAction === 'merge') {
-            urls.push(merged.url);
-            continue;
-          }
-          refImage = merged.url;
-          finalPrompt = `${finalPrompt}\n\n[Reference collage attached]`;
-        }
-      }
-
-      const { runPictureGenJob } = await import('./picture-gen-runner');
+    if (pictureGenMode === 'upscale-hd') {
+      const refImage = nodeRef || charRef || multiRefs[0] || upstreamPics[0];
+      if (!refImage) throw new Error('图片高清需要参考图：请上传或连接上游');
       const batchUrls = await runPictureGenJob({
-        prompt: finalPrompt,
-        modelId,
-        size,
+        prompt: 'upscale',
         referenceImageUrl: refImage,
-        n: imageCount,
-        mode: pictureGenMode === 'panorama-720' ? 'panorama-720' : 'standard',
+        mode: 'upscale-hd',
+        upscaleScale: (d.resolutionTier as string) === '4k' ? 4 : 2,
       });
       urls.push(...batchUrls);
+      lastPrompt = '图片高清';
+    } else {
+      for (const job of finalJobs) {
+        let finalPrompt = enrichPromptWithCharacters(job.prompt, enhancedCtx.characters);
+        if (envPromptSuffix) finalPrompt = `${finalPrompt}\n${envPromptSuffix}`;
+        finalPrompt = composePictureProPrompt(finalPrompt, proAction);
+        const neg = (d.negativePrompt as string | undefined)?.trim();
+        if (neg) finalPrompt = `${finalPrompt}\n\nNegative: ${neg}`;
+        lastPrompt = finalPrompt;
+        let refImage =
+          job.imageUrls?.[0] || nodeRef || charRef || multiRefs[0] || styleImageUrl;
+
+        if (job.imageUrls && job.imageUrls.length >= 2) {
+          if (composeAction === 'merge' || composeAction === 'merge-then-generate') {
+            const merged = await api.mergeImages({
+              imageUrls: job.imageUrls,
+              direction: 'horizontal',
+            });
+            if (composeAction === 'merge') {
+              urls.push(merged.url);
+              continue;
+            }
+            refImage = merged.url;
+            finalPrompt = `${finalPrompt}\n\n[Reference collage attached]`;
+          }
+        }
+
+        if (
+          !job.imageUrls?.length &&
+          pictureGenMode === 'multi-ref' &&
+          multiRefs.length + (nodeRef ? 1 : 0) >= 2
+        ) {
+          const collageSrc = [nodeRef, ...multiRefs].filter(Boolean) as string[];
+          try {
+            const merged = await api.mergeImages({
+              imageUrls: collageSrc.slice(0, 4),
+              direction: 'horizontal',
+            });
+            refImage = merged.url;
+            finalPrompt = `${finalPrompt}\n\n[Multi-reference collage: ${collageSrc.length} images]`;
+          } catch {
+            /* keep single ref */
+          }
+        }
+
+        if (needsRef && !refImage) {
+          throw new Error('当前模式需要参考图：请上传主体参考，或连接上游图片');
+        }
+
+        const batchUrls = await runPictureGenJob({
+          prompt: finalPrompt,
+          modelId,
+          size,
+          referenceImageUrl: refImage,
+          referenceImageUrls: multiRefs,
+          styleImageUrl,
+          strength: imageStrength,
+          n: imageCount,
+          mode: pictureGenMode === 'panorama-720' ? 'panorama-720' : 'standard',
+          negativePrompt: d.negativePrompt as string | undefined,
+          seed: d.seed as number | undefined,
+        });
+        urls.push(...batchUrls);
+      }
     }
     if (urls.length === 0) throw new Error('图像生成失败');
 
@@ -564,12 +608,69 @@ async function executeBlock(
   }
 
   if (kind === 'clip-gen') {
+    const videoMode = (d.videoMode as string) ?? 'single';
     const charCtx = characterContextForBlock(block, upstream.pictures);
     const breakdown = upstream.scriptBreakdowns?.[0];
     const breakdownShots = flattenScriptBreakdownShots(breakdown);
     const confirmedPreview =
       (d.storyboardPreview as import('@nx9/shared').StoryboardPreviewPayload | undefined)?.confirmed;
 
+    // Bridge 续拍：抽尾帧再作为图生视频参考
+    if (videoMode === 'bridge' && (upstream.clips?.[0] || (d.sourceClipUrl as string))) {
+      const clipUrl = (upstream.clips?.[0] || (d.sourceClipUrl as string)) as string;
+      const framesRes = await api.extractFrames(clipUrl, 1);
+      const endFrameUrl = framesRes.frames?.[0];
+      const nextPrompt = prompt || (d.content as string) || '';
+      const continuationPrompt = (await import('@nx9/shared')).buildBridgeContinuationPrompt({
+        sourcePrompt: upstream.prompts?.[0] ?? (d.content as string) ?? '',
+        nextPrompt,
+      });
+      if (endFrameUrl) {
+        // 写入 endFrame 供后续图生视频使用
+        updateNodeData(block.id, {
+          endFrameUrl,
+          continuationPrompt,
+          content: continuationPrompt,
+          pictures: [endFrameUrl],
+        });
+        // 继续走单镜出片，以尾帧为 imageUrl
+        const finalPrompt = enrichPromptWithCharacters(continuationPrompt, charCtx.characters);
+        const modelId = (d.model as string) || 'veo';
+        const videoParams = resolveVideoGenParams({
+          resolution: d.resolution as string | undefined,
+          orientation: d.orientation as string | undefined,
+          aspect: d.aspect as string | undefined,
+          durationSec: d.durationSec as number | undefined,
+        });
+        const res = (await api.proxyVideo({
+          prompt: finalPrompt,
+          model: modelId,
+          imageUrl: endFrameUrl,
+          duration: videoParams.durationSec,
+          aspect_ratio: videoParams.aspect,
+          size: videoParams.size,
+          resolution: videoParams.resolution,
+          generateAudio: (d.generateAudio as boolean | undefined) ?? false,
+        })) as { ok?: boolean; url?: string; status?: string; taskId?: string; message?: string };
+        let videoUrl = res.url;
+        if (!videoUrl && res.taskId && (res.status === 'processing' || res.status === 'queued')) {
+          videoUrl = await pollVideoUntilDone(res.taskId);
+        }
+        updateNodeData(block.id, {
+          status: videoUrl ? 'success' : 'error',
+          videoUrl,
+          endFrameUrl,
+          continuationPrompt,
+          content: finalPrompt,
+          error: videoUrl ? undefined : (res.message ?? 'Bridge 续拍失败'),
+        });
+        return;
+      }
+    }
+
+    // chain/motion 已下线假批出：旧节点回退为单镜逻辑（下方）
+
+    // 多镜 + 多参考图：按镜批量图生视频（真实出片）
     if (breakdownShots.length > 1 && upstream.pictures.length > 1) {
       const videoParams = resolveVideoGenParams({
         resolution: d.resolution as string | undefined,
@@ -734,39 +835,98 @@ async function executeBlock(
   }
 
   if (kind === 'director-desk') {
-    const charCtx = characterContextForBlock(block, upstream.pictures);
-    let shotPrompt = enrichPromptWithCharacters(
-      (d.content as string) || prompt || 'cinematic medium shot',
-      charCtx.characters,
-    );
-    const linkedShotId = d.linkedShotId as string | undefined;
-    let envRefUrl: string | undefined;
-    if (linkedShotId) {
-      const environments = useWorkspaceDocument.getState().environments;
-      const shot = useWorkspaceDocument.getState().storyboard.shots.find((s) => s.id === linkedShotId);
-      if (shot?.sceneCode && environments?.environments) {
-        const env = environments.environments.find((e) => e.sceneCode === shot.sceneCode);
-        if (env) {
-          const { enrichPromptWithEnvironment } = require('@nx9/shared') as typeof import('@nx9/shared');
-          const envSuffix = enrichPromptWithEnvironment('', env);
-          if (envSuffix) shotPrompt = `${shotPrompt}\n${envSuffix}`;
-          envRefUrl = (env.referenceUrls ?? [])[0] ?? env.referenceImageUrl ?? undefined;
-        }
-      }
+    const {
+      runDirectorDeskBatch,
+      findDirectorPictureGenNode,
+      syncStyleToPictureGen,
+      openReviewAfterDirectorBatch,
+    } = await import('./director-desk-runner');
+    const pictureNode =
+      ctx?.nodes && ctx?.edges
+        ? findDirectorPictureGenNode(block.id, ctx.nodes, ctx.edges)
+        : undefined;
+    const filter = (d.queueFilter as 'missing' | 'failed' | 'selected' | 'all') ?? 'missing';
+    const styleSeedRaw = d.styleSeed;
+    const styleSeed =
+      styleSeedRaw === null || styleSeedRaw === undefined || styleSeedRaw === ''
+        ? null
+        : Number(styleSeedRaw);
+    const syncStyle = (d.syncStyleToPicture as boolean | undefined) ?? true;
+    if (syncStyle && pictureNode) {
+      syncStyleToPictureGen({
+        deskBlockId: block.id,
+        nodes: ctx?.nodes ?? [],
+        edges: ctx?.edges ?? [],
+        updateNodeData,
+        styleSeed: styleSeed != null && Number.isFinite(styleSeed) ? styleSeed : null,
+        stylePrompt: (d.stylePrompt as string | undefined) || undefined,
+        styleLock: (d.styleLock as boolean | undefined) ?? true,
+        negativePrompt: (d.negativePrompt as string | undefined) || undefined,
+      });
     }
-    const refUrl = upstream.pictures[0] ?? envRefUrl;
-    const res = await api.proxyImage({ prompt: shotPrompt, model: 'dall-e-3', imageUrl: refUrl }) as {
-      ok?: boolean;
-      url?: string;
+    const pictureData = {
+      ...((pictureNode?.data ?? {}) as Record<string, unknown>),
+      ...(styleSeed != null && Number.isFinite(styleSeed) ? { seed: styleSeed } : {}),
     };
-    if (!res.url) throw new Error('图像生成未返回 URL');
-    updateNodeData(block.id, {
-      status: 'success',
-      previewUrl: res.url,
-      content: shotPrompt,
-      characterInjected: charCtx.characters.map((c) => c.id),
-      lastResult: res,
+    const summary = await runDirectorDeskBatch({
+      filter,
+      skipExisting: (d.skipExisting as boolean | undefined) ?? true,
+      skipApproved: (d.skipApproved as boolean | undefined) ?? true,
+      concurrency: (d.concurrency as number | undefined) ?? 2,
+      maxRetries: (d.maxRetries as number | undefined) ?? 1,
+      forceCharacterRef: (d.forceCharacterRef as boolean | undefined) ?? true,
+      forceSceneRef: (d.forceSceneRef as boolean | undefined) ?? true,
+      styleLock: (d.styleLock as boolean | undefined) ?? true,
+      prefer3dRef: (d.prefer3dRef as boolean | undefined) ?? true,
+      stylePrompt: (d.stylePrompt as string | undefined) || undefined,
+      styleSeed: styleSeed != null && Number.isFinite(styleSeed) ? styleSeed : null,
+      pictureNodeData: pictureData,
+      upstreamPictures: upstream.pictures,
+      blockData: d as Record<string, unknown>,
     });
+    if (summary.total === 0) {
+      updateNodeData(block.id, {
+        status: 'success',
+        content: '队列为空（无待出关键帧）',
+        batchSummary: summary,
+      });
+      return;
+    }
+    updateNodeData(block.id, {
+      status: summary.failed > 0 && summary.done === 0 ? 'error' : 'success',
+      previewUrl: summary.lastUrl,
+      content: `批出 ${summary.done}/${summary.total} · 失败 ${summary.failed}` +
+        (summary.retried ? ` · 重试 ${summary.retried}` : ''),
+      batchSummary: {
+        total: summary.total,
+        done: summary.done,
+        failed: summary.failed,
+        skipped: summary.skipped,
+        retried: summary.retried ?? 0,
+        at: new Date().toISOString(),
+      },
+      lastResults: summary.results.map((r) => ({
+        shotId: r.shotId,
+        ok: r.ok,
+        url: r.url,
+        error: r.error,
+        attempts: r.attempts,
+        phase: r.phase,
+        usedRefs: r.usedRefs,
+      })),
+      error: summary.failed > 0 ? `${summary.failed} 镜失败` : undefined,
+    });
+    const autoOpenReview = (d.autoOpenReview as boolean | undefined) ?? true;
+    if (autoOpenReview && summary.done > 0 && ctx?.nodes && ctx?.edges) {
+      openReviewAfterDirectorBatch({
+        deskBlockId: block.id,
+        nodes: ctx.nodes,
+        edges: ctx.edges,
+        updateNodeData,
+        succeededShotIds: summary.results.filter((r) => r.ok).map((r) => r.shotId),
+        openSession: true,
+      });
+    }
     return;
   }
 
@@ -867,6 +1027,38 @@ async function executeBlock(
   }
 
   if (kind === 'clip-editor') {
+    const editorMode = (d.editorMode as string) ?? 'concat';
+    if (editorMode === 'audio') {
+      const tracks = upstream.sounds ?? [];
+      if (tracks.length < 2) throw new Error('至少需要 2 条音频');
+      const mixRes = await api.mixAudio(tracks, (d.normalize as boolean | undefined) ?? true);
+      if (!mixRes.ok || !mixRes.url) throw new Error(mixRes.message ?? '混音失败');
+      updateNodeData(block.id, {
+        status: 'success',
+        outputSound: mixRes.url,
+        sounds: [mixRes.url],
+        meta: { trackCount: mixRes.trackCount },
+      });
+      return;
+    }
+    if (editorMode === 'grade') {
+      const source = upstream.clips?.[0] ?? upstream.pictures?.[0];
+      if (!source) throw new Error('需要上游图像或视频');
+      const gradeRes = await api.colorGrade({
+        sourceUrl: source,
+        brightness: (d.brightness as number) ?? 0,
+        contrast: (d.contrast as number) ?? 1,
+        saturation: (d.saturation as number) ?? 1,
+      });
+      if (!gradeRes.ok || !gradeRes.url) throw new Error(gradeRes.message ?? '调色失败');
+      updateNodeData(block.id, {
+        status: 'success',
+        outputUrl: gradeRes.url,
+        previewUrl: gradeRes.url,
+        videoUrl: upstream.clips?.[0] ? gradeRes.url : undefined,
+      });
+      return;
+    }
     const clips = [...upstream.clips, ...((d.extraClips as string[]) ?? [])].filter(Boolean);
     if (clips.length === 0) throw new Error('缺少视频片段');
     const transition = (d.transition as string) ?? 'none';
@@ -1138,6 +1330,27 @@ async function executeBlock(
   }
 
   if (kind === 'caption-asr') {
+    const captionMode = (d.captionMode as string) ?? 'asr';
+    if (captionMode === 'burn') {
+      const clip = upstream.clips?.[0];
+      const subtitle = (d.subtitle as string) || (d.srtContent as string) || prompt || upstream.prompts?.[0] || '';
+      if (!clip) throw new Error('字幕烧录：需要上游视频');
+      if (!subtitle.trim()) throw new Error('字幕烧录：字幕为空');
+      const res = await api.renderShotMp4({
+        videoUrl: clip,
+        subtitle: subtitle.trim(),
+        durationSec: (d.durationSec as number) ?? 4,
+        skipReview: true,
+      });
+      if (!res.ok || !res.url) throw new Error(res.message ?? '字幕烧录失败');
+      updateNodeData(block.id, {
+        status: 'success',
+        outputClip: res.url,
+        clips: [res.url],
+        content: subtitle,
+      });
+      return;
+    }
     const src = upstream.clips?.[0] || upstream.sounds?.[0] || (d.sourceUrl as string);
     if (!src) throw new Error('语音转字幕：需要上游音频或视频');
     const language = (d.language as string) || 'zh';
@@ -1147,6 +1360,7 @@ async function executeBlock(
       srtContent: res.srtContent,
       cues: res.cues,
       language,
+      subtitle: res.srtContent,
       output: res.srtContent,
     });
     return;
@@ -1323,7 +1537,7 @@ async function executeBlock(
     return;
   }
 
-  if (kind === 'audio-mix') {
+  if (kind === 'audio-mix' || (kind === 'clip-editor' && (d.editorMode as string) === 'audio')) {
     const tracks = upstream.sounds ?? [];
     if (tracks.length < 2) throw new Error('至少需要 2 条音频');
     const res = await api.mixAudio(tracks, (d.normalize as boolean | undefined) ?? true);
@@ -1337,7 +1551,7 @@ async function executeBlock(
     return;
   }
 
-  if (kind === 'color-grade') {
+  if (kind === 'color-grade' || (kind === 'clip-editor' && (d.editorMode as string) === 'grade')) {
     const source = upstream.clips?.[0] ?? upstream.pictures?.[0];
     if (!source) throw new Error('需要上游图像或视频');
     const res = await api.colorGrade({

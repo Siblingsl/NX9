@@ -1,0 +1,435 @@
+/* ── 高级画布 · 沉浸式舞台（非 IDE 三栏） ──
+ * 背景与 chrome 随 desk 主题切换（见 desk-palette.css）
+ */
+
+.canvas-stage {
+  --cs-ink: var(--desk-ink);
+  --cs-muted: var(--desk-muted);
+  --cs-glass: var(--nx9-glass, rgba(18, 20, 24, 0.72));
+  --cs-glass-border: var(--desk-line-strong);
+  --cs-accent: var(--desk-accent);
+  --cs-accent-dim: var(--desk-accent-soft);
+  --cs-warn: var(--desk-warn);
+  --cs-shadow: var(--desk-shadow);
+  /* 画布全局滚动条 token */
+  --cs-scroll-track: var(--desk-panel);
+  --cs-scroll-thumb: var(--desk-accent-line);
+  --cs-scroll-thumb-hover: var(--desk-accent);
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  background: var(--desk-stage-bg);
+  color: var(--cs-ink);
+  overflow: hidden;
+}
+
+.canvas-stage__viewport {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+}
+
+/* 视口底色跟随主题；React Flow 自身 background 由 FlowSurface 内联设置 */
+.canvas-stage__viewport,
+.canvas-stage__viewport .nx9-stage-deck {
+  background: transparent;
+}
+.canvas-stage__viewport .react-flow__background pattern circle,
+.canvas-stage__viewport .react-flow__background {
+  opacity: 0.55;
+}
+
+.nx9-app-dark .canvas-stage__viewport .react-flow__background pattern circle,
+.nx9-app-dark .canvas-stage__viewport .react-flow__background,
+.nx9-theme-dark .react-flow__background {
+  opacity: 0.4;
+}
+
+.canvas-stage__vignette {
+  pointer-events: none;
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  background:
+    radial-gradient(ellipse 80% 60% at 50% 45%, transparent 40%, rgba(0, 0, 0, 0.12) 100%),
+    linear-gradient(180deg, rgba(0, 0, 0, 0.06) 0%, transparent 18%, transparent 82%, rgba(0, 0, 0, 0.1) 100%);
+}
+
+.nx9-app-dark .canvas-stage__vignette {
+  background:
+    radial-gradient(ellipse 80% 60% at 50% 45%, transparent 40%, rgba(0, 0, 0, 0.35) 100%),
+    linear-gradient(180deg, rgba(0, 0, 0, 0.25) 0%, transparent 18%, transparent 82%, rgba(0, 0, 0, 0.4) 100%);
+}
+
+.canvas-stage__float {
+  position: absolute;
+  z-index: 20;
+  pointer-events: none;
+}
+.canvas-stage__float > * {
+  pointer-events: auto;
+}
+
+.canvas-stage__top-left {
+  top: 16px;
+  left: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-width: min(420px, calc(100vw - 32px));
+}
+
+.canvas-stage__top-right {
+  top: 16px;
+  right: 16px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.canvas-stage__bottom {
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  width: min(720px, calc(100vw - 24px));
+}
+
+.cs-glass {
+  background: var(--cs-glass);
+  backdrop-filter: blur(18px) saturate(1.2);
+  -webkit-backdrop-filter: blur(18px) saturate(1.2);
+  border: 1px solid var(--cs-glass-border);
+  box-shadow: var(--cs-shadow);
+  border-radius: 16px;
+}
+
+.cs-nav {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px 6px 6px;
+}
+
+.cs-mark {
+  width: 32px;
+  height: 32px;
+  border-radius: 10px;
+  display: grid;
+  place-items: center;
+  font-size: 10px;
+  font-weight: 800;
+  background: linear-gradient(145deg, var(--desk-accent), color-mix(in srgb, var(--desk-accent) 60%, #1a1610));
+  color: var(--desk-btn-primary-ink);
+  flex-shrink: 0;
+}
+
+.cs-btn {
+  border: none;
+  background: transparent;
+  color: var(--cs-muted);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 7px 10px;
+  border-radius: 10px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  transition: background 0.15s, color 0.15s;
+}
+.cs-btn:hover {
+  background: var(--desk-panel);
+  color: var(--cs-ink);
+}
+.cs-btn.is-on {
+  background: var(--cs-accent-dim);
+  color: var(--cs-accent);
+}
+.cs-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.cs-btn-primary {
+  border: none;
+  cursor: pointer;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  padding: 10px 16px;
+  border-radius: 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--desk-btn-primary-ink);
+  background: linear-gradient(135deg, var(--desk-accent), color-mix(in srgb, var(--desk-accent) 70%, #fff));
+  box-shadow: 0 4px 16px color-mix(in srgb, var(--desk-accent) 30%, transparent);
+  transition: filter 0.15s, transform 0.1s;
+}
+.cs-btn-primary:hover:not(:disabled) {
+  filter: brightness(1.05);
+}
+.cs-btn-primary:active:not(:disabled) {
+  transform: scale(0.98);
+}
+.cs-btn-primary:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.cs-projects {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 8px;
+  max-height: 96px;
+  overflow: auto;
+}
+.cs-project {
+  border: 1px solid transparent;
+  background: var(--desk-panel);
+  color: var(--cs-muted);
+  font: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 5px 10px;
+  border-radius: 999px;
+  cursor: pointer;
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cs-project:hover {
+  color: var(--cs-ink);
+  background: rgba(255, 255, 255, 0.08);
+}
+.cs-project.is-on {
+  border-color: rgba(45, 212, 191, 0.4);
+  background: var(--cs-accent-dim);
+  color: var(--cs-accent);
+}
+
+.cs-island {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 10px;
+}
+
+.cs-island-divider {
+  width: 1px;
+  height: 22px;
+  background: rgba(255, 255, 255, 0.12);
+  margin: 0 4px;
+  flex-shrink: 0;
+}
+
+.cs-tool-panel {
+  width: min(520px, calc(100vw - 24px));
+  max-height: min(420px, 50vh);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 12px;
+}
+
+.cs-tool-lanes {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+.cs-lane {
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--cs-muted);
+  font: inherit;
+  font-size: 11px;
+  font-weight: 650;
+  padding: 6px 10px;
+  border-radius: 999px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.cs-lane.is-on {
+  border-color: rgba(45, 212, 191, 0.45);
+  background: var(--cs-accent-dim);
+  color: var(--cs-accent);
+}
+
+.cs-tool-search {
+  width: 100%;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(0, 0, 0, 0.25);
+  color: var(--cs-ink);
+  border-radius: 10px;
+  padding: 8px 12px;
+  font: inherit;
+  font-size: 12px;
+  margin-bottom: 10px;
+  outline: none;
+}
+.cs-tool-search:focus {
+  border-color: rgba(45, 212, 191, 0.45);
+}
+.cs-tool-search::placeholder {
+  color: rgba(243, 240, 234, 0.35);
+}
+
+.cs-tool-list {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+@media (max-width: 520px) {
+  .cs-tool-list {
+    grid-template-columns: 1fr;
+  }
+}
+
+.cs-tool-item {
+  text-align: left;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--cs-ink);
+  font: inherit;
+  padding: 10px;
+  border-radius: 12px;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+.cs-tool-item:hover {
+  border-color: rgba(45, 212, 191, 0.35);
+  background: rgba(45, 212, 191, 0.08);
+}
+.cs-tool-item strong {
+  display: block;
+  font-size: 12px;
+  font-weight: 650;
+  margin-bottom: 3px;
+}
+.cs-tool-item span {
+  display: block;
+  font-size: 10px;
+  color: var(--cs-muted);
+  line-height: 1.35;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.cs-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  font-size: 11px;
+  color: var(--cs-muted);
+}
+.cs-status b {
+  color: var(--cs-accent);
+  font-variant-numeric: tabular-nums;
+}
+
+.cs-hint {
+  font-size: 10px;
+  color: rgba(243, 240, 234, 0.4);
+  text-align: center;
+  padding: 0 8px;
+}
+
+/* React Flow 控件避开底部岛 */
+.canvas-stage .react-flow__controls {
+  bottom: 100px !important;
+  left: 16px !important;
+  border-radius: 12px !important;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.1) !important;
+  box-shadow: var(--cs-shadow) !important;
+}
+.canvas-stage .react-flow__minimap {
+  bottom: 100px !important;
+  right: 16px !important;
+  border-radius: 12px !important;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.1) !important;
+  opacity: 0.85;
+}
+
+/* ── 画布全局滚动条 ──
+ * 凡画布舞台内、以及从画布弹出的全屏弹窗，统一暖金细滚动条。
+ * 门户弹层（ScreenModal → body）用 .nx9-screen-modal 一并覆盖。
+ */
+.canvas-stage,
+.canvas-stage *,
+.nx9-screen-modal,
+.nx9-screen-modal * {
+  scrollbar-width: thin;
+  scrollbar-color: var(--cs-scroll-thumb, rgba(196, 165, 116, 0.35))
+    var(--cs-scroll-track, rgba(255, 255, 255, 0.04));
+}
+
+.canvas-stage::-webkit-scrollbar,
+.canvas-stage *::-webkit-scrollbar,
+.nx9-screen-modal::-webkit-scrollbar,
+.nx9-screen-modal *::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+.canvas-stage::-webkit-scrollbar-corner,
+.canvas-stage *::-webkit-scrollbar-corner,
+.nx9-screen-modal::-webkit-scrollbar-corner,
+.nx9-screen-modal *::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+.canvas-stage::-webkit-scrollbar-track,
+.canvas-stage *::-webkit-scrollbar-track,
+.nx9-screen-modal::-webkit-scrollbar-track,
+.nx9-screen-modal *::-webkit-scrollbar-track {
+  background: var(--cs-scroll-track, rgba(255, 255, 255, 0.04));
+  border-radius: 0;
+}
+
+.canvas-stage::-webkit-scrollbar-thumb,
+.canvas-stage *::-webkit-scrollbar-thumb,
+.nx9-screen-modal::-webkit-scrollbar-thumb,
+.nx9-screen-modal *::-webkit-scrollbar-thumb {
+  background: var(--cs-scroll-thumb, rgba(196, 165, 116, 0.35));
+  border-radius: 6px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+
+.canvas-stage::-webkit-scrollbar-thumb:hover,
+.canvas-stage *::-webkit-scrollbar-thumb:hover,
+.nx9-screen-modal::-webkit-scrollbar-thumb:hover,
+.nx9-screen-modal *::-webkit-scrollbar-thumb:hover {
+  background: var(--cs-scroll-thumb-hover, rgba(196, 165, 116, 0.55));
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+
+/* 门户弹层不在 .canvas-stage 内，补齐 token */
+.nx9-screen-modal {
+  --cs-scroll-track: rgba(255, 255, 255, 0.04);
+  --cs-scroll-thumb: rgba(196, 165, 116, 0.35);
+  --cs-scroll-thumb-hover: rgba(196, 165, 116, 0.55);
+}

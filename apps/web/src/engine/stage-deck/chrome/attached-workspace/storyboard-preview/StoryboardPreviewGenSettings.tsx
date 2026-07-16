@@ -90,7 +90,9 @@ export function StoryboardPreviewGenSettings({
         mode={settings.pictureGenMode as PictureGenMode}
         modes={['text-to-image', 'image-to-image']}
         onChange={(mode) => {
-          if (mode !== 'panorama-720') onChange({ pictureGenMode: mode });
+          if (mode === 'text-to-image' || mode === 'image-to-image') {
+            onChange({ pictureGenMode: mode });
+          }
         }}
       />
       <span className="w-px h-3.5 bg-line/50" />

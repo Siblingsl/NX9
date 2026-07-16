@@ -1,19 +1,28 @@
 /**
  * 产品展示面配置 — 控制哪些功能出现在 UI 中。
- * 被关闭的功能代码仍保留在仓库内，将对应开关改为 true 即可重新启用。
  *
- * 当前模式：Workflow Core — 画布 + 节点 + 必要连带能力。
+ * 架构：
+ * - home：导航页（制作台 / 高级画布）
+ * - studio：制作台全页（无右侧抽屉）
+ * - canvas：高级画布（后期重构 UI；无右侧抽屉）
+ *
+ * 明确禁止：右侧 ContextRail 抽屉及其编剧/分镜/资源库子页。
  */
 export const PRODUCT_SURFACE = {
-  // —— 核心：画布与节点 ——
+  // —— 画布（仅 canvas 表面挂载时展示 · 全屏舞台风格） ——
   canvas: true,
   canvasFirst: true,
+  /** 节点工作区：底部跟随挂载（非屏幕弹窗） */
   promptBar: true,
-  moduleDock: true,
+  /** 旧左侧模块坞：由舞台底部能力岛替代 */
+  moduleDock: false,
+  /** 永久关闭：右侧内容抽屉 */
   inspectorRail: false,
-  workspaceRail: true,
+  /** 旧工作区标签轨：由舞台项目 chips 替代 */
+  workspaceRail: false,
   commandPalette: true,
-  viewModeCapsule: true,
+  /** 旧顶栏模式胶囊：舞台不再挂载 */
+  viewModeCapsule: false,
   batchRun: true,
   undoRedo: true,
   takeRail: true,
@@ -23,16 +32,25 @@ export const PRODUCT_SURFACE = {
   logPanel: true,
   assetLibraryModal: true,
 
-  // —— 暂缓展示（代码保留） ——
-  storyboard: false,
-  playbookWizard: false,
+  // —— 制作引导（制作台页面自有 UI，不走右侧抽屉） ——
+  productionProgressWall: false,
+  /** 画布内步骤条：浮动玻璃，非 IDE 顶栏 */
   playbookFlowRail: true,
+  productionWall: false,
+  expertWorkflowToggle: false,
+  playbookWizard: true,
+  /** 全屏故事板面板（制作台入口打开，非右侧抽屉） */
+  storyboard: true,
+
+  // —— 禁止右侧抽屉相关 ——
   scriptStudio: false,
   libraryRail: false,
+  /** 旧顶栏路径条关闭；制作台页面内嵌阶段 UI */
+  productionPathStrip: false,
+
+  // —— 暂缓 ——
   episodeStudio: false,
   director3d: false,
-  productionWall: false,
-  productionProgressWall: true,
   generationHistory: false,
   usageTracking: false,
   skillsDrawer: false,

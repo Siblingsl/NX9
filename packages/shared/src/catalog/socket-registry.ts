@@ -8,9 +8,11 @@ export const SOCKET_REGISTRY: Record<string, SocketProfile> = {
   'picture-gen': { accepts: ['prompt', 'picture'], emits: ['picture'] },
   'clip-gen': { accepts: ['prompt', 'picture', 'clip', 'sound'], emits: ['clip'] },
   'storyboard-preview': { accepts: ['prompt', 'picture', 'meta'], emits: ['picture', 'meta'] },
-  'clip-editor': { accepts: ['clip'], emits: ['clip'] },
+  /** 分镜台 = 网格 + 关键帧预览（合并节点） */
+  'storyboard-desk': { accepts: ['prompt', 'picture', 'meta'], emits: ['prompt', 'picture', 'meta'] },
+  'clip-editor': { accepts: ['clip', 'sound', 'picture'], emits: ['clip', 'sound'] },
   'motion-story': { accepts: ['prompt', 'picture', 'clip', 'sound'], emits: ['clip'] },
-  'director-desk': { accepts: ['prompt', 'picture', 'clip', 'sound'], emits: ['clip', 'prompt'] },
+  'director-desk': { accepts: ['prompt', 'picture', 'clip', 'sound'], emits: ['picture', 'prompt'] },
   'sound-gen': { accepts: ['prompt', 'sound'], emits: ['sound'] },
   'chat-model': { accepts: ['prompt', 'picture', 'clip'], emits: ['prompt'] },
 
@@ -27,7 +29,7 @@ export const SOCKET_REGISTRY: Record<string, SocketProfile> = {
   'asset-gate': { accepts: ['prompt', 'meta'], emits: ['prompt', 'meta'] },
   'voice-cast': { accepts: ['prompt', 'sound'], emits: ['sound', 'meta'] },
   'bridge-clip': { accepts: ['prompt', 'clip'], emits: ['prompt', 'picture', 'meta'] },
-  'caption-asr': { accepts: ['clip', 'sound'], emits: ['prompt', 'meta'] },
+  'caption-asr': { accepts: ['clip', 'sound', 'prompt'], emits: ['prompt', 'clip', 'meta'] },
   'seedance-chain': { accepts: ['prompt', 'clip'], emits: ['clip', 'meta'] },
   'thumbnail-maker': { accepts: ['picture', 'clip'], emits: ['picture', 'meta'] },
   'inpaint-edit': { accepts: ['picture', 'prompt'], emits: ['picture', 'meta'] },
@@ -247,7 +249,14 @@ export const VERTICAL_SOCKETS: Record<string, VerticalSocketSpec[]> = {
       position: 'top',
       type: 'target',
       id: 'exec-picture',
-      // label: '预览',
+    },
+  ],
+  'storyboard-desk': [
+    {
+      kind: 'picture',
+      position: 'top',
+      type: 'target',
+      id: 'exec-picture',
     },
   ],
   'asset-gate': [
@@ -265,6 +274,11 @@ export function resolveVerticalSockets(kind: string): VerticalSocketSpec[] {
   return VERTICAL_SOCKETS[kind] ?? [];
 }
 
+/** 分镜关键帧宿主：分镜台（及迁移前的预览节点） */
+export function isStoryboardPreviewHostKind(kind?: string | null): boolean {
+  return kind === 'storyboard-desk' || kind === 'storyboard-preview' || kind === 'story-grid';
+}
+
 export function isStoryboardExecLink(
   sourceKind: string,
   targetKind: string,
@@ -275,9 +289,9 @@ export function isStoryboardExecLink(
     EXEC_PICTURE_HANDLES.has(sourceHandle ?? '') ||
     EXEC_PICTURE_HANDLES.has(targetHandle ?? '');
   const pair =
-    (sourceKind === 'picture-gen' && targetKind === 'storyboard-preview') ||
-    (sourceKind === 'storyboard-preview' && targetKind === 'picture-gen') ||
-    (sourceKind === 'director-3d' && targetKind === 'storyboard-preview') ||
-    (sourceKind === 'storyboard-preview' && targetKind === 'director-3d');
+    (sourceKind === 'picture-gen' && isStoryboardPreviewHostKind(targetKind)) ||
+    (isStoryboardPreviewHostKind(sourceKind) && targetKind === 'picture-gen') ||
+    (sourceKind === 'director-3d' && isStoryboardPreviewHostKind(targetKind)) ||
+    (isStoryboardPreviewHostKind(sourceKind) && targetKind === 'director-3d');
   return usesExec && pair;
 }

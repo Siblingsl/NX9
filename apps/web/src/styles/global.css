@@ -3,22 +3,24 @@
 @tailwind utilities;
 
 :root {
-  --nx9-bg: #fafaf8;
-  --nx9-ink: #222222;
-  --nx9-brand: #a13d63;
-  --nx9-accent: #5e4d8a;
-  --nx9-ok: #2e8b57;
-  --nx9-warn: #d97706;
-  --nx9-line: #e6e6e6;
-  --nx9-glass: rgba(255, 255, 255, 0.72);
-  --nx9-glass-blur: 16px;
-  --nx9-lane-character: rgba(94, 77, 138, 0.06);
-  --nx9-lane-scene: rgba(161, 61, 99, 0.06);
-  --nx9-lane-gen: rgba(217, 119, 6, 0.06);
-  --nx9-lane-output: rgba(46, 139, 87, 0.06);
-  --nx9-deck-height: 168px;
+  --nx9-bg: #f4f1ea;
+  --nx9-ink: #1a1814;
+  --nx9-brand: #0f766e;
+  --nx9-accent: #1e3a5f;
+  --nx9-ok: #15803d;
+  --nx9-warn: #c2410c;
+  --nx9-line: #e4dfd6;
+  --nx9-glass: rgba(255, 252, 247, 0.82);
+  --nx9-glass-blur: 18px;
+  --nx9-lane-character: rgba(30, 58, 95, 0.07);
+  --nx9-lane-scene: rgba(15, 118, 110, 0.07);
+  --nx9-lane-gen: rgba(194, 65, 12, 0.07);
+  --nx9-lane-output: rgba(21, 128, 61, 0.07);
+  --nx9-deck-height: 0px;
   --nx9-dock-width: 48px;
   --nx9-rail-width: 320px;
+  --nx9-node-radius: 16px;
+  --nx9-socket-opacity: 0.55;
 }
 
 * {
@@ -35,7 +37,7 @@ body,
 body {
   background: var(--nx9-bg);
   color: var(--nx9-ink);
-  font-family: 'DM Sans', system-ui, sans-serif;
+  font-family: 'Source Sans 3', 'Segoe UI', system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
 }
 
@@ -63,13 +65,33 @@ body {
   pointer-events: none;
 }
 
+.nx9-socket {
+  opacity: var(--nx9-socket-opacity, 0.55);
+  transition: opacity 150ms ease, transform 150ms ease;
+}
+
+.nx9-socket:hover,
+.react-flow__node.selected .nx9-socket {
+  opacity: 1;
+}
+
 .nx9-socket-exec {
-  box-shadow: 0 0 0 2px rgba(161, 61, 99, 0.18);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--nx9-brand) 22%, transparent);
 }
 
 .nx9-stage-deck .react-flow__edge[data-exec='true'] .react-flow__edge-path {
-  stroke: #a13d63;
+  stroke: var(--nx9-brand);
   stroke-width: 3px;
+}
+
+/* 制作模式：连线更克制，选中/悬停再强调 */
+.nx9-stage-deck--produce .react-flow__edge-path {
+  stroke-opacity: 0.45;
+}
+
+.nx9-stage-deck--produce .react-flow__edge.selected .react-flow__edge-path,
+.nx9-stage-deck--produce .react-flow__edge.selectable:hover .react-flow__edge-path {
+  stroke-opacity: 1;
 }
 
 /* 滚轮在节点内（.nowheel）时由 React Flow 跳过缩放，交给节点内 overflow 区域滚动 */
@@ -106,19 +128,35 @@ body {
   border: 1px solid var(--nx9-line);
 }
 
+/* 通用滚动区：与画布全局滚动条同款（暖金细条） */
 .nx9-scroll {
+  --cs-scroll-track: rgba(255, 255, 255, 0.04);
+  --cs-scroll-thumb: rgba(196, 165, 116, 0.35);
+  --cs-scroll-thumb-hover: rgba(196, 165, 116, 0.55);
   scrollbar-width: thin;
-  scrollbar-color: #ccc transparent;
+  scrollbar-color: var(--cs-scroll-thumb) var(--cs-scroll-track);
 }
 
 .nx9-scroll::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+  width: 10px;
+  height: 10px;
+}
+
+.nx9-scroll::-webkit-scrollbar-track {
+  background: var(--cs-scroll-track);
 }
 
 .nx9-scroll::-webkit-scrollbar-thumb {
-  background: #ccc;
-  border-radius: 999px;
+  background: var(--cs-scroll-thumb);
+  border-radius: 6px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+
+.nx9-scroll::-webkit-scrollbar-thumb:hover {
+  background: var(--cs-scroll-thumb-hover);
+  border: 2px solid transparent;
+  background-clip: content-box;
 }
 
 /* Canvas context menus */
@@ -296,11 +334,19 @@ body {
   background: rgba(255,255,255,0.075) !important;
 }
 
-.nx9-theme-dark.nx9-stage-deck .text-ink,
-.nx9-theme-dark.nx9-stage-deck .text-ink\/80,
-.nx9-theme-dark.nx9-stage-deck .text-ink\/85,
-.nx9-theme-dark.nx9-stage-deck .text-ink\/90 {
+/* 深色舞台：非卡片区用暖白字；卡片区走 desk 变量（炭黑卡 + 暖白字） */
+.nx9-theme-dark.nx9-stage-deck .text-ink:not(.nx9-stage-card *),
+.nx9-theme-dark.nx9-stage-deck .text-ink\/80:not(.nx9-stage-card *),
+.nx9-theme-dark.nx9-stage-deck .text-ink\/85:not(.nx9-stage-card *),
+.nx9-theme-dark.nx9-stage-deck .text-ink\/90:not(.nx9-stage-card *) {
   color: rgba(245, 242, 236, 0.92) !important;
+}
+
+.nx9-theme-dark.nx9-stage-deck .nx9-stage-card .text-ink,
+.nx9-theme-dark.nx9-stage-deck .nx9-stage-card .text-ink\/80,
+.nx9-theme-dark.nx9-stage-deck .nx9-stage-card .text-ink\/85,
+.nx9-theme-dark.nx9-stage-deck .nx9-stage-card .text-ink\/90 {
+  color: var(--desk-ink, rgba(236, 232, 224, 0.92)) !important;
 }
 
 .nx9-theme-dark.nx9-stage-deck .text-ink\/70,
@@ -343,7 +389,7 @@ body {
 
 .nx9-theme-dark.nx9-stage-deck .bg-brand\/10,
 .nx9-theme-dark.nx9-stage-deck .bg-accent\/5 {
-  background: rgba(161,61,99,0.18) !important;
+  background: color-mix(in srgb, var(--nx9-brand) 22%, transparent) !important;
 }
 
 .nx9-theme-dark.nx9-stage-deck .border-dashed {
@@ -794,7 +840,7 @@ body {
   color: #fff;
   cursor: pointer;
   white-space: nowrap;
-  box-shadow: 0 1px 2px rgba(161, 61, 99, 0.25);
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--nx9-brand) 28%, transparent);
   transition: opacity 150ms ease, transform 100ms ease;
 }
 

@@ -111,6 +111,54 @@ function normalizeDialogue(value: unknown) {
   }).filter((item) => item.speaker && item.text).slice(0, 8);
 }
 
+/** 是否像「景别 CU / 运镜 推」标签清单，而非成段视听叙述 */
+function looksLikeAvTagList(text: string): boolean {
+  const t = text.trim();
+  if (!t) return true;
+  if (/[。！？]/.test(t) && t.length >= 20) return false;
+  const tagHits = (t.match(/(景别|运镜|机位|镜头|声效|旁白|特写|全景|中景|推|拉|摇|移|跟|手持)/g) ?? []).length;
+  const sentenceEnds = (t.match(/[。！？]/g) ?? []).length;
+  return tagHits >= 2 && sentenceEnds === 0 && t.length < 80;
+}
+
+function normalizeAudiovisualLanguage(
+  row: Record<string, unknown>,
+  fallback: {
+    scriptText: string;
+    visual?: string;
+    action?: string;
+    sound?: string;
+    shotSize?: string;
+    cameraMove?: string;
+    cameraAngle?: string;
+  },
+): string {
+  const direct = String(
+    row.audiovisualLanguage
+    ?? row.audioVisualLanguage
+    ?? row.avLanguage
+    ?? row['视听语言']
+    ?? '',
+  ).trim();
+  if (direct.length >= 12 && !looksLikeAvTagList(direct)) return direct;
+
+  const subject = (fallback.visual || fallback.action || fallback.scriptText || '这一戏剧瞬间')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 60);
+  const move = fallback.cameraMove && fallback.cameraMove !== '固定'
+    ? `${fallback.cameraMove}镜跟随情境`
+    : '镜头贴近情境';
+  const sizeHint = fallback.shotSize === 'CU' || fallback.shotSize === 'ECU'
+    ? '特写钉住表情与细节'
+    : fallback.shotSize === 'WS' || fallback.shotSize === 'FS'
+      ? '全景交代空间与关系'
+      : '中景稳住人物状态';
+  const angle = fallback.cameraAngle ? `，${fallback.cameraAngle}强化压迫或疏离感` : '';
+  const sound = fallback.sound ? `声画上，${fallback.sound.replace(/[。！？]+$/, '')}与画面同步加压。` : '光色与材质对比把这一拍的情绪推到前景。';
+  return `${move}，${sizeHint}${angle}，交代${subject}。${sound}`;
+}
+
 function normalizeStoryAnalysis(plan: Record<string, unknown> | null): ScriptBreakdownStoryAnalysis | undefined {
   const raw = (plan?.storyAnalysis ?? plan?.analysis) as Record<string, unknown> | undefined;
   if (!raw || typeof raw !== 'object') return undefined;
@@ -202,6 +250,16 @@ export function normalizeProductionEpisode(args: {
       for (const line of dialogue) if (!characters.includes(line.speaker)) characters.push(line.speaker);
       const visual = String(row.imagePrompt ?? row.image_prompt ?? '').trim() || `${args.config.visualStyle}，${scriptText}`;
       const motion = String(row.videoPrompt ?? row.video_prompt ?? row.videoDesc ?? '').trim() || `根据关键帧生成 ${durationSec} 秒视频：${scriptText}，动作自然，镜头连续`;
+      const shotSize = ['ECU', 'CU', 'MS', 'FS', 'WS', 'OTS'].includes(String(row.shotSize).toUpperCase())
+        ? String(row.shotSize).toUpperCase() as ScriptBreakdownShot['shotSize']
+        : 'MS';
+      const cameraMove = ['固定', '推', '拉', '摇', '移', '跟', '手持'].includes(String(row.cameraMove))
+        ? String(row.cameraMove) as ScriptBreakdownShot['cameraMove']
+        : '固定';
+      const cameraAngle = String(row.cameraAngle ?? '').trim() || undefined;
+      const visualDesc = String(row.visual ?? '').trim() || undefined;
+      const actionDesc = String(row.action ?? '').trim() || undefined;
+      const soundDesc = String(row.sound ?? '').trim() || undefined;
       return {
         id: `${episodeId}-shot-${globalShotIndex}`,
         episodeId,
@@ -212,22 +270,27 @@ export function normalizeProductionEpisode(args: {
         title: String(row.title ?? scriptText.slice(0, 28) ?? `镜头 ${globalShotIndex}`).trim(),
         purpose: String(row.purpose ?? row.shotPurpose ?? '').trim() || undefined,
         durationSec,
-        shotSize: ['ECU', 'CU', 'MS', 'FS', 'WS', 'OTS'].includes(String(row.shotSize).toUpperCase())
-          ? String(row.shotSize).toUpperCase() as ScriptBreakdownShot['shotSize']
-          : 'MS',
-        cameraMove: ['固定', '推', '拉', '摇', '移', '跟', '手持'].includes(String(row.cameraMove))
-          ? String(row.cameraMove) as ScriptBreakdownShot['cameraMove']
-          : '固定',
-        cameraAngle: String(row.cameraAngle ?? '').trim() || undefined,
+        shotSize,
+        cameraMove,
+        cameraAngle,
         cameraLens: String(row.cameraLens ?? '').trim() || undefined,
         characters: characters.slice(0, 12),
         scene: String(sceneRow.location ?? sceneRow.title ?? '未指定场景').trim(),
         scriptText,
-        visual: String(row.visual ?? '').trim() || undefined,
-        action: String(row.action ?? '').trim() || undefined,
+        visual: visualDesc,
+        action: actionDesc,
         dialogue,
         narration: String(row.narration ?? '').trim() || undefined,
-        sound: String(row.sound ?? '').trim() || undefined,
+        sound: soundDesc,
+        audiovisualLanguage: normalizeAudiovisualLanguage(row, {
+          scriptText,
+          visual: visualDesc,
+          action: actionDesc,
+          sound: soundDesc,
+          shotSize,
+          cameraMove,
+          cameraAngle,
+        }),
         imagePrompt: visual,
         videoPrompt: motion,
         negativePrompt: String(row.negativePrompt ?? '').trim() || undefined,
@@ -580,6 +643,7 @@ export class AgentService {
             characters: shot.characters,
             scriptText: shot.scriptText,
             dialogue: shot.dialogue,
+            audiovisualLanguage: shot.audiovisualLanguage,
             imagePrompt: shot.imagePrompt,
             videoPrompt: shot.videoPrompt,
             continuityNotes: [],
@@ -633,7 +697,7 @@ export class AgentService {
       episodes,
       config,
       diagnostics,
-      promptVersion: 'production-director-v2',
+      promptVersion: 'production-director-v3-av-language',
       generatedAt: new Date().toISOString(),
     };
     diagnostics.push(...validateScriptBreakdownPayload(payload).filter((item) =>

@@ -3,7 +3,7 @@ import type {
   StoryboardPreviewFrame,
   StoryboardPreviewPictureSettings,
 } from '../types/storyboard-preview';
-import { EXEC_PICTURE_HANDLES } from '../catalog/socket-registry';
+import { EXEC_PICTURE_HANDLES, isStoryboardPreviewHostKind } from '../catalog/socket-registry';
 import type { StoryboardDirector3dGuide } from '../types/storyboard';
 
 export function buildDirectorCharacterPlacementPrompt(
@@ -73,13 +73,19 @@ export function resolveConnectedDirector3dId(
   return resolveConnectedNodeIdByType(previewBlockId, 'director-3d', nodes, edges);
 }
 
-/** 从 3D 导演台解析已连接的分镜预览。 */
+/** 从 3D 导演台解析已连接的分镜台/预览。 */
 export function resolveConnectedStoryboardPreviewForDirector3dId(
   directorBlockId: string,
   nodes: Array<{ id: string; type?: string | null }>,
   edges: Array<{ source: string; target: string }>,
 ): string | undefined {
-  return resolveConnectedNodeIdByType(directorBlockId, 'storyboard-preview', nodes, edges);
+  const byId = new Map(nodes.map((node) => [node.id, node]));
+  for (const edge of edges) {
+    if (edge.source !== directorBlockId && edge.target !== directorBlockId) continue;
+    const otherId = edge.source === directorBlockId ? edge.target : edge.source;
+    if (isStoryboardPreviewHostKind(byId.get(otherId)?.type)) return otherId;
+  }
+  return undefined;
 }
 
 /** 将预览图写回剧本拆分结构 */
@@ -123,8 +129,10 @@ function findStoryboardExecEdge(
     const source = byId.get(e.source);
     const target = byId.get(e.target);
     const isPair =
-      (source?.type === 'picture-gen' && target?.type === 'storyboard-preview') ||
-      (source?.type === 'storyboard-preview' && target?.type === 'picture-gen');
+      (source?.type === 'picture-gen' && isStoryboardPreviewHostKind(target?.type)) ||
+      (isStoryboardPreviewHostKind(source?.type) && target?.type === 'picture-gen') ||
+      (source?.type === 'director-3d' && isStoryboardPreviewHostKind(target?.type)) ||
+      (isStoryboardPreviewHostKind(source?.type) && target?.type === 'director-3d');
     if (!isPair) return false;
     return e.source === blockId || e.target === blockId;
   });
@@ -167,8 +175,8 @@ export function isDirector3dDelegatedToPreview(
     const source = byId.get(edge.source);
     const target = byId.get(edge.target);
     const isPair =
-      (source?.type === 'director-3d' && target?.type === 'storyboard-preview') ||
-      (source?.type === 'storyboard-preview' && target?.type === 'director-3d');
+      (source?.type === 'director-3d' && isStoryboardPreviewHostKind(target?.type)) ||
+      (isStoryboardPreviewHostKind(source?.type) && target?.type === 'director-3d');
     if (!isPair) return false;
     return (
       EXEC_PICTURE_HANDLES.has(edge.sourceHandle ?? '') ||

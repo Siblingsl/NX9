@@ -140,23 +140,33 @@ export const DIRECTOR_CONTROL_GROUPS: Array<{
   },
 ];
 
-export function ChipMultiSelect({ label, value, options, onChange }: {
-  label: string; value: string[]; options: string[]; onChange: (next: string[]) => void;
+export function ChipMultiSelect({ label, value, options, onChange, disabled = false }: {
+  label: string;
+  value: string[];
+  options: string[];
+  onChange: (next: string[]) => void;
+  disabled?: boolean;
 }) {
   const selected = new Set(value);
   return (
-    <div className="space-y-1">
+    <div className={`space-y-1 ${disabled ? 'opacity-70' : ''}`}>
       <div className="flex items-center gap-2">
         <span className="text-[10px] font-medium text-ink/60">{label}</span>
-        {value.length > 0 && <button type="button" onClick={() => onChange([])} className="text-[9px] text-ink/40 hover:text-brand">清空</button>}
+        {!disabled && value.length > 0 && (
+          <button type="button" onClick={() => onChange([])} className="text-[9px] text-ink/40 hover:text-brand">清空</button>
+        )}
       </div>
       <div className="flex flex-wrap gap-1">
         {options.map((option) => (
           <button
             key={option}
             type="button"
-            onClick={() => onChange(selected.has(option) ? value.filter((item) => item !== option) : [...value, option])}
-            className={`rounded-full border px-2.5 py-1 text-[10px] transition-colors ${selected.has(option) ? 'border-brand/40 bg-brand/10 font-medium text-brand' : 'border-line/50 bg-white text-ink/60 hover:border-brand/25 hover:text-ink'}`}
+            disabled={disabled}
+            onClick={() => {
+              if (disabled) return;
+              onChange(selected.has(option) ? value.filter((item) => item !== option) : [...value, option]);
+            }}
+            className={`rounded-full border px-2.5 py-1 text-[10px] transition-colors ${selected.has(option) ? 'border-brand/40 bg-brand/10 font-medium text-brand' : 'border-line/50 bg-white text-ink/60 hover:border-brand/25 hover:text-ink'} ${disabled ? 'cursor-default' : ''}`}
           >
             {option}
           </button>

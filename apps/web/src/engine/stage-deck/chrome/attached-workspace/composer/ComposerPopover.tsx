@@ -13,6 +13,8 @@ export interface ComposerPopoverProps {
   align?: 'start' | 'end';
   placement?: 'above' | 'below';
   width?: number;
+  /** 炭黑工作台弹层（对齐剧本拆分） */
+  tone?: 'default' | 'desk';
 }
 
 export function ComposerPopover({
@@ -23,6 +25,7 @@ export function ComposerPopover({
   align = 'start',
   placement = 'below',
   width = 200,
+  tone = 'default',
 }: ComposerPopoverProps) {
   const panelRef = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
@@ -65,7 +68,9 @@ export function ComposerPopover({
       />
       <div
         ref={panelRef}
-        className="nx9-composer-popover fixed z-[121] rounded-xl border border-line/60 bg-white shadow-panel py-1 nodrag nopan"
+        className={`nx9-composer-popover fixed z-[121] rounded-xl border border-line/60 bg-white shadow-panel py-1 nodrag nopan ${
+          tone === 'desk' ? 'is-picture-desk' : ''
+        }`}
         style={{
           top: pos?.top ?? -9999,
           left: pos?.left ?? 0,

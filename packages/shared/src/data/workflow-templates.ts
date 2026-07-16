@@ -82,7 +82,7 @@ export const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
     category: 'story',
     build() {
       const a = node('prompt-studio', 0, 0, { studioTab: 'cinema' });
-      const b = node('story-grid', 1, 0, { rows: 3, cols: 3 });
+      const b = node('storyboard-desk', 1, 0, { rows: 3, cols: 3 });
       const c = node('grid-split', 2, 0, { rows: 3, cols: 3 });
       const d = node('preview-sink', 3, 0);
       return {
@@ -113,7 +113,7 @@ export const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
     description: '分镜网格 → 宫格反推 → 视频生成（moyin/LibTV）',
     category: 'story',
     build() {
-      const a = node('story-grid', 0, 0);
+      const a = node('storyboard-desk', 0, 0);
       const b = node('grid-prompt-reverse', 1, 0, { rows: 3, cols: 3 });
       const c = node('clip-gen', 2, 0);
       return {
@@ -146,7 +146,7 @@ export const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
     build() {
       const a = node('shot-script', 0, 0);
       const b = node('director-desk', 1, 0);
-      const c = node('motion-story', 2, 0);
+      const c = node('clip-gen', 2, 0);
       const d = node('export-pack', 3, 0);
       return {
         blocks: [a, b, c, d],
@@ -224,7 +224,7 @@ export const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
     description: '场面调度 → 灯光 → 深度通道 → 生图',
     category: 'tool',
     build() {
-      const a = node('blocking-stage', 0, 0);
+      const a = node('director-3d', 0, 0);
       const b = node('light-rig', 1, 0);
       const c = node('depth-pass', 2, 0);
       const d = node('picture-gen', 3, 0);
@@ -242,7 +242,7 @@ export const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
     build() {
       const a = node('shot-script', 0, 0);
       const b = node('director-desk', 1, 0);
-      const c = node('motion-story', 2, 0, { sclassEnabled: true });
+      const c = node('clip-gen', 2, 0, { sclassEnabled: true });
       const d = node('review-gate', 3, 0);
       const e = node('export-pack', 4, 0);
       return {
@@ -290,7 +290,7 @@ export const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
     description: '宫格生成 → 切分 → 连续性检查（分镜一致性审核流程）',
     category: 'story',
     build() {
-      const a = node('story-grid', 0, 0, { rows: 3, cols: 3 });
+      const a = node('storyboard-desk', 0, 0, { rows: 3, cols: 3 });
       const b = node('grid-split', 1, 0, {});
       const c = node('continuity-check', 2, 0, {});
       return {
@@ -306,7 +306,7 @@ export const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
     category: 'story',
     build() {
       const a = node('dialogue-sheet', 0, 0);
-      const b = node('voice-cast', 1, 0);
+      const b = node('sound-gen', 1, 0);
       const c = node('audio-mix', 2, 0);
       const d = node('clip-editor', 3, 0);
       return { blocks: [a, b, c, d], links: [edge(a.id, b.id), edge(b.id, c.id), edge(c.id, d.id)] };
@@ -360,7 +360,7 @@ export const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
     build() {
       const a = node('text-chunker', 0, 0, { mode: 'paragraph' });
       const b = node('shot-script', 0, 1);
-      const c = node('story-grid', 1, 0, { rows: 3, cols: 3, style: 'line-art' });
+      const c = node('storyboard-desk', 1, 0, { rows: 3, cols: 3, style: 'line-art' });
       const d = node('grid-split', 2, 0, { rows: 3, cols: 3 });
       const e = node('review-gate', 3, 0);
       return {
@@ -376,7 +376,7 @@ export const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
     category: 'story',
     build() {
       const a = node('shot-script', 0, 0);
-      const b = node('story-grid', 1, 0, { rows: 3, cols: 3, style: 'line-art' });
+      const b = node('storyboard-desk', 1, 0, { rows: 3, cols: 3, style: 'line-art' });
       const c = node('grid-split', 2, 0, { rows: 3, cols: 3 });
       const d = node('review-gate', 3, 0);
       return {
@@ -404,8 +404,9 @@ export const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
   },
   {
     id: 'tpl-core-episode',
-    label: '核心 6 步成片',
-    description: '剧本拆分 → 设定检查 → 分镜网格 → 分镜预览（图像生成 + 3D 导演台）→ 批审 → 视频生成 → 简单拼接导出',
+    label: '核心成片流水线',
+    description:
+      '剧本拆分 → 设定检查 → 分镜台（图像生成 + 3D）→ 导演台批出关键帧 → 关键帧批审 → 视频生成 → 导出',
     category: 'story',
     build() {
       const script = node('dialogue-sheet', 0, 2, {
@@ -416,60 +417,77 @@ export const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
         playbookStepId: 'story-grid',
         playbookStepIndex: 2,
       });
-      const grid = node('story-grid', 2, 2, {
-        playbookStepId: 'story-grid',
-        playbookStepIndex: 2,
-      });
-      const preview = node('storyboard-preview', 3, 2, {
-        playbookStepId: 'storyboard-preview',
+      const desk = node('storyboard-desk', 2.5, 2, {
+        playbookStepId: 'storyboard-desk',
         playbookStepIndex: 3,
       });
-      const picture = node('picture-gen', 2.55, 0, {
-        playbookStepId: 'storyboard-preview',
+      const picture = node('picture-gen', 2, 0, {
+        playbookStepId: 'storyboard-desk',
         playbookStepIndex: 3,
       });
-      const director = node('director-3d', 3.45, 0, {
-        playbookStepId: 'storyboard-preview',
+      const director3d = node('director-3d', 3, 0, {
+        playbookStepId: 'storyboard-desk',
         playbookStepIndex: 3,
       });
-      const review = node('review-gate', 4, 2, {
-        playbookStepId: 'keyframe-review',
+      const directorDesk = node('director-desk', 3.5, 2, {
+        playbookStepId: 'keyframe-gen',
         playbookStepIndex: 4,
-        gateMode: 'keyframe',
-        label: '分镜批审',
+        queueFilter: 'missing',
+        autoOpenReview: true,
+        syncStyleToPicture: true,
       });
-      const video = node('clip-gen', 5, 2, {
-        playbookStepId: 'video-gen',
+      const review = node('review-gate', 4.5, 2, {
+        playbookStepId: 'keyframe-review',
         playbookStepIndex: 5,
+        gateMode: 'keyframe',
+        label: '关键帧批审',
       });
-      const pack = node('export-pack', 6, 2, {
-        playbookStepId: 'export',
+      const video = node('clip-gen', 5.5, 2, {
+        playbookStepId: 'video-gen',
         playbookStepIndex: 6,
+        videoMode: 'single',
+      });
+      const pack = node('export-pack', 6.5, 2, {
+        playbookStepId: 'export',
+        playbookStepIndex: 7,
         exportMode: 'ffmpeg-episode',
       });
       return {
-        blocks: [script, gate, grid, preview, picture, director, review, video, pack],
+        blocks: [
+          script,
+          gate,
+          desk,
+          picture,
+          director3d,
+          directorDesk,
+          review,
+          video,
+          pack,
+        ],
         links: [
           {
             ...edge(script.id, gate.id),
             targetHandle: 'asset-gate',
           },
           {
-            ...edge(gate.id, grid.id),
+            ...edge(gate.id, desk.id),
             sourceHandle: 'asset-gate',
           },
-          edge(grid.id, preview.id),
           {
-            ...edge(picture.id, preview.id),
+            ...edge(picture.id, desk.id),
             sourceHandle: 'exec-picture',
             targetHandle: 'exec-picture',
           },
           {
-            ...edge(director.id, preview.id),
+            ...edge(director3d.id, desk.id),
             sourceHandle: 'exec-picture',
             targetHandle: 'exec-picture',
           },
-          edge(preview.id, review.id),
+          // 图像生成设置 → 导演台（读模型/比例）
+          edge(picture.id, directorDesk.id),
+          // 分镜表 → 导演台（语义连接）
+          edge(desk.id, directorDesk.id),
+          edge(directorDesk.id, review.id),
           edge(review.id, video.id),
           edge(video.id, pack.id),
         ],

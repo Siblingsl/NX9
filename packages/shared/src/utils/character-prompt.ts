@@ -37,6 +37,7 @@ export function resolveBlockCharacters(
   library: CharacterProfile[],
 ): CharacterProfile[] {
   const byId = new Map(library.map((c) => [c.id, c]));
+  const byName = new Map(library.map((c) => [c.name.trim().toLowerCase(), c]));
   const ids = new Set<string>();
 
   const explicit = blockData?.characterId as string | undefined;
@@ -44,6 +45,12 @@ export function resolveBlockCharacters(
 
   for (const id of linkedShot?.characterIds ?? []) {
     if (id) ids.add(id);
+  }
+
+  // 镜头仅有 characterNames 时也解析（剧本拆分常见）
+  for (const name of linkedShot?.characterNames ?? []) {
+    const found = byName.get(name.trim().toLowerCase());
+    if (found) ids.add(found.id);
   }
 
   return [...ids].map((id) => byId.get(id)).filter((c): c is CharacterProfile => Boolean(c));

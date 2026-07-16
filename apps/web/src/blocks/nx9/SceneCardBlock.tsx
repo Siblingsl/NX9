@@ -9,13 +9,31 @@ import {
   type BacklotWorkspaceItem,
   type EnvironmentProfile,
 } from '@nx9/shared';
-import { Lock, MapPin, Plus, ShieldCheck, Sparkles } from 'lucide-react';
+import { MapPin, Plus, ShieldCheck } from 'lucide-react';
 import { BlockShell } from '../shared/BlockShell';
+import { ScreenModal } from '../../components/ui/ScreenModal';
 import ImageUploadSlot from '../shared/ImageUploadSlot';
 import { AssetLinkField, assetRefFromData, patchWithAssetRef } from '../shared/AssetLinkField';
 import { useWorkspaceDocument } from '../../stores/workspace-document';
 import { useActivityLog } from '../../stores/activity-log';
 import { toastSuccess } from '../../stores/toast';
+import './scene-sheet.css';
+
+/** 库 →（选中后）设定 → 参考 — 对齐角色设定 */
+type StudioTab = 'library' | 'profile' | 'refs';
+
+type RosterRow = {
+  key: string;
+  name: string;
+  code: string;
+  summary: string;
+  status: string;
+  tone: 'ok' | 'warn' | 'todo';
+  hasRef: boolean;
+  hasAnchor: boolean;
+  env?: EnvironmentProfile;
+  backlot?: BacklotWorkspaceItem;
+};
 
 function splitList(value: string): string[] {
   return value.split(/[,，、\n]/).map((item) => item.trim()).filter(Boolean);
@@ -23,6 +41,11 @@ function splitList(value: string): string[] {
 
 function line(...parts: Array<string | undefined | null | false>): string {
   return parts.filter((part) => part && String(part).trim()).join('\n');
+}
+
+function compact(text: string, max = 36) {
+  const t = text.replace(/\s+/g, ' ').trim();
+  return t.length > max ? `${t.slice(0, max)}…` : t;
 }
 
 function buildSceneConsistencyPrompt(input: {
@@ -50,13 +73,40 @@ function buildSceneConsistencyPrompt(input: {
   );
 }
 
-function Label({ children }: { children: React.ReactNode }) {
-  return <span className="mb-1 block text-[10px] font-medium text-ink/45">{children}</span>;
+function envRosterStatus(env: EnvironmentProfile): Pick<RosterRow, 'status' | 'tone' | 'hasRef' | 'hasAnchor'> {
+  const hasRef = Boolean(env.referenceUrls?.length || env.referenceImageUrl);
+  const hasAnchor = Boolean(env.descriptionZh?.trim() || env.consistencyPrompt?.trim());
+  if (hasAnchor && hasRef) return { status: '齐备', tone: 'ok', hasRef, hasAnchor };
+  if (!hasAnchor) return { status: '缺锚点', tone: 'todo', hasRef, hasAnchor };
+  if (!hasRef) return { status: '缺参考', tone: 'warn', hasRef, hasAnchor };
+  return { status: '可入库', tone: 'warn', hasRef, hasAnchor };
+}
+
+function backlotRosterStatus(item: BacklotWorkspaceItem): Pick<RosterRow, 'status' | 'tone' | 'hasRef' | 'hasAnchor'> {
+  const creative = (item.creative ?? {}) as Record<string, unknown>;
+  const refs = Array.isArray(creative.referenceUrls)
+    ? (creative.referenceUrls.filter(Boolean) as string[])
+    : [];
+  const hasRef = refs.length > 0;
+  const hasAnchor = Boolean(
+    (creative.description as string | undefined)?.trim()
+    || item.promptZh?.trim()
+    || item.promptEn?.trim(),
+  );
+  const locked = Boolean(creative.locked);
+  if (locked && hasAnchor && hasRef) return { status: '齐备', tone: 'ok', hasRef, hasAnchor };
+  if (locked) return { status: '已锁', tone: 'ok', hasRef, hasAnchor };
+  if (!hasAnchor) return { status: '缺锚点', tone: 'todo', hasRef, hasAnchor };
+  if (!hasRef) return { status: '缺参考', tone: 'warn', hasRef, hasAnchor };
+  return { status: '可入库', tone: 'warn', hasRef, hasAnchor };
 }
 
 function SceneCardBlock(props: NodeProps) {
   const { updateNodeData } = useReactFlow();
-  const [editing, setEditing] = useState(false);
+  const [studioOpen, setStudioOpen] = useState(false);
+  const [studioTab, setStudioTab] = useState<StudioTab>('library');
+  /** 本轮打开后点选库内场景 / 新建，才可进设定·参考 */
+  const [sessionPicked, setSessionPicked] = useState(false);
   const appendLog = useActivityLog((s) => s.append);
   const setEnvironments = useWorkspaceDocument((s) => s.setEnvironments);
   const upsertBacklotWorkspace = useWorkspaceDocument((s) => s.upsertBacklotWorkspace);
@@ -74,26 +124,110 @@ function SceneCardBlock(props: NodeProps) {
   const weather = (data.weather as string | undefined) ?? '';
   const lighting = (data.lighting as string | undefined) ?? '';
   const colorTone = (data.colorTone as string | undefined) ?? '';
-  const propsText = Array.isArray(data.props) ? (data.props as string[]).join('、') : ((data.props as string | undefined) ?? '');
+  const propsText = Array.isArray(data.props)
+    ? (data.props as string[]).join('、')
+    : ((data.props as string | undefined) ?? '');
   const forbidden = (data.forbiddenSceneDrift as string | undefined) ?? '';
-  const referenceUrls = ((data.referenceUrls as string[] | undefined) ?? []).filter(Boolean).slice(0, MAX_ENV_REFERENCE_IMAGES);
+  const referenceUrls = ((data.referenceUrls as string[] | undefined) ?? [])
+    .filter(Boolean)
+    .slice(0, MAX_ENV_REFERENCE_IMAGES);
   const locked = Boolean(data.assetLocked);
-  const syncedAt = data.backlotSyncedAt as string | undefined;
   const propsArr = useMemo(() => splitList(propsText), [propsText]);
   const prompt = useMemo(
-    () => buildSceneConsistencyPrompt({ sceneName, description, era, weather, lighting, colorTone, props: propsArr, forbidden }),
+    () => buildSceneConsistencyPrompt({
+      sceneName, description, era, weather, lighting, colorTone, props: propsArr, forbidden,
+    }),
     [colorTone, description, era, forbidden, lighting, propsArr, sceneName, weather],
   );
   const duplicate = useMemo(
     () => environments.some((env) => env.name.trim() === sceneName.trim() && env.id !== data.sceneAssetId),
     [data.sceneAssetId, environments, sceneName],
   );
-  const health = [sceneName.trim(), description.trim(), lighting.trim() || era.trim(), prompt.trim(), referenceUrls[0]].filter(Boolean).length;
+  const health = [
+    sceneName.trim(),
+    description.trim(),
+    lighting.trim() || era.trim(),
+    prompt.trim(),
+    referenceUrls[0],
+  ].filter(Boolean).length;
+  const refCount = referenceUrls.length;
+  const canEditTabs = sessionPicked;
+
+  /** 场记表：环境库 + 仅存在于 backlot 的场景条目 */
+  const roster = useMemo((): RosterRow[] => {
+    const rows: RosterRow[] = [];
+    const envNames = new Set<string>();
+    for (const env of environments) {
+      const st = envRosterStatus(env);
+      envNames.add(env.name.trim().toLowerCase());
+      rows.push({
+        key: `env-${env.id}`,
+        name: env.name,
+        code: env.sceneCode || '—',
+        summary: compact(env.descriptionZh || env.era || env.lighting || '—', 24),
+        ...st,
+        env,
+      });
+    }
+    for (const item of workspaceItems.filter((i) => i.kind === 'scene')) {
+      if (envNames.has(item.label.trim().toLowerCase())) continue;
+      const st = backlotRosterStatus(item);
+      const creative = (item.creative ?? {}) as Record<string, unknown>;
+      rows.push({
+        key: `bl-${item.id}`,
+        name: item.label,
+        code: '—',
+        summary: compact(
+          (creative.description as string)
+          || item.promptZh
+          || item.promptEn
+          || '—',
+          24,
+        ),
+        ...st,
+        backlot: item,
+      });
+    }
+    return rows;
+  }, [environments, workspaceItems]);
+
+  const rosterStats = useMemo(() => {
+    let ready = 0;
+    let needAnchor = 0;
+    let needRef = 0;
+    for (const r of roster) {
+      if (r.tone === 'ok' && r.hasAnchor && r.hasRef) ready += 1;
+      if (!r.hasAnchor) needAnchor += 1;
+      else if (!r.hasRef) needRef += 1;
+    }
+    return {
+      total: roster.length,
+      ready,
+      needAnchor,
+      needRef,
+      pending: Math.max(0, roster.length - ready),
+    };
+  }, [roster]);
+
+  const rosterPreview = useMemo(() => roster.slice(0, 4), [roster]);
+
+  const cardStatusText = rosterStats.total === 0
+    ? '待建库'
+    : rosterStats.pending === 0
+      ? '场记齐备'
+      : `待补 ${rosterStats.pending}`;
+  const cardStatusClass = rosterStats.total === 0
+    ? ''
+    : rosterStats.pending === 0
+      ? 'is-ready'
+      : 'is-warn';
 
   const commit = useCallback(
     (patch: Record<string, unknown>) => {
       const next = { ...data, ...patch };
-      const nextProps = Array.isArray(next.props) ? (next.props as string[]) : splitList((next.props as string | undefined) ?? '');
+      const nextProps = Array.isArray(next.props)
+        ? (next.props as string[])
+        : splitList((next.props as string | undefined) ?? '');
       const nextPrompt = buildSceneConsistencyPrompt({
         sceneName: (next.sceneName as string | undefined) ?? '',
         description: (next.description as string | undefined) ?? '',
@@ -119,8 +253,31 @@ function SceneCardBlock(props: NodeProps) {
     [data, props.id, updateNodeData],
   );
 
+  const openStudio = useCallback(() => {
+    setSessionPicked(false);
+    setStudioTab('library');
+    setStudioOpen(true);
+  }, []);
+
+  const closeStudio = useCallback(() => {
+    setStudioOpen(false);
+    setSessionPicked(false);
+    setStudioTab('library');
+  }, []);
+
+  const tryOpenTab = useCallback((tab: StudioTab) => {
+    if (tab !== 'library' && !sessionPicked) {
+      appendLog('场景设定：请先在「库」中选择场景或新建，再进入设定 / 参考');
+      setStudioTab('library');
+      return;
+    }
+    setStudioTab(tab);
+  }, [appendLog, sessionPicked]);
+
   const addRef = useCallback(
-    (url: string) => commit({ referenceUrls: [...new Set([url, ...referenceUrls])].slice(0, MAX_ENV_REFERENCE_IMAGES) }),
+    (url: string) => commit({
+      referenceUrls: [...new Set([url, ...referenceUrls])].slice(0, MAX_ENV_REFERENCE_IMAGES),
+    }),
     [commit, referenceUrls],
   );
 
@@ -130,13 +287,40 @@ function SceneCardBlock(props: NodeProps) {
       appendLog('场景设定：没有上游图片。请连接图像生成节点或上传场景参考图。');
       return;
     }
-    commit({ referenceUrls: [...new Set([...pics, ...referenceUrls])].slice(0, MAX_ENV_REFERENCE_IMAGES) });
+    commit({
+      referenceUrls: [...new Set([...pics, ...referenceUrls])].slice(0, MAX_ENV_REFERENCE_IMAGES),
+    });
     appendLog(`场景设定已引用上游图片 · ${Math.min(pics.length, MAX_ENV_REFERENCE_IMAGES)} 张`);
+    setStudioTab('refs');
   }, [appendLog, commit, referenceUrls, upstream?.pictures]);
 
-  const loadScene = useCallback((item: BacklotWorkspaceItem) => {
+  const loadEnvironment = useCallback((env: EnvironmentProfile) => {
+    const lightingParts = (env.lighting ?? '').split(/[·,，]/).map((s) => s.trim()).filter(Boolean);
+    commit({
+      sceneAssetId: env.id,
+      sceneLibraryId: undefined,
+      sceneName: env.name,
+      sceneCode: env.sceneCode ?? '',
+      description: env.descriptionZh ?? '',
+      era: env.era ?? '',
+      weather: lightingParts[1] ?? '',
+      lighting: lightingParts[0] ?? env.lighting ?? '',
+      colorTone: lightingParts[2] ?? '',
+      props: env.props ?? [],
+      forbiddenSceneDrift: '',
+      referenceUrls: env.referenceUrls ?? (env.referenceImageUrl ? [env.referenceImageUrl] : []),
+      assetLocked: false,
+    });
+    setSessionPicked(true);
+    setStudioTab('profile');
+    appendLog(`已选中场景：${env.name} · 可编辑设定与参考`);
+  }, [appendLog, commit]);
+
+  const loadBacklotScene = useCallback((item: BacklotWorkspaceItem) => {
     const creative = (item.creative ?? {}) as Record<string, unknown>;
-    const refs = Array.isArray(creative.referenceUrls) ? creative.referenceUrls.filter(Boolean) as string[] : [];
+    const refs = Array.isArray(creative.referenceUrls)
+      ? (creative.referenceUrls.filter(Boolean) as string[])
+      : [];
     commit({
       sceneLibraryId: item.id,
       sceneName: item.label,
@@ -150,9 +334,15 @@ function SceneCardBlock(props: NodeProps) {
       referenceUrls: refs,
       assetLocked: Boolean(creative.locked),
     });
-    appendLog(`已载入场景设定：${item.label}`);
-    setEditing(true);
+    setSessionPicked(true);
+    setStudioTab('profile');
+    appendLog(`已选中场景：${item.label} · 可编辑设定与参考`);
   }, [appendLog, commit]);
+
+  const loadRosterRow = useCallback((row: RosterRow) => {
+    if (row.env) loadEnvironment(row.env);
+    else if (row.backlot) loadBacklotScene(row.backlot);
+  }, [loadBacklotScene, loadEnvironment]);
 
   const createScene = useCallback(() => {
     commit({
@@ -171,14 +361,21 @@ function SceneCardBlock(props: NodeProps) {
       assetLocked: true,
       backlotSyncedAt: undefined,
     });
-    appendLog('已打开新增场景设定；可手动填写，或由设定检查/AI 拆分后自动补入。');
-    setEditing(true);
+    setSessionPicked(true);
+    setStudioTab('profile');
+    appendLog('已新建空白场景 · 填写后保存入库');
   }, [appendLog, commit]);
 
   const saveToLibraries = useCallback(() => {
+    if (!sessionPicked) {
+      appendLog('场景设定：请先在库中选择场景');
+      setStudioTab('library');
+      return;
+    }
     const finalName = sceneName.trim();
     if (!finalName || !description.trim()) {
       appendLog('场景设定：请至少填写场景名和空间锚点');
+      setStudioTab('profile');
       return;
     }
     const envId = (data.sceneAssetId as string | undefined) ?? `env-${props.id}`;
@@ -194,9 +391,14 @@ function SceneCardBlock(props: NodeProps) {
       referenceUrls,
       referenceImageUrl: referenceUrls[0] ?? null,
     });
-    setEnvironments({ version: 1, environments: [...environments.filter((item) => item.id !== envId), env] });
+    setEnvironments({
+      version: 1,
+      environments: [...environments.filter((item) => item.id !== envId), env],
+    });
 
-    const existingScene = workspaceItems.find((item) => item.kind === 'scene' && (item.id === data.sceneLibraryId || item.label === finalName));
+    const existingScene = workspaceItems.find(
+      (item) => item.kind === 'scene' && (item.id === data.sceneLibraryId || item.label === finalName),
+    );
     const item: BacklotWorkspaceItem = refreshWorkspacePrompts({
       ...(existingScene ?? newBacklotWorkspaceItem('scene')),
       id: existingScene?.id ?? (data.sceneLibraryId as string | undefined) ?? `scene-${props.id}`,
@@ -213,10 +415,11 @@ function SceneCardBlock(props: NodeProps) {
         lighting,
         colorTone,
         tags: ['scene-consistency'],
-        prompts: (existingScene?.creative as any)?.prompts,
+        prompts: (existingScene?.creative as { prompts?: unknown } | undefined)?.prompts,
         locked,
         forbiddenDrift: forbidden,
-      } as any,
+        props: propsArr,
+      } as unknown as BacklotWorkspaceItem['creative'],
     });
     upsertBacklotWorkspace(item);
     updateNodeData(props.id, {
@@ -229,126 +432,451 @@ function SceneCardBlock(props: NodeProps) {
     });
     toastSuccess(`场景「${finalName}」已保存到场景库`);
     appendLog(`场景一致性资产已保存 · ${finalName}`);
-    setEditing(false);
-  }, [appendLog, colorTone, data.sceneAssetId, data.sceneLibraryId, description, environments, era, forbidden, lighting, locked, prompt, props.id, propsArr, referenceUrls, sceneCode, sceneName, setEnvironments, updateNodeData, upsertBacklotWorkspace, weather, workspaceItems]);
+  }, [
+    appendLog, colorTone, data.sceneAssetId, data.sceneLibraryId, description, environments,
+    era, forbidden, lighting, locked, prompt, props.id, propsArr, referenceUrls, sceneCode,
+    sceneName, sessionPicked, setEnvironments, updateNodeData, upsertBacklotWorkspace,
+    weather, workspaceItems,
+  ]);
 
   return (
-    <BlockShell {...props}>
-      <div className="relative w-[300px] nodrag nopan text-xs text-ink">
-        <div className="space-y-2">
-          <div className="rounded-xl border border-line/60 bg-white p-2.5">
-            <div className="mb-2 flex items-center justify-between">
-              <div>
-                <p className="text-sm font-semibold">场景设定库</p>
-                <p className="text-[9px] text-ink/40">已有 {workspaceItems.filter((item) => item.kind === 'scene').length} 个场景 · 负责空间一致性</p>
-              </div>
-              {locked && <Lock size={12} className="text-brand" />}
-            </div>
-            <div className="max-h-28 space-y-1 overflow-y-auto nx9-scroll">
-              {workspaceItems.filter((item) => item.kind === 'scene').length === 0 ? (
-                <div className="rounded-lg border border-dashed border-line bg-surface/40 px-2 py-3 text-center text-[10px] text-ink/45">
-                  暂无场景。运行设定检查后可 AI 自动填入，也可以手动新增。
-                </div>
-              ) : workspaceItems.filter((item) => item.kind === 'scene').slice(0, 8).map((item) => {
-                const creative = (item.creative ?? {}) as Record<string, unknown>;
-                const refs = Array.isArray(creative.referenceUrls) ? creative.referenceUrls.filter(Boolean) as string[] : [];
-                return (
-                  <button key={item.id} type="button" onClick={() => loadScene(item)} className="flex w-full items-center gap-2 rounded-lg border border-line/45 bg-white px-2 py-1.5 text-left hover:border-brand/35 hover:bg-brand/5">
-                    {refs[0] ? <img src={refs[0]} alt="" className="h-8 w-10 rounded border border-line object-cover" /> : <span className="grid h-8 w-10 place-items-center rounded border border-dashed border-line text-ink/25"><MapPin size={12} /></span>}
-                    <span className="min-w-0 flex-1">
-                      <span className="block truncate text-[11px] font-medium text-ink/75">{item.label}</span>
-                      <span className="block truncate text-[9px] text-ink/40">{item.promptZh || item.promptEn || '未补空间锚点'}</span>
-                    </span>
-                    {Boolean(creative.locked) && <Lock size={11} className="text-brand" />}
-                  </button>
-                );
-              })}
-            </div>
+    <div className="relative">
+      <BlockShell {...props}>
+        <div className="ss ss-card nodrag nopan">
+          <div className="ss-card__toolbar">
+            <span className={`ss-card__status ${cardStatusClass}`}>{cardStatusText}</span>
+            <span className="ss-card__counts">
+              库 <b>{rosterStats.total}</b>
+              {' · '}
+              齐备 <b>{rosterStats.ready}</b>
+            </span>
           </div>
 
-          <div className="grid grid-cols-2 gap-2 text-[10px]">
-            <div className="rounded-lg border border-line/60 p-2">
-              <p className="text-ink/35">当前编辑</p>
-              <p className="mt-0.5 truncate font-medium">{sceneName || '未选择'}</p>
-            </div>
-            <div className="rounded-lg border border-line/60 p-2">
-              <p className="text-ink/35">健康</p>
-              <p className="mt-0.5 truncate font-medium">{health}/5{duplicate ? ' · 疑似重复' : syncedAt ? ' · 已入库' : ''}</p>
-            </div>
-          </div>
-
+          {/* 场记表概览：不钉死某一个场景 */}
           <button
             type="button"
-            onClick={createScene}
-            className="flex w-full items-center justify-center gap-1.5 rounded-xl bg-brand px-3 py-2 text-[12px] font-medium text-white"
+            className="ss-mini"
+            onClick={openStudio}
+            title="打开场景场记台 · 从库选场景再编辑"
           >
-            <Plus size={13} />
-            新增场景设定
-          </button>
-          <p className="flex items-center justify-center gap-1 text-center text-[9px] text-ink/35"><Sparkles size={10} />可由设定检查/AI 自动填入；图片交给图像生成节点。</p>
-        </div>
-
-        {editing && (
-          <div className="absolute left-[calc(100%+12px)] top-0 z-30 w-[360px] space-y-2 rounded-2xl border border-line bg-white p-3 shadow-2xl">
-            <div className="flex items-center justify-between">
-              <p className="text-sm font-semibold">编辑场景一致性</p>
-              <button type="button" onClick={() => setEditing(false)} className="rounded-lg px-2 py-1 text-[11px] text-ink/45 hover:bg-surface">关闭</button>
-            </div>
-            <AssetLinkField
-              kind="scene"
-              assetRef={assetRef}
-              onChange={(ref) => {
-                const patch = patchWithAssetRef(ref);
-                commit(ref ? { ...patch, sceneLibraryId: ref.id, sceneName: ref.label } : patch);
-              }}
-            />
-            <div className="grid grid-cols-[1fr_76px] gap-2">
-              <label><Label>场景名</Label><input value={sceneName} onChange={(e) => commit({ sceneName: e.target.value })} className="w-full rounded-lg border border-line px-2 py-1.5" /></label>
-              <label><Label>场景码</Label><input value={sceneCode} onChange={(e) => commit({ sceneCode: e.target.value })} className="w-full rounded-lg border border-line px-2 py-1.5" /></label>
-            </div>
-            <label><Label>空间锚点（必须）</Label><textarea value={description} onChange={(e) => commit({ description: e.target.value })} className="h-20 w-full resize-y rounded-xl border border-brand/25 bg-brand/[0.03] px-2 py-1.5" placeholder="空间布局、建筑结构、材质、固定标识物…" /></label>
-            <div className="grid grid-cols-2 gap-2">
-              <input value={era} onChange={(e) => commit({ era: e.target.value })} placeholder="时代/地域" className="rounded-lg border border-line px-2 py-1.5" />
-              <input value={weather} onChange={(e) => commit({ weather: e.target.value })} placeholder="天气" className="rounded-lg border border-line px-2 py-1.5" />
-              <input value={lighting} onChange={(e) => commit({ lighting: e.target.value })} placeholder="光线" className="rounded-lg border border-line px-2 py-1.5" />
-              <input value={colorTone} onChange={(e) => commit({ colorTone: e.target.value })} placeholder="色彩" className="rounded-lg border border-line px-2 py-1.5" />
-            </div>
-            <label><Label>固定道具/建筑结构</Label><input value={propsText} onChange={(e) => commit({ props: splitList(e.target.value) })} className="w-full rounded-lg border border-line px-2 py-1.5" /></label>
-            <label><Label>禁改项 / 污染防护</Label><input value={forbidden} onChange={(e) => commit({ forbiddenSceneDrift: e.target.value })} className="w-full rounded-lg border border-line px-2 py-1.5" /></label>
-            <div className="rounded-xl border border-line/60 p-2">
-              <div className="mb-1.5 flex items-center justify-between">
-                <span className="text-[10px] font-medium text-ink/50">参考图</span>
-                <button type="button" onClick={fillFromUpstream} className="text-[10px] text-brand hover:underline">用上游图</button>
-              </div>
-              <ImageUploadSlot url="" label="上传参考" compact onUploaded={addRef} />
-              {referenceUrls.length > 0 && (
-                <div className="mt-1.5 grid grid-cols-6 gap-1">
-                  {referenceUrls.map((url, index) => (
-                    <button key={`${url}-${index}`} type="button" onClick={() => commit({ referenceUrls: referenceUrls.filter((_, i) => i !== index) })} title="点击移除">
-                      <img src={url} alt="" className="aspect-square rounded border border-line object-cover" />
-                    </button>
-                  ))}
+            {rosterStats.total > 0 ? (
+              <>
+                <div className="ss-mini__head ss-mini__head--roster">
+                  <span>场景</span>
+                  <span>锚点</span>
+                  <span>状态</span>
                 </div>
-              )}
+                {rosterPreview.map((row) => (
+                  <div key={row.key} className="ss-mini__row ss-mini__row--roster">
+                    <span className="is-title">{compact(row.name, 10)}</span>
+                    <span>{compact(row.summary, 12)}</span>
+                    <span className={`ss-mini__badge is-${row.tone}`}>{row.status}</span>
+                  </div>
+                ))}
+                {rosterStats.total > 4 ? (
+                  <div className="ss-mini__more">
+                    另有 {rosterStats.total - 4} 场 · 开表查看全部
+                  </div>
+                ) : null}
+              </>
+            ) : (
+              <div className="ss-mini__empty">
+                场景场记为空
+                <br />
+                开表新建，或由剧本拆分补入
+              </div>
+            )}
+          </button>
+
+          {rosterStats.needAnchor > 0 || rosterStats.needRef > 0 ? (
+            <p className="ss-card__hint is-warn">
+              {rosterStats.needAnchor > 0 ? `${rosterStats.needAnchor} 场缺锚点` : ''}
+              {rosterStats.needAnchor > 0 && rosterStats.needRef > 0 ? ' · ' : ''}
+              {rosterStats.needRef > 0 ? `${rosterStats.needRef} 场缺参考图` : ''}
+            </p>
+          ) : null}
+
+          <div className="ss-card__actions">
+            <button
+              type="button"
+              className="ss-btn ss-btn--primary"
+              onClick={(e) => {
+                e.stopPropagation();
+                openStudio();
+              }}
+            >
+              开表
+            </button>
+          </div>
+        </div>
+      </BlockShell>
+
+      <ScreenModal
+        open={studioOpen}
+        onClose={closeStudio}
+        title="场景设定 · 场记台"
+        subtitle="先从库选场景 · 再改设定与参考"
+        width={920}
+        variant="default"
+        className="ss-modal"
+      >
+        <div className="ss ss-studio">
+          <div className="ss-studio__tabs" role="tablist">
+            {(
+              [
+                { id: 'library' as const, label: '库' },
+                { id: 'profile' as const, label: '设定' },
+                { id: 'refs' as const, label: '参考' },
+              ] as const
+            ).map((tab) => {
+              const lockedTab = tab.id !== 'library' && !canEditTabs;
+              return (
+                <button
+                  key={tab.id}
+                  type="button"
+                  role="tab"
+                  disabled={lockedTab}
+                  className={`ss-studio__tab ${studioTab === tab.id ? 'is-on' : ''} ${lockedTab ? 'is-dim' : ''}`}
+                  onClick={() => tryOpenTab(tab.id)}
+                  title={lockedTab ? '请先在库中选择场景或新建' : undefined}
+                >
+                  {tab.label}
+                  {tab.id === 'library' ? ` · ${roster.length}` : ''}
+                  {tab.id !== 'library' && lockedTab ? ' · 锁' : ''}
+                  {tab.id === 'refs' && canEditTabs && refCount > 0 ? ` · ${refCount}` : ''}
+                </button>
+              );
+            })}
+          </div>
+
+          <div className="ss-studio__body">
+            <div className="ss-stats">
+              <div className="ss-stats__cell">
+                <span className="ss-stats__val">{rosterStats.total}</span>
+                <span className="ss-stats__lab">库内场景</span>
+              </div>
+              <div className="ss-stats__cell">
+                <span className="ss-stats__val">{rosterStats.ready}</span>
+                <span className="ss-stats__lab">齐备</span>
+              </div>
+              <div className="ss-stats__cell">
+                <span className="ss-stats__val">{rosterStats.needAnchor}</span>
+                <span className="ss-stats__lab">缺锚点</span>
+              </div>
+              <div className="ss-stats__cell">
+                <span className="ss-stats__val">{rosterStats.needRef}</span>
+                <span className="ss-stats__lab">缺参考</span>
+              </div>
             </div>
-            <details className="rounded-xl border border-line/60 bg-surface/30">
-              <summary className="cursor-pointer px-2 py-1.5 text-[10px] font-medium text-ink/55">生成约束 Prompt</summary>
-              <pre className="max-h-28 overflow-y-auto whitespace-pre-wrap px-2 pb-2 text-[10px] text-ink/65">{prompt}</pre>
-            </details>
-            <div className="flex gap-2">
-              <label className="flex flex-1 items-center gap-1.5 rounded-lg border border-line px-2 py-1.5 text-[10px] text-ink/55">
-                <input type="checkbox" checked={locked} onChange={(e) => commit({ assetLocked: e.target.checked })} />
-                锁定
+
+            {!canEditTabs && studioTab === 'library' && (
+              <p className="ss-warn">
+                请先点选下方库内场景，或「新建空白」，再进入设定 / 参考。
+              </p>
+            )}
+
+            {canEditTabs && duplicate && (
+              <p className="ss-warn">场景名与库内已有场景重复，保存会覆盖同 id 或产生歧义，请核对。</p>
+            )}
+
+            {canEditTabs && (
+              <div className="ss-session-bar">
+                当前编辑：
+                <b>{sceneName.trim() || '（未命名新建）'}</b>
+                {sceneCode.trim() ? ` · ${sceneCode.trim()}` : ''}
+                <button
+                  type="button"
+                  className="ss-btn ss-btn--ghost ss-btn--sm"
+                  onClick={() => {
+                    setSessionPicked(false);
+                    setStudioTab('library');
+                  }}
+                >
+                  重选
+                </button>
+              </div>
+            )}
+
+            {studioTab === 'library' && (
+              <>
+                <div className="ss-panel__head" style={{ marginBottom: 10 }}>
+                  <h3 className="ss-panel__title">场景场记</h3>
+                  <button type="button" className="ss-btn ss-btn--soft ss-btn--sm" onClick={createScene}>
+                    <Plus size={12} /> 新建空白
+                  </button>
+                </div>
+                {roster.length === 0 ? (
+                  <div className="ss-empty">
+                    暂无场景。可新建，或由剧本拆分 / 设定检查补入后再选。
+                  </div>
+                ) : (
+                  <ul className="ss-lib-list">
+                    {roster.map((row) => {
+                      const thumb =
+                        row.env?.referenceUrls?.[0]
+                        || row.env?.referenceImageUrl
+                        || (() => {
+                          const c = (row.backlot?.creative ?? {}) as Record<string, unknown>;
+                          const refs = Array.isArray(c.referenceUrls)
+                            ? (c.referenceUrls.filter(Boolean) as string[])
+                            : [];
+                          return refs[0];
+                        })();
+                      const active = canEditTabs && (
+                        row.env?.id === data.sceneAssetId
+                        || row.backlot?.id === data.sceneLibraryId
+                        || row.name.trim() === sceneName.trim()
+                      );
+                      return (
+                        <li key={row.key}>
+                          <button
+                            type="button"
+                            className={`ss-lib-item ${active ? 'is-on' : ''}`}
+                            onClick={() => loadRosterRow(row)}
+                          >
+                            {thumb ? (
+                              <img src={thumb} alt="" className="ss-lib-thumb" style={{ width: 48, height: 32 }} />
+                            ) : (
+                              <span className="ss-lib-thumb is-empty" style={{ width: 48, height: 32 }}>
+                                <MapPin size={14} />
+                              </span>
+                            )}
+                            <span className="ss-lib-body">
+                              <span className="ss-lib-name">{row.name}</span>
+                              <span className="ss-lib-meta">
+                                {row.code !== '—' ? `${row.code} · ` : ''}
+                                {row.summary}
+                              </span>
+                            </span>
+                            <span className={`ss-mini__badge is-${row.tone}`}>{row.status}</span>
+                          </button>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                )}
+              </>
+            )}
+
+            {studioTab === 'profile' && canEditTabs && (
+              <>
+                <div className="ss-panel">
+                  <div className="ss-panel__head">
+                    <h3 className="ss-panel__title">资产关联</h3>
+                    <span className="ss-panel__meta">可选 · 链到场景库条目</span>
+                  </div>
+                  <AssetLinkField
+                    kind="scene"
+                    assetRef={assetRef}
+                    onChange={(ref) => {
+                      const patch = patchWithAssetRef(ref);
+                      commit(ref
+                        ? { ...patch, sceneLibraryId: ref.id, sceneName: ref.label }
+                        : patch);
+                    }}
+                  />
+                </div>
+
+                <div className="ss-grid-2">
+                  <label className="ss-field">
+                    <span className="ss-label">场景名 <span className="is-req">必填</span></span>
+                    <input
+                      className="ss-input"
+                      value={sceneName}
+                      onChange={(e) => commit({ sceneName: e.target.value })}
+                      placeholder="雨夜街道 / 咖啡馆内…"
+                    />
+                  </label>
+                  <label className="ss-field">
+                    <span className="ss-label">场景码</span>
+                    <input
+                      className="ss-input"
+                      value={sceneCode}
+                      onChange={(e) => commit({ sceneCode: e.target.value })}
+                      placeholder="1-1 / S01"
+                    />
+                  </label>
+                </div>
+
+                <label className="ss-field">
+                  <span className="ss-label">空间锚点 <span className="is-req">必填</span></span>
+                  <textarea
+                    className="ss-textarea"
+                    value={description}
+                    onChange={(e) => commit({ description: e.target.value })}
+                    placeholder="空间布局、建筑结构、材质、固定标识物…（跨镜保持一致）"
+                  />
+                </label>
+
+                <div className="ss-grid-2">
+                  <label className="ss-field">
+                    <span className="ss-label">时代 / 地域</span>
+                    <input
+                      className="ss-input"
+                      value={era}
+                      onChange={(e) => commit({ era: e.target.value })}
+                      placeholder="现代都市 · 江南水乡"
+                    />
+                  </label>
+                  <label className="ss-field">
+                    <span className="ss-label">天气</span>
+                    <input
+                      className="ss-input"
+                      value={weather}
+                      onChange={(e) => commit({ weather: e.target.value })}
+                      placeholder="阴雨 · 雾 · 晴"
+                    />
+                  </label>
+                  <label className="ss-field">
+                    <span className="ss-label">光线</span>
+                    <input
+                      className="ss-input"
+                      value={lighting}
+                      onChange={(e) => commit({ lighting: e.target.value })}
+                      placeholder="霓虹侧光 · 窗光"
+                    />
+                  </label>
+                  <label className="ss-field">
+                    <span className="ss-label">色彩</span>
+                    <input
+                      className="ss-input"
+                      value={colorTone}
+                      onChange={(e) => commit({ colorTone: e.target.value })}
+                      placeholder="青冷 · 暖琥珀"
+                    />
+                  </label>
+                </div>
+
+                <label className="ss-field">
+                  <span className="ss-label">固定道具 / 建筑结构</span>
+                  <input
+                    className="ss-input"
+                    value={propsText}
+                    onChange={(e) => commit({ props: splitList(e.target.value) })}
+                    placeholder="路灯、铁门、吧台…"
+                  />
+                </label>
+
+                <label className="ss-field">
+                  <span className="ss-label">禁改项 / 污染防护</span>
+                  <input
+                    className="ss-input"
+                    value={forbidden}
+                    onChange={(e) => commit({ forbiddenSceneDrift: e.target.value })}
+                    placeholder="不可改变的建筑轮廓、主光源方向…"
+                  />
+                </label>
+              </>
+            )}
+
+            {studioTab === 'refs' && canEditTabs && (
+              <>
+                <div className="ss-panel">
+                  <div className="ss-panel__head">
+                    <h3 className="ss-panel__title">
+                      参考图
+                      {' '}
+                      <span className="ss-panel__meta">最多 {MAX_ENV_REFERENCE_IMAGES} 张</span>
+                    </h3>
+                    <button
+                      type="button"
+                      className="ss-btn ss-btn--ghost ss-btn--sm"
+                      onClick={fillFromUpstream}
+                    >
+                      用上游图
+                    </button>
+                  </div>
+                  <div className="ss-views" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(100px, 1fr))' }}>
+                    <div className="ss-slot">
+                      <ImageUploadSlot
+                        url=""
+                        label="上传参考"
+                        compact
+                        onUploaded={addRef}
+                      />
+                    </div>
+                    {referenceUrls.map((url, index) => (
+                      <button
+                        key={`${url}-${index}`}
+                        type="button"
+                        className="ss-slot"
+                        title="点击移除"
+                        onClick={() =>
+                          commit({
+                            referenceUrls: referenceUrls.filter((_, i) => i !== index),
+                          })
+                        }
+                        style={{
+                          border: '1px solid rgba(255,255,255,0.1)',
+                          borderRadius: 4,
+                          overflow: 'hidden',
+                          padding: 0,
+                          background: '#161719',
+                          cursor: 'pointer',
+                        }}
+                      >
+                        <img
+                          src={url}
+                          alt=""
+                          style={{ width: '100%', aspectRatio: '4/3', objectFit: 'cover', display: 'block' }}
+                        />
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="ss-panel">
+                  <div className="ss-panel__head">
+                    <h3 className="ss-panel__title">一致性 Prompt</h3>
+                    <span className="ss-panel__meta">自动生成 · 随设定更新</span>
+                  </div>
+                  <pre className="ss-prompt">{prompt || '填写场景名与空间锚点后生成'}</pre>
+                </div>
+              </>
+            )}
+          </div>
+
+          <div className="ss-studio__foot">
+            {canEditTabs ? (
+              <label className="ss-check">
+                <input
+                  type="checkbox"
+                  checked={locked}
+                  onChange={(e) => commit({ assetLocked: e.target.checked })}
+                />
+                锁定一致性
               </label>
-              <button type="button" onClick={saveToLibraries} className="flex flex-1 items-center justify-center gap-1 rounded-lg bg-brand px-2 py-1.5 text-[11px] font-medium text-white">
-                <ShieldCheck size={13} />
-                保存到场景库
+            ) : (
+              <span className="ss-check">先从库选场景</span>
+            )}
+            <p className="ss-studio__foot-hint">
+              {canEditTabs
+                ? `${sceneName.trim() || '未命名'} · 健康 ${health}/5 · 参考 ${refCount}/${MAX_ENV_REFERENCE_IMAGES}`
+                : `场记 ${rosterStats.total} 场 · 齐备 ${rosterStats.ready} · 待补 ${rosterStats.pending}`}
+            </p>
+            <div className="ss-studio__foot-actions">
+              {canEditTabs && studioTab !== 'refs' ? (
+                <button
+                  type="button"
+                  className="ss-btn ss-btn--ghost"
+                  onClick={() => setStudioTab(studioTab === 'library' ? 'profile' : 'refs')}
+                >
+                  下一步
+                </button>
+              ) : null}
+              <button
+                type="button"
+                className="ss-btn ss-btn--primary"
+                disabled={!canEditTabs}
+                onClick={saveToLibraries}
+              >
+                <ShieldCheck size={13} /> 保存到场景库
               </button>
             </div>
           </div>
-        )}
-      </div>
-    </BlockShell>
+        </div>
+      </ScreenModal>
+    </div>
   );
 }
 

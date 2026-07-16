@@ -1,0 +1,455 @@
+/* ── 设定系节点内容（在浅色节点卡内 · 高对比可读） ──
+   剧本拆分 / 设定检查 / 角色 / 场景 / 分镜网格
+   注意：节点卡本体多为浅色，文字必须用深色，不能套暗色 HUD 字色
+*/
+
+.sb {
+  --sb-ink: #1a1814;
+  --sb-muted: rgba(26, 24, 20, 0.58);
+  --sb-faint: rgba(26, 24, 20, 0.4);
+  --sb-line: rgba(26, 24, 20, 0.1);
+  --sb-panel: rgba(26, 24, 20, 0.04);
+  --sb-panel-2: #fff;
+  --sb-accent: #0d9488;
+  --sb-accent-soft: rgba(13, 148, 136, 0.1);
+  --sb-warn: #c2410c;
+  --sb-ok: #059669;
+  color: var(--sb-ink);
+  width: 100%;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+/* 不再重复节点标题：只留一句说明 */
+.sb-lead {
+  margin: 0 0 10px;
+  font-size: 11px;
+  color: var(--sb-muted);
+  line-height: 1.45;
+}
+
+.sb-stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.sb-stats.is-2 {
+  grid-template-columns: repeat(2, 1fr);
+}
+
+.sb-stat {
+  border-radius: 10px;
+  padding: 8px 6px;
+  text-align: center;
+  background: var(--sb-panel);
+  border: 1px solid var(--sb-line);
+}
+
+.sb-stat b {
+  display: block;
+  font-size: 16px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--sb-ink);
+  letter-spacing: -0.02em;
+}
+
+.sb-stat span {
+  display: block;
+  margin-top: 2px;
+  font-size: 10px;
+  color: var(--sb-faint);
+}
+
+.sb-stat.is-warn b {
+  color: var(--sb-warn);
+}
+.sb-stat.is-ok b {
+  color: var(--sb-ok);
+}
+
+.sb-panel {
+  border-radius: 12px;
+  border: 1px solid var(--sb-line);
+  background: var(--sb-panel);
+  padding: 10px;
+  margin-bottom: 8px;
+}
+
+.sb-panel:last-child {
+  margin-bottom: 0;
+}
+
+.sb-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.sb-grow {
+  flex: 1;
+  min-width: 0;
+}
+
+.sb-list {
+  max-height: 160px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.sb-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  text-align: left;
+  border-radius: 10px;
+  border: 1px solid var(--sb-line);
+  background: var(--sb-panel-2);
+  padding: 8px;
+  color: var(--sb-ink);
+  cursor: pointer;
+  transition: border-color 0.12s, background 0.12s;
+}
+
+.sb-item:hover {
+  border-color: rgba(13, 148, 136, 0.35);
+  background: var(--sb-accent-soft);
+}
+
+.sb-item.is-on {
+  border-color: rgba(13, 148, 136, 0.45);
+  background: var(--sb-accent-soft);
+  box-shadow: inset 0 0 0 1px rgba(13, 148, 136, 0.12);
+}
+
+.sb-code {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--sb-accent);
+  flex-shrink: 0;
+  min-width: 1.8em;
+}
+
+.sb-item-title {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--sb-ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sb-item-meta {
+  font-size: 10px;
+  color: var(--sb-muted);
+  flex-shrink: 0;
+}
+
+.sb-thumb {
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  object-fit: cover;
+  background: #f0eeea;
+  border: 1px solid var(--sb-line);
+  flex-shrink: 0;
+}
+
+.sb-thumb.is-empty {
+  display: grid;
+  place-items: center;
+  color: var(--sb-faint);
+}
+
+.sb-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border-radius: 10px;
+  border: 1px solid var(--sb-line);
+  background: #fff;
+  color: var(--sb-ink);
+  font-size: 12px;
+  font-weight: 600;
+  padding: 8px 12px;
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s, opacity 0.12s;
+}
+
+.sb-btn:hover:not(:disabled) {
+  border-color: rgba(13, 148, 136, 0.4);
+  background: var(--sb-accent-soft);
+}
+
+.sb-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.sb-btn.is-primary {
+  background: var(--sb-accent);
+  border-color: transparent;
+  color: #fff;
+}
+
+.sb-btn.is-primary:hover:not(:disabled) {
+  background: #0f766e;
+  filter: none;
+}
+
+.sb-btn.is-ghost {
+  background: transparent;
+  color: var(--sb-muted);
+  border-color: transparent;
+}
+
+.sb-btn.is-ghost:hover:not(:disabled) {
+  background: var(--sb-panel);
+  color: var(--sb-ink);
+}
+
+.sb-btn.is-block {
+  width: 100%;
+}
+
+.sb-btn.is-sm {
+  padding: 5px 9px;
+  font-size: 11px;
+  border-radius: 8px;
+}
+
+.sb-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.sb-actions .sb-btn {
+  flex: 1;
+}
+
+.sb-field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin-bottom: 10px;
+}
+
+.sb-field:last-child {
+  margin-bottom: 0;
+}
+
+.sb-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--sb-muted);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.sb-input,
+.sb-textarea,
+.sb-select {
+  width: 100%;
+  border-radius: 10px;
+  border: 1px solid var(--sb-line);
+  background: #fff;
+  color: var(--sb-ink);
+  font-size: 12px;
+  padding: 8px 10px;
+  outline: none;
+  transition: border-color 0.12s, box-shadow 0.12s;
+}
+
+.sb-input:focus,
+.sb-textarea:focus,
+.sb-select:focus {
+  border-color: rgba(13, 148, 136, 0.55);
+  box-shadow: 0 0 0 3px rgba(13, 148, 136, 0.12);
+}
+
+.sb-textarea {
+  resize: vertical;
+  min-height: 72px;
+  line-height: 1.5;
+}
+
+.sb-hint {
+  font-size: 11px;
+  color: var(--sb-muted);
+  line-height: 1.45;
+}
+
+.sb-warn {
+  color: var(--sb-warn);
+  font-size: 11px;
+}
+
+.sb-ok {
+  color: var(--sb-ok);
+}
+
+.sb-chip-wrap {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  max-height: 100px;
+  overflow-y: auto;
+}
+
+.sb-chip {
+  border-radius: 999px;
+  border: 1px solid var(--sb-line);
+  background: #fff;
+  color: var(--sb-muted);
+  font-size: 11px;
+  padding: 4px 10px;
+  cursor: pointer;
+}
+
+.sb-chip.is-on {
+  border-color: rgba(13, 148, 136, 0.4);
+  background: var(--sb-accent-soft);
+  color: var(--sb-accent);
+  font-weight: 600;
+}
+
+.sb-empty {
+  border-radius: 10px;
+  border: 1px dashed var(--sb-line);
+  padding: 16px 12px;
+  text-align: center;
+  font-size: 11px;
+  color: var(--sb-faint);
+  line-height: 1.5;
+  background: #fff;
+}
+
+.sb-section-title {
+  font-size: 12px;
+  font-weight: 700;
+  margin: 0 0 8px;
+  color: var(--sb-ink);
+}
+
+.sb-grid-2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.sb-grid-3 {
+  display: grid;
+  grid-template-columns: 1.4fr 0.7fr 0.9fr;
+  gap: 8px;
+}
+
+.sb-footer {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 8px;
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--sb-line);
+}
+
+.sb-badge {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--sb-panel);
+  color: var(--sb-muted);
+  flex-shrink: 0;
+  border: 1px solid var(--sb-line);
+}
+
+.sb-badge.is-accent {
+  background: var(--sb-accent-soft);
+  color: var(--sb-accent);
+  border-color: rgba(13, 148, 136, 0.2);
+}
+
+.sb-badge.is-warn {
+  background: rgba(194, 65, 12, 0.08);
+  color: var(--sb-warn);
+  border-color: rgba(194, 65, 12, 0.15);
+}
+
+.sb-badge.is-ok {
+  background: rgba(5, 150, 105, 0.08);
+  color: var(--sb-ok);
+  border-color: rgba(5, 150, 105, 0.15);
+}
+
+/* ── 屏幕弹窗：浅色清晰（与节点卡一致，可读优先） ── */
+.nx9-screen-modal__panel.sb-modal {
+  background: #faf9f6 !important;
+  border: 1px solid rgba(26, 24, 20, 0.1) !important;
+  color: #1a1814 !important;
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.28) !important;
+}
+
+.nx9-screen-modal__panel.sb-modal .nx9-screen-modal__chrome {
+  border-bottom: 1px solid rgba(26, 24, 20, 0.08) !important;
+  background: #fff !important;
+}
+
+.nx9-screen-modal__panel.sb-modal .nx9-screen-modal__title {
+  color: #1a1814 !important;
+  font-size: 15px !important;
+}
+
+.nx9-screen-modal__panel.sb-modal .nx9-screen-modal__sub {
+  color: rgba(26, 24, 20, 0.55) !important;
+}
+
+.nx9-screen-modal__panel.sb-modal .nx9-screen-modal__close {
+  border-color: rgba(26, 24, 20, 0.1) !important;
+  background: #fff !important;
+  color: rgba(26, 24, 20, 0.55) !important;
+}
+
+.nx9-screen-modal__panel.sb-modal .nx9-screen-modal__body {
+  background: #faf9f6;
+}
+
+/* 节点卡内浅色内容：覆盖 stage-card 深色强制字色 */
+.nx9-stage-card .sb,
+.nx9-stage-card .sb * {
+  /* 不继承错误的浅色 ink */
+}
+
+.nx9-stage-card .sb .sb-item-title,
+.nx9-stage-card .sb .sb-section-title,
+.nx9-stage-card .sb .sb-stat b,
+.nx9-stage-card .sb .sb-btn:not(.is-primary) {
+  color: #1a1814;
+}
+
+.nx9-stage-card .sb .sb-lead,
+.nx9-stage-card .sb .sb-hint,
+.nx9-stage-card .sb .sb-item-meta,
+.nx9-stage-card .sb .sb-label {
+  color: rgba(26, 24, 20, 0.58);
+}
+
+.nx9-stage-card .sb .sb-input,
+.nx9-stage-card .sb .sb-textarea,
+.nx9-stage-card .sb .sb-select {
+  background: #fff;
+  color: #1a1814;
+  border-color: rgba(26, 24, 20, 0.12);
+}

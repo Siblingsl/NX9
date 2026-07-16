@@ -11,6 +11,7 @@ import {
   resolveStoryboardPreviewPictureSettings,
   resolveConnectedDirector3dId,
   writeBackBreakdownPreviewImage,
+  KEYFRAME_SCORE_THRESHOLD,
   type StoryboardPreviewFrame,
   type StoryboardPreviewGridColumns,
   type StoryboardPreviewPayload,
@@ -25,6 +26,7 @@ import {
   findConnectedPictureGenNode,
   generateStoryboardFrameImage,
   generateStoryboardPanorama720,
+  scoreStoryboardKeyframes,
 } from '../../../../storyboard-preview-runner';
 
 function nextInsertOrder(frames: StoryboardPreviewFrame[], afterOrder: number): number {
@@ -703,21 +705,44 @@ export function useStoryboardPreviewState(blockId: string) {
   }, [blockId, readPayload, updateNodeData]);
 
   const checkConsistency = useCallback(
-    async (dimension: 'character' | 'scene') => {
+    async (dimension: 'character' | 'scene' | 'other' | 'full' = 'full') => {
       const node = getNodes().find((n) => n.id === blockId);
       const data = (node?.data ?? {}) as Record<string, unknown>;
       const current = readPayload(data);
       updateNodeData(blockId, { status: 'running' });
       try {
+        if (dimension === 'full') {
+          const { report, frames } = await scoreStoryboardKeyframes(
+            current.frames,
+            KEYFRAME_SCORE_THRESHOLD,
+          );
+          updateNodeData(blockId, {
+            status: 'idle',
+            storyboardPreview: {
+              ...current,
+              frames,
+              lastConsistencyReport: report,
+            },
+          });
+          const low = report.suggestRegenerateFrameIds?.length ?? 0;
+          appendLog(
+            `关键帧评分完成 · 综合 ${report.overallScore}/100（角色/场景/其它）`
+            + (low > 0 ? ` · ${low} 镜低于 ${KEYFRAME_SCORE_THRESHOLD} 分建议重生成` : ' · 全部达标'),
+          );
+          return report;
+        }
         const report = await checkStoryboardConsistencyWithAi(current.frames, dimension);
         updateNodeData(blockId, {
           status: 'idle',
           storyboardPreview: { ...current, lastConsistencyReport: report },
         });
-        appendLog(`${dimension === 'character' ? '角色' : '场景'}一致性检查完成 · ${report.overallScore}/100`);
+        const labels = { character: '角色', scene: '场景', other: '其它' } as const;
+        appendLog(`${labels[dimension]}一致性检查完成 · ${report.overallScore}/100`);
+        return report;
       } catch (e) {
         updateNodeData(blockId, { status: 'error', error: String(e) });
         appendLog(`一致性检查失败: ${String(e)}`);
+        return null;
       }
     },
     [appendLog, blockId, getNodes, readPayload, updateNodeData],

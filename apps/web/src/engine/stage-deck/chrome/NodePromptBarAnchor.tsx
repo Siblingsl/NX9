@@ -16,8 +16,16 @@ export interface NodePromptBarAnchorProps {
 }
 
 const PANEL_WIDTH = 480;
+const PANEL_WIDTH_BY_KIND: Record<string, number> = {
+  'picture-gen': 560,
+  'clip-gen': 520,
+};
 const ZERO_OFFSET = { x: 0, y: 0 };
 
+/**
+ * 底部/节点跟随工作区锚点 — 挂在节点下方，随节点移动。
+ * 分镜预览、视频生成等 Attached Workspace 走这里，不要改成屏幕弹窗。
+ */
 export const NodePromptBarAnchor = memo(function NodePromptBarAnchor({
   blockId,
   kind,
@@ -88,13 +96,15 @@ export const NodePromptBarAnchor = memo(function NodePromptBarAnchor({
 
   if (!show) return null;
 
+  const panelWidth = PANEL_WIDTH_BY_KIND[kind] ?? PANEL_WIDTH;
+
   return (
     <div
       className="absolute z-[70] nodrag nopan nowheel pointer-events-auto"
       style={{
         left: '50%',
         top: '100%',
-        width: PANEL_WIDTH,
+        width: panelWidth,
         paddingTop: 12,
         transform: `translate(calc(-50% + ${offset.x}px), ${offset.y}px)`,
       }}

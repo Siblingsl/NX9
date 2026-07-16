@@ -41,6 +41,8 @@ export type {
   StoryboardVideoVersion,
   StoryboardDirectorCharacterPlacement,
   EpisodeExportRecord,
+  EpisodeMeta,
+  EpisodeStatus,
   StoryboardDirector3dGuide,
   StoryboardShot,
   StoryboardPayload,
@@ -56,6 +58,8 @@ export {
   migrateStoryboardPayload,
   resolveActiveEpisodeId,
   activeEpisodeShots,
+  listEpisodeMetas,
+  createEpisodeMeta,
   resolveStoryboardVideoVersions,
   appendStoryboardVideoVersion,
   adoptStoryboardVideoVersion,
@@ -119,6 +123,7 @@ export type {
 export {
   emptyStoryboardPreview,
   DEFAULT_STORYBOARD_PREVIEW_PICTURE_SETTINGS,
+  KEYFRAME_SCORE_THRESHOLD,
   resolveStoryboardPreviewPictureSettings,
   computeStoryboardPreviewFrameCount,
   estimateActionComplexity,
@@ -313,6 +318,7 @@ export {
   VERTICAL_SOCKETS,
   resolveVerticalSockets,
   isStoryboardExecLink,
+  isStoryboardPreviewHostKind,
 } from './catalog/socket-registry';
 export type { VerticalSocketSpec } from './catalog/socket-registry';
 
@@ -402,6 +408,12 @@ export {
   parseMentionsFromPrompt,
   type CharacterPromptContext,
 } from './utils/character-prompt';
+export {
+  buildStudioImagePrompt,
+  buildStudioVideoPrompt,
+  applyStudioPromptsToShot,
+  type StudioPromptContext,
+} from './utils/studio-prompt-builder';
 export { parseChineseScript, scenesToStoryboardShots } from './utils/script-import';
 export type { ParsedScriptBackground, ParsedScriptScene } from './utils/script-import';
 export { parseFountain, parseFinalDraft } from './utils/fountain-import';

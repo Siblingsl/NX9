@@ -1,10 +1,11 @@
 import type { ContextRailTab } from '../../../stores/context-rail-ui';
 import { SlidersHorizontal, Clapperboard, ScrollText, Layers, AlertCircle, ListChecks } from 'lucide-react';
 
+/** 制作台优先：编剧 → 分镜 → 检查器 → 资源 */
 const TAB_CONFIG: { id: ContextRailTab; label: string; icon: typeof SlidersHorizontal }[] = [
-  { id: 'inspector', label: '检查器', icon: SlidersHorizontal },
-  { id: 'storyboard', label: '分镜', icon: Clapperboard },
   { id: 'script', label: '编剧', icon: ScrollText },
+  { id: 'storyboard', label: '分镜', icon: Clapperboard },
+  { id: 'inspector', label: '检查器', icon: SlidersHorizontal },
   { id: 'library', label: '资源库', icon: Layers },
   { id: 'inspect', label: '检查', icon: AlertCircle },
   { id: 'tasks', label: '任务', icon: ListChecks },

@@ -1,0 +1,198 @@
+/* ── 3D 导演台 · desk 简洁卡 ── */
+
+.d3 {
+  --d3-bg: var(--desk-bg);
+  --d3-bg-2: var(--desk-bg-2);
+  --d3-ink: var(--desk-ink);
+  --d3-muted: var(--desk-muted);
+  --d3-faint: var(--desk-faint);
+  --d3-line: var(--desk-line);
+  --d3-accent: var(--desk-accent);
+  --d3-accent-soft: var(--desk-accent-soft);
+  --d3-accent-line: var(--desk-accent-line);
+  --d3-ok: var(--desk-ok);
+  --d3-warn: var(--desk-warn);
+  --d3-run: var(--desk-run);
+  color: var(--d3-ink);
+  font-size: 12px;
+  line-height: 1.4;
+  font-variant-numeric: tabular-nums;
+}
+
+.d3-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: -2px -2px 0;
+}
+
+/* 预览 */
+.d3-preview {
+  position: relative;
+  aspect-ratio: 16 / 10;
+  border-radius: 10px;
+  overflow: hidden;
+  background: var(--desk-media-bg);
+  border: 1px solid var(--d3-line);
+  cursor: pointer;
+}
+
+.d3-preview__img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.d3-preview__empty {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  color: var(--d3-faint);
+  background: var(--desk-card-bg);
+  user-select: none;
+}
+
+.d3-preview__empty span {
+  font-size: 11px;
+  letter-spacing: 0.02em;
+}
+
+.d3-preview__badges {
+  position: absolute;
+  left: 6px;
+  top: 6px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  max-width: calc(100% - 12px);
+  pointer-events: none;
+}
+
+.d3-badge {
+  font-size: 9px;
+  font-weight: 650;
+  padding: 2px 6px;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--desk-stage-bg) 72%, transparent);
+  border: 1px solid var(--desk-line-strong);
+  color: var(--d3-ink);
+  backdrop-filter: blur(6px);
+}
+
+.d3-badge.is-ok {
+  color: var(--d3-ok);
+  border-color: color-mix(in srgb, var(--d3-ok) 35%, transparent);
+}
+
+.d3-badge.is-warn {
+  color: var(--d3-warn);
+  border-color: color-mix(in srgb, var(--d3-warn) 35%, transparent);
+}
+
+.d3-badge.is-accent {
+  color: var(--d3-accent);
+  border-color: var(--d3-accent-line);
+  background: var(--d3-accent-soft);
+}
+
+/* 分镜选择 */
+.d3-field {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.d3-field label {
+  font-size: 10px;
+  color: var(--d3-faint);
+  flex-shrink: 0;
+}
+
+.d3-select {
+  flex: 1;
+  min-width: 0;
+  height: 28px;
+  border-radius: 8px;
+  border: 1px solid var(--d3-line);
+  background: var(--desk-bg-2);
+  color: var(--d3-ink);
+  font-size: 11px;
+  padding: 0 8px;
+  outline: none;
+}
+
+.d3-select:focus {
+  border-color: var(--d3-accent-line);
+}
+
+/* 机位提示 */
+.d3-prompt {
+  margin: 0;
+  font-size: 10px;
+  line-height: 1.45;
+  color: var(--d3-muted);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* 操作 */
+.d3-acts {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.d3-btn {
+  height: 30px;
+  padding: 0 10px;
+  border-radius: 8px;
+  border: 1px solid var(--desk-line-strong);
+  background: var(--desk-bg-2);
+  color: var(--d3-ink);
+  font-size: 11px;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  cursor: pointer;
+  flex-shrink: 0;
+  text-decoration: none;
+  transition: background 0.12s, border-color 0.12s;
+}
+
+.d3-btn:hover {
+  border-color: var(--d3-accent-line);
+  background: var(--d3-accent-soft);
+}
+
+.d3-btn.is-primary {
+  flex: 1;
+  background: var(--d3-accent);
+  border-color: transparent;
+  color: var(--desk-btn-primary-ink);
+}
+
+.d3-btn.is-primary:hover {
+  filter: brightness(1.06);
+}
+
+.d3-btn.is-ghost {
+  background: transparent;
+  color: var(--d3-muted);
+}
+
+.d3-hint {
+  margin: 0;
+  font-size: 10px;
+  color: var(--d3-faint);
+  line-height: 1.4;
+}

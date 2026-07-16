@@ -5,6 +5,7 @@ import * as Icons from 'lucide-react';
 import { useWorkspaceDocument } from '../../../stores/workspace-document';
 import { LogDockButton } from '../../../panels/LogPanel';
 import { isSurfaceEnabled } from '../../../config/product-surface';
+import { useStudioSurface } from '../../../stores/studio-surface';
 
 type LaneId = 'character' | 'scene' | 'generate' | 'output';
 
@@ -12,10 +13,10 @@ const LANE_META: Record<
   LaneId,
   { label: string; icon: React.ComponentType<{ size?: number; className?: string }>; categories: BlockCategory[] }
 > = {
-  character: { label: '角色', icon: User, categories: ['craft'] },
-  scene: { label: '场景', icon: Image, categories: ['source', 'spatial'] },
-  generate: { label: '生成', icon: Sparkles, categories: ['generate', 'hub', 'integrate'] },
-  output: { label: '输出', icon: Package, categories: ['support', 'utility'] },
+  character: { label: '角色设定', icon: User, categories: ['craft'] },
+  scene: { label: '场景机位', icon: Image, categories: ['source', 'spatial'] },
+  generate: { label: '出图出片', icon: Sparkles, categories: ['generate', 'hub', 'integrate'] },
+  output: { label: '合成导出', icon: Package, categories: ['support', 'utility'] },
 };
 
 interface ModuleDockProps {
@@ -44,17 +45,20 @@ function blocksForLane(lane: LaneId, query: string): BlockDefinition[] {
 }
 
 const STEP_KINDS: Record<string, string[]> = {
-  script: ['shot-script', 'dialogue-sheet'],
+  script: ['dialogue-sheet'],
+  'script-breakdown': ['dialogue-sheet'],
   'scene-split': ['text-chunker'],
-  storyboard: ['asset-gate', 'story-grid'],
-  'storyboard-preview': ['storyboard-preview'],
+  storyboard: ['asset-gate', 'storyboard-desk'],
+  'story-grid': ['asset-gate', 'storyboard-desk'],
+  'storyboard-preview': ['storyboard-desk'],
+  'storyboard-desk': ['storyboard-desk'],
   'character-bible': ['character-sheet'],
   'environment-bible': ['scene-card'],
   'camera-3d': ['director-3d'],
   'camera-live': ['director-desk'],
-  'keyframe-gen': ['picture-gen'],
+  'keyframe-gen': ['picture-gen', 'director-desk'],
   'keyframe-review': ['review-gate'],
-  'video-gen': ['motion-story', 'clip-gen'],
+  'video-gen': ['clip-gen'],
   consistency: ['continuity-check'],
   'episode-studio': ['clip-editor'],
   'review-gate': ['review-gate'],
@@ -64,7 +68,9 @@ const STEP_KINDS: Record<string, string[]> = {
 export function ModuleDock({ onPick }: ModuleDockProps) {
   const [activeLane, setActiveLane] = useState<LaneId | null>(null);
   const [query, setQuery] = useState('');
-  const [expanded, setExpanded] = useState(() => !isSurfaceEnabled('playbookWizard'));
+  /** 制作台默认收起工具坞；专家编排才默认展开 */
+  const expertWorkflow = useStudioSurface((s) => s.expertWorkflow);
+  const [expanded, setExpanded] = useState(() => expertWorkflow);
   const session = useWorkspaceDocument((s) => s.playbookSession);
   const hasActivePlaybook =
     isSurfaceEnabled('playbookWizard') &&
@@ -85,6 +91,13 @@ export function ModuleDock({ onPick }: ModuleDockProps) {
     if (hasActivePlaybook) setExpanded(false);
   }, [hasActivePlaybook]);
 
+  useEffect(() => {
+    if (!expertWorkflow) {
+      setExpanded(false);
+      setActiveLane(null);
+    }
+  }, [expertWorkflow]);
+
   const panelItems = activeLane ? blocksForLane(activeLane, query) : [];
   const filteredItems = currentStepKinds && !expanded
     ? panelItems.filter((b) => currentStepKinds.has(b.kind))
@@ -98,7 +111,7 @@ export function ModuleDock({ onPick }: ModuleDockProps) {
           type="button"
           onClick={() => setExpanded(true)}
           className="w-9 h-9 rounded-xl flex items-center justify-center hover:bg-surface text-ink/60"
-          title="展开模块面板（⌘K 搜索）"
+          title="展开制作工具箱（⌘K 搜索）"
         >
           <LayoutGrid size={18} />
         </button>
@@ -111,7 +124,7 @@ export function ModuleDock({ onPick }: ModuleDockProps) {
 
   return (
     <aside
-      className="nx9-module-dock shrink-0 border-r border-line bg-white/80 backdrop-blur-[var(--nx9-glass-blur)] flex h-full relative z-20"
+      className="nx9-module-dock shrink-0 border-r border-line bg-[#FFFCFA]/88 backdrop-blur-[var(--nx9-glass-blur)] flex h-full relative z-20"
       style={{ width: 'var(--nx9-dock-width)' }}
     >
       <div className="flex flex-col items-center py-3 gap-2 w-full h-full">
@@ -119,7 +132,7 @@ export function ModuleDock({ onPick }: ModuleDockProps) {
           type="button"
           onClick={() => setExpanded(false)}
           className="w-9 h-9 rounded-xl flex items-center justify-center hover:bg-surface text-ink/60 mb-1"
-          title="收起模块面板"
+          title="收起制作工具箱"
         >
           <LayoutGrid size={18} />
         </button>
@@ -154,7 +167,7 @@ export function ModuleDock({ onPick }: ModuleDockProps) {
           }}
         >
           <div className="p-3 border-b border-line">
-            <p className="text-xs font-semibold text-ink mb-2">{LANE_META[activeLane].label} 模块</p>
+            <p className="text-xs font-semibold text-ink mb-2">{LANE_META[activeLane].label}</p>
             <div className="relative">
               <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-ink/40" />
               <input

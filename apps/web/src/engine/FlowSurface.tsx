@@ -97,16 +97,17 @@ import { computeGroupBounds } from './stage-deck/canvas/SceneGroup';
 import { StageDeckInteractionBridge } from './stage-deck/StageDeckInteractionBridge';
 import { normalizeDirectorProject } from '@nx9/director3d';
 import { useDirector3dUi } from '../stores/director3d-ui';
+import { openDirector3dStage } from './director3d-open';
 import { auditCorePipeline, repairCorePipeline } from './core-pipeline-graph';
 
 const CANVAS_GRID = {
   light: {
-    background: '#FAFAF8',
-    dots: { gap: 24, size: 1.3, color: 'rgba(34,34,34,0.12)' },
-    lines: { gap: 36, size: 1.15, color: 'rgba(34,34,34,0.11)' },
+    background: '#E8E4DB',
+    dots: { gap: 24, size: 1.3, color: 'rgba(42,36,28,0.12)' },
+    lines: { gap: 36, size: 1.15, color: 'rgba(42,36,28,0.1)' },
   },
   dark: {
-    background: '#11100E',
+    background: '#0C0E12',
     dots: { gap: 28, size: 1.35, color: 'rgba(255,255,255,0.13)' },
     lines: { gap: 40, size: 1.2, color: 'rgba(255,255,255,0.085)' },
   },
@@ -133,6 +134,12 @@ async function applyPendingTemplate(
     await load(templateId, templateMode);
     sessionHandledTemplateRequestId.current = templateRequestId;
     useFlowCommands.setState({ templateId: null });
+    // hydrate/reset 之后再启动 playbook，避免新建项目 bootstrap 被冲掉
+    const playbookId = useFlowCommands.getState().consumePendingPlaybook();
+    if (playbookId) {
+      useWorkspaceDocument.getState().startPlaybook(playbookId);
+      useWorkspaceDocument.getState().setProjectStatus('draft');
+    }
   } finally {
     if (inFlightTemplateRequestId.current === templateRequestId) {
       inFlightTemplateRequestId.current = 0;
@@ -207,6 +214,15 @@ const FlowSurfaceInner = memo(function FlowSurfaceInner({
     (id: string, mode: 'merge' | 'replace') => Promise<void>
   >(async () => {});
   const lastSaveRef = useRef<{
+    workspaceId: string;
+    nodes: Node[];
+    edges: Edge[];
+    viewport: Viewport;
+    idx: number;
+  } | null>(null);
+  /** 大工作区保存串行：避免多个 ~16MB PUT 叠发后被浏览器/热更新中途掐掉 */
+  const saveInFlightRef = useRef(false);
+  const saveQueuedRef = useRef<{
     workspaceId: string;
     nodes: Node[];
     edges: Edge[];
@@ -315,7 +331,7 @@ const FlowSurfaceInner = memo(function FlowSurfaceInner({
   const snapGrid = useMemo(() => [PERF.gridStep, PERF.gridStep] as [number, number], []);
 
   const persist = useMemo(() => {
-    const flushSave = async (
+    const runSave = async (
       id: string,
       n: Node[],
       e: Edge[],
@@ -351,6 +367,36 @@ const FlowSurfaceInner = memo(function FlowSurfaceInner({
         });
       }
     };
+
+    const pumpSaveQueue = async () => {
+      if (saveInFlightRef.current) return;
+      saveInFlightRef.current = true;
+      try {
+        while (saveQueuedRef.current) {
+          const job = saveQueuedRef.current;
+          saveQueuedRef.current = null;
+          await runSave(job.workspaceId, job.nodes, job.edges, job.viewport, job.idx);
+        }
+      } finally {
+        saveInFlightRef.current = false;
+        // 循环结束时若又有新排队，再开一轮
+        if (saveQueuedRef.current) void pumpSaveQueue();
+      }
+    };
+
+    const flushSave = async (
+      id: string,
+      n: Node[],
+      e: Edge[],
+      vp: Viewport,
+      idx: number,
+    ) => {
+      // 始终只保留最新快照；进行中则等当前 PUT 结束后再写这一版
+      saveQueuedRef.current = { workspaceId: id, nodes: n, edges: e, viewport: vp, idx };
+      lastSaveRef.current = saveQueuedRef.current;
+      await pumpSaveQueue();
+    };
+
     return debounce((id: string, n: Node[], e: Edge[], vp: Viewport, idx: number) => {
       void flushSave(id, n, e, vp, idx);
     }, PERF.saveDebounceMs);
@@ -1698,7 +1744,17 @@ const FlowSurfaceInner = memo(function FlowSurfaceInner({
     (_e: ReactMouseEvent, node: Node) => {
       setNodes((prev) => prev.map((n) => ({ ...n, selected: n.id === node.id })));
       syncSelectedBlockId(node.id);
-      if (isStageDeck && (node.type === 'director-3d' || node.type === 'blocking-stage' || node.type === 'light-rig')) {
+      if (isStageDeck && node.type === 'director-3d') {
+        openDirector3dStage({
+          blockId: node.id,
+          nodes: nodesRef.current,
+          edges: edgesRef.current,
+          updateNodeData: updateNodeDataStable,
+        });
+        appendLog('打开 3D 导演台舞台');
+        return;
+      }
+      if (isStageDeck && (node.type === 'blocking-stage' || node.type === 'light-rig')) {
         openDirector3dForBlock(
           node.id,
           normalizeDirectorProject(node.data?.scene),
@@ -1750,7 +1806,7 @@ const FlowSurfaceInner = memo(function FlowSurfaceInner({
 
   return (
     <div
-      className={`relative h-full w-full ${flowClass} ${canvasAppearance.theme === 'dark' ? 'nx9-theme-dark' : ''}`}
+      className={`relative h-full w-full ${flowClass} ${canvasAppearance.theme === 'dark' ? 'nx9-theme-dark' : 'nx9-theme-light'}`}
       style={{ background: canvasGrid.background }}
       onDragOver={onDragOver}
       onDrop={onDrop}

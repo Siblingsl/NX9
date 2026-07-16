@@ -1,11 +1,6 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { BlockDefinition } from '@nx9/shared';
 import { isPrivateWorkspace } from '@nx9/shared';
-import { ModuleDock } from '../engine/stage-deck/chrome/ModuleDock';
-import { ContextRail } from '../engine/stage-deck/chrome/ContextRail';
-import { useContextRailUi } from '../engine/stage-deck/stores/context-rail-ui';
-import { StudioTopBar } from './StudioTopBar';
-import { WorkspaceRail } from '../panels/WorkspaceRail';
 import { SettingsDrawer } from '../panels/SettingsDrawer';
 import { ShortcutsModal } from '../panels/ShortcutsModal';
 import { LogPanel } from '../panels/LogPanel';
@@ -19,12 +14,15 @@ import { useActivityLog } from '../stores/activity-log';
 import { useFlowCommands } from '../stores/flow-commands';
 import { useFlowRuntime, useStoryboardUi, useRemotionUi } from '../stores/flow-runtime';
 import { useExecutionQueue } from '../stores/execution-queue';
-import { useDirector3dUi } from '../stores/director3d-ui';
 import { useAssetLibraryModalUi } from '../stores/asset-library-modal-ui';
 import { useCreateWorkspaceDialogUi } from '../stores/create-workspace-dialog-ui';
 import { useSkillVault } from '../stores/skill-vault';
 import { isSurfaceEnabled } from '../config/product-surface';
 import { useWorkspaceDocument } from '../stores/workspace-document';
+import { useAppSurface } from '../stores/app-surface';
+import { HomeNavPage } from '../pages/HomeNavPage';
+import { ProductionStudioPage } from '../pages/ProductionStudioPage';
+import { CanvasStageShell } from './canvas-stage/CanvasStageShell';
 
 const StageDeckSurface = lazy(() =>
   import('../engine/stage-deck/StageDeckSurface').then((m) => ({ default: m.StageDeckSurface })),
@@ -57,16 +55,15 @@ const SkillsDrawer = lazy(() =>
 const StageDeckTour = lazy(() =>
   import('../engine/stage-deck/chrome/StageDeckTour').then((m) => ({ default: m.StageDeckTour })),
 );
-const ProductionProgressWall = lazy(() =>
-  import('../components/ProductionProgressWall').then((m) => ({ default: m.ProductionProgressWall })),
-);
 
 export default function AppShell() {
+  const surface = useAppSurface((s) => s.surface);
+  const goHome = useAppSurface((s) => s.goHome);
+  const goStudio = useAppSurface((s) => s.goStudio);
   const {
     activeId,
     fetchAll,
     create,
-    rename,
     closeWorkspace,
     selectWorkspace,
     reloadToken,
@@ -75,13 +72,10 @@ export default function AppShell() {
   const toggleSkills = useSkillVault((s) => s.toggleDrawer);
   const requestSpawn = useFlowCommands((s) => s.requestSpawn);
   const runtime = useFlowRuntime((s) => s.runtime);
-  const selectedBlockId = useFlowRuntime((s) => s.selectedBlockId);
-  const toggleStoryboard = useStoryboardUi((s) => s.toggle);
-  const storyboardOpen = useStoryboardUi((s) => s.open);
   const batchPhase = useExecutionQueue((s) => s.phase);
   const batchProgress = useExecutionQueue((s) => s.progress);
   const batchTaskId = useExecutionQueue((s) => s.taskId);
-  const batchTask = useTaskStream(batchTaskId);
+  useTaskStream(batchTaskId);
   const appendLog = useActivityLog((s) => s.append);
   const [flowKey, setFlowKey] = useState(0);
   const [createSubmitting, setCreateSubmitting] = useState(false);
@@ -97,14 +91,10 @@ export default function AppShell() {
   const [usageOpen, setUsageOpen] = useState(false);
   const bootstrapUser = useUserSession((s) => s.bootstrap);
   const user = useUserSession((s) => s.user);
-  const users = useUserSession((s) => s.users);
-  const setUser = useUserSession((s) => s.setUser);
-  const createUser = useUserSession((s) => s.createUser);
   const bootstrapped = useRef(false);
   const userBootstrapped = useRef(false);
-  const requestRailTab = useContextRailUi((s) => s.requestTab);
-  const openDirector3d = useDirector3dUi((s) => s.openStandalone);
   const canvasTheme = useWorkspaceDocument((s) => s.canvasAppearance.theme);
+  const requestBootstrapCorePipeline = useFlowCommands((s) => s.requestBootstrapCorePipeline);
 
   useEffect(() => {
     document.body.classList.toggle('nx9-app-dark-body', canvasTheme === 'dark');
@@ -123,7 +113,7 @@ export default function AppShell() {
       const current = useWorkspaceCatalog.getState().items;
       if (current.length === 0 && !bootstrapped.current) {
         bootstrapped.current = true;
-        await create({ title: '默认工作区', visibility: 'private' });
+        await create({ title: '我的第一部剧', visibility: 'private' });
       }
     })();
   }, [fetchAll, create]);
@@ -131,7 +121,7 @@ export default function AppShell() {
   const onPickBlock = useCallback(
     (def: BlockDefinition) => {
       requestSpawn(def.kind);
-      appendLog(`从模块库选择: ${def.label}`);
+      appendLog(`添加工具: ${def.label}`);
     },
     [requestSpawn, appendLog],
   );
@@ -141,13 +131,23 @@ export default function AppShell() {
   }, [reloadToken]);
 
   const handleCreatePrivate = useCallback(
-    async (title: string) => {
+    async (title: string, opts?: { bootstrapCorePipeline?: boolean }) => {
       setCreateSubmitting(true);
       try {
+        if (opts?.bootstrapCorePipeline) {
+          requestBootstrapCorePipeline();
+        }
         await create({ title, visibility: 'private' });
         closeCreateDialog();
-        toastSuccess(`私有项目「${title}」已创建`);
-        appendLog(`已创建私有项目：${title}`);
+        if (opts?.bootstrapCorePipeline) {
+          toastSuccess(`「${title}」已创建；可在制作台做剧，或打开高级画布查看流程`);
+          appendLog(`已创建项目：${title}（含核心流程登记）`);
+          goStudio();
+        } else {
+          toastSuccess(`项目「${title}」已创建`);
+          appendLog(`已创建私有项目：${title}`);
+          goStudio();
+        }
       } catch (e) {
         const msg = String(e);
         appendLog(`创建私有项目失败: ${msg}`);
@@ -157,14 +157,7 @@ export default function AppShell() {
         setCreateSubmitting(false);
       }
     },
-    [create, closeCreateDialog, appendLog],
-  );
-
-  const handleSelectWorkspace = useCallback(
-    (id: string) => {
-      void selectWorkspace(id);
-    },
-    [selectWorkspace],
+    [create, closeCreateDialog, appendLog, requestBootstrapCorePipeline, goStudio],
   );
 
   const catalogItems = useWorkspaceCatalog((s) => s.items);
@@ -199,98 +192,74 @@ export default function AppShell() {
     return () => window.removeEventListener('keydown', onKey);
   }, []);
 
+  const isCanvas = surface === 'canvas';
+  const isStudio = surface === 'studio';
+  const isHome = surface === 'home';
+
   return (
     <div className={`h-full flex flex-col ${canvasTheme === 'dark' ? 'nx9-app-dark' : ''}`}>
-      <StudioTopBar
-        batchPhase={batchPhase}
-        batchProgress={batchProgress}
-        batchTaskProgress={batchTask?.progress}
-        storyboardOpen={storyboardOpen}
-        canUndo={runtime?.canUndo ?? false}
-        canRedo={runtime?.canRedo ?? false}
-        user={user}
-        users={users}
-        remotionOpen={remotionOpen}
-        usageOpen={usageOpen}
-        assetLibOpen={assetLibModalOpen}
-        onUndo={() => runtime?.undo()}
-        onRedo={() => runtime?.redo()}
-        onToggleStoryboard={() => {
-          requestRailTab('storyboard');
-          toggleStoryboard();
-        }}
-        onOpenDirector3d={() => openDirector3d()}
-        onBatchRun={() => void handleBatchRun()}
-        onSetUser={setUser}
-        onCreateUser={(name) => void createUser(name)}
-        onToggleRemotion={() => {
-          setRemotionOpen(!remotionOpen);
-          setUsageOpen(false);
-        }}
-        onToggleUsage={() => {
-          setUsageOpen((v) => !v);
-          setRemotionOpen(false);
-        }}
-        onOpenWorkflowTemplates={() => requestRailTab('library', { librarySub: 'workflow' })}
-        onOpenHistory={() => requestRailTab('library', { librarySub: 'history' })}
-        onToggleAssetLib={() => toggleAssetLibModal()}
-        onOpenSkills={() => toggleSkills(true)}
-        onOpenShortcuts={() => setShortcutsOpen(true)}
-        onOpenSettings={() => toggleSettings(true)}
-      />
-
-      {isSurfaceEnabled('productionProgressWall') && (
-        <Suspense fallback={null}>
-          <ProductionProgressWall />
-        </Suspense>
-      )}
-
-      {isSurfaceEnabled('workspaceRail') && (
-        <WorkspaceRail
-          items={railItems}
-          activeId={activeId}
-          onSelect={handleSelectWorkspace}
-          onCreate={openCreateDialog}
-          onRename={(id, title) => void rename(id, title)}
-          onClose={(id) => void closeWorkspace(id)}
-        />
-      )}
-
       <div className="flex-1 flex min-h-0">
-        {isSurfaceEnabled('moduleDock') && <ModuleDock onPick={onPickBlock} />}
+        <main className="flex-1 min-w-0 bg-surface relative flex flex-col">
+          {isHome && <HomeNavPage />}
 
-        <main className="flex-1 min-w-0 bg-surface relative flex">
-          {activeId ? (
-            <Suspense
-              fallback={
-                <div className="flex items-center justify-center h-full text-ink/50 text-sm flex-1">
-                  加载流程画布…
-                </div>
-              }
-            >
-              <div className="flex-1 min-w-0 flex">
-                <div className="flex-1 min-w-0">
+          {isStudio && <ProductionStudioPage />}
+
+          {isCanvas &&
+            (activeId ? (
+              <CanvasStageShell
+                projects={railItems}
+                activeProjectId={activeId}
+                batchRunning={batchPhase === 'running'}
+                batchProgress={batchProgress}
+                canUndo={runtime?.canUndo ?? false}
+                canRedo={runtime?.canRedo ?? false}
+                user={user}
+                onGoHome={goHome}
+                onGoStudio={goStudio}
+                onSelectProject={(id) => void selectWorkspace(id)}
+                onCreateProject={openCreateDialog}
+                onPickBlock={onPickBlock}
+                onUndo={() => runtime?.undo()}
+                onRedo={() => runtime?.redo()}
+                onBatchRun={() => void handleBatchRun()}
+                onOpenAssets={() => toggleAssetLibModal()}
+                onOpenSettings={() => toggleSettings(true)}
+                onOpenHistory={() => setHistoryOpen(true)}
+              >
+                <Suspense
+                  fallback={
+                    <div className="flex items-center justify-center h-full text-white/50 text-sm">
+                      正在打开舞台…
+                    </div>
+                  }
+                >
                   <StageDeckSurface key={`${activeId}-${flowKey}`} workspaceId={activeId} />
-                </div>
-                {isSurfaceEnabled('inspectorRail') && <ContextRail selectedBlockId={selectedBlockId} />}
+                </Suspense>
+              </CanvasStageShell>
+            ) : (
+              <div className="flex flex-col items-center justify-center h-full text-ink/50 flex-1 gap-2 px-6 text-center">
+                <p className="text-sm font-medium text-ink/70">选择或新建项目后再打开画布</p>
+                <button
+                  type="button"
+                  onClick={goHome}
+                  className="text-xs text-brand hover:underline"
+                >
+                  返回导航
+                </button>
               </div>
-            </Suspense>
-          ) : (
-            <div className="flex items-center justify-center h-full text-ink/50 flex-1">
-              选择或创建工作区
-            </div>
-          )}
+            ))}
 
-      <Suspense fallback={null}>
-        {isSurfaceEnabled('assetLibraryModal') && <AssetLibraryModal />}
-        <CreateWorkspaceDialog
-          open={createDialogOpen}
-          onClose={closeCreateDialog}
-          onConfirm={handleCreatePrivate}
-          submitting={createSubmitting}
-          defaultTitle={`私有项目 ${railItems.length + 1}`}
-        />
-        {isSurfaceEnabled('storyboard') && <StoryboardPanel />}
+          <Suspense fallback={null}>
+            {isSurfaceEnabled('assetLibraryModal') && <AssetLibraryModal />}
+            <CreateWorkspaceDialog
+              open={createDialogOpen}
+              onClose={closeCreateDialog}
+              onConfirm={handleCreatePrivate}
+              submitting={createSubmitting}
+              defaultTitle={`项目 ${railItems.length + 1}`}
+              defaultBootstrapCore
+            />
+            {isCanvas && isSurfaceEnabled('storyboard') && <StoryboardPanel />}
             {isSurfaceEnabled('generationHistory') && (
               <GenerationHistoryPanel open={historyOpen} onClose={() => setHistoryOpen(false)} />
             )}
@@ -311,11 +280,10 @@ export default function AppShell() {
       {isSurfaceEnabled('settings') && <SettingsDrawer />}
       <Suspense fallback={null}>
         {isSurfaceEnabled('skillsDrawer') && <SkillsDrawer />}
-        {/* 节点工作区需要 3D 宿主常驻；director3d surface flag 仅控制顶部独立入口。 */}
         <Director3dPanel />
-        {isSurfaceEnabled('stageDeckTour') && <StageDeckTour />}
+        {isCanvas && isSurfaceEnabled('stageDeckTour') && <StageDeckTour />}
       </Suspense>
-      {isSurfaceEnabled('logPanel') && <LogPanel />}
+      {isCanvas && isSurfaceEnabled('logPanel') && <LogPanel />}
       <ToastHost />
     </div>
   );

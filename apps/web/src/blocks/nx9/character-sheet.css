@@ -1,0 +1,798 @@
+/* ── 角色设定 · 分镜表同款暗色工作台 ──
+ * 冷静炭黑 · 表格式档案 · 暖金强调 · 无科技 HUD
+ */
+
+.cs {
+  --cs-bg: var(--desk-bg);
+  --cs-bg-2: var(--desk-bg-2);
+  --cs-bg-3: var(--desk-bg-3);
+  --cs-ink: var(--desk-ink);
+  --cs-muted: var(--desk-muted);
+  --cs-faint: var(--desk-faint);
+  --cs-line: var(--desk-line);
+  --cs-line-strong: var(--desk-line-strong);
+  --cs-accent: var(--desk-accent);
+  --cs-accent-soft: var(--desk-accent-soft);
+  --cs-accent-line: var(--desk-accent-line);
+  --cs-warn: var(--desk-warn);
+  --cs-ok: var(--desk-ok);
+  --cs-run: var(--desk-run);
+  color: var(--cs-ink);
+  font-size: 12px;
+  line-height: 1.4;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ========== 画布节点 · 迷你角色档案表 ========== */
+.cs-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  margin: -2px -2px 0;
+}
+
+.cs-card__toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 0 0 8px;
+  min-width: 0;
+}
+
+.cs-card__status {
+  font-size: 10px;
+  font-weight: 650;
+  letter-spacing: 0.04em;
+  color: var(--cs-faint);
+}
+
+.cs-card__status.is-ready { color: var(--cs-ok); }
+.cs-card__status.is-run { color: var(--cs-run); }
+.cs-card__status.is-warn { color: var(--cs-warn); }
+
+.cs-card__counts {
+  font-size: 10px;
+  color: var(--cs-faint);
+  white-space: nowrap;
+}
+
+.cs-card__counts b {
+  color: var(--cs-muted);
+  font-weight: 650;
+}
+
+.cs-mini {
+  width: 100%;
+  border: 1px solid var(--cs-line-strong);
+  border-radius: 4px;
+  overflow: hidden;
+  background: var(--cs-bg);
+  cursor: pointer;
+  text-align: left;
+  padding: 0;
+  display: block;
+  transition: border-color 0.12s;
+}
+
+.cs-mini:hover {
+  border-color: var(--cs-accent-line);
+}
+
+.cs-mini__head {
+  display: grid;
+  grid-template-columns: 40px 1fr 1.2fr;
+  gap: 0;
+  padding: 5px 8px;
+  background: rgba(0, 0, 0, 0.28);
+  border-bottom: 1px solid var(--cs-line);
+  font-size: 9px;
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  color: var(--cs-faint);
+  text-transform: uppercase;
+}
+
+/* 名册：角色 | 身份 | 状态 */
+.cs-mini__head--roster,
+.cs-mini__row--roster {
+  grid-template-columns: 0.9fr 1fr 0.7fr;
+}
+
+.cs-mini__row {
+  display: grid;
+  grid-template-columns: 40px 1fr 1.2fr;
+  gap: 0;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--cs-line);
+  font-size: 11px;
+  color: var(--cs-muted);
+  min-height: 28px;
+  align-items: center;
+}
+
+.cs-mini__badge {
+  justify-self: end;
+  font-size: 9px;
+  font-weight: 650;
+  letter-spacing: 0.02em;
+  padding: 2px 5px;
+  border-radius: 3px;
+  border: 1px solid var(--cs-line);
+  color: var(--cs-faint);
+  white-space: nowrap;
+}
+
+.cs-mini__badge.is-ok {
+  color: var(--cs-ok);
+  border-color: rgba(143, 184, 154, 0.35);
+  background: rgba(143, 184, 154, 0.1);
+}
+
+.cs-mini__badge.is-warn {
+  color: var(--cs-warn);
+  border-color: rgba(212, 165, 116, 0.35);
+  background: rgba(212, 165, 116, 0.1);
+}
+
+.cs-mini__badge.is-todo {
+  color: var(--cs-faint);
+  border-color: var(--cs-line-strong);
+}
+
+.cs-mini__more {
+  padding: 6px 8px;
+  font-size: 10px;
+  color: var(--cs-faint);
+  text-align: center;
+  background: rgba(0, 0, 0, 0.15);
+}
+
+.cs-studio__tab.is-dim,
+.cs-studio__tab:disabled {
+  opacity: 0.38;
+  cursor: not-allowed;
+  pointer-events: auto;
+}
+
+.cs-session-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin: 0 0 12px;
+  padding: 8px 10px;
+  border-radius: 4px;
+  border: 1px solid var(--cs-accent-line);
+  background: var(--cs-accent-soft);
+  font-size: 11px;
+  color: var(--cs-muted);
+}
+
+.cs-session-bar b {
+  color: var(--cs-ink);
+  font-weight: 650;
+}
+
+.cs-lib-item .cs-mini__badge {
+  flex-shrink: 0;
+  justify-self: auto;
+}
+
+.cs-mini__row:last-child {
+  border-bottom: none;
+}
+
+.cs-mini__row .is-code {
+  color: var(--cs-accent);
+  font-weight: 650;
+  font-size: 10px;
+}
+
+.cs-mini__row .is-title {
+  color: var(--cs-ink);
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cs-mini__row span:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--cs-faint);
+}
+
+.cs-mini__empty {
+  padding: 18px 12px;
+  text-align: center;
+  color: var(--cs-faint);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.cs-mini__portrait {
+  display: flex;
+  gap: 10px;
+  padding: 10px;
+  align-items: stretch;
+  border-bottom: 1px solid var(--cs-line);
+}
+
+.cs-mini__thumb {
+  width: 48px;
+  height: 64px;
+  border-radius: 3px;
+  object-fit: cover;
+  background: var(--cs-bg-3);
+  border: 1px solid var(--cs-line);
+  flex-shrink: 0;
+}
+
+.cs-mini__thumb.is-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--cs-faint);
+}
+
+.cs-mini__meta {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 4px;
+}
+
+.cs-mini__name {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--cs-ink);
+  letter-spacing: 0.02em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cs-mini__sub {
+  font-size: 10px;
+  color: var(--cs-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cs-card__hint {
+  margin: 8px 0 0;
+  font-size: 10px;
+  color: var(--cs-faint);
+  line-height: 1.35;
+}
+
+.cs-card__hint.is-warn {
+  color: var(--cs-warn);
+}
+
+.cs-card__actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+/* ========== 按钮 ========== */
+.cs-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  border: 1px solid transparent;
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 11px;
+  border-radius: 4px;
+  padding: 7px 10px;
+  transition: background 0.12s, border-color 0.12s, color 0.12s, opacity 0.12s;
+}
+
+.cs-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.cs-btn--primary {
+  flex: 1;
+  color: #1a1714;
+  background: var(--cs-accent);
+  border-color: var(--cs-accent);
+}
+
+.cs-btn--primary:hover:not(:disabled) {
+  background: #d4b584;
+  border-color: #d4b584;
+}
+
+.cs-btn--ghost {
+  color: var(--cs-muted);
+  background: transparent;
+  border-color: var(--cs-line-strong);
+}
+
+.cs-btn--ghost:hover:not(:disabled) {
+  color: var(--cs-ink);
+  background: rgba(255, 255, 255, 0.04);
+  border-color: rgba(255, 255, 255, 0.16);
+}
+
+.cs-btn--soft {
+  color: var(--cs-accent);
+  background: var(--cs-accent-soft);
+  border-color: var(--cs-accent-line);
+}
+
+.cs-btn--soft:hover:not(:disabled) {
+  background: rgba(196, 165, 116, 0.22);
+}
+
+.cs-btn--sm {
+  padding: 5px 8px;
+  font-size: 10px;
+}
+
+/* ========== 弹窗 ========== */
+.nx9-screen-modal__panel.cs-modal {
+  background: #141618 !important;
+  border: 1px solid rgba(255, 255, 255, 0.1) !important;
+  box-shadow:
+    0 24px 64px rgba(0, 0, 0, 0.55),
+    0 0 0 1px rgba(0, 0, 0, 0.4) !important;
+  color: var(--cs-ink) !important;
+  width: min(920px, calc(100vw - 24px)) !important;
+  max-width: min(920px, calc(100vw - 24px)) !important;
+  border-radius: 8px !important;
+}
+
+.nx9-screen-modal__panel.cs-modal .nx9-screen-modal__chrome {
+  background: #1a1c1f !important;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08) !important;
+  backdrop-filter: none;
+}
+
+.nx9-screen-modal__panel.cs-modal .nx9-screen-modal__title {
+  color: rgba(236, 232, 224, 0.94) !important;
+  font-size: 14px !important;
+  font-weight: 650 !important;
+  letter-spacing: 0.02em;
+}
+
+.nx9-screen-modal__panel.cs-modal .nx9-screen-modal__sub {
+  color: rgba(236, 232, 224, 0.4) !important;
+  font-size: 11px !important;
+  letter-spacing: 0.04em;
+}
+
+.nx9-screen-modal__panel.cs-modal .nx9-screen-modal__close {
+  background: transparent !important;
+  border-color: rgba(255, 255, 255, 0.12) !important;
+  color: rgba(236, 232, 224, 0.55) !important;
+  border-radius: 4px !important;
+}
+
+.nx9-screen-modal__panel.cs-modal .nx9-screen-modal__close:hover {
+  background: rgba(255, 255, 255, 0.06) !important;
+  color: rgba(236, 232, 224, 0.9) !important;
+}
+
+.nx9-screen-modal__panel.cs-modal .nx9-screen-modal__body {
+  background: #141618;
+  padding: 0;
+}
+
+.cs-studio {
+  display: flex;
+  flex-direction: column;
+  min-height: min(72vh, 640px);
+  max-height: min(86vh, 740px);
+}
+
+.cs-studio__tabs {
+  display: flex;
+  gap: 0;
+  flex-shrink: 0;
+  border-bottom: 1px solid var(--cs-line-strong);
+  background: #1a1c1f;
+  padding: 0 4px;
+}
+
+.cs-studio__tab {
+  position: relative;
+  flex: 0 0 auto;
+  min-width: 88px;
+  border: none;
+  background: transparent;
+  color: var(--cs-faint);
+  font-size: 12px;
+  font-weight: 600;
+  padding: 11px 16px 12px;
+  cursor: pointer;
+  letter-spacing: 0.03em;
+  transition: color 0.12s, background 0.12s;
+}
+
+.cs-studio__tab:hover {
+  color: var(--cs-muted);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.cs-studio__tab.is-on {
+  color: var(--cs-ink);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.cs-studio__tab.is-on::after {
+  content: '';
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: 0;
+  height: 2px;
+  background: var(--cs-accent);
+  border-radius: 1px 1px 0 0;
+}
+
+.cs-studio__body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 16px 18px 12px;
+  scrollbar-gutter: stable;
+}
+
+.cs-studio__foot {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 18px;
+  border-top: 1px solid var(--cs-line-strong);
+  background: #1a1c1f;
+}
+
+.cs-studio__foot-hint {
+  flex: 1;
+  margin: 0;
+  font-size: 11px;
+  color: var(--cs-faint);
+  min-width: 0;
+}
+
+.cs-studio__foot-actions {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+/* 统计条 */
+.cs-stats {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 1px;
+  background: var(--cs-line-strong);
+  border: 1px solid var(--cs-line-strong);
+  border-radius: 4px;
+  overflow: hidden;
+  margin-bottom: 14px;
+}
+
+.cs-stats__cell {
+  background: var(--cs-bg-2);
+  padding: 10px 12px;
+  text-align: center;
+}
+
+.cs-stats__val {
+  display: block;
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--cs-ink);
+  letter-spacing: 0.02em;
+}
+
+.cs-stats__lab {
+  display: block;
+  margin-top: 2px;
+  font-size: 10px;
+  color: var(--cs-faint);
+  letter-spacing: 0.04em;
+}
+
+/* 警告 */
+.cs-warn {
+  margin: 0 0 12px;
+  padding: 8px 10px;
+  border-radius: 4px;
+  border: 1px solid rgba(212, 165, 116, 0.28);
+  background: rgba(212, 165, 116, 0.08);
+  color: var(--cs-warn);
+  font-size: 11px;
+}
+
+/* 表单 */
+.cs-grid-2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+@media (max-width: 640px) {
+  .cs-grid-2 {
+    grid-template-columns: 1fr;
+  }
+}
+
+.cs-field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin-bottom: 12px;
+}
+
+.cs-field:last-child {
+  margin-bottom: 0;
+}
+
+.cs-label {
+  font-size: 10px;
+  font-weight: 650;
+  letter-spacing: 0.05em;
+  color: var(--cs-faint);
+  text-transform: uppercase;
+}
+
+.cs-label .is-req {
+  color: var(--cs-warn);
+  margin-left: 4px;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.cs-input,
+.cs-textarea {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid var(--cs-line-strong);
+  border-radius: 4px;
+  background: var(--cs-bg);
+  color: var(--cs-ink);
+  font-size: 12px;
+  padding: 8px 10px;
+  outline: none;
+  transition: border-color 0.12s;
+}
+
+.cs-input:focus,
+.cs-textarea:focus {
+  border-color: var(--cs-accent-line);
+}
+
+.cs-input::placeholder,
+.cs-textarea::placeholder {
+  color: var(--cs-faint);
+}
+
+.cs-textarea {
+  min-height: 88px;
+  resize: vertical;
+  line-height: 1.5;
+  font-family: inherit;
+}
+
+.cs-textarea--sm {
+  min-height: 64px;
+}
+
+.cs-panel {
+  border: 1px solid var(--cs-line-strong);
+  border-radius: 4px;
+  background: var(--cs-bg-2);
+  padding: 12px;
+  margin-bottom: 12px;
+}
+
+.cs-panel__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.cs-panel__title {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.04em;
+  color: var(--cs-muted);
+}
+
+.cs-panel__meta {
+  font-size: 10px;
+  color: var(--cs-faint);
+}
+
+/* 角色库列表 */
+.cs-lib-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  border: 1px solid var(--cs-line-strong);
+  border-radius: 4px;
+  overflow: hidden;
+  max-height: min(48vh, 420px);
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+
+.cs-lib-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 10px 12px;
+  border: none;
+  border-bottom: 1px solid var(--cs-line);
+  background: var(--cs-bg);
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.1s;
+}
+
+.cs-lib-item:last-child {
+  border-bottom: none;
+}
+
+.cs-lib-item:hover {
+  background: var(--cs-bg-2);
+}
+
+.cs-lib-item.is-on {
+  background: var(--cs-accent-soft);
+  box-shadow: inset 3px 0 0 var(--cs-accent);
+}
+
+.cs-lib-thumb {
+  width: 36px;
+  height: 48px;
+  border-radius: 3px;
+  object-fit: cover;
+  background: var(--cs-bg-3);
+  border: 1px solid var(--cs-line);
+  flex-shrink: 0;
+}
+
+.cs-lib-thumb.is-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--cs-faint);
+}
+
+.cs-lib-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.cs-lib-name {
+  display: block;
+  font-size: 12px;
+  font-weight: 650;
+  color: var(--cs-ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cs-lib-meta {
+  display: block;
+  margin-top: 2px;
+  font-size: 10px;
+  color: var(--cs-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cs-empty {
+  padding: 36px 16px;
+  text-align: center;
+  color: var(--cs-faint);
+  font-size: 12px;
+  border: 1px dashed var(--cs-line-strong);
+  border-radius: 4px;
+  background: var(--cs-bg);
+}
+
+/* 参考图网格 */
+.cs-views {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px;
+}
+
+@media (max-width: 640px) {
+  .cs-views {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+.cs-views .cs-slot {
+  min-width: 0;
+}
+
+/* 让 ImageUploadSlot 在暗色里更协调 */
+.cs .cs-views button,
+.cs .cs-views [class*='aspect'] {
+  border-radius: 4px;
+}
+
+.cs-prompt {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 4px;
+  background: var(--cs-bg);
+  border: 1px solid var(--cs-line);
+  color: var(--cs-muted);
+  font-size: 11px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  max-height: 140px;
+  overflow: auto;
+  scrollbar-gutter: stable;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+.cs-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--cs-muted);
+  cursor: pointer;
+  user-select: none;
+}
+
+.cs-check input {
+  accent-color: var(--cs-accent);
+}
+
+/* AssetLinkField（tailwind）在暗台内的可读性补丁 */
+.cs .text-ink\/50,
+.cs .text-ink\/40,
+.cs .text-ink\/55 {
+  color: var(--cs-faint) !important;
+}
+.cs .text-brand,
+.cs .text-brand\/70 {
+  color: var(--cs-accent) !important;
+}
+.cs .border-brand\/30 {
+  border-color: var(--cs-accent-line) !important;
+}
+.cs .bg-brand\/5 {
+  background: var(--cs-accent-soft) !important;
+}
+.cs .border-line {
+  border-color: var(--cs-line-strong) !important;
+}
+.cs .bg-panel,
+.cs .bg-canvas {
+  background: var(--cs-bg) !important;
+}
+.cs .text-ink {
+  color: var(--cs-ink) !important;
+}

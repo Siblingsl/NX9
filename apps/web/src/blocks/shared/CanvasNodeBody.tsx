@@ -1,5 +1,5 @@
-import { memo, useCallback } from 'react';
-import { Play } from 'lucide-react';
+import { memo, useCallback, useMemo } from 'react';
+import { ImageIcon, Loader2, Maximize2, Play } from 'lucide-react';
 import {
   lookupBlock,
   normalizeNodeStatus,
@@ -11,35 +11,17 @@ import {
   type NodeRunStatus,
 } from '@nx9/shared';
 import { useDeckUi } from '../../engine/stage-deck/stores/deck-ui';
-
-const STATUS_DOT: Record<NodeRunStatus, string> = {
-  idle: 'bg-ink/20',
-  ready: 'bg-brand/60',
-  running: 'bg-brand animate-pulse',
-  success: 'bg-ok',
-  error: 'bg-warn',
-  waiting: 'bg-warn/70',
-  disabled: 'bg-ink/15',
-};
+import { NodeSummaryBody } from './NodeSummaryBody';
+import '../core/picture-gen.css';
 
 const STATUS_LABEL: Record<NodeRunStatus, string> = {
-  idle: 'Idle',
-  ready: 'Ready',
-  running: 'Running',
-  success: 'Success',
-  error: 'Error',
-  waiting: 'Waiting',
-  disabled: 'Disabled',
-};
-
-const TAG_COLORS: Record<string, string> = {
-  character: 'bg-violet-500/10 text-violet-700',
-  scene: 'bg-emerald-500/10 text-emerald-700',
-  shot: 'bg-sky-500/10 text-sky-700',
-  emotion: 'bg-amber-500/10 text-amber-700',
-  hook: 'bg-rose-500/10 text-rose-700',
-  sound: 'bg-indigo-500/10 text-indigo-700',
-  style: 'bg-orange-500/10 text-orange-700',
+  idle: '待配置',
+  ready: '就绪',
+  running: '生成中',
+  success: '完成',
+  error: '失败',
+  waiting: '等待',
+  disabled: '停用',
 };
 
 export interface CanvasNodeBodyProps {
@@ -49,15 +31,84 @@ export interface CanvasNodeBodyProps {
   alias?: string;
   onRun?: () => void;
   compact?: boolean;
+  canOpenWorkspace?: boolean;
 }
 
+/** 图像生成卡：仅展示图片（1 张铺满 / 多张宫格） */
+function PictureOnlyBody({
+  urls,
+  status,
+  canOpenWorkspace,
+  onOpen,
+}: {
+  urls: string[];
+  status: NodeRunStatus;
+  canOpenWorkspace: boolean;
+  onOpen: (e?: React.MouseEvent) => void;
+}) {
+  const n = urls.length;
+  const show = urls.slice(0, 4);
+  const gridClass =
+    n <= 1
+      ? 'pg-media-grid is-1'
+      : n === 2
+        ? 'pg-media-grid is-2'
+        : n === 3
+          ? 'pg-media-grid is-3'
+          : 'pg-media-grid is-4';
+
+  return (
+    <div className="pg-only nodrag nopan">
+      <div
+        className="pg-only__frame"
+        onDoubleClick={canOpenWorkspace ? onOpen : undefined}
+        onClick={canOpenWorkspace ? onOpen : undefined}
+        title={canOpenWorkspace ? '点击展开工作区' : undefined}
+        role={canOpenWorkspace ? 'button' : undefined}
+      >
+        {status === 'running' && (
+          <div className="pg-only__busy">
+            <Loader2 size={18} className="animate-spin" />
+          </div>
+        )}
+
+        {n === 0 ? (
+          <div className="pg-only__empty">
+            <ImageIcon size={22} strokeWidth={1.25} />
+            <span>暂无图像</span>
+          </div>
+        ) : n === 1 ? (
+          <img src={urls[0]} alt="" className="pg-only__img" draggable={false} />
+        ) : (
+          <div className={gridClass}>
+            {show.map((url, i) => (
+              <div key={`${url}-${i}`} className="pg-media-grid__cell">
+                <img src={url} alt="" draggable={false} />
+                {i === 3 && n > 4 && (
+                  <span className="pg-media-grid__more">+{n - 3}</span>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+
+        {n > 1 && (
+          <span className="pg-only__count" aria-hidden>
+            {n}
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/** 生成类节点摘要 — 走 NodeSummaryBody 统一骨架 */
 export const CanvasNodeBody = memo(function CanvasNodeBody({
-  blockId,
   kind,
   data,
   alias,
   onRun,
-  compact = false,
+  canOpenWorkspace = true,
 }: CanvasNodeBodyProps) {
   const meta = lookupBlock(kind);
   const status = normalizeNodeStatus(data.status as string | undefined);
@@ -73,91 +124,83 @@ export const CanvasNodeBody = memo(function CanvasNodeBody({
     (data.provider as string | undefined) ??
     (data.preset as string | undefined);
 
-  const handlePromptClick = useCallback(
-    (e: React.MouseEvent) => {
-      e.stopPropagation();
-      focusPromptBar();
+  const openWorkspace = useCallback(
+    (e?: React.MouseEvent) => {
+      e?.stopPropagation();
+      if (canOpenWorkspace) focusPromptBar();
     },
-    [focusPromptBar],
+    [canOpenWorkspace, focusPromptBar],
   );
 
-  const handleRun = useCallback(
-    (e: React.MouseEvent) => {
-      e.stopPropagation();
-      onRun?.();
-    },
-    [onRun],
-  );
+  const isPicture = kind === 'picture-gen';
+  const pictureUrls = useMemo(() => {
+    if (!isPicture) return [] as string[];
+    const urls = (data.previewUrls as string[] | undefined) ?? [];
+    if (urls.length > 0) return urls;
+    const single = (data.previewUrl as string | undefined) ?? thumb;
+    return single ? [single] : [];
+  }, [isPicture, data.previewUrl, data.previewUrls, thumb]);
+
+  /* 图像生成：卡片只展示图，参数与操作都在底部工作区 */
+  if (isPicture) {
+    return (
+      <div className="pg pg-card">
+        <PictureOnlyBody
+          urls={pictureUrls}
+          status={status}
+          canOpenWorkspace={canOpenWorkspace}
+          onOpen={openWorkspace}
+        />
+      </div>
+    );
+  }
+
+  const summary =
+    promptPreview ||
+    configSummary ||
+    alias ||
+    meta?.hint ||
+    (thumb || videoUrl ? undefined : '点击展开编辑');
+
+  const statusLabel =
+    STATUS_LABEL[status] +
+    (outputCount != null && outputCount > 0 ? ` · ${outputCount} 输出` : '');
 
   return (
-    <div className={`space-y-2 ${compact ? '' : 'min-h-[88px]'}`}>
-      {configSummary && !promptPreview && (
-        <p className="text-[11px] text-ink/70 truncate">
-          <span className="text-ink/40">配置 · </span>
-          {configSummary}
-        </p>
-      )}
-
-      {tags.length > 0 && (
-        <div className="flex flex-wrap gap-1">
-          {tags.slice(0, 4).map((t) => (
-            <span
-              key={`${t.kind}-${t.label}`}
-              className={`text-[9px] px-1.5 py-0.5 rounded-full truncate max-w-[88px] ${TAG_COLORS[t.kind] ?? 'bg-ink/5 text-ink/60'}`}
-            >
-              {t.label}
-            </span>
-          ))}
-        </div>
-      )}
-
-      {promptPreview ? (
-        <button
-          type="button"
-          onClick={handlePromptClick}
-          className="w-full text-left text-[11px] text-ink/60 leading-snug hover:text-brand transition-colors line-clamp-2"
-          title="在 Prompt Bar 中编辑"
-        >
-          <span className="text-ink/35">Prompt · </span>
-          {promptPreview}
-        </button>
-      ) : !configSummary ? (
-        <p className="text-[10px] text-ink/30 italic">点击在 Prompt Bar 编辑</p>
-      ) : null}
-
-      <div className="flex items-center gap-2">
-        <div className="flex items-center gap-1.5 flex-1 min-w-0">
-          <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${STATUS_DOT[status]}`} />
-          <span className="text-[9px] text-ink/40 truncate">{STATUS_LABEL[status]}</span>
-          {outputCount != null && outputCount > 0 && (
-            <span className="text-[9px] text-ink/35">· {outputCount} 输出</span>
-          )}
-        </div>
-        {onRun && status !== 'running' && (
-          <button
-            type="button"
-            onClick={handleRun}
-            className="shrink-0 w-7 h-7 rounded-lg border border-line flex items-center justify-center hover:border-brand/50 hover:text-brand text-ink/50"
-            title="运行"
-          >
-            <Play size={12} />
-          </button>
-        )}
-      </div>
-
-      {videoUrl ? (
-        <div className="aspect-video rounded-lg overflow-hidden border border-line/60 bg-black">
-          <video src={videoUrl} controls className="w-full h-full object-cover" playsInline />
-        </div>
-      ) : thumb && (
-        <div className="aspect-video rounded-lg overflow-hidden border border-line/60 bg-surface">
-          <img src={thumb} alt="" className="w-full h-full object-cover" />
-        </div>
-      )}
-
-      {!alias && meta?.hint && !thumb && !videoUrl && !promptPreview && (
-        <p className="text-[9px] text-ink/30 line-clamp-2">{meta.hint}</p>
-      )}
-    </div>
+    <NodeSummaryBody
+      mediaUrl={thumb}
+      mediaVideoUrl={videoUrl}
+      emptyLabel={meta?.label ?? kind}
+      onMediaDoubleClick={canOpenWorkspace ? openWorkspace : undefined}
+      tags={tags.slice(0, 3).map((t) => t.label)}
+      summary={summary}
+      summaryClickable={canOpenWorkspace && Boolean(promptPreview || !thumb)}
+      onSummaryClick={openWorkspace}
+      statusLabel={statusLabel}
+      secondary={
+        canOpenWorkspace
+          ? [
+              {
+                label: '展开',
+                icon: <Maximize2 size={12} />,
+                iconOnly: true,
+                onClick: openWorkspace,
+              },
+            ]
+          : []
+      }
+      primary={
+        onRun && status !== 'running'
+          ? {
+              label: '运行',
+              icon: <Play size={11} fill="currentColor" />,
+              onClick: (e) => {
+                e.stopPropagation();
+                onRun();
+              },
+            }
+          : undefined
+      }
+    />
   );
 });

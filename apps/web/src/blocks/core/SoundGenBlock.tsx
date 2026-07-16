@@ -1,4 +1,4 @@
-import { memo, useCallback, useMemo, useRef } from 'react';
+import { lazy, memo, Suspense, useCallback, useMemo, useRef } from 'react';
 import { type NodeProps, useEdges, useNodes, useReactFlow } from '@xyflow/react';
 import { gatherUpstream, AUDIO_FORMAT_OPTIONS, SPEECH_RATE_OPTIONS } from '@nx9/shared';
 import { BlockShell } from '../shared/BlockShell';
@@ -13,6 +13,13 @@ import { useWorkspaceDocument } from '../../stores/workspace-document';
 import GenSettingsPills from '../shared/GenSettingsPills';
 
 const CLOUD_VOICES = ['alloy', 'echo', 'fable', 'onyx', 'nova', 'shimmer'] as const;
+const SOUND_MODES = [
+  { id: 'tts', label: '单轨 TTS' },
+  { id: 'cast', label: '多角色' },
+  { id: 'music', label: 'BGM' },
+] as const;
+
+const VoiceCastPanel = lazy(() => import('../nx9/VoiceCastBlock'));
 
 function SoundGenBlock(props: NodeProps) {
   const { updateNodeData } = useReactFlow();
@@ -21,6 +28,7 @@ function SoundGenBlock(props: NodeProps) {
   const refInputRef = useRef<HTMLInputElement>(null);
   const appendLog = useActivityLog((s) => s.append);
   const characters = useWorkspaceDocument((s) => s.characters.characters);
+  const soundMode = (props.data?.soundMode as string) ?? 'tts';
   const text = (props.data?.text as string) ?? '';
   const upstreamPrompt = (props.data?.upstreamPrompt as string) ?? '';
   const provider = (props.data?.provider as string) ?? 'cloud';
@@ -122,11 +130,88 @@ function SoundGenBlock(props: NodeProps) {
     updateNodeData,
   ]);
 
+  if (soundMode === 'cast') {
+    return (
+      <BlockShell {...props}>
+        <div className="space-y-2 nodrag nopan">
+          <div className="flex gap-1">
+            {SOUND_MODES.map((m) => (
+              <button
+                key={m.id}
+                type="button"
+                onClick={() => updateNodeData(props.id, { soundMode: m.id })}
+                className={`flex-1 py-1 rounded-lg text-[10px] border ${
+                  soundMode === m.id ? 'border-brand bg-brand/10 text-brand' : 'border-line text-ink/50'
+                }`}
+              >
+                {m.label}
+              </button>
+            ))}
+          </div>
+          <Suspense fallback={<p className="text-xs text-ink/40 py-3 text-center">加载多角色配音…</p>}>
+            <VoiceCastPanel
+              {...props}
+              data={{ ...(props.data ?? {}), studioEmbed: true, soundMode: 'cast' }}
+            />
+          </Suspense>
+        </div>
+      </BlockShell>
+    );
+  }
+
+  if (soundMode === 'music') {
+    return (
+      <BlockShell {...props}>
+        <div className="space-y-2 nodrag nopan text-xs">
+          <div className="flex gap-1">
+            {SOUND_MODES.map((m) => (
+              <button
+                key={m.id}
+                type="button"
+                onClick={() => updateNodeData(props.id, { soundMode: m.id })}
+                className={`flex-1 py-1 rounded-lg text-[10px] border ${
+                  soundMode === m.id ? 'border-brand bg-brand/10 text-brand' : 'border-line text-ink/50'
+                }`}
+              >
+                {m.label}
+              </button>
+            ))}
+          </div>
+          <textarea
+            value={(props.data?.content as string) ?? ''}
+            onChange={(e) => updateNodeData(props.id, { content: e.target.value })}
+            placeholder="BGM 情绪 / 风格描述…"
+            rows={3}
+            className="w-full rounded-lg border border-line px-2 py-1 resize-y"
+          />
+          <p className="text-[10px] text-ink/45">BGM 需接入专用音乐 API（Suno / Udio 等），当前为占位模式。</p>
+          <button type="button" disabled className="w-full rounded-xl bg-gray-400 text-white py-1.5 cursor-not-allowed">
+            BGM 生成（开发中）
+          </button>
+        </div>
+      </BlockShell>
+    );
+  }
+
   return (
     <BlockShell {...props}>
       <div className="space-y-2">
+        <div className="flex gap-1">
+          {SOUND_MODES.map((m) => (
+            <button
+              key={m.id}
+              type="button"
+              onClick={() => updateNodeData(props.id, { soundMode: m.id })}
+              className={`flex-1 py-1 rounded-lg text-[10px] border ${
+                soundMode === m.id ? 'border-brand bg-brand/10 text-brand' : 'border-line text-ink/50'
+              }`}
+            >
+              {m.label}
+            </button>
+          ))}
+        </div>
         <p className="text-[10px] text-ink/45 bg-surface rounded-lg px-2 py-1">
-          当前为 <strong>AI 配音 (TTS)</strong>。背景音乐 / Suno 音乐生成尚未接入，请用外部工具或后续版本。
+          单轨 <strong>AI 配音 (TTS)</strong>。多角色对白请切到「多角色」。
         </p>
         <GenUpstreamHint hasUpstream={hasUpstream} />
         {(upstreamPrompt || upstreamPreview) && (

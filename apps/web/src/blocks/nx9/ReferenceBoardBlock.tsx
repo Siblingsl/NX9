@@ -7,7 +7,7 @@ function ReferenceBoardBlock(props: NodeProps) {
   const { updateNodeData } = useReactFlow();
   const upstream = props.data?.upstream as { pictures?: string[]; prompts?: string[] } | undefined;
   const boardImages = (props.data?.boardImages as string[] | undefined) ?? [];
-  const palette = (props.data?.palette as string[] | undefined) ?? ['#A13D63', '#5E4D8A', '#FAFAF8'];
+  const palette = (props.data?.palette as string[] | undefined) ?? ['#0F766E', '#1E3A5F', '#F4F1EA'];
   const styleNotes = (props.data?.styleNotes as string) ?? '';
   const content = (props.data?.content as string) ?? '';
 

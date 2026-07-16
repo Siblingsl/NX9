@@ -16,6 +16,8 @@ import { StudioOverflowMenu } from './StudioOverflowMenu';
 import { StudioDropdownPanel } from './StudioDropdownPanel';
 import { isDesktop } from '../platform/runtime-bridge';
 import { isSurfaceEnabled } from '../config/product-surface';
+import { useStudioSurface } from '../stores/studio-surface';
+import { useViewMode } from '../engine/stage-deck/stores/view-mode';
 import type { UserSummary } from '@nx9/shared';
 
 export interface StudioTopBarProps {
@@ -93,9 +95,12 @@ export function StudioTopBar({
     isSurfaceEnabled('playbookWizard') && playbookSession && !playbookSession.dismissed;
   const projectStatus = useWorkspaceDocument((s) => s.projectStatus);
   const t = useTranslate();
+  const expertWorkflow = useStudioSurface((s) => s.expertWorkflow);
+  const setExpertWorkflow = useStudioSurface((s) => s.setExpertWorkflow);
+  const setViewMode = useViewMode((s) => s.setMode);
 
   return (
-    <header className="nx9-topbar shrink-0 border-b border-line/80 bg-white/90 backdrop-blur-md">
+    <header className="nx9-topbar shrink-0 border-b border-line/80 bg-[#FFFCFA]/92 backdrop-blur-md">
       <div className="flex h-12 items-center gap-3 px-4">
         <div className="flex items-center gap-2.5 shrink-0 min-w-0">
           <div className="w-8 h-8 rounded-[10px] bg-gradient-to-br from-brand to-accent flex items-center justify-center text-white font-bold text-xs shadow-sm">
@@ -106,7 +111,7 @@ export function StudioTopBar({
               NX9 Studio
             </h1>
             <p className="text-[10px] text-ink/45 mt-0.5 leading-none">
-              {t(isDesktop() ? 'Desktop' : 'Web')} · {t('AI Workflow')}
+              {t(isDesktop() ? 'Desktop' : 'Web')} · 高级画布
             </p>
           </div>
         </div>
@@ -186,16 +191,32 @@ export function StudioTopBar({
               onClick={onBatchRun}
               disabled={running}
               className="nx9-topbar-cta"
-              title="批量运行"
+              title="批量生成当前流程"
             >
               <Zap size={14} />
-              <span className="hidden sm:inline">批量运行</span>
+              <span className="hidden sm:inline">批量生成</span>
               {running && (
                 <span className="text-[10px] opacity-80 tabular-nums">
                   {batchProgress.done}/{batchProgress.total}
                   {batchTaskProgress != null && batchTaskProgress > 0 && ` · ${batchTaskProgress}%`}
                 </span>
               )}
+            </button>
+          )}
+
+          {isSurfaceEnabled('expertWorkflowToggle') && (
+            <button
+              type="button"
+              onClick={() => {
+                const next = !expertWorkflow;
+                setExpertWorkflow(next);
+                setViewMode(next ? 'explore' : 'produce');
+              }}
+              className={`nx9-topbar-pill hidden md:flex ${expertWorkflow ? 'nx9-topbar-pill--active' : ''}`}
+              title={expertWorkflow ? '关闭专家编排，回到制作台' : '打开专家编排（完整节点工具坞）'}
+            >
+              <Clapperboard size={14} />
+              <span className="hidden xl:inline">{expertWorkflow ? '专家开' : '专家编排'}</span>
             </button>
           )}
 

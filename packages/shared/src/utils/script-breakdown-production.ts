@@ -240,14 +240,20 @@ export function buildEpisodeBreakdownUserPrompt(args: {
       '"purpose":"镜头目的：表现孤独/制造悬念/展示关系/推动剧情等","cameraAngle":"平视|俯拍|仰拍|侧拍","cameraLens":"广角|标准镜头|长焦",',
       '"characters":["稳定角色名"],"scriptText":"对应剧情与可视动作","visual":"电影级关键帧画面描述：环境、人物位置、光线、动作、情绪、构图","action":"动作设计：开始动作、变化、结束动作",',
       '"dialogue":[{"speaker":"角色名","text":"对白","emotion":"情绪"}],"narration":"旁白，可为空","sound":"环境声音与音乐设计",',
+      '"audiovisualLanguage":"视听语言：1-3句中文成段描写，写运镜如何服务情绪与戏剧信息、景别功能、光色/材质对比、声画关系；禁止只罗列景别运镜词条",',
       '"imagePrompt":"可直接生成单帧的完整提示词","videoPrompt":"动作+运镜+时长+连续性提示词","negativePrompt":"排除项",',
       '"continuityNotes":["服装/道具/位置/朝向/光线延续"]}]}]}。',
       `每镜 ${config.minShotDurationSec}-${config.maxShotDurationSec} 秒；本集最多 ${config.maxShotsPerEpisode} 镜；目标总时长约 ${config.targetEpisodeDurationSec} 秒。`,
       `画幅 ${config.aspectRatio}；目标形态 ${config.targetFormat}；节奏 ${config.pacing}；改编忠实度 ${config.adaptationFidelity}；对白密度 ${config.dialogueDensity}。`,
       `imagePrompt/videoPrompt 语言：${config.promptLanguage}；统一视觉风格：${config.visualStyle}。`,
+      '【audiovisualLanguage 强制要求】必须是完整句子组成的视听叙述，不是标签。',
+      '真人范例：「微摇的镜头跟随角色的挣扎，特写交代了男子受制、无法反抗的生理困境。金属的冷色与鲜红的血液形成强烈对比，增强了视觉冲击力。」',
+      '动漫范例：「跟镜压进角色侧脸，速度线在背景炸开，特写咬紧的牙关把崩溃情绪钉死。硬边阴影与高饱和对比色把怒意推到前景。」',
+      '国漫/3D 范例：「缓推穿过灵雾落在袍角与剑光交击，再切近眼部高光；冷青体积光与暖金法阵分层，烟尘粒子拖出余韵。」',
+      'shotSize/cameraMove/cameraAngle 仍可填写技术字段；audiovisualLanguage 必须另行写出叙事化视听描写，二者不可互相替代。',
       '图片 Prompt 必须英文优先，并包含：(masterpiece), cinematic scene, fixed character description, environment, action, camera angle, lighting, film photography, high detail。',
       '视频 Prompt 必须包含：镜头运动、人物动作过程、环境变化、时间变化、情绪变化。',
-      '不得仅写“同上”“保持一致”；每条 Prompt 必须独立可执行。',
+      '不得仅写“同上”“保持一致”；每条 Prompt 与 audiovisualLanguage 必须独立可执行。',
     ].join('\n'),
     `本集原文：\n${args.sourceText}`,
   ].filter(Boolean).join('\n\n');
@@ -310,6 +316,14 @@ export function validateScriptBreakdownPayload(payload: ScriptBreakdownPayload):
       if (!shot.scriptText?.trim()) diagnostics.push({ level: 'error', code: 'shot_text_empty', episodeId: episode.id, message: `${shot.sceneCode || shot.id} 缺少剧情/动作描述` });
       if (!shot.imagePrompt?.trim()) diagnostics.push({ level: 'error', code: 'image_prompt_empty', episodeId: episode.id, message: `${shot.sceneCode || shot.id} 缺少图片 Prompt` });
       if (!shot.videoPrompt?.trim()) diagnostics.push({ level: 'error', code: 'video_prompt_empty', episodeId: episode.id, message: `${shot.sceneCode || shot.id} 缺少视频 Prompt` });
+      if (!shot.audiovisualLanguage?.trim() || shot.audiovisualLanguage.trim().length < 12) {
+        diagnostics.push({
+          level: 'warning',
+          code: 'audiovisual_language_weak',
+          episodeId: episode.id,
+          message: `${shot.sceneCode || shot.id} 视听语言偏弱或缺失，建议重生成以获得成段镜头叙事`,
+        });
+      }
       if (!Number.isFinite(shot.durationSec) || shot.durationSec <= 0) diagnostics.push({ level: 'error', code: 'duration_invalid', episodeId: episode.id, message: `${shot.sceneCode || shot.id} 镜头时长无效` });
       if (shot.characters.length === 0) diagnostics.push({ level: 'info', code: 'characters_empty', episodeId: episode.id, message: `${shot.sceneCode || shot.id} 未识别到出场角色，请在分镜网格复核` });
     }

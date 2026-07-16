@@ -22,7 +22,7 @@ export function CanvasAppearancePanel() {
     return () => mq.removeEventListener('change', handler);
   }, []);
 
-  const themeSetting = (localStorage.getItem('nx9:canvas_theme') as CanvasThemeUISetting | null) || canvasAppearance.theme || 'light';
+  const themeSetting = (localStorage.getItem('nx9:canvas_theme') as CanvasThemeUISetting | null) || canvasAppearance.theme || 'dark';
   const effectiveTheme = themeSetting === 'system' ? (systemDark ? 'dark' : 'light') : themeSetting;
 
   // 当系统主题变化时或 themeSetting 变化时同步到 canvasAppearance

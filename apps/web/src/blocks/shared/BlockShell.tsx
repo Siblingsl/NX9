@@ -12,6 +12,7 @@ import {
 } from '@nx9/shared';
 import { Loader2 } from 'lucide-react';
 import { useStageDeckFlag } from '../../stores/stage-deck-flag';
+import '../../styles/node-stage-card.css';
 
 interface BlockShellProps extends NodeProps {
   children: React.ReactNode;
@@ -72,20 +73,8 @@ function VerticalSocketHandle({
   if (isDualPurposePort) {
     return (
       <>
-        <Handle
-          type="target"
-          position={position}
-          id={spec.id}
-          className={commonClass}
-          style={commonStyle}
-        />
-        <Handle
-          type="source"
-          position={position}
-          id={spec.id}
-          className={commonClass}
-          style={commonStyle}
-        />
+        <Handle type="target" position={position} id={spec.id} className={commonClass} style={commonStyle} />
+        <Handle type="source" position={position} id={spec.id} className={commonClass} style={commonStyle} />
       </>
     );
   }
@@ -117,8 +106,7 @@ export const BlockShell = memo(function BlockShell({
   const verticalBottom = verticalSockets.filter((s) => s.position === 'bottom');
   const hasExecPorts = verticalSockets.length > 0;
   const configuredShowExecPorts = (data as { showExecPorts?: boolean }).showExecPorts;
-  const showExecPorts =
-    configuredShowExecPorts ?? hasExecPorts;
+  const showExecPorts = configuredShowExecPorts ?? hasExecPorts;
   const status = (data as { status?: string }).status;
   const blockIndex = (data as { blockIndex?: number }).blockIndex;
   const hideBlockIndex = useStageDeckFlag((s) => s.isEnabled());
@@ -143,15 +131,28 @@ export const BlockShell = memo(function BlockShell({
   }
 
   const execPortsVisible = hasExecPorts && showExecPorts && !hideSockets;
+  const accent = meta?.accent ?? 'var(--nx9-accent, #2dd4bf)';
+  const statusClass =
+    status === 'running'
+      ? 'is-running'
+      : status === 'done' || status === 'success'
+        ? 'is-done'
+        : status === 'error'
+          ? 'is-error'
+          : status === 'ready'
+            ? 'is-ready'
+            : '';
 
   return (
     <div
-      className={`relative min-w-[220px] max-w-[360px] rounded-2xl border bg-white dark:bg-[#222222] shadow-panel transition-shadow nowheel ${
-        selected ? 'border-brand ring-2 ring-brand/20' : 'border-line dark:border-[#333]'
+      className={`nx9-stage-card nowheel ${selected ? 'is-selected' : ''} ${
+        status === 'running' ? 'is-running' : ''
       } ${execPortsVisible && verticalTop.length > 0 ? 'mt-3' : ''} ${
         execPortsVisible && verticalBottom.length > 0 ? 'mb-3' : ''
       }`}
     >
+      <div className="nx9-stage-card__accent" style={{ background: accent }} aria-hidden />
+
       {execPortsVisible && verticalTop.length > 0 && (
         <div className="absolute inset-x-0 top-0 h-0 z-10">
           {verticalTop.map((spec) => (
@@ -160,39 +161,29 @@ export const BlockShell = memo(function BlockShell({
         </div>
       )}
 
-      <div className="flex items-center gap-2 px-3 py-2 border-b border-line dark:border-[#333] bg-surface/80 dark:bg-[#2a2a2a] rounded-t-2xl cursor-grab active:cursor-grabbing">
-        <span
-          className="w-2 h-2 rounded-full shrink-0"
-          style={{ background: meta?.accent ?? '#5E4D8A' }}
-        />
-        <span className="text-sm font-semibold text-ink truncate flex-1">
-          {meta?.label ?? type}
-        </span>
+      <div className="nx9-stage-card__head">
+        <span className="nx9-stage-card__title">{meta?.label ?? type}</span>
         {hasExecPorts && (
           <button
             type="button"
             onClick={toggleExecPorts}
-            className={`nodrag nopan shrink-0 text-[9px] px-1.5 py-0.5 rounded-md border transition-colors ${
-              showExecPorts
-                ? 'border-brand/50 bg-brand/10 text-brand font-medium'
-                : 'border-line/60 text-ink/40 hover:text-ink/60 hover:border-line'
-            }`}
+            className={`nx9-stage-card__port-toggle nodrag nopan ${showExecPorts ? 'is-on' : ''}`}
             title={showExecPorts ? '关闭顶部连接口并切断相关连接' : '打开顶部连接口'}
           >
-            执行口
+            口
           </button>
         )}
         {blockIndex != null && !hideBlockIndex && (
-          <span className="text-[10px] font-mono text-accent/70 bg-accent/5 px-1.5 py-0.5 rounded">
-            #{blockIndex}
-          </span>
+          <span className="nx9-stage-card__badge">#{blockIndex}</span>
         )}
-        {status === 'running' && <Loader2 size={14} className="animate-spin text-brand" />}
-        {status === 'done' && <span className="w-2 h-2 rounded-full bg-ok" />}
-        {status === 'error' && <span className="w-2 h-2 rounded-full bg-warn" />}
+        {status === 'running' ? (
+          <Loader2 size={13} className="animate-spin text-teal-300 shrink-0" />
+        ) : (
+          <span className={`nx9-stage-card__status ${statusClass}`} title={status ?? 'idle'} />
+        )}
       </div>
 
-      <div className="relative px-3 py-3 nodrag nopan nowheel">
+      <div className="nx9-stage-card__body nodrag nopan nowheel nx9-stage-card-fallback">
         {accepts.map((kind) => (
           <SocketHandle key={`in-${kind}`} kind={kind} type="target" hidden={hideSockets} />
         ))}

@@ -47,6 +47,17 @@ export async function runPictureGenExecutor(ctx: BlockExecutorContext): Promise<
   const customW = (d.width as number) || 1024;
   const customH = (d.height as number) || 1024;
   const snapToStep = (d.snapToStep as boolean) ?? true;
+  const imageStrength = (d.imageStrength as number) || 0.85;
+  const styleImageUrl = (d.styleImageUrl as string | undefined)?.trim();
+  const multiRefs = Array.isArray(d.referenceImageUrls)
+    ? (d.referenceImageUrls as string[]).filter((u) => typeof u === 'string' && u.trim())
+    : [];
+  const excludedRefs = new Set(
+    Array.isArray(d.excludedRefUrls)
+      ? (d.excludedRefUrls as string[])
+      : [],
+  );
+  const upstreamPics = (upstream.pictures ?? []).filter((u) => !excludedRefs.has(u));
   const resolvedSize = resolveImageRequestSize({
     quality,
     aspectRatio: aspectRatio === 'custom' ? undefined : aspectRatio,
@@ -54,40 +65,99 @@ export async function runPictureGenExecutor(ctx: BlockExecutorContext): Promise<
     height: aspectRatio === 'custom' ? customH : undefined,
     snapToStep,
   });
-  const charRef = enhancedCtx.referenceImageUrl ?? upstream.pictures[0];
+  const nodeRef = (d.referenceImageUrl as string | undefined)?.trim();
+  const charRef = enhancedCtx.referenceImageUrl ?? upstreamPics[0];
+  const needsRef =
+    pictureGenMode === 'image-to-image' ||
+    pictureGenMode === 'multi-ref' ||
+    pictureGenMode === 'style-ref' ||
+    pictureGenMode === 'upscale-hd';
+
+  // 专业动作模板（LibTV 对齐）
+  const { composePictureProPrompt, lookupPictureProAction } = await import(
+    '../stage-deck/chrome/attached-workspace/generation/picture/picture-pro-actions'
+  );
+  const proAction = lookupPictureProAction(d.pictureProAction as string | undefined);
 
   const urls: string[] = [];
   let lastPrompt = '';
 
-  for (const job of finalJobs) {
-    let finalPrompt = enrichPromptWithCharacters(job.prompt, enhancedCtx.characters);
-    lastPrompt = finalPrompt;
-    let refImage = job.imageUrls?.[0] || charRef;
-
-    if (job.imageUrls && job.imageUrls.length >= 2) {
-      if (composeAction === 'merge' || composeAction === 'merge-then-generate') {
-        const merged = await api.mergeImages({
-          imageUrls: job.imageUrls,
-          direction: 'horizontal',
-        });
-        if (composeAction === 'merge') {
-          urls.push(merged.url);
-          continue;
-        }
-        refImage = merged.url;
-        finalPrompt = `${finalPrompt}\n\n[Reference collage attached]`;
-      }
-    }
-
+  // 高清：直接放大，不走多 job 生成
+  if (pictureGenMode === 'upscale-hd') {
+    const refImage = nodeRef || charRef || multiRefs[0] || upstreamPics[0];
+    if (!refImage) throw new Error('图片高清需要参考图：请上传或连接上游');
     const batchUrls = await runPictureGenJob({
-      prompt: finalPrompt,
-      modelId,
-      size: resolvedSize.size,
+      prompt: 'upscale',
       referenceImageUrl: refImage,
-      n: imageCount,
-      mode: pictureGenMode === 'panorama-720' ? 'panorama-720' : 'standard',
+      mode: 'upscale-hd',
+      upscaleScale: (d.resolutionTier as string) === '4k' ? 4 : 2,
     });
     urls.push(...batchUrls);
+    lastPrompt = '图片高清';
+  } else {
+    for (const job of finalJobs) {
+      let finalPrompt = enrichPromptWithCharacters(job.prompt, enhancedCtx.characters);
+      finalPrompt = composePictureProPrompt(finalPrompt, proAction);
+      const neg = (d.negativePrompt as string | undefined)?.trim();
+      if (neg) {
+        finalPrompt = `${finalPrompt}\n\nNegative: ${neg}`;
+      }
+      lastPrompt = finalPrompt;
+      let refImage =
+        job.imageUrls?.[0] || nodeRef || charRef || multiRefs[0] || styleImageUrl;
+
+      if (job.imageUrls && job.imageUrls.length >= 2) {
+        if (composeAction === 'merge' || composeAction === 'merge-then-generate') {
+          const merged = await api.mergeImages({
+            imageUrls: job.imageUrls,
+            direction: 'horizontal',
+          });
+          if (composeAction === 'merge') {
+            urls.push(merged.url);
+            continue;
+          }
+          refImage = merged.url;
+          finalPrompt = `${finalPrompt}\n\n[Reference collage attached]`;
+        }
+      }
+
+      if (
+        !job.imageUrls?.length &&
+        pictureGenMode === 'multi-ref' &&
+        multiRefs.length + (nodeRef ? 1 : 0) >= 2
+      ) {
+        const collageSrc = [nodeRef, ...multiRefs].filter(Boolean) as string[];
+        try {
+          const merged = await api.mergeImages({
+            imageUrls: collageSrc.slice(0, 4),
+            direction: 'horizontal',
+          });
+          refImage = merged.url;
+          finalPrompt = `${finalPrompt}\n\n[Multi-reference collage: ${collageSrc.length} images]`;
+        } catch {
+          /* 拼贴失败则退回单参考 */
+        }
+      }
+
+      if (needsRef && !refImage) {
+        throw new Error('当前模式需要参考图：请上传主体参考，或连接上游图片');
+      }
+
+      const batchUrls = await runPictureGenJob({
+        prompt: finalPrompt,
+        modelId,
+        size: resolvedSize.size,
+        referenceImageUrl: refImage,
+        referenceImageUrls: multiRefs,
+        styleImageUrl,
+        strength: imageStrength,
+        n: imageCount,
+        mode: pictureGenMode === 'panorama-720' ? 'panorama-720' : 'standard',
+        negativePrompt: d.negativePrompt as string | undefined,
+        seed: d.seed as number | undefined,
+      });
+      urls.push(...batchUrls);
+    }
   }
   if (urls.length === 0) throw new Error('图像生成失败');
 

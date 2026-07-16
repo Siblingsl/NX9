@@ -41,7 +41,10 @@ import {
   switchPlaybookEpisode,
   syncCurrentEpisodePlaybookProgress,
   migrateEnvironmentProfile,
+  createEpisodeMeta,
+  listEpisodeMetas,
   type PlaybookReadinessContext,
+  type EpisodeMeta,
 } from '@nx9/shared';
 import { api } from '../api/client';
 
@@ -64,6 +67,11 @@ interface WorkspaceDocumentState {
   reset: () => void;
   setStoryboard: (sb: StoryboardPayload) => void;
   setActiveEpisodeId: (episodeId: string | null) => void;
+  /** 制作台：创建/切换/完成剧集 */
+  upsertEpisodeMeta: (ep: EpisodeMeta) => void;
+  createNextEpisode: (title?: string) => string;
+  completeActiveEpisode: (exportUrl?: string | null) => void;
+  setGlobalArtDirection: (text: string) => void;
   setVoice: (v: VoicePayload) => void;
   setReviewMode: (mode: 'manual' | 'auto') => void;
   updateShot: (id: string, patch: Partial<StoryboardShot>) => void;
@@ -212,6 +220,81 @@ export const useWorkspaceDocument = create<WorkspaceDocumentState>((set, get) =>
       };
     }),
 
+  upsertEpisodeMeta: (ep) =>
+    set((s) => {
+      const list = [...(s.storyboard.episodes ?? [])];
+      const i = list.findIndex((x) => x.id === ep.id);
+      if (i >= 0) list[i] = { ...list[i], ...ep };
+      else list.push(ep);
+      return { storyboard: { ...s.storyboard, episodes: list.sort((a, b) => a.index - b.index) } };
+    }),
+
+  createNextEpisode: (title) => {
+    const state = get();
+    const existing = listEpisodeMetas(state.storyboard);
+    const nextIndex = existing.reduce((m, e) => Math.max(m, e.index), 0) + 1;
+    const ep = createEpisodeMeta(nextIndex, title);
+    set({
+      storyboard: {
+        ...state.storyboard,
+        episodes: [...(state.storyboard.episodes ?? []).filter((e) => e.id !== ep.id), ep],
+        activeEpisodeId: ep.id,
+      },
+      projectStatus: 'draft',
+    });
+    return ep.id;
+  },
+
+  completeActiveEpisode: (exportUrl) =>
+    set((s) => {
+      const id = resolveActiveEpisodeId(s.storyboard);
+      if (!id) return {};
+      const list = [...(s.storyboard.episodes ?? [])];
+      const i = list.findIndex((e) => e.id === id);
+      const base =
+        i >= 0
+          ? list[i]
+          : {
+              id,
+              index: 1,
+              title: s.storyboard.title || '本集',
+              status: 'in_progress' as const,
+            };
+      const updated = {
+        ...base,
+        status: 'completed' as const,
+        completedAt: new Date().toISOString(),
+        lastExportUrl: exportUrl ?? base.lastExportUrl ?? null,
+      };
+      if (i >= 0) list[i] = updated;
+      else list.push(updated);
+      const history = exportUrl
+        ? [
+            {
+              id: `exp-${Date.now()}`,
+              episodeId: id,
+              episodeTitle: updated.title,
+              url: exportUrl,
+              fileName: `${updated.title || 'episode'}.mp4`,
+              mode: 'ffmpeg-episode' as const,
+              shotCount: s.storyboard.shots.filter((sh) => sh.episodeId === id || !sh.episodeId).length,
+              durationSec: s.storyboard.shots
+                .filter((sh) => sh.episodeId === id || !sh.episodeId)
+                .reduce((sum, sh) => sum + (sh.durationSec || 0), 0),
+              createdAt: new Date().toISOString(),
+            },
+            ...(s.storyboard.exportHistory ?? []),
+          ].slice(0, 30)
+        : s.storyboard.exportHistory;
+      return {
+        storyboard: { ...s.storyboard, episodes: list, exportHistory: history },
+        projectStatus: 'completed' as const,
+      };
+    }),
+
+  setGlobalArtDirection: (globalArtDirection) =>
+    set((s) => ({ storyboard: { ...s.storyboard, globalArtDirection } })),
+
   setVoice: (v) => set({ voice: v }),
 
   setReviewMode: (reviewMode) =>
@@ -250,8 +333,29 @@ export const useWorkspaceDocument = create<WorkspaceDocumentState>((set, get) =>
 
   addShots: (shots, mode) =>
     set((s) => {
+      const activeEp = resolveActiveEpisodeId(s.storyboard);
+      const stamp = (sh: (typeof shots)[0]) => ({
+        ...sh,
+        episodeId: sh.episodeId ?? activeEp,
+        episodeIndex:
+          sh.episodeIndex ??
+          (s.storyboard.episodes ?? []).find((e) => e.id === (sh.episodeId ?? activeEp))?.index,
+        episodeTitle:
+          sh.episodeTitle ??
+          (s.storyboard.episodes ?? []).find((e) => e.id === (sh.episodeId ?? activeEp))?.title,
+      });
       if (mode === 'replace') {
-        return { storyboard: { ...s.storyboard, shots } };
+        // 仅替换当前集镜头，其它集保留
+        const others = activeEp
+          ? s.storyboard.shots.filter((sh) => sh.episodeId && sh.episodeId !== activeEp)
+          : [];
+        const stamped = shots.map(stamp);
+        return {
+          storyboard: {
+            ...s.storyboard,
+            shots: [...others, ...stamped].sort((a, b) => a.index - b.index),
+          },
+        };
       }
       const sourceIds = new Set(
         shots.map((sh) => sh.linkedBlockId).filter((id): id is string => Boolean(id)),
@@ -259,9 +363,10 @@ export const useWorkspaceDocument = create<WorkspaceDocumentState>((set, get) =>
       const base = sourceIds.size
         ? s.storyboard.shots.filter((sh) => !sh.linkedBlockId || sourceIds.has(sh.linkedBlockId))
         : s.storyboard.shots;
-      const maxIdx = base.reduce((m, sh) => Math.max(m, sh.index), 0);
+      const scoped = activeEp ? base.filter((sh) => !sh.episodeId || sh.episodeId === activeEp) : base;
+      const maxIdx = scoped.reduce((m, sh) => Math.max(m, sh.index), 0);
       const normalized = shots.map((sh, i) => ({
-        ...sh,
+        ...stamp(sh),
         index: sh.index || maxIdx + i + 1,
       }));
       return {

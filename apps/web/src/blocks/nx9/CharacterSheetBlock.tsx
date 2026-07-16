@@ -8,16 +8,26 @@ import {
   refreshCharacterPrompts,
   type CharacterProfile,
 } from '@nx9/shared';
-import { Lock, Plus, ShieldCheck, Sparkles, UserRound } from 'lucide-react';
+import { Plus, ShieldCheck, UserRound } from 'lucide-react';
 import { BlockShell } from '../shared/BlockShell';
+import { ScreenModal } from '../../components/ui/ScreenModal';
 import ImageUploadSlot from '../shared/ImageUploadSlot';
 import { AssetLinkField, assetRefFromData, patchWithAssetRef } from '../shared/AssetLinkField';
 import { useWorkspaceDocument } from '../../stores/workspace-document';
 import { useActivityLog } from '../../stores/activity-log';
 import { toastSuccess } from '../../stores/toast';
+import './character-sheet.css';
+
+/** 库 →（选中后）设定 → 参考 */
+type StudioTab = 'library' | 'profile' | 'refs';
 
 function line(...parts: Array<string | undefined | null | false>): string {
   return parts.filter((part) => part && String(part).trim()).join('\n');
+}
+
+function compact(text: string, max = 36) {
+  const t = text.replace(/\s+/g, ' ').trim();
+  return t.length > max ? `${t.slice(0, max)}…` : t;
 }
 
 function buildLockedCharacterPrompt(data: Record<string, unknown>): string {
@@ -31,13 +41,40 @@ function buildLockedCharacterPrompt(data: Record<string, unknown>): string {
   );
 }
 
-function Label({ children }: { children: React.ReactNode }) {
-  return <span className="mb-1 block text-[10px] font-medium text-ink/45">{children}</span>;
+/** 库内角色的卡片行状态：用于名册概览，不绑定「本节点正在编谁」 */
+function characterRosterStatus(character: CharacterProfile): {
+  label: string;
+  tone: 'ok' | 'warn' | 'todo';
+  hasRef: boolean;
+  hasAppearance: boolean;
+} {
+  const ext = getCharacterCreative(character);
+  const hasRef = Boolean(
+    ext.fullSheetUrl || ext.frontViewUrl || character.referenceImageUrl,
+  );
+  const hasAppearance = Boolean(
+    character.bible?.appearance?.trim()
+    || character.consistencyPrompt?.trim(),
+  );
+  const locked = Boolean(ext.consistency?.locked || ext.viewsLocked);
+  if (locked && hasAppearance && hasRef) {
+    return { label: '齐备', tone: 'ok', hasRef, hasAppearance };
+  }
+  if (locked) return { label: '已锁', tone: 'ok', hasRef, hasAppearance };
+  if (!hasAppearance) return { label: '缺锚点', tone: 'todo', hasRef, hasAppearance };
+  if (!hasRef) return { label: '缺参考', tone: 'warn', hasRef, hasAppearance };
+  return { label: '可入库', tone: 'warn', hasRef, hasAppearance };
 }
 
 function CharacterSheetBlock(props: NodeProps) {
   const { updateNodeData } = useReactFlow();
-  const [editing, setEditing] = useState(false);
+  const [studioOpen, setStudioOpen] = useState(false);
+  const [studioTab, setStudioTab] = useState<StudioTab>('library');
+  /**
+   * 仅当在本轮打开档案台后「点选库内角色 / 新建」才允许进设定·参考。
+   * 关闭弹窗后清空，避免下次直接跳进某个残留角色。
+   */
+  const [sessionPicked, setSessionPicked] = useState(false);
   const appendLog = useActivityLog((s) => s.append);
   const upsertCharacter = useWorkspaceDocument((s) => s.upsertCharacter);
   const characters = useWorkspaceDocument((s) => s.characters.characters);
@@ -64,13 +101,63 @@ function CharacterSheetBlock(props: NodeProps) {
   const backUrl = (data.backUrl as string | undefined) ?? '';
   const locked = Boolean(data.assetLocked);
   const previewUrl = fullSheetUrl || frontUrl || upstream?.pictures?.[0];
-  const syncedAt = data.backlotSyncedAt as string | undefined;
   const prompt = useMemo(() => buildLockedCharacterPrompt(data), [data]);
   const duplicate = useMemo(
     () => characters.some((c) => c.name.trim() === name.trim() && c.id !== data.characterId),
     [characters, data.characterId, name],
   );
   const health = [name.trim(), appearance.trim(), prompt.trim(), previewUrl].filter(Boolean).length;
+  const refCount = [fullSheetUrl, frontUrl, sideUrl, backUrl].filter(Boolean).length;
+
+  /** 设定 / 参考：必须先从库选人（或新建） */
+  const canEditTabs = sessionPicked;
+
+  const rosterStats = useMemo(() => {
+    let lockedCount = 0;
+    let needAnchor = 0;
+    let needRef = 0;
+    let ready = 0;
+    for (const c of characters) {
+      const s = characterRosterStatus(c);
+      if (s.label === '齐备' || s.label === '已锁') lockedCount += 1;
+      if (!s.hasAppearance) needAnchor += 1;
+      else if (!s.hasRef) needRef += 1;
+      if (s.tone === 'ok' && s.hasAppearance && s.hasRef) ready += 1;
+    }
+    return {
+      total: characters.length,
+      lockedCount,
+      needAnchor,
+      needRef,
+      ready,
+      pending: Math.max(0, characters.length - ready),
+    };
+  }, [characters]);
+
+  const rosterPreview = useMemo(
+    () => characters.slice(0, 4).map((c) => {
+      const st = characterRosterStatus(c);
+      return {
+        id: c.id,
+        name: c.name,
+        identity: c.bible?.identity || c.descriptionZh || '—',
+        status: st.label,
+        tone: st.tone,
+      };
+    }),
+    [characters],
+  );
+
+  const cardStatusText = rosterStats.total === 0
+    ? '待建库'
+    : rosterStats.pending === 0
+      ? '名册齐备'
+      : `待补 ${rosterStats.pending}`;
+  const cardStatusClass = rosterStats.total === 0
+    ? ''
+    : rosterStats.pending === 0
+      ? 'is-ready'
+      : 'is-warn';
 
   const commit = useCallback(
     (patch: Record<string, unknown>) => {
@@ -91,6 +178,28 @@ function CharacterSheetBlock(props: NodeProps) {
     [data, props.id, updateNodeData, upstream?.pictures],
   );
 
+  const openStudio = useCallback(() => {
+    // 每次打开都从库开始；未点选前不可进设定/参考
+    setSessionPicked(false);
+    setStudioTab('library');
+    setStudioOpen(true);
+  }, []);
+
+  const closeStudio = useCallback(() => {
+    setStudioOpen(false);
+    setSessionPicked(false);
+    setStudioTab('library');
+  }, []);
+
+  const tryOpenTab = useCallback((tab: StudioTab) => {
+    if (tab !== 'library' && !sessionPicked) {
+      appendLog('角色设定：请先在「库」中选择角色或新建，再进入设定 / 参考');
+      setStudioTab('library');
+      return;
+    }
+    setStudioTab(tab);
+  }, [appendLog, sessionPicked]);
+
   const fillFromUpstream = useCallback(() => {
     const pics = upstream?.pictures ?? [];
     if (pics.length === 0) {
@@ -101,6 +210,7 @@ function CharacterSheetBlock(props: NodeProps) {
       ? { frontUrl: pics[0], sideUrl: pics[1], backUrl: pics[2] }
       : { fullSheetUrl: pics[0] });
     appendLog(`角色设定已引用上游图片 · ${Math.min(pics.length, 3)} 张`);
+    setStudioTab('refs');
   }, [appendLog, commit, upstream?.pictures]);
 
   const loadCharacter = useCallback((character: CharacterProfile) => {
@@ -120,8 +230,9 @@ function CharacterSheetBlock(props: NodeProps) {
       backUrl: ext.backViewUrl ?? '',
       assetLocked: Boolean(ext.consistency?.locked ?? ext.viewsLocked),
     });
-    appendLog(`已载入角色设定：${character.name}`);
-    setEditing(true);
+    setSessionPicked(true);
+    setStudioTab('profile');
+    appendLog(`已选中角色：${character.name} · 可编辑设定与参考`);
   }, [appendLog, commit]);
 
   const createCharacter = useCallback(() => {
@@ -141,14 +252,21 @@ function CharacterSheetBlock(props: NodeProps) {
       assetLocked: true,
       backlotSyncedAt: undefined,
     });
-    appendLog('已打开新增角色设定；可手动填写，或由设定检查/AI 拆分后自动补入。');
-    setEditing(true);
+    setSessionPicked(true);
+    setStudioTab('profile');
+    appendLog('已新建空白角色 · 填写后保存入库');
   }, [appendLog, commit]);
 
   const saveToLibrary = useCallback(() => {
+    if (!sessionPicked) {
+      appendLog('角色设定：请先在库中选择角色');
+      setStudioTab('library');
+      return;
+    }
     const finalName = name.trim();
     if (!finalName || !appearance.trim()) {
       appendLog('角色设定：请至少填写角色名和固定外貌锚点');
+      setStudioTab('profile');
       return;
     }
     const id = (data.characterId as string | undefined) ?? `char-${props.id}`;
@@ -196,117 +314,427 @@ function CharacterSheetBlock(props: NodeProps) {
     });
     toastSuccess(`角色「${finalName}」已保存到角色库`);
     appendLog(`角色一致性资产已保存 · ${finalName}`);
-    setEditing(false);
-  }, [aliases, appendLog, appearance, backUrl, characters, data.characterId, forbidden, frontUrl, fullSheetUrl, identity, locked, name, personality, prompt, props.id, sideUrl, updateNodeData, upsertCharacter, upstream?.pictures, wardrobe]);
+  }, [
+    aliases, appendLog, appearance, backUrl, characters, data.characterId, forbidden,
+    frontUrl, fullSheetUrl, identity, locked, name, personality, prompt, props.id,
+    sessionPicked, sideUrl, updateNodeData, upsertCharacter, upstream?.pictures, wardrobe,
+  ]);
 
   return (
-    <BlockShell {...props}>
-      <div className="relative w-[300px] nodrag nopan text-xs text-ink">
-        <div className="space-y-2">
-          <div className="rounded-xl border border-line/60 bg-white p-2.5">
-            <div className="mb-2 flex items-center justify-between">
-              <div>
-                <p className="text-sm font-semibold">角色设定库</p>
-                <p className="text-[9px] text-ink/40">已有 {characters.length} 个角色 · 负责一致性，不负责生图</p>
-              </div>
-              {locked && <Lock size={12} className="text-brand" />}
-            </div>
-            <div className="max-h-28 space-y-1 overflow-y-auto nx9-scroll">
-              {characters.length === 0 ? (
-                <div className="rounded-lg border border-dashed border-line bg-surface/40 px-2 py-3 text-center text-[10px] text-ink/45">
-                  暂无角色。运行设定检查后可 AI 自动填入，也可以手动新增。
-                </div>
-              ) : characters.slice(0, 8).map((character) => {
-                const ext = getCharacterCreative(character);
-                const url = ext.fullSheetUrl ?? ext.frontViewUrl ?? character.referenceImageUrl ?? '';
-                return (
-                  <button key={character.id} type="button" onClick={() => loadCharacter(character)} className="flex w-full items-center gap-2 rounded-lg border border-line/45 bg-white px-2 py-1.5 text-left hover:border-brand/35 hover:bg-brand/5">
-                    {url ? <img src={url} alt="" className="h-8 w-6 rounded border border-line object-cover" /> : <span className="grid h-8 w-6 place-items-center rounded border border-dashed border-line text-ink/25"><UserRound size={12} /></span>}
-                    <span className="min-w-0 flex-1">
-                      <span className="block truncate text-[11px] font-medium text-ink/75">{character.name}</span>
-                      <span className="block truncate text-[9px] text-ink/40">{character.bible?.identity || character.descriptionZh || '未补身份'}</span>
-                    </span>
-                    {ext.consistency?.locked && <Lock size={11} className="text-brand" />}
-                  </button>
-                );
-              })}
-            </div>
+    <div className="relative">
+      <BlockShell {...props}>
+        <div className="cs cs-card nodrag nopan">
+          <div className="cs-card__toolbar">
+            <span className={`cs-card__status ${cardStatusClass}`}>{cardStatusText}</span>
+            <span className="cs-card__counts">
+              库 <b>{rosterStats.total}</b>
+              {' · '}
+              齐备 <b>{rosterStats.ready}</b>
+            </span>
           </div>
 
-          <div className="grid grid-cols-2 gap-2 text-[10px]">
-            <div className="rounded-lg border border-line/60 p-2">
-              <p className="text-ink/35">当前编辑</p>
-              <p className="mt-0.5 truncate font-medium">{name || '未选择'}</p>
-            </div>
-            <div className="rounded-lg border border-line/60 p-2">
-              <p className="text-ink/35">健康</p>
-              <p className="mt-0.5 truncate font-medium">{health}/4{duplicate ? ' · 疑似重复' : syncedAt ? ' · 已入库' : ''}</p>
-            </div>
-          </div>
-
+          {/* 名册概览：展示库内角色清单，不钉死「当前编辑的那一个」 */}
           <button
             type="button"
-            onClick={createCharacter}
-            className="flex w-full items-center justify-center gap-1.5 rounded-xl bg-brand px-3 py-2 text-[12px] font-medium text-white"
+            className="cs-mini"
+            onClick={openStudio}
+            title="打开角色名册 · 从库选人再编辑"
           >
-            <Plus size={13} />
-            新增角色设定
+            {rosterStats.total > 0 ? (
+              <>
+                <div className="cs-mini__head cs-mini__head--roster">
+                  <span>角色</span>
+                  <span>身份</span>
+                  <span>状态</span>
+                </div>
+                {rosterPreview.map((row) => (
+                  <div key={row.id} className="cs-mini__row cs-mini__row--roster">
+                    <span className="is-title">{compact(row.name, 10)}</span>
+                    <span>{compact(row.identity, 12)}</span>
+                    <span className={`cs-mini__badge is-${row.tone}`}>{row.status}</span>
+                  </div>
+                ))}
+                {rosterStats.total > 4 ? (
+                  <div className="cs-mini__more">
+                    另有 {rosterStats.total - 4} 人 · 开表查看全部
+                  </div>
+                ) : null}
+              </>
+            ) : (
+              <div className="cs-mini__empty">
+                角色名册为空
+                <br />
+                开表从库新建，或由剧本拆分补入
+              </div>
+            )}
           </button>
-          <p className="flex items-center justify-center gap-1 text-center text-[9px] text-ink/35"><Sparkles size={10} />可由设定检查/AI 自动填入；图片交给图像生成节点。</p>
-        </div>
 
-        {editing && (
-          <div className="absolute left-[calc(100%+12px)] top-0 z-30 w-[360px] space-y-2 rounded-2xl border border-line bg-white p-3 shadow-2xl">
-            <div className="flex items-center justify-between">
-              <p className="text-sm font-semibold">编辑角色一致性</p>
-              <button type="button" onClick={() => setEditing(false)} className="rounded-lg px-2 py-1 text-[11px] text-ink/45 hover:bg-surface">关闭</button>
-            </div>
-            <AssetLinkField
-              kind="character"
-              assetRef={assetRef}
-              onChange={(ref) => updateNodeData(props.id, { ...patchWithAssetRef(ref), characterId: ref?.id, characterName: ref?.label ?? name })}
-            />
-            <div className="grid grid-cols-2 gap-2">
-              <label><Label>角色名</Label><input value={name} onChange={(e) => commit({ characterName: e.target.value })} className="w-full rounded-lg border border-line px-2 py-1.5" /></label>
-              <label><Label>身份</Label><input value={identity} onChange={(e) => commit({ identity: e.target.value })} className="w-full rounded-lg border border-line px-2 py-1.5" /></label>
-            </div>
-            <label><Label>别名/剧中称呼（防重复匹配）</Label><input value={aliasesText} onChange={(e) => commit({ aliases: e.target.value })} placeholder="老林、林先生、林侦探" className="w-full rounded-lg border border-line px-2 py-1.5" /></label>
-            <label><Label>固定外貌锚点（必须）</Label><textarea value={appearance} onChange={(e) => commit({ appearanceAnchor: e.target.value })} className="h-20 w-full resize-y rounded-xl border border-brand/25 bg-brand/[0.03] px-2 py-1.5" placeholder="发型、脸型、瞳色、身形、标志物、服装轮廓…" /></label>
-            <div className="grid grid-cols-2 gap-2">
-              <label><Label>服装/标志物</Label><textarea value={wardrobe} onChange={(e) => commit({ wardrobeAnchor: e.target.value })} className="h-16 w-full resize-y rounded-lg border border-line px-2 py-1.5" /></label>
-              <label><Label>禁改项</Label><textarea value={forbidden} onChange={(e) => commit({ forbiddenTraits: e.target.value })} className="h-16 w-full resize-y rounded-lg border border-line px-2 py-1.5" /></label>
-            </div>
-            <label><Label>性格/表演边界</Label><input value={personality} onChange={(e) => commit({ personality: e.target.value })} className="w-full rounded-lg border border-line px-2 py-1.5" /></label>
-            <div className="rounded-xl border border-line/60 p-2">
-              <div className="mb-1.5 flex items-center justify-between">
-                <span className="text-[10px] font-medium text-ink/50">参考图</span>
-                <button type="button" onClick={fillFromUpstream} className="text-[10px] text-brand hover:underline">用上游图</button>
+          {rosterStats.needAnchor > 0 || rosterStats.needRef > 0 ? (
+            <p className="cs-card__hint is-warn">
+              {rosterStats.needAnchor > 0 ? `${rosterStats.needAnchor} 人缺锚点` : ''}
+              {rosterStats.needAnchor > 0 && rosterStats.needRef > 0 ? ' · ' : ''}
+              {rosterStats.needRef > 0 ? `${rosterStats.needRef} 人缺参考图` : ''}
+            </p>
+          ) : null}
+
+          <div className="cs-card__actions">
+            <button
+              type="button"
+              className="cs-btn cs-btn--primary"
+              onClick={(e) => {
+                e.stopPropagation();
+                openStudio();
+              }}
+            >
+              开表
+            </button>
+          </div>
+        </div>
+      </BlockShell>
+
+      <ScreenModal
+        open={studioOpen}
+        onClose={closeStudio}
+        title="角色设定 · 档案台"
+        subtitle="先从库选人 · 再改设定与参考"
+        width={920}
+        variant="default"
+        className="cs-modal"
+      >
+        <div className="cs cs-studio">
+          <div className="cs-studio__tabs" role="tablist">
+            {(
+              [
+                { id: 'library' as const, label: '库' },
+                { id: 'profile' as const, label: '设定' },
+                { id: 'refs' as const, label: '参考' },
+              ] as const
+            ).map((tab) => {
+              const lockedTab = tab.id !== 'library' && !canEditTabs;
+              return (
+                <button
+                  key={tab.id}
+                  type="button"
+                  role="tab"
+                  disabled={lockedTab}
+                  className={`cs-studio__tab ${studioTab === tab.id ? 'is-on' : ''} ${lockedTab ? 'is-dim' : ''}`}
+                  onClick={() => tryOpenTab(tab.id)}
+                  title={lockedTab ? '请先在库中选择角色或新建' : undefined}
+                >
+                  {tab.label}
+                  {tab.id === 'library' ? ` · ${characters.length}` : ''}
+                  {tab.id !== 'library' && lockedTab ? ' · 锁' : ''}
+                  {tab.id === 'refs' && canEditTabs && refCount > 0 ? ` · ${refCount}` : ''}
+                </button>
+              );
+            })}
+          </div>
+
+          <div className="cs-studio__body">
+            {/* 统计始终是库级，不是「当前人」独占 */}
+            <div className="cs-stats">
+              <div className="cs-stats__cell">
+                <span className="cs-stats__val">{rosterStats.total}</span>
+                <span className="cs-stats__lab">库内角色</span>
               </div>
-              <div className="grid grid-cols-4 gap-1.5">
-                <ImageUploadSlot url={fullSheetUrl} label="主参考" compact onUploaded={(url) => commit({ fullSheetUrl: url })} onClear={() => commit({ fullSheetUrl: '' })} />
-                <ImageUploadSlot url={frontUrl} label="正面" compact onUploaded={(url) => commit({ frontUrl: url })} onClear={() => commit({ frontUrl: '' })} />
-                <ImageUploadSlot url={sideUrl} label="侧面" compact onUploaded={(url) => commit({ sideUrl: url })} onClear={() => commit({ sideUrl: '' })} />
-                <ImageUploadSlot url={backUrl} label="背面" compact onUploaded={(url) => commit({ backUrl: url })} onClear={() => commit({ backUrl: '' })} />
+              <div className="cs-stats__cell">
+                <span className="cs-stats__val">{rosterStats.ready}</span>
+                <span className="cs-stats__lab">齐备</span>
+              </div>
+              <div className="cs-stats__cell">
+                <span className="cs-stats__val">{rosterStats.needAnchor}</span>
+                <span className="cs-stats__lab">缺锚点</span>
+              </div>
+              <div className="cs-stats__cell">
+                <span className="cs-stats__val">{rosterStats.needRef}</span>
+                <span className="cs-stats__lab">缺参考</span>
               </div>
             </div>
-            <details className="rounded-xl border border-line/60 bg-surface/30">
-              <summary className="cursor-pointer px-2 py-1.5 text-[10px] font-medium text-ink/55">生成约束 Prompt</summary>
-              <pre className="max-h-28 overflow-y-auto whitespace-pre-wrap px-2 pb-2 text-[10px] text-ink/65">{prompt}</pre>
-            </details>
-            <div className="flex gap-2">
-              <label className="flex flex-1 items-center gap-1.5 rounded-lg border border-line px-2 py-1.5 text-[10px] text-ink/55">
-                <input type="checkbox" checked={locked} onChange={(e) => commit({ assetLocked: e.target.checked })} />
-                锁定
+
+            {!canEditTabs && studioTab === 'library' && (
+              <p className="cs-warn">
+                请先点选下方库内角色，或「新建空白」，再进入设定 / 参考。
+              </p>
+            )}
+
+            {canEditTabs && duplicate && (
+              <p className="cs-warn">角色名与库内已有角色重复，保存会覆盖同 id 或产生歧义，请核对。</p>
+            )}
+
+            {canEditTabs && (
+              <div className="cs-session-bar">
+                当前编辑：
+                <b>{name.trim() || '（未命名新建）'}</b>
+                {identity.trim() ? ` · ${identity.trim()}` : ''}
+                <button
+                  type="button"
+                  className="cs-btn cs-btn--ghost cs-btn--sm"
+                  onClick={() => {
+                    setSessionPicked(false);
+                    setStudioTab('library');
+                  }}
+                >
+                  重选
+                </button>
+              </div>
+            )}
+
+            {studioTab === 'library' && (
+              <>
+                <div className="cs-panel__head" style={{ marginBottom: 10 }}>
+                  <h3 className="cs-panel__title">角色名册</h3>
+                  <button type="button" className="cs-btn cs-btn--soft cs-btn--sm" onClick={createCharacter}>
+                    <Plus size={12} /> 新建空白
+                  </button>
+                </div>
+                {characters.length === 0 ? (
+                  <div className="cs-empty">
+                    暂无角色。可新建，或由剧本拆分 / 设定检查补入后再选人。
+                  </div>
+                ) : (
+                  <ul className="cs-lib-list">
+                    {characters.map((character) => {
+                      const ext = getCharacterCreative(character);
+                      const url =
+                        ext.fullSheetUrl ?? ext.frontViewUrl ?? character.referenceImageUrl ?? '';
+                      const st = characterRosterStatus(character);
+                      const active = canEditTabs && (
+                        character.id === data.characterId
+                        || character.name.trim() === name.trim()
+                      );
+                      return (
+                        <li key={character.id}>
+                          <button
+                            type="button"
+                            className={`cs-lib-item ${active ? 'is-on' : ''}`}
+                            onClick={() => loadCharacter(character)}
+                          >
+                            {url ? (
+                              <img src={url} alt="" className="cs-lib-thumb" />
+                            ) : (
+                              <span className="cs-lib-thumb is-empty">
+                                <UserRound size={14} />
+                              </span>
+                            )}
+                            <span className="cs-lib-body">
+                              <span className="cs-lib-name">{character.name}</span>
+                              <span className="cs-lib-meta">
+                                {character.bible?.identity
+                                  || character.descriptionZh
+                                  || '未补身份'}
+                                {' · '}
+                                {st.label}
+                              </span>
+                            </span>
+                            <span className={`cs-mini__badge is-${st.tone}`}>{st.label}</span>
+                          </button>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                )}
+              </>
+            )}
+
+            {studioTab === 'profile' && canEditTabs && (
+              <>
+                <div className="cs-panel">
+                  <div className="cs-panel__head">
+                    <h3 className="cs-panel__title">资产关联</h3>
+                    <span className="cs-panel__meta">可选 · 链到角色库条目</span>
+                  </div>
+                  <AssetLinkField
+                    kind="character"
+                    assetRef={assetRef}
+                    onChange={(ref) =>
+                      updateNodeData(props.id, {
+                        ...patchWithAssetRef(ref),
+                        characterId: ref?.id,
+                        characterName: ref?.label ?? name,
+                      })
+                    }
+                  />
+                </div>
+
+                <div className="cs-grid-2">
+                  <label className="cs-field">
+                    <span className="cs-label">角色名 <span className="is-req">必填</span></span>
+                    <input
+                      className="cs-input"
+                      value={name}
+                      onChange={(e) => commit({ characterName: e.target.value })}
+                      placeholder="林夏"
+                    />
+                  </label>
+                  <label className="cs-field">
+                    <span className="cs-label">身份</span>
+                    <input
+                      className="cs-input"
+                      value={identity}
+                      onChange={(e) => commit({ identity: e.target.value })}
+                      placeholder="私家侦探 / 女主…"
+                    />
+                  </label>
+                </div>
+
+                <label className="cs-field">
+                  <span className="cs-label">别名 / 剧中称呼</span>
+                  <input
+                    className="cs-input"
+                    value={aliasesText}
+                    onChange={(e) => commit({ aliases: e.target.value })}
+                    placeholder="老林、林先生…"
+                  />
+                </label>
+
+                <label className="cs-field">
+                  <span className="cs-label">固定外貌锚点 <span className="is-req">必填</span></span>
+                  <textarea
+                    className="cs-textarea"
+                    value={appearance}
+                    onChange={(e) => commit({ appearanceAnchor: e.target.value })}
+                    placeholder="发型、脸型、瞳色、身形、标志物、服装轮廓…（跨镜保持一致）"
+                  />
+                </label>
+
+                <div className="cs-grid-2">
+                  <label className="cs-field">
+                    <span className="cs-label">服装 / 标志物</span>
+                    <textarea
+                      className="cs-textarea cs-textarea--sm"
+                      value={wardrobe}
+                      onChange={(e) => commit({ wardrobeAnchor: e.target.value })}
+                      placeholder="风衣、怀表、耳坠…"
+                    />
+                  </label>
+                  <label className="cs-field">
+                    <span className="cs-label">禁改项</span>
+                    <textarea
+                      className="cs-textarea cs-textarea--sm"
+                      value={forbidden}
+                      onChange={(e) => commit({ forbiddenTraits: e.target.value })}
+                      placeholder="不可改变的脸型、伤疤、瞳色…"
+                    />
+                  </label>
+                </div>
+
+                <label className="cs-field">
+                  <span className="cs-label">性格 / 表演边界</span>
+                  <input
+                    className="cs-input"
+                    value={personality}
+                    onChange={(e) => commit({ personality: e.target.value })}
+                    placeholder="克制、冷幽默；避免夸张表情…"
+                  />
+                </label>
+              </>
+            )}
+
+            {studioTab === 'refs' && canEditTabs && (
+              <>
+                <div className="cs-panel">
+                  <div className="cs-panel__head">
+                    <h3 className="cs-panel__title">参考视图</h3>
+                    <button
+                      type="button"
+                      className="cs-btn cs-btn--ghost cs-btn--sm"
+                      onClick={fillFromUpstream}
+                    >
+                      用上游图
+                    </button>
+                  </div>
+                  <div className="cs-views">
+                    <div className="cs-slot">
+                      <ImageUploadSlot
+                        url={fullSheetUrl}
+                        label="主参考"
+                        compact
+                        onUploaded={(url) => commit({ fullSheetUrl: url })}
+                        onClear={() => commit({ fullSheetUrl: '' })}
+                      />
+                    </div>
+                    <div className="cs-slot">
+                      <ImageUploadSlot
+                        url={frontUrl}
+                        label="正面"
+                        compact
+                        onUploaded={(url) => commit({ frontUrl: url })}
+                        onClear={() => commit({ frontUrl: '' })}
+                      />
+                    </div>
+                    <div className="cs-slot">
+                      <ImageUploadSlot
+                        url={sideUrl}
+                        label="侧面"
+                        compact
+                        onUploaded={(url) => commit({ sideUrl: url })}
+                        onClear={() => commit({ sideUrl: '' })}
+                      />
+                    </div>
+                    <div className="cs-slot">
+                      <ImageUploadSlot
+                        url={backUrl}
+                        label="背面"
+                        compact
+                        onUploaded={(url) => commit({ backUrl: url })}
+                        onClear={() => commit({ backUrl: '' })}
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="cs-panel">
+                  <div className="cs-panel__head">
+                    <h3 className="cs-panel__title">一致性 Prompt</h3>
+                    <span className="cs-panel__meta">自动生成 · 随设定更新</span>
+                  </div>
+                  <pre className="cs-prompt">{prompt || '填写角色名与外貌锚点后生成'}</pre>
+                </div>
+              </>
+            )}
+          </div>
+
+          <div className="cs-studio__foot">
+            {canEditTabs ? (
+              <label className="cs-check">
+                <input
+                  type="checkbox"
+                  checked={locked}
+                  onChange={(e) => commit({ assetLocked: e.target.checked })}
+                />
+                锁定一致性
               </label>
-              <button type="button" onClick={saveToLibrary} className="flex flex-1 items-center justify-center gap-1 rounded-lg bg-brand px-2 py-1.5 text-[11px] font-medium text-white">
-                <ShieldCheck size={13} />
-                保存到角色库
+            ) : (
+              <span className="cs-check">先从库选人</span>
+            )}
+            <p className="cs-studio__foot-hint">
+              {canEditTabs
+                ? `${name.trim() || '未命名'} · 健康 ${health}/4 · 参考 ${refCount}/4`
+                : `名册 ${rosterStats.total} 人 · 齐备 ${rosterStats.ready} · 待补 ${rosterStats.pending}`}
+            </p>
+            <div className="cs-studio__foot-actions">
+              {canEditTabs && studioTab !== 'refs' ? (
+                <button
+                  type="button"
+                  className="cs-btn cs-btn--ghost"
+                  onClick={() => setStudioTab(studioTab === 'library' ? 'profile' : 'refs')}
+                >
+                  下一步
+                </button>
+              ) : null}
+              <button
+                type="button"
+                className="cs-btn cs-btn--primary"
+                disabled={!canEditTabs}
+                onClick={saveToLibrary}
+              >
+                <ShieldCheck size={13} /> 保存到角色库
               </button>
             </div>
           </div>
-        )}
-      </div>
-    </BlockShell>
+        </div>
+      </ScreenModal>
+    </div>
   );
 }
 

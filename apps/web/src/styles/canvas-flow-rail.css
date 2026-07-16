@@ -1,11 +1,12 @@
 :root {
-  --nx9-flow-rail-top: 12px;
-  --nx9-flow-rail-max-width: min(960px, 92vw);
-  --nx9-flow-rail-bg: rgba(255, 255, 255, 0.92);
-  --nx9-flow-rail-shadow: 0 4px 24px rgba(0, 0, 0, 0.08);
-  --nx9-step-warn: #D97706;
+  --nx9-flow-rail-top: 72px;
+  --nx9-flow-rail-max-width: min(720px, 88vw);
+  --nx9-flow-rail-bg: rgba(18, 20, 24, 0.78);
+  --nx9-flow-rail-shadow: 0 8px 28px rgba(0, 0, 0, 0.35);
+  --nx9-step-warn: #fb923c;
 }
 
+/* 全屏舞台：浮动步骤条（避开左上导航） */
 .nx9-flow-rail {
   position: absolute;
   top: var(--nx9-flow-rail-top);
@@ -15,15 +16,17 @@
   max-width: var(--nx9-flow-rail-max-width);
   background: var(--nx9-flow-rail-bg);
   box-shadow: var(--nx9-flow-rail-shadow);
-  border-radius: 12px;
+  border-radius: 14px;
   padding: 6px 12px;
   display: flex;
   align-items: center;
   gap: 2px;
-  border: 1px solid rgba(0, 0, 0, 0.06);
-  backdrop-filter: blur(8px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  backdrop-filter: blur(16px) saturate(1.15);
+  -webkit-backdrop-filter: blur(16px) saturate(1.15);
   pointer-events: auto;
   white-space: nowrap;
+  color: rgba(243, 240, 234, 0.7);
 }
 
 .nx9-flow-rail-step {
@@ -39,23 +42,24 @@
   position: relative;
   font-family: inherit;
   font-size: 11px;
-  color: rgba(0, 0, 0, 0.55);
+  color: rgba(243, 240, 234, 0.55);
 }
 
 .nx9-flow-rail-step:hover {
-  background: rgba(0, 0, 0, 0.04);
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(243, 240, 234, 0.85);
 }
 
 .nx9-flow-rail-step--done {
-  color: rgba(0, 0, 0, 0.7);
+  color: rgba(243, 240, 234, 0.75);
 }
 
 .nx9-flow-rail-step--current {
-  color: #A13D63;
+  color: #2dd4bf;
 }
 
 .nx9-flow-rail-step--blocked {
-  color: rgba(0, 0, 0, 0.55);
+  color: rgba(243, 240, 234, 0.45);
 }
 
 .nx9-flow-rail-step--future {
@@ -83,7 +87,7 @@
 }
 
 .nx9-flow-rail-step-badge--current {
-  background: #A13D63;
+  background: var(--nx9-brand);
   color: white;
   box-shadow: 0 0 0 2px rgba(161, 61, 99, 0.25);
 }
@@ -105,7 +109,7 @@
 }
 
 .nx9-flow-rail-step-badge--waiting {
-  background: #A13D63;
+  background: var(--nx9-brand);
   color: #fff;
   animation: nx9-rail-pulse 1.5s ease-in-out infinite;
 }
@@ -126,7 +130,7 @@
 }
 
 .nx9-flow-rail-step--waiting {
-  color: #A13D63;
+  color: var(--nx9-brand);
 }
 
 .nx9-flow-rail-step--skipped {
@@ -138,7 +142,7 @@
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: #A13D63;
+  background: var(--nx9-brand);
   position: absolute;
   bottom: -2px;
   right: 4px;
@@ -193,7 +197,7 @@
 }
 
 .nx9-flow-rail-step-badge--milestone::before {
-  background: #A13D63;
+  background: var(--nx9-brand);
   left: -2px;
   top: -4px;
 }
@@ -286,7 +290,7 @@
 }
 
 .nx9-flow-rail-free-dot-indicator--active {
-  background: #A13D63;
+  background: var(--nx9-brand);
 }
 
 .nx9-flow-rail-free-dot-indicator--pending {
@@ -369,7 +373,7 @@
 .nx9-flow-rail-tooltip-action {
   width: 100%;
   border: none;
-  background: #A13D63;
+  background: var(--nx9-brand);
   color: #fff;
   font-size: 11px;
   font-weight: 600;
@@ -413,7 +417,7 @@
 }
 
 .nx9-app-dark .nx9-flow-rail-step--current {
-  color: #A13D63;
+  color: var(--nx9-brand);
 }
 
 .nx9-app-dark .nx9-flow-rail-step--done {

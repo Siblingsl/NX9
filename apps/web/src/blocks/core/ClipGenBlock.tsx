@@ -35,6 +35,10 @@ function ClipGenBlock(props: NodeProps) {
   const appendLog = useActivityLog((s) => s.append);
   const characters = useWorkspaceDocument((s) => s.characters.characters);
   const shots = useWorkspaceDocument((s) => s.storyboard.shots);
+  const rawVideoMode = (props.data?.videoMode as string) ?? 'single';
+  // 旧工作区 chain/motion 回退到单镜，避免假批出
+  const videoMode =
+    rawVideoMode === 'bridge' ? 'bridge' : 'single';
   const model = (props.data?.model as string) ?? 'veo';
   const aspect = (props.data?.aspect as string) ?? '16:9';
   const durationSec = (props.data?.durationSec as number) ?? 5;
@@ -49,6 +53,12 @@ function ClipGenBlock(props: NodeProps) {
   const linkedShotId = props.data?.linkedShotId as string | undefined;
   const localContent = (props.data?.content as string) ?? '';
   const { hasUpstream, preview: upstreamPreview } = useUpstreamPrompt(props.id);
+
+  /** 仅展示已闭环能力；chain/motion 元数据未真出片，已从 UI 下线 */
+  const VIDEO_MODES = [
+    { id: 'single', label: '单镜' },
+    { id: 'bridge', label: 'Bridge 续拍' },
+  ] as const;
 
   const activeCharacters = useMemo(() => {
     const shot = shots.find((s) => s.id === linkedShotId);
@@ -72,10 +82,18 @@ function ClipGenBlock(props: NodeProps) {
     return gatherUpstream(props.id, flowBlocks, flowLinks);
   }, [props.id, nodes, edges]);
 
-  const imageUrl = pickReferenceImage(activeCharacters, upstreamMedia.pictures);
+  const linkedShot = useMemo(
+    () => shots.find((s) => s.id === linkedShotId),
+    [shots, linkedShotId],
+  );
+  const directorDeskRefs = (props.data?.directorDeskRefs as string[] | undefined) ?? [];
+  const imageUrl =
+    linkedShot?.firstFrameAssetId ||
+    directorDeskRefs[0] ||
+    pickReferenceImage(activeCharacters, upstreamMedia.pictures);
   const hasAudioUpstream = (upstreamMedia.sounds?.length ?? 0) > 0;
   const refError = validateSClassReferences(
-    upstreamMedia.pictures?.length ?? 0,
+    Math.max(upstreamMedia.pictures?.length ?? 0, imageUrl ? 1 : 0),
     upstreamMedia.clips?.length ?? 0,
   );
 
@@ -94,6 +112,9 @@ function ClipGenBlock(props: NodeProps) {
       const base =
         upstreamMedia.prompts.filter(Boolean).join('\n\n') ||
         localContent ||
+        linkedShot?.videoPromptPro ||
+        linkedShot?.videoPromptEn ||
+        linkedShot?.promptEn ||
         (props.data?.content as string) ||
         '';
       const bridgeSuffix = bridgePromptSuffix(
@@ -123,6 +144,14 @@ function ClipGenBlock(props: NodeProps) {
         characterInjected: activeCharacters.map((c) => c.id),
         lastResult: res,
       });
+      // 写回故事板：闭环视频状态
+      if (res.url && linkedShot) {
+        useWorkspaceDocument.getState().updateShot(linkedShot.id, {
+          videoAssetId: res.url,
+          videoStatus: 'review',
+          status: 'review',
+        });
+      }
       appendLog(
         res.status === 'success'
           ? `视频生成完成 · ${props.id}`
@@ -138,6 +167,8 @@ function ClipGenBlock(props: NodeProps) {
     aspect,
     durationSec,
     resolution,
+    imageUrl,
+    linkedShot,
     orientation,
     generateAudio,
     localContent,
@@ -146,7 +177,8 @@ function ClipGenBlock(props: NodeProps) {
     updateNodeData,
     activeCharacters,
     upstreamMedia,
-    imageUrl,
+    edges,
+    nodes,
   ]);
 
   const poll = useCallback(async () => {
@@ -156,6 +188,13 @@ function ClipGenBlock(props: NodeProps) {
       const url = await pollClipTask(taskId);
       if (url) {
         updateNodeData(props.id, { status: 'success', videoUrl: url, message: undefined });
+        if (linkedShot) {
+          useWorkspaceDocument.getState().updateShot(linkedShot.id, {
+            videoAssetId: url,
+            videoStatus: 'review',
+            status: 'review',
+          });
+        }
         appendLog('视频轮询完成');
       } else {
         updateNodeData(props.id, { status: 'running', message: '仍在生成中，请稍后再查' });
@@ -163,11 +202,33 @@ function ClipGenBlock(props: NodeProps) {
     } catch (e) {
       updateNodeData(props.id, { status: 'error', error: String(e) });
     }
-  }, [taskId, props.id, updateNodeData, appendLog]);
+  }, [taskId, props.id, updateNodeData, appendLog, linkedShot]);
 
   return (
     <BlockShell {...props}>
       <div className="space-y-2 text-sm">
+        <div className="flex flex-wrap gap-1">
+          {VIDEO_MODES.map((m) => (
+            <button
+              key={m.id}
+              type="button"
+              onClick={() => updateNodeData(props.id, { videoMode: m.id })}
+              className={`px-2 py-0.5 rounded-md text-[10px] border ${
+                videoMode === m.id
+                  ? 'border-brand bg-brand/10 text-brand font-medium'
+                  : 'border-line text-ink/50'
+              }`}
+            >
+              {m.label}
+            </button>
+          ))}
+        </div>
+        {videoMode === 'bridge' && (
+          <p className="text-[10px] text-ink/45">Bridge 续拍：上游视频尾帧 + 本镜 Prompt</p>
+        )}
+        {videoMode === 'single' && linkedShot?.firstFrameAssetId && (
+          <p className="text-[10px] text-ink/45">将使用关联镜头关键帧作为图生视频参考</p>
+        )}
         <GenUpstreamHint hasUpstream={hasUpstream} />
         {(upstreamPrompt || upstreamPreview) && (
           <p className="text-[10px] text-ink/50 line-clamp-2" title={upstreamPrompt || upstreamPreview}>
@@ -178,7 +239,7 @@ function ClipGenBlock(props: NodeProps) {
           <img src={imageUrl} alt="" className="w-full rounded-lg border border-line max-h-24 object-cover" />
         )}
         {hasAudioUpstream && (
-          <p className="text-[10px] text-brand/70">已连接上游音频（合成请用 clip-editor）</p>
+          <p className="text-[10px] text-brand/70">已连接上游音频（合成请用视频剪辑）</p>
         )}
         <MentionEditor
           blockId={props.id}
@@ -198,7 +259,6 @@ function ClipGenBlock(props: NodeProps) {
                 />
                 生成音频
               </label>
-              <p className="text-[9px] text-ink/40">分镜连续链请使用 motion-story 节点</p>
             </div>
           )}
           <select

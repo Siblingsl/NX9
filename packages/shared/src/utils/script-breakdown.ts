@@ -97,6 +97,9 @@ function makeShot(
   const scenePart = scene ? `，场景：${scene}` : '';
   const imagePrompt = `漫画短剧关键帧，${visual}${characterPart}${scenePart}，画面清晰，角色一致，电影感构图`;
   const videoPrompt = `根据关键帧生成 5 秒短视频：${visual}${characterPart}${scenePart}，动作自然，镜头稳定，保持角色与场景一致`;
+  const subject = compactText(text, 48) || '关键戏剧瞬间';
+  const audiovisualLanguage =
+    `稳定镜头贴近情境，中景到特写逐步交代${subject}。光色层次与角色状态形成对比，强化这一拍的情绪冲击。`;
 
   return {
     id: `${episodeId}-shot-${shotIndex}`,
@@ -111,6 +114,7 @@ function makeShot(
     scene,
     scriptText: text,
     dialogue,
+    audiovisualLanguage,
     imagePrompt,
     videoPrompt,
     referenceImageUrl: null,

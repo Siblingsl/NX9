@@ -1,20 +1,46 @@
-"use strict";
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.SOCKET_LABELS = exports.SOCKET_COLORS = exports.SOCKET_REGISTRY = void 0;
-exports.resolveEmits = resolveEmits;
-exports.resolveAccepts = resolveAccepts;
-exports.socketsCompatible = socketsCompatible;
-exports.validateLink = validateLink;
+import { resolveAssetImportItems } from '../utils/asset-import';
 const DEV_SOCKETS = {};
-exports.SOCKET_REGISTRY = {
+export const SOCKET_REGISTRY = {
     prompt: { accepts: ['prompt', 'picture', 'clip', 'sound'], emits: ['prompt'] },
     'picture-gen': { accepts: ['prompt', 'picture'], emits: ['picture'] },
     'clip-gen': { accepts: ['prompt', 'picture', 'clip', 'sound'], emits: ['clip'] },
+    'storyboard-preview': { accepts: ['prompt', 'picture', 'meta'], emits: ['picture', 'meta'] },
     'clip-editor': { accepts: ['clip'], emits: ['clip'] },
     'motion-story': { accepts: ['prompt', 'picture', 'clip', 'sound'], emits: ['clip'] },
     'director-desk': { accepts: ['prompt', 'picture', 'clip', 'sound'], emits: ['clip', 'prompt'] },
     'sound-gen': { accepts: ['prompt', 'sound'], emits: ['sound'] },
     'chat-model': { accepts: ['prompt', 'picture', 'clip'], emits: ['prompt'] },
+    'prompt-studio': { accepts: ['prompt', 'picture'], emits: ['prompt'] },
+    'style-lab': { accepts: ['prompt', 'picture'], emits: ['prompt', 'picture'] },
+    'local-enhance': { accepts: ['picture', 'clip'], emits: ['picture', 'clip'] },
+    'model-market': { accepts: ['prompt', 'picture', 'clip', 'sound'], emits: ['prompt', 'picture', 'clip', 'sound', 'mesh'] },
+    'shot-script': { accepts: ['prompt'], emits: ['prompt', 'meta'] },
+    'reference-board': { accepts: ['prompt', 'picture'], emits: ['prompt', 'picture'] },
+    'character-sheet': { accepts: ['prompt', 'picture', 'meta'], emits: ['prompt', 'meta'] },
+    'continuity-check': { accepts: ['prompt', 'picture', 'clip'], emits: ['prompt', 'meta'] },
+    'scene-card': { accepts: ['prompt', 'picture'], emits: ['prompt', 'meta'] },
+    'dialogue-sheet': { accepts: ['prompt'], emits: ['prompt', 'meta'] },
+    'asset-gate': { accepts: ['prompt', 'meta'], emits: ['prompt', 'meta'] },
+    'voice-cast': { accepts: ['prompt', 'sound'], emits: ['sound', 'meta'] },
+    'bridge-clip': { accepts: ['prompt', 'clip'], emits: ['prompt', 'picture', 'meta'] },
+    'caption-asr': { accepts: ['clip', 'sound'], emits: ['prompt', 'meta'] },
+    'seedance-chain': { accepts: ['prompt', 'clip'], emits: ['clip', 'meta'] },
+    'thumbnail-maker': { accepts: ['picture', 'clip'], emits: ['picture', 'meta'] },
+    'inpaint-edit': { accepts: ['picture', 'prompt'], emits: ['picture', 'meta'] },
+    'control-preprocess': { accepts: ['picture'], emits: ['picture', 'meta'] },
+    'reference-analyze': { accepts: ['clip', 'prompt'], emits: ['prompt', 'meta'] },
+    'music-gen': { accepts: ['prompt'], emits: ['sound'] },
+    'lipsync-pass': { accepts: ['clip', 'sound'], emits: ['clip'] },
+    'export-pack': { accepts: ['prompt', 'picture', 'clip', 'sound'], emits: [] },
+    'subtitle-burn': { accepts: ['prompt', 'clip'], emits: ['clip'] },
+    'audio-mix': { accepts: ['sound'], emits: ['sound'] },
+    'color-grade': { accepts: ['picture', 'clip'], emits: ['picture', 'clip'] },
+    'beat-sync': { accepts: ['sound', 'clip'], emits: ['clip', 'meta'] },
+    'variant-fork': { accepts: ['prompt', 'picture', 'clip', 'sound'], emits: ['prompt', 'picture', 'clip', 'sound', 'meta'] },
+    'review-gate': { accepts: ['prompt', 'picture', 'clip', 'sound'], emits: ['prompt', 'picture', 'clip', 'sound', 'meta'] },
+    'recipe-spawn': { accepts: [], emits: [] },
+    'prompt-diff': { accepts: ['prompt'], emits: ['prompt', 'meta'] },
+    'asset-watch': { accepts: ['picture', 'clip', 'sound'], emits: ['picture', 'clip', 'sound', 'meta'] },
     'workflow-hub': { accepts: ['prompt', 'picture', 'clip', 'sound', 'param'], emits: ['picture', 'clip'] },
     'wallet-hub': { accepts: ['prompt', 'picture', 'clip', 'sound', 'param'], emits: ['picture', 'clip'] },
     'param-inject': { accepts: ['prompt', 'picture', 'clip', 'sound'], emits: ['param'] },
@@ -30,12 +56,15 @@ exports.SOCKET_REGISTRY = {
     'style-atelier': { accepts: ['prompt'], emits: ['prompt', 'picture'] },
     'tag-atelier': { accepts: ['prompt', 'picture'], emits: ['prompt', 'picture'] },
     'comfy-market': { accepts: ['prompt', 'picture', 'clip', 'sound'], emits: ['prompt', 'picture', 'clip', 'sound'] },
+    'comfy-workflow': { accepts: ['prompt', 'picture', 'clip'], emits: ['picture', 'clip', 'meta'] },
     'comfy-builder': { accepts: [], emits: ['prompt'] },
     'multi-view-3d': { accepts: ['prompt', 'picture'], emits: ['picture'] },
     'panorama-flat': { accepts: ['prompt'], emits: ['picture'] },
     'portrait-flow': { accepts: ['prompt', 'picture', 'meta'], emits: ['picture'] },
     'portrait-meta': { accepts: ['picture'], emits: ['meta'] },
-    'story-grid': { accepts: ['picture'], emits: ['picture'] },
+    'story-grid': { accepts: ['prompt', 'meta'], emits: ['prompt', 'meta'] },
+    'grid-prompt-reverse': { accepts: ['picture'], emits: ['prompt', 'picture'] },
+    'photo-speak': { accepts: ['prompt', 'picture', 'sound'], emits: ['clip', 'sound'] },
     'sketch-pad': { accepts: ['picture'], emits: ['picture'] },
     'web-view': { accepts: [], emits: ['prompt', 'picture'] },
     'picture-diff': { accepts: ['picture'], emits: ['picture'] },
@@ -56,8 +85,8 @@ exports.SOCKET_REGISTRY = {
     passthrough: { accepts: ['wildcard'], emits: ['wildcard'] },
     'watermark-clean': { accepts: ['picture', 'clip', 'sound'], emits: ['picture', 'clip', 'sound', 'prompt', 'meta'] },
     'clip-sink': { accepts: ['clip'], emits: [] },
-    'cinema-prompt': { accepts: [], emits: ['prompt'] },
-    'camera-prompt': { accepts: [], emits: ['prompt'] },
+    'cinema-prompt': { accepts: ['prompt'], emits: ['prompt'] },
+    'camera-prompt': { accepts: ['prompt', 'picture'], emits: ['prompt'] },
     'angle-visual': { accepts: ['picture'], emits: ['prompt'] },
     'portrait-craft': { accepts: ['prompt', 'meta'], emits: ['prompt', 'meta'] },
     'pose-craft': { accepts: ['prompt', 'picture', 'meta'], emits: ['picture', 'prompt', 'meta'] },
@@ -66,6 +95,10 @@ exports.SOCKET_REGISTRY = {
     'topaz-picture': { accepts: ['picture'], emits: ['picture'] },
     'topaz-clip': { accepts: ['clip'], emits: ['clip'] },
     'panorama-sphere': { accepts: ['picture'], emits: ['picture'] },
+    'director-3d': { accepts: ['picture', 'mesh'], emits: ['picture', 'prompt'] },
+    'blocking-stage': { accepts: ['prompt', 'picture'], emits: ['prompt', 'meta'] },
+    'light-rig': { accepts: ['picture', 'prompt'], emits: ['picture', 'prompt'] },
+    'depth-pass': { accepts: ['picture', 'mesh'], emits: ['picture', 'meta'] },
     'asset-import': { accepts: [], emits: [] },
     'asset-bundle': { accepts: ['prompt', 'picture', 'clip', 'sound'], emits: ['prompt', 'picture', 'clip', 'sound'] },
     'render-slot': { accepts: ['prompt', 'picture'], emits: ['picture'] },
@@ -73,7 +106,7 @@ exports.SOCKET_REGISTRY = {
     'group-frame': { accepts: [], emits: ['wildcard'] },
     'codex-picture': { accepts: ['prompt', 'picture'], emits: ['picture', 'prompt'] },
 };
-exports.SOCKET_COLORS = {
+export const SOCKET_COLORS = {
     prompt: '#5E4D8A',
     picture: '#A13D63',
     clip: '#D97706',
@@ -83,7 +116,7 @@ exports.SOCKET_COLORS = {
     param: '#5E4D8A',
     wildcard: '#E6E6E6',
 };
-exports.SOCKET_LABELS = {
+export const SOCKET_LABELS = {
     prompt: '文本',
     picture: '图像',
     clip: '视频',
@@ -93,18 +126,23 @@ exports.SOCKET_LABELS = {
     param: '参数',
     wildcard: '任意',
 };
-function resolveEmits(kind, data) {
+export function resolveEmits(kind, data) {
     if (kind === 'asset-import') {
-        const media = data?.mediaKind;
-        if (media === 'picture')
-            return ['picture'];
-        if (media === 'clip')
-            return ['clip'];
-        if (media === 'sound')
-            return ['sound'];
-        if (media === 'mesh')
-            return ['mesh'];
-        return [];
+        const items = resolveAssetImportItems(data);
+        if (items.length === 0)
+            return [];
+        const kinds = new Set();
+        for (const item of items) {
+            if (item.mediaKind === 'picture')
+                kinds.add('picture');
+            else if (item.mediaKind === 'clip')
+                kinds.add('clip');
+            else if (item.mediaKind === 'sound')
+                kinds.add('sound');
+            else if (item.mediaKind === 'mesh')
+                kinds.add('mesh');
+        }
+        return [...kinds];
     }
     if (kind === 'asset-bundle') {
         const bundleKind = data?.bundleKind;
@@ -121,19 +159,19 @@ function resolveEmits(kind, data) {
             return ['sound'];
         return [];
     }
-    return exports.SOCKET_REGISTRY[kind]?.emits ?? [];
+    return SOCKET_REGISTRY[kind]?.emits ?? [];
 }
-function resolveAccepts(kind) {
-    return exports.SOCKET_REGISTRY[kind]?.accepts ?? [];
+export function resolveAccepts(kind) {
+    return SOCKET_REGISTRY[kind]?.accepts ?? [];
 }
-function socketsCompatible(sourceEmits, targetAccepts) {
+export function socketsCompatible(sourceEmits, targetAccepts) {
     if (sourceEmits.length === 0 || targetAccepts.length === 0)
         return false;
     if (sourceEmits.includes('wildcard') || targetAccepts.includes('wildcard'))
         return true;
     return sourceEmits.some((s) => targetAccepts.includes(s));
 }
-function validateLink(sourceKind, targetKind, sourceData) {
+export function validateLink(sourceKind, targetKind, sourceData) {
     if (sourceKind === targetKind && sourceKind !== 'passthrough')
         return false;
     if (sourceKind === 'iterator' && targetKind === 'preview-sink')
@@ -142,4 +180,76 @@ function validateLink(sourceKind, targetKind, sourceData) {
     const accepts = resolveAccepts(targetKind);
     return socketsCompatible(emits, accepts);
 }
-//# sourceMappingURL=socket-registry.js.map
+export const EXEC_PICTURE_HANDLES = new Set([
+    'exec-picture',
+    'exec-picture-in',
+    'exec-picture-out',
+]);
+export const VERTICAL_SOCKETS = {
+    'character-sheet': [
+        {
+            kind: 'meta',
+            position: 'bottom',
+            type: 'source',
+            id: 'asset-gate',
+            label: '角色设定',
+        },
+    ],
+    'scene-card': [
+        {
+            kind: 'meta',
+            position: 'bottom',
+            type: 'source',
+            id: 'asset-gate',
+            label: '场景设定',
+        },
+    ],
+    'picture-gen': [
+        {
+            kind: 'picture',
+            position: 'bottom',
+            type: 'source',
+            id: 'exec-picture',
+            // label: '出图',
+        },
+    ],
+    'director-3d': [
+        {
+            kind: 'picture',
+            position: 'bottom',
+            type: 'source',
+            id: 'exec-picture',
+            // 与图像生成共用能力口：向分镜预览回写 3D 机位参考
+        },
+    ],
+    'storyboard-preview': [
+        {
+            kind: 'picture',
+            position: 'top',
+            type: 'target',
+            id: 'exec-picture',
+            // label: '预览',
+        },
+    ],
+    'asset-gate': [
+        {
+            kind: 'meta',
+            position: 'top',
+            type: 'both',
+            id: 'asset-gate',
+            label: '设定门禁',
+        },
+    ],
+};
+export function resolveVerticalSockets(kind) {
+    return VERTICAL_SOCKETS[kind] ?? [];
+}
+export function isStoryboardExecLink(sourceKind, targetKind, sourceHandle, targetHandle) {
+    const usesExec = EXEC_PICTURE_HANDLES.has(sourceHandle ?? '') ||
+        EXEC_PICTURE_HANDLES.has(targetHandle ?? '');
+    const pair = (sourceKind === 'picture-gen' && targetKind === 'storyboard-preview') ||
+        (sourceKind === 'storyboard-preview' && targetKind === 'picture-gen') ||
+        (sourceKind === 'director-3d' && targetKind === 'storyboard-preview') ||
+        (sourceKind === 'storyboard-preview' && targetKind === 'director-3d');
+    return usesExec && pair;
+}

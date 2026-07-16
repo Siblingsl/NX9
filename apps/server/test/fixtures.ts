@@ -69,7 +69,7 @@ export const FIXTURE_WS_IMPORT = {
     lines: [{ id: 'vl-fix-001', shotId: 'shot-fix-002', speaker: '林晓', text: 'FIXTURE 一杯美式，谢谢。', voiceProfileId: 'vp-fix-001', status: 'pending' }],
   },
   viewMode: 'explore',
-  canvasAppearance: { theme: 'light', gridStyle: 'dots', backgroundImageUrl: null, backgroundImageOpacity: 0.35 },
+  canvasAppearance: { theme: 'dark', gridStyle: 'dots', backgroundImageUrl: null, backgroundImageOpacity: 0.35 },
 };
 
 // ===== §2.2 故事板镜头 =====

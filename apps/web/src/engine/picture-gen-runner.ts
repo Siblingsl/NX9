@@ -6,8 +6,17 @@ export interface PictureGenJobInput {
   modelId?: string;
   size?: string;
   referenceImageUrl?: string;
+  /** 额外参考图（多参考 / 风格） */
+  referenceImageUrls?: string[];
+  styleImageUrl?: string;
+  /** 图生图强度 0–1，默认 0.85 */
+  strength?: number;
   n?: number;
-  mode?: 'standard' | 'panorama-720';
+  mode?: 'standard' | 'panorama-720' | 'upscale-hd';
+  negativePrompt?: string;
+  seed?: number;
+  /** 高清放大倍率，默认 2 */
+  upscaleScale?: number;
 }
 
 export const PANORAMA_720_PROMPT_SUFFIX = [
@@ -34,25 +43,57 @@ async function normalizePanoramaUrls(urls: string[]): Promise<string[]> {
 }
 
 export async function runPictureGenJob(input: PictureGenJobInput): Promise<string[]> {
+  // ── 图片高清：本地 / 服务端放大，不走生成模型 ──
+  if (input.mode === 'upscale-hd') {
+    const src =
+      input.referenceImageUrl?.trim() ||
+      input.referenceImageUrls?.find((u) => u?.trim())?.trim() ||
+      '';
+    if (!src) throw new Error('图片高清需要参考图（上传或连接上游）');
+    const scale = Math.min(4, Math.max(2, input.upscaleScale ?? 2));
+    const res = await api.upscaleImage({ sourceUrl: src, scale });
+    if (!res.url) throw new Error('高清放大失败');
+    return [res.url];
+  }
+
   const def = lookupPictureModel(input.modelId);
   const panorama = input.mode === 'panorama-720';
   const prompt = [input.prompt.trim(), panorama ? PANORAMA_720_PROMPT_SUFFIX : '']
     .filter(Boolean)
     .join('\n\n');
-  if (!prompt) throw new Error('Prompt 为空');
+  // 图生图允许空 prompt（仅改风格时），文生图必须有
+  if (!prompt && !input.referenceImageUrl) throw new Error('Prompt 为空');
+  const safePrompt = prompt || 'high quality refined image, preserve subject';
 
   if (def.provider === 'fal') {
-    const falInput: Record<string, unknown> = { prompt };
+    const falInput: Record<string, unknown> = { prompt: safePrompt };
+    if (input.negativePrompt?.trim()) {
+      falInput.negative_prompt = input.negativePrompt.trim();
+    }
+    if (input.seed != null && Number.isFinite(input.seed)) {
+      falInput.seed = input.seed;
+    }
     if (panorama) {
       falInput.image_size = { width: 2048, height: 1024 };
       falInput.num_images = 1;
       falInput.enable_safety_checker = true;
     }
-    const ref = input.referenceImageUrl?.trim();
+    const ref =
+      input.referenceImageUrl?.trim() ||
+      input.referenceImageUrls?.find((u) => u?.trim())?.trim() ||
+      '';
+    const style = input.styleImageUrl?.trim();
     if (def.supportsReference) {
-      if (!ref) throw new Error('FLUX 图生图需要参考图（连接上游图片或角色参考）');
-      falInput.image_url = ref;
-      falInput.strength = 0.85;
+      if (!ref && !style) {
+        throw new Error('图生图需要参考图（上传、连接上游，或角色参考）');
+      }
+      falInput.image_url = ref || style;
+      const s = input.strength;
+      falInput.strength =
+        typeof s === 'number' && s > 0 && s <= 1 ? s : 0.85;
+      if (style && ref && style !== ref) {
+        falInput.prompt = `${safePrompt}\n\n[Style reference attached; match visual style]`;
+      }
     }
     const res = await api.proxyFal({ model: def.model, input: falInput });
     if (!res.url) throw new Error('Fal 未返回图片');
@@ -67,7 +108,7 @@ export async function runPictureGenJob(input: PictureGenJobInput): Promise<strin
       : '1792x1024'
     : input.size || def.defaultSize || '1024x1024';
   const res = (await api.proxyImage({
-    prompt,
+    prompt: safePrompt,
     model: def.model,
     provider: def.provider,
     size: requestSize,

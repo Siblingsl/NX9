@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Box, ChevronDown, GripVertical, Play, Sparkles } from 'lucide-react';
 import {
   canConfirmStoryboardPreview,
+  KEYFRAME_SCORE_THRESHOLD,
   lookupBlock,
   storyboardPreviewSummary,
   type StoryboardPreviewGridColumns,
@@ -37,12 +38,15 @@ export interface StoryboardPreviewWorkspaceProps {
   blockId: string;
   kind: string;
   onCollapse?: () => void;
+  /** 内嵌于分镜台 ScreenModal 时隐藏底栏拖拽头，加高内容区 */
+  embedded?: boolean;
 }
 
 export function StoryboardPreviewWorkspace({
   blockId,
   kind,
   onCollapse,
+  embedded = false,
 }: StoryboardPreviewWorkspaceProps) {
   const collapsePromptBar = useDeckUi((s) => s.collapsePromptBar);
   const appendLog = useActivityLog((s) => s.append);
@@ -249,18 +253,30 @@ export function StoryboardPreviewWorkspace({
     onReorder: actions.reorderFrame,
   };
 
+  const report = payload.lastConsistencyReport;
+  const lowCount = report?.suggestRegenerateFrameIds?.length
+    ?? payload.frames.filter((f) => f.suggestRegenerate).length;
+
   return (
     <div
-      className="flex flex-col w-full h-[min(480px,55vh)] min-h-[320px] px-3 py-2 nodrag"
+      className={`flex flex-col w-full nodrag ${
+        embedded
+          ? 'h-[min(560px,62vh)] min-h-[360px] px-0 py-0'
+          : 'h-[min(480px,55vh)] min-h-[320px] px-3 py-2'
+      }`}
       onMouseDown={stop}
       onPointerDown={stop}
       onWheel={(e) => e.stopPropagation()}
     >
-      <div className="flex items-center gap-2 shrink-0 h-8">
-        <GripVertical size={13} className="text-ink/20 nx9-prompt-bar-drag-handle cursor-grab" />
+      <div className="flex items-center gap-2 shrink-0 h-8 px-1">
+        {!embedded && (
+          <GripVertical size={13} className="text-ink/20 nx9-prompt-bar-drag-handle cursor-grab" />
+        )}
         <p className="flex-1 text-[13px] font-medium text-ink truncate">
-          {meta?.label ?? '分镜预览'}
-          <span className="ml-2 text-[10px] font-normal text-ink/40">Video Proof · 调度器</span>
+          {embedded ? '关键帧预览' : (meta?.label ?? '分镜预览')}
+          <span className="ml-2 text-[10px] font-normal text-ink/40">
+            Video Proof · 出图 / 评分 / 批审
+          </span>
         </p>
         <span
           className={`text-[9px] px-1.5 py-0.5 rounded ${
@@ -285,10 +301,39 @@ export function StoryboardPreviewWorkspace({
         <span className="text-[10px] text-ink/45 tabular-nums">
           {summary.success}/{summary.total} · 🔒 {summary.locked}
         </span>
-        <button type="button" onClick={handleCollapse} className="p-1 rounded-lg text-ink/35 hover:text-ink">
-          <ChevronDown size={15} />
-        </button>
+        {!embedded && (
+          <button type="button" onClick={handleCollapse} className="p-1 rounded-lg text-ink/35 hover:text-ink">
+            <ChevronDown size={15} />
+          </button>
+        )}
       </div>
+
+      {report && (
+        <div
+          className={`shrink-0 mx-1 mb-1.5 rounded-lg border px-2.5 py-1.5 text-[10px] ${
+            (report.overallScore ?? 0) < KEYFRAME_SCORE_THRESHOLD
+              ? 'border-warn/40 bg-warn/10 text-warn'
+              : 'border-ok/30 bg-ok/10 text-ok'
+          }`}
+        >
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5">
+            <span className="font-semibold">
+              综合 {report.overallScore}/100
+              {(report.overallScore ?? 0) < KEYFRAME_SCORE_THRESHOLD ? ' · 建议重生成低分镜' : ' · 达标'}
+            </span>
+            {report.dimensions.map((d) => (
+              <span key={d.id} className="text-ink/55">
+                {d.label} {d.score}
+              </span>
+            ))}
+            {lowCount > 0 && (
+              <span className="text-warn font-medium">
+                {lowCount} 镜 &lt; {KEYFRAME_SCORE_THRESHOLD} 分
+              </span>
+            )}
+          </div>
+        </div>
+      )}
 
       <div className="flex-1 min-h-0 mt-1.5 rounded-xl border border-line/35 bg-white shadow-[0_1px_8px_rgba(15,15,15,0.03)] flex flex-col overflow-hidden">
         {pictureNode && (
@@ -343,11 +388,21 @@ export function StoryboardPreviewWorkspace({
           <button
             type="button"
             onMouseDown={stop}
+            disabled={status === 'running'}
+            onClick={() => void actions.checkConsistency('full')}
+            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-medium bg-brand/10 text-brand disabled:opacity-40"
+            title={`角色+场景+其它一致性 · 低于 ${KEYFRAME_SCORE_THRESHOLD} 分建议重生成`}
+          >
+            <Sparkles size={11} />
+            关键帧评分
+          </button>
+          <button
+            type="button"
+            onMouseDown={stop}
             onClick={() => void actions.checkConsistency('character')}
             className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] text-ink/50 hover:text-brand"
           >
-            <Sparkles size={11} />
-            角色检查
+            角色
           </button>
           <button
             type="button"
@@ -355,9 +410,40 @@ export function StoryboardPreviewWorkspace({
             onClick={() => void actions.checkConsistency('scene')}
             className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] text-ink/50 hover:text-brand"
           >
-            <Sparkles size={11} />
-            场景检查
+            场景
           </button>
+          <button
+            type="button"
+            onMouseDown={stop}
+            onClick={() => void actions.checkConsistency('other')}
+            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] text-ink/50 hover:text-brand"
+          >
+            其它
+          </button>
+          {lowCount > 0 && (
+            <button
+              type="button"
+              disabled={generating}
+              onMouseDown={stop}
+              onClick={() => {
+                const ids = report?.suggestRegenerateFrameIds
+                  ?? payload.frames.filter((f) => f.suggestRegenerate).map((f) => f.id);
+                setSelectedIds(new Set(ids));
+                void (async () => {
+                  setGenerating(true);
+                  for (const id of ids) {
+                    const frame = payload.frames.find((f) => f.id === id);
+                    if (frame && !frame.locked) await actions.regenerateFrame(id);
+                  }
+                  setGenerating(false);
+                  appendLog(`已对 ${ids.length} 张低分关键帧触发重生成`);
+                })();
+              }}
+              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-medium bg-warn/15 text-warn disabled:opacity-40"
+            >
+              重生成低分镜
+            </button>
+          )}
           <button
             type="button"
             onMouseDown={stop}

@@ -8,23 +8,27 @@ export interface CanvasAppearance {
   backgroundImageOpacity?: number;
 }
 
+/** 默认深色 desk（剧本拆分同源炭黑 + 暖金） */
 export const DEFAULT_CANVAS_APPEARANCE: CanvasAppearance = {
-  theme: 'light',
+  theme: 'dark',
   gridStyle: 'dots',
+  backgroundImageUrl: null,
   backgroundImageOpacity: 0.35,
 };
 
 export const CANVAS_THEMES = {
   light: {
-    canvasBg: '#FAFAF8',
-    gridDot: '#E6E6E6',
-    gridLine: '#E0E0E0',
-    nodeBg: '#FFFFFF',
+    canvasBg: '#E8E4DB',
+    gridDot: 'rgba(42,36,28,0.12)',
+    gridLine: 'rgba(42,36,28,0.1)',
+    nodeBg: '#FBF9F5',
+    accent: '#A67C4A',
   },
   dark: {
-    canvasBg: '#11100E',
+    canvasBg: '#0C0E12',
     gridDot: 'rgba(255,255,255,0.13)',
-    gridLine: 'rgba(255,255,255,0.075)',
-    nodeBg: '#211F1C',
+    gridLine: 'rgba(255,255,255,0.085)',
+    nodeBg: '#1A1C1F',
+    accent: '#C4A574',
   },
 } as const;
