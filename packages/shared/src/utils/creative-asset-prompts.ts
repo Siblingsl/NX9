@@ -1,3 +1,4 @@
+import { buildCharacterMasterSheetPrompt, CHARACTER_SHEET_MASTER_PROMPT_TEMPLATE } from './character-sheet-master';
 import type { BacklotWorkspaceItem } from '../data/backlot-templates';
 import type { CharacterProfile } from '../types/character';
 import type {
@@ -13,16 +14,8 @@ import type { SoundAssetProfile } from '../types/sound-library';
 import { defaultCharacterVariants } from '../data/creative-asset-presets';
 import { touchStructuredPrompt } from '../types/creative-asset-center';
 
-export const CHARACTER_SHEET_PROMPT_TEMPLATE = `Marvel-style character sheet, white background, clean layout, high resolution.
-Full-body front standing pose showing outfit proportions and silhouette.
-Turnaround: front view, side profile, back view — identical character design.
-Character info panel with name, age, occupation, personality tags.
-Body metrics and appearance details as labeled reference.
-Expression grid: smile, happy, laugh, calm, sad, angry, surprised, afraid and more.
-Action poses: stand, walk, run, sit, combat, wave.
-Camera angles: front, 45-degree, side, back, close-up, medium, wide.
-Consistent face, hair, outfit, accessories across all panels.
-Anime cinematic style, production-ready character bible reference sheet.`;
+/** @deprecated 使用 buildCharacterMasterSheetPrompt；保留兼容导出名 */
+export const CHARACTER_SHEET_PROMPT_TEMPLATE = CHARACTER_SHEET_MASTER_PROMPT_TEMPLATE;
 
 function lines(...parts: Array<string | undefined | null | false>): string {
   return parts.filter((p) => p && String(p).trim()).join('\n');
@@ -43,6 +36,9 @@ export function getCharacterCreative(c: CharacterProfile): CharacterCreativeExte
     expressions: ext.expressions?.length ? ext.expressions : variants.expressions,
     poses: ext.poses?.length ? ext.poses : variants.poses,
     angles: ext.angles?.length ? ext.angles : variants.angles,
+    microExpressions: ext.microExpressions?.length ? ext.microExpressions : variants.microExpressions,
+    costumeDetails: ext.costumeDetails?.length ? ext.costumeDetails : variants.costumeDetails,
+    handRefs: ext.handRefs?.length ? ext.handRefs : variants.handRefs,
     consistency: { ...ext.consistency },
     prompts: { ...ext.prompts },
   };
@@ -62,6 +58,10 @@ export function getEmotionCreative(item: BacklotWorkspaceItem): EmotionCreativeE
 
 export function getHookCreative(item: BacklotWorkspaceItem): HookCreativeExtension {
   return (item.creative as HookCreativeExtension) ?? {};
+}
+
+export function getCostumeCreative(item: BacklotWorkspaceItem): import('../types/creative-asset-center').CostumeCreativeExtension {
+  return (item.creative as import('../types/creative-asset-center').CostumeCreativeExtension) ?? {};
 }
 
 export function getVoiceCreative(s: SoundAssetProfile): VoiceCreativeExtension {
@@ -95,24 +95,53 @@ export function buildCharacterImagePrompt(c: CharacterProfile): string {
   const expr = ext.expressions?.slice(0, 4).map((e) => e.prompt).filter(Boolean).join(', ');
   const pose = ext.poses?.[0]?.prompt;
   const angle = ext.angles?.[0]?.prompt;
-  return lines(base, expr && `Expression: ${expr}`, pose && `Pose: ${pose}`, angle && `Angle: ${angle}`, 'consistent character design, same outfit and face');
+  const fixed = c.consistencyPrompt?.trim() || ext.consistency?.consistencyPrompt?.trim();
+  return lines(
+    'Single character key visual, production still, locked identity.',
+    base,
+    fixed && `Identity lock: ${fixed}`,
+    expr && `Expression: ${expr}`,
+    pose && `Pose: ${pose}`,
+    angle && `Camera: ${angle}`,
+    'Composition: clear subject separation, readable silhouette, costume landmarks visible.',
+    'Quality: high detail face and fabric, coherent lighting, no text, no watermark, no multi-character crowd.',
+    'Consistency: same face, hairline, body proportion, outfit, accessories across any reference match.',
+  );
 }
 
 export function buildCharacterVideoPrompt(c: CharacterProfile): string {
   const image = buildCharacterImagePrompt(c);
-  return lines(image, 'cinematic motion, stable identity, smooth animation, character consistency maintained');
+  return lines(
+    image,
+    'Motion brief: natural continuous performance, subtle body mechanics, stable head volume.',
+    'Camera: motivated gentle move (push/orbit/hold), no jump cuts, keep face readable.',
+    'Continuity: identity and costume locked from first frame to last frame.',
+    'Constraints: no morphing face, no outfit change, no text overlay, filmic motion blur only when motivated.',
+  );
 }
 
 export function buildCharacterSheetGenerationPrompt(c: CharacterProfile): string {
   const ext = getCharacterCreative(c);
   const refHint = [ext.fullSheetUrl, c.referenceImageUrl, ext.frontViewUrl].find((u) => u?.trim());
-  return lines(
-    CHARACTER_SHEET_PROMPT_TEMPLATE,
-    `Character name: ${c.name}`,
-    buildCharacterBiblePrompt(c),
-    refHint ? `Reference image: match identity and outfit from uploaded reference.` : '',
-    'Output: single high-resolution character bible sheet on white background.',
-  );
+  const personality = ext.personalityText || c.bible?.personality || '';
+  const role = ext.identityRole || ext.occupation || c.bible?.identity || '';
+  const appearance = c.bible?.appearance || ext.appearanceDetails?.specialMarks || c.consistencyPrompt || '';
+  return buildCharacterMasterSheetPrompt({
+    characterName: c.name,
+    characterDescription: c.descriptionZh || c.consistencyPrompt || appearance,
+    styleMode: (ext.sheetStyleMode as any) || 'semi-realistic',
+    gender: ext.gender || undefined,
+    age: ext.age || undefined,
+    bodyType: ext.bodyType || undefined,
+    styleKeywords: ext.styleKeywords || undefined,
+    role,
+    personality,
+    coreTheme: ext.coreTheme || undefined,
+    costumeLock: ext.costumePrompt || ext.costumeLabel || undefined,
+    appearanceLock: appearance,
+    forbidden: ext.consistency?.negativePrompt || undefined,
+    hasReferenceImage: Boolean(refHint),
+  });
 }
 
 export function buildCharacterNegativePrompt(c: CharacterProfile): string {
@@ -142,16 +171,34 @@ export function buildSceneBiblePrompt(item: BacklotWorkspaceItem): string {
     section('推荐动作', ext.recommendedActions?.join(', ')),
     section('推荐情绪', ext.recommendedEmotions?.join(', ')),
     section('标签', ext.tags?.join(', ')),
+    section(
+      'Generation anchors',
+      lines(
+        ext.timeOfDay && `time of day: ${ext.timeOfDay}`,
+        ext.weather && `weather: ${ext.weather}`,
+        ext.lighting && `lighting: ${ext.lighting}`,
+        ext.colorTone && `color grade: ${ext.colorTone}`,
+        'keep spatial continuity and material language across shots',
+      ) || undefined,
+    ),
   );
 }
 
-export const SCENE_SHEET_PROMPT_TEMPLATE = `Environment concept sheet, white background, clean layout.
-Bird-eye overview of the full scene, multiple viewing angles, local detail callouts.
-Lighting setup, material textures, color palette, weather and time-of-day notes.
-Consistent spatial layout for AI scene generation across shots.`;
+export const SCENE_SHEET_PROMPT_TEMPLATE = `Environment concept bible sheet, clean presentation layout, production design quality.
+Required panels:
+1) Bird-eye / plan overview with readable spatial landmarks and pathing.
+2) Eye-level establishing views from at least two angles.
+3) Local detail callouts: key props, architecture materials, signage/ornament anchors.
+4) Lighting diagram notes: key light direction, practicals, shadow character, time-of-day.
+5) Color palette strip + material chips (wood/metal/fabric/stone as relevant).
+Hard constraints: stable architecture scale, consistent vanishing spatial rules, no random prop teleport, no people unless required as scale figures, no watermark, no UI chrome.`;
 
 export function buildSceneSheetGenerationPrompt(item: BacklotWorkspaceItem): string {
-  return lines(SCENE_SHEET_PROMPT_TEMPLATE, buildSceneBiblePrompt(item));
+  return lines(
+    SCENE_SHEET_PROMPT_TEMPLATE,
+    buildSceneBiblePrompt(item),
+    'Use as reusable location bible for multi-shot continuity; keep architecture, light logic and prop anchors fixed.',
+  );
 }
 
 export function buildShotPrompt(item: BacklotWorkspaceItem): string {
@@ -208,6 +255,68 @@ export function buildVoicePrompt(s: SoundAssetProfile): string {
   );
 }
 
+
+export function buildCostumeBiblePrompt(item: BacklotWorkspaceItem): string {
+  const ext = getCostumeCreative(item);
+  return lines(
+    section('服装', item.label),
+    section('描述', ext.description || item.promptZh),
+    section('类别', ext.category),
+    section('时代风格', ext.eraStyle),
+    section('配色', ext.colorPalette),
+    section('面料质感', ext.materials),
+    section('廓形剪裁', ext.silhouette),
+    section('上衣', ext.top),
+    section('下装', ext.bottom),
+    section('外套', ext.outerwear),
+    section('鞋履', ext.footwear),
+    section('配饰标志', ext.accessories),
+    section('适用角色', ext.recommendedCharacters?.join(', ')),
+    section('适用场景', ext.recommendedScenes?.join(', ')),
+    section('标签', ext.tags?.join(', ')),
+    section('英文 Prompt', item.promptEn),
+  );
+}
+
+export function buildCostumeImagePrompt(item: BacklotWorkspaceItem): string {
+  const ext = getCostumeCreative(item);
+  const base = item.promptEn?.trim() || buildCostumeBiblePrompt(item);
+  return lines(
+    'Production costume design plate, clean presentation, wardrobe continuity reference.',
+    base,
+    ext.silhouette && `Silhouette: ${ext.silhouette}`,
+    ext.colorPalette && `Palette: ${ext.colorPalette}`,
+    ext.materials && `Materials: ${ext.materials}`,
+    ext.accessories && `Signature accessories: ${ext.accessories}`,
+    'Show full outfit clearly; preserve fabric, cut and landmark accessories; no random wardrobe drift; no watermark.',
+  );
+}
+
+export function buildCostumeNegativePrompt(item: BacklotWorkspaceItem): string {
+  const ext = getCostumeCreative(item);
+  return (
+    ext.prompts?.negative?.text?.trim()
+    || 'wrong outfit, inconsistent wardrobe, extra accessories, modern clothes when period costume, low quality fabric, deformed clothing, watermark, UI chrome'
+  );
+}
+
+export const COSTUME_SHEET_PROMPT_TEMPLATE = `Production costume design sheet, clean white/studio background, high resolution, fashion-tech pack quality.
+Panel layout:
+1) Full-body front outfit presentation with clear silhouette.
+2) Turnaround: front, 3/4, side, back — identical garments, seams and accessories.
+3) Detail callouts: collar, cuffs, closures, fabric weave, logo/emblem, signature accessory.
+4) Color palette chips + material notes.
+Hard constraints: one outfit only, no random wardrobe swap, no face focus required, no watermark, no UI chrome, production-ready costume bible.`;
+
+export function buildCostumeSheetGenerationPrompt(item: BacklotWorkspaceItem): string {
+  return lines(
+    COSTUME_SHEET_PROMPT_TEMPLATE,
+    buildCostumeBiblePrompt(item),
+    buildCostumeImagePrompt(item),
+    'Use as reusable wardrobe continuity plate across multi-shot production.',
+  );
+}
+
 export function regenerateCharacterPrompts(c: CharacterProfile): CharacterCreativeExtension {
   const ext = getCharacterCreative(c);
   const bibleText = buildCharacterBiblePrompt(c);
@@ -237,8 +346,25 @@ export function regenerateScenePrompts(item: BacklotWorkspaceItem): SceneCreativ
     prompts: {
       scene: touchStructuredPrompt(sceneText),
       negative: touchStructuredPrompt(
-        ext.prompts?.negative?.text || 'low quality, inconsistent lighting, wrong scale',
+        ext.prompts?.negative?.text
+          || 'low quality, inconsistent lighting, warped architecture, wrong scale, cluttered composition, random extra props, text watermark, UI chrome, people crowd unless specified',
       ),
+    },
+  };
+}
+
+export function regenerateCostumePrompts(item: BacklotWorkspaceItem): import('../types/creative-asset-center').CostumeCreativeExtension {
+  const ext = getCostumeCreative(item);
+  const bible = buildCostumeBiblePrompt(item);
+  const image = buildCostumeImagePrompt(item);
+  const negative = buildCostumeNegativePrompt(item);
+  return {
+    ...ext,
+    description: ext.description || item.promptZh || item.label,
+    prompts: {
+      costume: touchStructuredPrompt(bible),
+      image: touchStructuredPrompt(image),
+      negative: touchStructuredPrompt(negative, negative),
     },
   };
 }
@@ -247,6 +373,8 @@ export function regenerateWorkspacePrompts(item: BacklotWorkspaceItem): BacklotW
   switch (item.kind) {
     case 'scene':
       return regenerateScenePrompts(item);
+    case 'costume':
+      return regenerateCostumePrompts(item);
     case 'shot':
       return { ...getShotCreative(item), prompts: { shot: touchStructuredPrompt(buildShotPrompt(item)) } };
     case 'emotion':
@@ -267,7 +395,7 @@ export function regenerateVoicePrompts(s: SoundAssetProfile): VoiceCreativeExten
 }
 
 export function resolveAssetPromptText(
-  kind: 'character' | 'scene' | 'shot' | 'emotion' | 'hook' | 'sound',
+  kind: 'character' | 'scene' | 'shot' | 'emotion' | 'hook' | 'costume' | 'sound',
   entity: CharacterProfile | BacklotWorkspaceItem | SoundAssetProfile,
 ): string {
   if (kind === 'character') {
@@ -287,6 +415,11 @@ export function resolveAssetPromptText(
   if (item.kind === 'scene') {
     const text = getSceneCreative(item).prompts?.scene?.text?.trim();
     return text || buildSceneBiblePrompt(item);
+  }
+  if (item.kind === 'costume') {
+    const text = getCostumeCreative(item).prompts?.costume?.text?.trim()
+      || getCostumeCreative(item).prompts?.image?.text?.trim();
+    return text || buildCostumeBiblePrompt(item);
   }
   if (item.kind === 'shot') {
     const text = getShotCreative(item).prompts?.shot?.text?.trim();

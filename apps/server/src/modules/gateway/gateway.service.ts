@@ -12,6 +12,7 @@ import { SettingsService } from '../settings/settings.service';
 import { UsageService } from '../usage/usage.service';
 import { LuxTtsAdapter, type LuxTtsProbeResult } from './luxtts.adapter';
 import { MagicHourAdapter } from './magic-hour.adapter';
+import { GeminiAdapter } from './gemini.adapter';
 import { VoiceboxAdapter } from './voicebox.adapter';
 import type { LuxTtsNoGpuFallback } from '@nx9/shared';
 
@@ -41,6 +42,7 @@ export class GatewayService {
     private readonly voicebox: VoiceboxAdapter,
     private readonly luxtts: LuxTtsAdapter,
     private readonly magicHour: MagicHourAdapter,
+    private readonly gemini: GeminiAdapter,
     private readonly usage: UsageService,
   ) {}
 
@@ -54,6 +56,14 @@ export class GatewayService {
     if (!primary && (!model || model === 'dall-e-3' || model === 'veo' || model === 'magic-hour')) {
       return true;
     }
+    return false;
+  }
+
+  private shouldUseGemini(model?: string, provider?: string): boolean {
+    if (!this.gemini.hasKey()) return false;
+    const p = (provider || '').toLowerCase();
+    if (p === 'gemini' || p === 'google' || p === 'google-ai') return true;
+    if (this.gemini.isGeminiModel(model)) return true;
     return false;
   }
 
@@ -299,7 +309,7 @@ export class GatewayService {
     const prompt = ((body.prompt as string) ?? '').trim();
     if (!prompt) throw new BadRequestException('Image prompt is required');
 
-    const model = (body.model as string) || 'dall-e-3';
+    const model = (body.model as string) || 'gemini-2.5-flash-image';
     const size = (body.size as string) || '1024x1024';
     const n = Math.min(4, Math.max(1, (body.n as number) || 1));
 
@@ -307,7 +317,22 @@ export class GatewayService {
       return this.proxyImageMagicHour({ prompt, model, size, n }, userId);
     }
 
-    const apiKey = this.apiKey('video');
+    if (this.shouldUseGemini(model, body.provider as string | undefined)) {
+      return this.proxyImageGemini(body, userId);
+    }
+
+    // 未显式选模型但已配置 Gemini、且无 OpenAI 主 Key 时，默认走 Gemini 图片
+    if (this.gemini.hasKey() && !this.apiKey('image')) {
+      const p = String(body.provider || '').toLowerCase();
+      if (!p || p === 'openai' || p === 'auto') {
+        return this.proxyImageGemini(
+          { ...body, model: model && model !== 'dall-e-3' ? model : 'gemini-2.5-flash-image' },
+          userId,
+        );
+      }
+    }
+
+    const apiKey = this.apiKey('image');
     if (!apiKey) {
       if (this.magicHour.hasKey()) {
         return this.proxyImageMagicHour({ prompt, model: 'magic-hour', size, n }, userId);
@@ -361,6 +386,89 @@ export class GatewayService {
       url: urls[0],
       urls,
       revisedPrompt: json.data[0].revised_prompt,
+      status: 'success',
+    };
+  }
+
+  private async proxyImageGemini(
+    body: Record<string, unknown>,
+    userId?: string,
+  ): Promise<{
+    ok: boolean;
+    url: string;
+    urls?: string[];
+    revisedPrompt?: string;
+    taskId?: string;
+    status?: 'success' | 'processing' | 'failed';
+    message?: string;
+  }> {
+    const prompt = ((body.prompt as string) ?? '').trim();
+    const model = (body.model as string) || 'gemini-2.5-flash-image';
+    const size = (body.size as string) || '1024x1024';
+    const n = Math.min(4, Math.max(1, (body.n as number) || 1));
+
+    const referenceParts: { inlineBase64?: string; mimeType?: string; text?: string }[] = [];
+    const refCandidates: string[] = [];
+    if (typeof body.referenceImageUrl === 'string' && body.referenceImageUrl.trim()) {
+      refCandidates.push(body.referenceImageUrl.trim());
+    }
+    if (Array.isArray(body.referenceImageUrls)) {
+      for (const u of body.referenceImageUrls as unknown[]) {
+        if (typeof u === 'string' && u.trim()) refCandidates.push(u.trim());
+      }
+    }
+    for (const refUrl of refCandidates.slice(0, 3)) {
+      try {
+        if (refUrl.startsWith('data:')) {
+          const m = refUrl.match(/^data:([^;]+);base64,(.+)$/);
+          if (m) referenceParts.push({ inlineBase64: m[2], mimeType: m[1] });
+          continue;
+        }
+        const local = resolveMediaUrl(refUrl);
+        if (local && existsSync(local)) {
+          const buf = readFileSync(local);
+          const lower = local.toLowerCase();
+          const mime = lower.endsWith('.png')
+            ? 'image/png'
+            : lower.endsWith('.webp')
+              ? 'image/webp'
+              : 'image/jpeg';
+          referenceParts.push({ inlineBase64: buf.toString('base64'), mimeType: mime });
+          continue;
+        }
+        if (/^https?:\/\//i.test(refUrl)) {
+          const imgRes = await fetch(refUrl);
+          if (imgRes.ok) {
+            const buf = Buffer.from(await imgRes.arrayBuffer());
+            const ct = imgRes.headers.get('content-type') || 'image/png';
+            referenceParts.push({ inlineBase64: buf.toString('base64'), mimeType: ct });
+          }
+        }
+      } catch {
+        /* 参考图可选 */
+      }
+    }
+
+    const imageSizeTier =
+      (typeof body.imageSizeTier === 'string' && body.imageSizeTier.trim()) ||
+      (typeof body.resolutionTier === 'string' && body.resolutionTier.trim()) ||
+      undefined;
+
+    const result = await this.gemini.generateImages({
+      prompt,
+      model,
+      size,
+      n,
+      imageSizeTier,
+      referenceParts: referenceParts.length ? referenceParts : undefined,
+    });
+
+    void this.track('image', { userId, model: result.model, units: result.urls.length });
+    return {
+      ok: true,
+      url: result.urls[0],
+      urls: result.urls,
+      revisedPrompt: result.text,
       status: 'success',
     };
   }
@@ -1085,6 +1193,22 @@ export class GatewayService {
         label: 'Magic Hour',
         available: false,
         message: '未配置 MAGIC_HOUR_API_KEY',
+      });
+    }
+
+    if (this.gemini.hasKey()) {
+      results.unshift({
+        id: 'gemini',
+        label: 'Google Gemini / Imagen',
+        available: true,
+        message: `Gemini Key 已配置 · ${this.gemini.resolveBaseUrl()}`,
+      });
+    } else {
+      results.unshift({
+        id: 'gemini',
+        label: 'Google Gemini / Imagen',
+        available: false,
+        message: '未配置 GEMINI_API_KEY / 设置中的 Gemini API Key',
       });
     }
 

@@ -6,6 +6,7 @@ import {
   type BacklotWorkspaceItem,
   type CharacterProfile,
   type EnvironmentProfile,
+  buildLineArtShotPrompt,
   emptyStoryboardPreview,
   flattenScriptBreakdownShots,
   resolveConnectedPictureGenId,
@@ -118,6 +119,7 @@ type ShotEditDraft = Pick<
   | 'scriptText'
   | 'imagePrompt'
   | 'videoPrompt'
+  | 'sketchPrompt'
   | 'shotSize'
   | 'cameraMove'
   | 'cameraAngle'
@@ -145,6 +147,7 @@ function createShotEditDraft(shot: ScriptBreakdownShot): ShotEditDraft {
     scriptText: shot.scriptText,
     imagePrompt: shot.imagePrompt,
     videoPrompt: shot.videoPrompt,
+    sketchPrompt: shot.sketchPrompt ?? '',
     shotSize: shot.shotSize,
     cameraMove: shot.cameraMove,
     cameraAngle: shot.cameraAngle,
@@ -217,14 +220,18 @@ function ShotFrameCell({
   generating,
   onUpload,
   onGenerate,
+  onGenerateLineArt,
   onCopyPrompt,
+  onCopySketchPrompt,
 }: {
   shot: ScriptBreakdownShot;
   storyboardUrl?: string | null;
   generating?: boolean;
   onUpload: (url: string) => void;
   onGenerate: () => void;
+  onGenerateLineArt: () => void;
   onCopyPrompt: () => void;
+  onCopySketchPrompt: () => void;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
@@ -296,12 +303,22 @@ function ShotFrameCell({
         <button
           type="button"
           className="sg-frame-cell__btn"
-          title="用连接的图像生成节点出图"
+          title="用连接的图像生成节点出关键帧"
           disabled={busy}
           onClick={onGenerate}
         >
           <Sparkles size={11} />
-          <span>生成</span>
+          <span>关键帧</span>
+        </button>
+        <button
+          type="button"
+          className="sg-frame-cell__btn"
+          title="生成黑白线稿构图（确认站位/景深后再出关键帧）"
+          disabled={busy}
+          onClick={onGenerateLineArt}
+        >
+          <Pencil size={11} />
+          <span>线稿</span>
         </button>
         <button
           type="button"
@@ -311,7 +328,17 @@ function ShotFrameCell({
           onClick={onCopyPrompt}
         >
           <Copy size={11} />
-          <span>复制</span>
+          <span>图词</span>
+        </button>
+        <button
+          type="button"
+          className="sg-frame-cell__btn"
+          title="复制线稿提示词"
+          disabled={!shot.sketchPrompt?.trim() && !shot.imagePrompt?.trim() && !shot.scriptText?.trim()}
+          onClick={onCopySketchPrompt}
+        >
+          <Copy size={11} />
+          <span>线词</span>
         </button>
       </div>
     </div>
@@ -362,6 +389,10 @@ function StoryboardDeskBlock(props: NodeProps) {
   const [editingShotId, setEditingShotId] = useState<string | null>(null);
   /** 正在生成画面的 shot id */
   const [generatingShotId, setGeneratingShotId] = useState<string | null>(null);
+  /** 批量任务：线稿 / 关键帧互斥 */
+  const [batchMode, setBatchMode] = useState<'line-art' | 'keyframe' | null>(null);
+  const [batchProgress, setBatchProgress] = useState<string | null>(null);
+  const batchRunning = batchMode !== null;
   const updateShot = useWorkspaceDocument((s) => s.updateShot);
   const storyboardShots = useWorkspaceDocument((s) => s.storyboard.shots);
   const editingShot = visibleShots.find((shot) => shot.id === editingShotId) ?? null;
@@ -522,6 +553,7 @@ function StoryboardDeskBlock(props: NodeProps) {
       scriptText: editDraft.scriptText,
       imagePrompt: editDraft.imagePrompt,
       videoPrompt: editDraft.videoPrompt,
+      sketchPrompt: editDraft.sketchPrompt?.trim() || undefined,
       shotSize: editDraft.shotSize,
       cameraMove: editDraft.cameraMove,
       cameraAngle: editDraft.cameraAngle,
@@ -571,12 +603,14 @@ function StoryboardDeskBlock(props: NodeProps) {
     return map;
   }, [storyboardShots]);
 
-  /** 写入画面 URL：拆分结构 + 故事板 + 预览帧 */
+  /** 写入画面 URL：拆分结构 + 故事板 + 预览帧（优先读节点最新 payload，避免批量写回被旧闭包覆盖） */
   const setShotFrameUrl = useCallback(
     (shotId: string, imageUrl: string) => {
-      if (!payload) return;
-      const nextBreakdown = writeBackBreakdownPreviewImage(payload, shotId, imageUrl)
-        ?? patchShotInPayload(payload, shotId, {
+      const livePayload = (getNodes().find((n) => n.id === props.id)?.data as Record<string, unknown> | undefined)?.scriptBreakdown as ScriptBreakdownPayload | undefined;
+      const base = livePayload ?? payload;
+      if (!base) return;
+      const nextBreakdown = writeBackBreakdownPreviewImage(base, shotId, imageUrl)
+        ?? patchShotInPayload(base, shotId, {
           previewImageUrl: imageUrl,
           referenceImageUrl: imageUrl,
           status: 'previewing',
@@ -592,38 +626,44 @@ function StoryboardDeskBlock(props: NodeProps) {
       // 同步 storyboardPreview.frames
       updateNodeData(props.id, (node) => {
         const data = (node.data ?? {}) as Record<string, unknown>;
+        // 节点 data 可能仍滞后于刚 apply 的拆分；以 nextBreakdown 为准
         const raw = data.storyboardPreview as StoryboardPreviewPayload | undefined;
         const current = raw?.version === 1 && Array.isArray(raw.frames)
           ? { ...emptyStoryboardPreview(), ...raw, pictureSettings: resolveStoryboardPreviewPictureSettings(raw) }
           : emptyStoryboardPreview();
         let frames = current.frames;
-        const idx = frames.findIndex((f) => f.sourceShotId === shotId || f.id === shotId);
+        const idx = frames.findIndex((f) => f.sourceShotId === shotId || f.id === shotId || f.id === `frame-${shotId}`);
+        const shot = flattenScriptBreakdownShots(nextBreakdown).find((s) => s.id === shotId);
+        const framePatch = {
+          imageUrl,
+          status: 'success' as const,
+          errorMessage: null as string | null,
+          promptSummary: shot?.imagePrompt || shot?.scriptText || shot?.title || '',
+          stylePreset: null as string | null,
+        };
         if (idx >= 0) {
           frames = frames.map((f, i) =>
             i === idx
-              ? { ...f, imageUrl, status: 'success' as const, errorMessage: null }
+              ? { ...f, ...framePatch }
               : f,
           );
-        } else {
-          // 尚无预览帧时，用当前镜头补一条
-          const shot = flattenScriptBreakdownShots(nextBreakdown).find((s) => s.id === shotId);
-          if (shot) {
-            const frame: StoryboardPreviewFrame = {
-              id: `frame-${shotId}`,
-              order: frames.length + 1,
-              label: shot.sceneCode || `Shot${shot.index}`,
-              startSec: 0,
-              endSec: Math.max(1, shot.durationSec || 5),
-              sourceShotId: shotId,
-              promptSummary: shot.imagePrompt || shot.scriptText || shot.title,
-              characterNames: shot.characters,
-              sceneAssetRef: shot.scene,
-              imageUrl,
-              status: 'success',
-              locked: false,
-            };
-            frames = [...frames, frame];
-          }
+        } else if (shot) {
+          const frame: StoryboardPreviewFrame = {
+            id: `frame-${shotId}`,
+            order: frames.length + 1,
+            label: shot.sceneCode || `Shot${shot.index}`,
+            startSec: 0,
+            endSec: Math.max(1, shot.durationSec || 5),
+            sourceShotId: shotId,
+            promptSummary: framePatch.promptSummary,
+            characterNames: shot.characters,
+            sceneAssetRef: shot.scene,
+            imageUrl,
+            status: 'success',
+            locked: false,
+            stylePreset: null,
+          };
+          frames = [...frames, frame];
         }
         return {
           ...node,
@@ -640,11 +680,15 @@ function StoryboardDeskBlock(props: NodeProps) {
         };
       });
     },
-    [payload, props.id, updateNodeData, updateShot],
+    [getNodes, payload, props.id, updateNodeData, updateShot],
   );
 
   const generateShotFrame = useCallback(
     async (shot: ScriptBreakdownShot) => {
+      if (batchRunning) {
+        appendLog('分镜台：批量任务进行中，请稍候再单镜生成');
+        return;
+      }
       const pictureId = resolveConnectedPictureGenId(props.id, getNodes(), getEdges());
       if (!pictureId) {
         appendLog('分镜台：请先用顶部能力口连接「图像生成」节点');
@@ -686,7 +730,406 @@ function StoryboardDeskBlock(props: NodeProps) {
         setGeneratingShotId(null);
       }
     },
-    [appendLog, getEdges, getNodes, props.id, setShotFrameUrl],
+    [appendLog, batchRunning, getEdges, getNodes, props.id, setShotFrameUrl],
+  );
+
+  const resolveSketchPrompt = useCallback((shot: ScriptBreakdownShot) => {
+    const raw = shot.sketchPrompt?.trim();
+    if (raw) return raw;
+    return buildLineArtShotPrompt(
+      [
+        shot.scriptText || shot.visual || shot.title,
+        shot.scene ? `location: ${shot.scene}` : '',
+        shot.shotSize ? `${shot.shotSize} shot` : '',
+        shot.cameraMove ? `camera: ${shot.cameraMove}` : '',
+        shot.cameraAngle ? `angle: ${shot.cameraAngle}` : '',
+        (shot.characters?.length ? `characters: ${shot.characters.join(', ')}` : ''),
+      ].filter(Boolean).join('\n'),
+      shot.shotSize,
+    );
+  }, []);
+
+  const generateShotLineArt = useCallback(
+    async (shot: ScriptBreakdownShot) => {
+      if (batchRunning) {
+        appendLog('分镜台：批量任务进行中，请稍候再单镜生成线稿');
+        return;
+      }
+      const pictureId = resolveConnectedPictureGenId(props.id, getNodes(), getEdges());
+      if (!pictureId) {
+        appendLog('分镜台：请先用顶部能力口连接「图像生成」节点后再生成线稿');
+        return;
+      }
+      const pictureNode = getNodes().find((n) => n.id === pictureId);
+      if (!pictureNode) return;
+
+      setGeneratingShotId(shot.id);
+      const sketchPrompt = resolveSketchPrompt(shot);
+      const frame: StoryboardPreviewFrame = {
+        id: `frame-line-${shot.id}`,
+        order: 1,
+        label: `${shot.sceneCode || `Shot${shot.index}`} · 线稿`,
+        startSec: 0,
+        endSec: Math.max(1, shot.durationSec || 5),
+        sourceShotId: shot.id,
+        promptSummary: sketchPrompt,
+        characterNames: shot.characters,
+        sceneAssetRef: shot.scene,
+        referenceImageUrl: null,
+        status: 'generating',
+        locked: false,
+        stylePreset: 'line-art',
+      };
+      try {
+        const nodeData = (getNodes().find((n) => n.id === props.id)?.data ?? {}) as Record<string, unknown>;
+        const previewRaw = nodeData.storyboardPreview as StoryboardPreviewPayload | undefined;
+        const pictureSettings = resolveStoryboardPreviewPictureSettings(previewRaw);
+        const imageUrl = await generateStoryboardFrameImage(
+          frame,
+          (pictureNode.data ?? {}) as Record<string, unknown>,
+          pictureSettings,
+        );
+        if (!payload) {
+          setShotFrameUrl(shot.id, imageUrl);
+        } else {
+          const withSketch = patchShotInPayload(payload, shot.id, {
+            sketchPrompt,
+            previewImageUrl: imageUrl,
+            referenceImageUrl: imageUrl,
+            status: 'previewing',
+          });
+          const nextBreakdown = writeBackBreakdownPreviewImage(withSketch, shot.id, imageUrl) ?? withSketch;
+          applyScriptBreakdownPayload(props.id, nextBreakdown);
+          updateShot(shot.id, {
+            firstFrameAssetId: imageUrl,
+            keyframeStatus: 'review',
+            status: 'review',
+            sketchPrompt,
+          });
+          updateNodeData(props.id, (node) => {
+            const data = (node.data ?? {}) as Record<string, unknown>;
+            const raw = data.storyboardPreview as StoryboardPreviewPayload | undefined;
+            const current = raw?.version === 1 && Array.isArray(raw.frames)
+              ? { ...emptyStoryboardPreview(), ...raw, pictureSettings: resolveStoryboardPreviewPictureSettings(raw) }
+              : emptyStoryboardPreview();
+            let frames = [...current.frames];
+            const idx = frames.findIndex((f) => f.sourceShotId === shot.id || f.id === `frame-line-${shot.id}` || f.id === shot.id);
+            const framePatch = {
+              imageUrl,
+              status: 'success' as const,
+              errorMessage: null,
+              promptSummary: sketchPrompt,
+              stylePreset: 'line-art',
+            };
+            if (idx >= 0) {
+              frames = frames.map((f, i) => (i === idx ? { ...f, ...framePatch } : f));
+            } else {
+              frames = [
+                ...frames,
+                {
+                  id: `frame-line-${shot.id}`,
+                  order: frames.length + 1,
+                  label: `${shot.sceneCode || `Shot${shot.index}`} · 线稿`,
+                  startSec: 0,
+                  endSec: Math.max(1, shot.durationSec || 5),
+                  sourceShotId: shot.id,
+                  promptSummary: sketchPrompt,
+                  characterNames: shot.characters,
+                  sceneAssetRef: shot.scene,
+                  referenceImageUrl: null,
+                  imageUrl,
+                  status: 'success' as const,
+                  locked: false,
+                  stylePreset: 'line-art',
+                },
+              ];
+            }
+            return {
+              ...node,
+              data: {
+                ...data,
+                scriptBreakdown: nextBreakdown,
+                storyboardPreview: { ...current, frames, confirmed: false },
+                previewUrls: frames.map((f) => f.imageUrl).filter(Boolean),
+              },
+            };
+          });
+        }
+        appendLog(`分镜线稿已生成 · ${shot.sceneCode || shot.id}`);
+        toastSuccess(`已生成 ${shot.sceneCode || '分镜'} 线稿`);
+      } catch (e) {
+        appendLog(`分镜线稿生成失败: ${String(e)}`);
+      } finally {
+        setGeneratingShotId(null);
+      }
+    },
+    [appendLog, batchRunning, getEdges, getNodes, payload, props.id, resolveSketchPrompt, setShotFrameUrl, updateNodeData, updateShot],
+  );
+
+  const copyShotSketchPrompt = useCallback(
+    async (shot: ScriptBreakdownShot) => {
+      const textValue = resolveSketchPrompt(shot);
+      if (!textValue) {
+        appendLog('该镜暂无线稿提示词可复制');
+        return;
+      }
+      try {
+        await navigator.clipboard.writeText(textValue);
+        toastSuccess('已复制线稿提示词');
+        appendLog(`已复制线稿提示词 · ${shot.sceneCode || shot.id}`);
+      } catch {
+        const ta = document.createElement('textarea');
+        ta.value = textValue;
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+        toastSuccess('已复制线稿提示词');
+      }
+    },
+    [appendLog, resolveSketchPrompt],
+  );
+
+
+  const generateBatchLineArt = useCallback(
+    async (scope: 'visible' | 'all' = 'visible') => {
+      const pictureId = resolveConnectedPictureGenId(props.id, getNodes(), getEdges());
+      if (!pictureId) {
+        appendLog('分镜台：批量线稿前请先连接「图像生成」节点');
+        return;
+      }
+      const pictureNode = getNodes().find((n) => n.id === pictureId);
+      if (!pictureNode) return;
+
+      const targetShots = (scope === 'visible' ? visibleShots : shots).filter(Boolean);
+      if (targetShots.length === 0) {
+        appendLog('分镜台：当前没有可生成线稿的镜头');
+        return;
+      }
+
+      setBatchMode('line-art');
+      setBatchProgress(`0/${targetShots.length}`);
+      appendLog(`开始批量线稿 · ${targetShots.length} 镜（${scope === 'visible' ? '当前可见' : '全部'}）`);
+
+      let ok = 0;
+      let fail = 0;
+      for (let i = 0; i < targetShots.length; i++) {
+        const shot = targetShots[i];
+        setBatchProgress(`${i + 1}/${targetShots.length}`);
+        setGeneratingShotId(shot.id);
+        try {
+          const livePayload = (getNodes().find((n) => n.id === props.id)?.data as Record<string, unknown> | undefined)?.scriptBreakdown as ScriptBreakdownPayload | undefined;
+          const liveShot = flattenScriptBreakdownShots(livePayload).find((s) => s.id === shot.id) ?? shot;
+          const sketchPrompt = resolveSketchPrompt(liveShot);
+          const frame: StoryboardPreviewFrame = {
+            id: `frame-line-${liveShot.id}`,
+            order: i + 1,
+            label: `${liveShot.sceneCode || `Shot${liveShot.index}`} · 线稿`,
+            startSec: 0,
+            endSec: Math.max(1, liveShot.durationSec || 5),
+            sourceShotId: liveShot.id,
+            promptSummary: sketchPrompt,
+            characterNames: liveShot.characters,
+            sceneAssetRef: liveShot.scene,
+            referenceImageUrl: null,
+            status: 'generating',
+            locked: false,
+            stylePreset: 'line-art',
+          };
+          const nodeData = (getNodes().find((n) => n.id === props.id)?.data ?? {}) as Record<string, unknown>;
+          const previewRaw = nodeData.storyboardPreview as StoryboardPreviewPayload | undefined;
+          const pictureSettings = resolveStoryboardPreviewPictureSettings(previewRaw);
+          const imageUrl = await generateStoryboardFrameImage(
+            frame,
+            (pictureNode.data ?? {}) as Record<string, unknown>,
+            pictureSettings,
+          );
+
+          const base = livePayload ?? payload;
+          if (!base) {
+            setShotFrameUrl(liveShot.id, imageUrl);
+          } else {
+            const withSketch = patchShotInPayload(base, liveShot.id, {
+              sketchPrompt,
+              previewImageUrl: imageUrl,
+              referenceImageUrl: imageUrl,
+              status: 'previewing',
+            });
+            const nextBreakdown = writeBackBreakdownPreviewImage(withSketch, liveShot.id, imageUrl) ?? withSketch;
+            applyScriptBreakdownPayload(props.id, nextBreakdown);
+            updateShot(liveShot.id, {
+              firstFrameAssetId: imageUrl,
+              keyframeStatus: 'review',
+              status: 'review',
+              sketchPrompt,
+            });
+            updateNodeData(props.id, (node) => {
+              const data = (node.data ?? {}) as Record<string, unknown>;
+              const raw = data.storyboardPreview as StoryboardPreviewPayload | undefined;
+              const current = raw?.version === 1 && Array.isArray(raw.frames)
+                ? { ...emptyStoryboardPreview(), ...raw, pictureSettings: resolveStoryboardPreviewPictureSettings(raw) }
+                : emptyStoryboardPreview();
+              let frames = [...current.frames];
+              const idx = frames.findIndex((f) => f.sourceShotId === liveShot.id || f.id === `frame-line-${liveShot.id}` || f.id === liveShot.id);
+              const framePatch = {
+                imageUrl,
+                status: 'success' as const,
+                errorMessage: null,
+                promptSummary: sketchPrompt,
+                stylePreset: 'line-art',
+              };
+              if (idx >= 0) {
+                frames = frames.map((f, fi) => (fi === idx ? { ...f, ...framePatch } : f));
+              } else {
+                frames = [
+                  ...frames,
+                  {
+                    id: `frame-line-${liveShot.id}`,
+                    order: frames.length + 1,
+                    label: `${liveShot.sceneCode || `Shot${liveShot.index}`} · 线稿`,
+                    startSec: 0,
+                    endSec: Math.max(1, liveShot.durationSec || 5),
+                    sourceShotId: liveShot.id,
+                    promptSummary: sketchPrompt,
+                    characterNames: liveShot.characters,
+                    sceneAssetRef: liveShot.scene,
+                    referenceImageUrl: null,
+                    imageUrl,
+                    status: 'success' as const,
+                    locked: false,
+                    stylePreset: 'line-art',
+                  },
+                ];
+              }
+              return {
+                ...node,
+                data: {
+                  ...data,
+                  scriptBreakdown: nextBreakdown,
+                  storyboardPreview: { ...current, frames, confirmed: false },
+                  previewUrls: frames.map((f) => f.imageUrl).filter(Boolean),
+                },
+              };
+            });
+          }
+          ok += 1;
+        } catch (e) {
+          fail += 1;
+          appendLog(`批量线稿失败 · ${shot.sceneCode || shot.id}: ${String(e)}`);
+        }
+      }
+
+      setGeneratingShotId(null);
+      setBatchMode(null);
+      setBatchProgress(null);
+      appendLog(`批量线稿完成 · 成功 ${ok} · 失败 ${fail}`);
+      if (ok > 0) toastSuccess(`批量线稿完成 ${ok}/${targetShots.length}`);
+    },
+    [
+      appendLog,
+      getEdges,
+      getNodes,
+      payload,
+      props.id,
+      resolveSketchPrompt,
+      setShotFrameUrl,
+      shots,
+      updateNodeData,
+      updateShot,
+      visibleShots,
+    ],
+  );
+
+  const generateBatchKeyframes = useCallback(
+    async (scope: 'visible' | 'all' | 'missing' = 'visible') => {
+      const pictureId = resolveConnectedPictureGenId(props.id, getNodes(), getEdges());
+      if (!pictureId) {
+        appendLog('分镜台：批量关键帧前请先连接「图像生成」节点');
+        return;
+      }
+      const pictureNode = getNodes().find((n) => n.id === pictureId);
+      if (!pictureNode) return;
+
+      const pool = (scope === 'all' ? shots : visibleShots).filter(Boolean);
+      const liveNow = (getNodes().find((n) => n.id === props.id)?.data as Record<string, unknown> | undefined)?.scriptBreakdown as ScriptBreakdownPayload | undefined;
+      const liveMap = new Map(flattenScriptBreakdownShots(liveNow).map((s) => [s.id, s]));
+      const targetShots = scope === 'missing'
+        ? pool.filter((shot) => {
+            const live = liveMap.get(shot.id) ?? shot;
+            return !live.previewImageUrl && !live.referenceImageUrl;
+          })
+        : pool;
+      if (targetShots.length === 0) {
+        appendLog(scope === 'missing' ? '分镜台：当前可见镜头均已有画面，无需补关键帧' : '分镜台：当前没有可生成关键帧的镜头');
+        return;
+      }
+
+      setBatchMode('keyframe');
+      setBatchProgress(`0/${targetShots.length}`);
+      appendLog(`开始批量关键帧 · ${targetShots.length} 镜（${scope === 'all' ? '全部' : scope === 'missing' ? '仅缺图' : '当前可见'}）`);
+
+      let ok = 0;
+      let fail = 0;
+      for (let i = 0; i < targetShots.length; i++) {
+        const shot = targetShots[i];
+        setBatchProgress(`${i + 1}/${targetShots.length}`);
+        setGeneratingShotId(shot.id);
+        try {
+          const livePayload = (getNodes().find((n) => n.id === props.id)?.data as Record<string, unknown> | undefined)?.scriptBreakdown as ScriptBreakdownPayload | undefined;
+          const liveShot = flattenScriptBreakdownShots(livePayload).find((s) => s.id === shot.id) ?? shot;
+          const promptSummary = (liveShot.imagePrompt || liveShot.scriptText || liveShot.visual || liveShot.title || '').trim();
+          if (!promptSummary) {
+            fail += 1;
+            appendLog(`批量关键帧跳过 · ${liveShot.sceneCode || liveShot.id}: 缺少 imagePrompt / 文案`);
+            continue;
+          }
+          const frame: StoryboardPreviewFrame = {
+            id: `frame-${liveShot.id}`,
+            order: i + 1,
+            label: liveShot.sceneCode || `Shot${liveShot.index}`,
+            startSec: 0,
+            endSec: Math.max(1, liveShot.durationSec || 5),
+            sourceShotId: liveShot.id,
+            promptSummary,
+            characterNames: liveShot.characters,
+            sceneAssetRef: liveShot.scene,
+            referenceImageUrl: liveShot.referenceImageUrl ?? liveShot.previewImageUrl ?? null,
+            status: 'generating',
+            locked: false,
+            stylePreset: null,
+          };
+          const nodeData = (getNodes().find((n) => n.id === props.id)?.data ?? {}) as Record<string, unknown>;
+          const previewRaw = nodeData.storyboardPreview as StoryboardPreviewPayload | undefined;
+          const pictureSettings = resolveStoryboardPreviewPictureSettings(previewRaw);
+          const imageUrl = await generateStoryboardFrameImage(
+            frame,
+            (pictureNode.data ?? {}) as Record<string, unknown>,
+            pictureSettings,
+          );
+          // setShotFrameUrl 会同步拆分结果 / 故事板 / 预览帧
+          setShotFrameUrl(liveShot.id, imageUrl);
+          ok += 1;
+        } catch (e) {
+          fail += 1;
+          appendLog(`批量关键帧失败 · ${shot.sceneCode || shot.id}: ${String(e)}`);
+        }
+      }
+
+      setGeneratingShotId(null);
+      setBatchMode(null);
+      setBatchProgress(null);
+      appendLog(`批量关键帧完成 · 成功 ${ok} · 失败 ${fail}`);
+      if (ok > 0) toastSuccess(`批量关键帧完成 ${ok}/${targetShots.length}`);
+    },
+    [
+      appendLog,
+      getEdges,
+      getNodes,
+      props.id,
+      setShotFrameUrl,
+      shots,
+      visibleShots,
+    ],
   );
 
   const copyShotImagePrompt = useCallback(
@@ -756,38 +1199,92 @@ function StoryboardDeskBlock(props: NodeProps) {
 
           <button
             type="button"
-            className="sg-mini"
-            onClick={() => openStudio(payload ? 'grid' : 'grid')}
+            className="sg-summary-card"
+            onClick={() => openStudio('grid')}
             title="打开分镜台 · 表编辑 + 关键帧预览"
           >
-            {payload && miniPreview.length > 0 ? (
+            {payload && visibleShots.length > 0 ? (
               <>
-                <div className="sg-mini__head sg-mini__head--roster">
-                  <span>镜</span>
-                  <span>场景</span>
-                  <span>内容</span>
-                </div>
-                {miniPreview.map((row) => (
-                  <div key={row.id} className="sg-mini__row sg-mini__row--roster">
-                    <span className="is-code" style={{ color: 'var(--sg-accent)', fontWeight: 650 }}>
-                      {row.code}
+                <div className="sg-summary-card__hero">
+                  <div>
+                    <span className="sg-summary-card__eyebrow">
+                      {currentEpisodeConfirmed ? '本集已确认' : '分镜台'}
                     </span>
-                    <span className="is-title">{compact(row.scene, 10)}</span>
-                    <span>{row.line}</span>
+                    <strong>
+                      {compact(
+                        visibleEpisodes[0]?.title
+                          || payload.title
+                          || `第 ${(visibleEpisodes[0]?.index ?? 0) + 1 || 1} 集`,
+                        18,
+                      )}
+                    </strong>
+                    <p>
+                      {miniPreview[0]
+                        ? `${miniPreview[0].code} · ${compact(miniPreview[0].scene, 10)} · ${compact(miniPreview[0].line, 28)}`
+                        : '打开后编辑分镜表、线稿与关键帧'}
+                    </p>
                   </div>
-                ))}
-                {visibleShots.length > 4 ? (
-                  <div className="sg-mini__more">
-                    本集另有 {visibleShots.length - 4} 镜 · 开表查看
-                  </div>
-                ) : null}
+                  <span className="sg-summary-card__metric">
+                    {visibleShots.length}
+                    <small>镜</small>
+                  </span>
+                </div>
+                <div className="sg-summary-card__stats" aria-label="分镜摘要">
+                  <span><b>{episodeCount}</b> 集</span>
+                  <span><b>{previewOk}</b> 关键帧</span>
+                  <span><b>{sceneCount}</b> 场</span>
+                </div>
+                <div className="sg-summary-card__chips">
+                  {(miniPreview.length
+                    ? miniPreview.map((r) => r.code)
+                    : ['分镜表', '线稿', '关键帧']
+                  ).map((label) => (
+                    <span key={label}>{compact(label, 10)}</span>
+                  ))}
+                </div>
+                <div className="sg-summary-card__trail">
+                  {previewLow > 0
+                    ? `${previewLow} 张关键帧评分偏低 · 建议重生成`
+                    : confirmedCount < episodeCount
+                      ? `已确认 ${confirmedCount}/${episodeCount} 集 · 点击开台`
+                      : '点击开台编辑分镜 / 预览关键帧'}
+                </div>
               </>
             ) : (
-              <div className="sg-mini__empty">
-                {upstream && !local
-                  ? '上游有拆分 · 点同步载入分镜表'
-                  : '等待剧本拆分 · 连接后同步展示'}
-              </div>
+              <>
+                <div className="sg-summary-card__hero is-empty">
+                  <div>
+                    <span className="sg-summary-card__eyebrow">
+                      {upstream && !local ? '可同步' : '等待拆分'}
+                    </span>
+                    <strong>
+                      {upstream && !local ? '同步上游分镜' : '连接剧本拆分'}
+                    </strong>
+                    <p>
+                      {upstream && !local
+                        ? '上游已有拆分结果，点同步载入分镜表后即可开台。'
+                        : '连接剧本拆分（或设定检查）后同步分镜表、线稿与关键帧。'}
+                    </p>
+                  </div>
+                  <span className="sg-summary-card__metric">
+                    {upstream ? (upstream.episodes?.length ?? 0) : 0}
+                    <small>集</small>
+                  </span>
+                </div>
+                <div className="sg-summary-card__stats" aria-label="等待状态">
+                  <span><b>0</b> 镜</span>
+                  <span><b>0</b> 图</span>
+                  <span><b>{upstream ? '待同步' : '待接'}</b></span>
+                </div>
+                <div className="sg-summary-card__chips">
+                  <span>分镜表</span>
+                  <span>线稿</span>
+                  <span>关键帧</span>
+                </div>
+                <div className="sg-summary-card__trail">
+                  {upstream && !local ? '点「同步」或卡片载入' : '等待剧本拆分结果'}
+                </div>
+              </>
             )}
           </button>
 
@@ -892,6 +1389,62 @@ function StoryboardDeskBlock(props: NodeProps) {
             </div>
 
             <div className="sg-studio__body">
+              <div className="sg-batch-bar">
+                <div className="sg-batch-bar__meta">
+                  {batchMode === 'line-art'
+                    ? `批量线稿进行中 ${batchProgress || ''}`.trim()
+                    : batchMode === 'keyframe'
+                      ? `批量关键帧进行中 ${batchProgress || ''}`.trim()
+                      : '先线稿确认构图，再批量出关键帧'}
+                </div>
+                <div className="sg-batch-bar__acts">
+                  <button
+                    type="button"
+                    className="sg-btn sg-btn--ghost"
+                    disabled={!payload || batchRunning || visibleShots.length === 0}
+                    onClick={() => void generateBatchLineArt('visible')}
+                    title="对当前表内可见镜头批量生成线稿"
+                  >
+                    {batchMode === 'line-art' ? `线稿 ${batchProgress}` : `可见线稿 · ${visibleShots.length}`}
+                  </button>
+                  <button
+                    type="button"
+                    className="sg-btn sg-btn--ghost"
+                    disabled={!payload || batchRunning || shots.length === 0}
+                    onClick={() => void generateBatchLineArt('all')}
+                    title="对本拆分结果全部镜头批量生成线稿"
+                  >
+                    全部线稿 · {shots.length}
+                  </button>
+                  <button
+                    type="button"
+                    className="sg-btn sg-btn--ghost"
+                    disabled={!payload || batchRunning || visibleShots.length === 0}
+                    onClick={() => void generateBatchKeyframes('visible')}
+                    title="对当前表内可见镜头批量生成关键帧成图"
+                  >
+                    {batchMode === 'keyframe' ? `关键帧 ${batchProgress}` : `可见关键帧 · ${visibleShots.length}`}
+                  </button>
+                  <button
+                    type="button"
+                    className="sg-btn sg-btn--ghost"
+                    disabled={!payload || batchRunning || visibleShots.length === 0}
+                    onClick={() => void generateBatchKeyframes('missing')}
+                    title="仅补当前可见、尚无画面的镜头关键帧"
+                  >
+                    缺图补关键帧
+                  </button>
+                  <button
+                    type="button"
+                    className="sg-btn sg-btn--ghost"
+                    disabled={!payload || batchRunning || shots.length === 0}
+                    onClick={() => void generateBatchKeyframes('all')}
+                    title="对本拆分结果全部镜头批量生成关键帧成图"
+                  >
+                    全部关键帧 · {shots.length}
+                  </button>
+                </div>
+              </div>
               <div className="sg-stats">
                 <div className="sg-stats__cell">
                   <span className="sg-stats__val">{episodeCount}</span>
@@ -961,6 +1514,7 @@ function StoryboardDeskBlock(props: NodeProps) {
                             <th className="col-av">视听语言</th>
                             <th className="col-img">画面图片提示词</th>
                             <th className="col-vid">画面视频提示词</th>
+                            <th className="col-sk">线稿提示词</th>
                             <th className="col-neg">排除</th>
                             <th className="col-dur">秒</th>
                             <th className="col-act">操作</th>
@@ -973,6 +1527,7 @@ function StoryboardDeskBlock(props: NodeProps) {
                             const av = shotAudiovisual(shot);
                             const img = shot.imagePrompt?.trim() || '—';
                             const vid = shot.videoPrompt?.trim() || '—';
+                            const sk = shot.sketchPrompt?.trim() || '—';
                             const neg = shot.negativePrompt?.trim() || '—';
                             const on = selectedId === shot.id || editingShotId === shot.id;
                             return (
@@ -988,13 +1543,15 @@ function StoryboardDeskBlock(props: NodeProps) {
                                   <ShotFrameCell
                                     shot={shot}
                                     storyboardUrl={storyboardUrlByShotId.get(shot.id)}
-                                    generating={generatingShotId === shot.id}
+                                    generating={generatingShotId === shot.id || (batchRunning && generatingShotId === shot.id)}
                                     onUpload={(url) => {
                                       setShotFrameUrl(shot.id, url);
                                       appendLog(`分镜画面已上传 · ${shot.sceneCode || shot.id}`);
                                     }}
                                     onGenerate={() => void generateShotFrame(shot)}
+                                    onGenerateLineArt={() => void generateShotLineArt(shot)}
                                     onCopyPrompt={() => void copyShotImagePrompt(shot)}
+                                    onCopySketchPrompt={() => void copyShotSketchPrompt(shot)}
                                   />
                                 </td>
                                 <td className="col-size">{shot.shotSize || '—'}</td>
@@ -1023,6 +1580,9 @@ function StoryboardDeskBlock(props: NodeProps) {
                                 </td>
                                 <td className="col-vid">
                                   <div className="sg-cell sg-cell--prompt" title={vid}>{vid}</div>
+                                </td>
+                                <td className="col-sk">
+                                  <div className="sg-cell sg-cell--prompt" title={sk}>{sk}</div>
                                 </td>
                                 <td className="col-neg">
                                   <div className="sg-cell" title={neg}>{neg === '—' ? '—' : compact(neg, 24)}</div>
@@ -1120,6 +1680,24 @@ function StoryboardDeskBlock(props: NodeProps) {
                   <button
                     type="button"
                     className="sg-btn sg-btn--ghost"
+                    disabled={!payload || batchRunning || visibleShots.length === 0}
+                    onClick={() => void generateBatchLineArt('visible')}
+                    data-testid="foot-batch-lineart"
+                  >
+                    {batchMode === 'line-art' ? `线稿 ${batchProgress}` : '批量线稿'}
+                  </button>
+                  <button
+                    type="button"
+                    className="sg-btn sg-btn--ghost"
+                    disabled={!payload || batchRunning || visibleShots.length === 0}
+                    onClick={() => void generateBatchKeyframes('visible')}
+                    data-testid="foot-batch-keyframe"
+                  >
+                    {batchMode === 'keyframe' ? `关键帧 ${batchProgress}` : '批量关键帧'}
+                  </button>
+                  <button
+                    type="button"
+                    className="sg-btn sg-btn--ghost"
                     onClick={() => setStudioTab('preview')}
                   >
                     去关键帧
@@ -1137,7 +1715,9 @@ function StoryboardDeskBlock(props: NodeProps) {
             ) : (
               <div className="sg-studio__foot">
                 <p className="sg-studio__foot-hint">
-                  关键帧出图 · 评分门槛 80 · 低分镜可批量重生成
+                  {batchMode === 'keyframe'
+                    ? `批量关键帧进行中 ${batchProgress || ''}`.trim()
+                    : '关键帧出图 · 评分门槛 80 · 可批量补图 / 全量重出'}
                 </p>
                 <div className="sg-studio__foot-actions">
                   <button
@@ -1146,6 +1726,24 @@ function StoryboardDeskBlock(props: NodeProps) {
                     onClick={() => setStudioTab('grid')}
                   >
                     回分镜表
+                  </button>
+                  <button
+                    type="button"
+                    className="sg-btn sg-btn--ghost"
+                    disabled={!payload || batchRunning || visibleShots.length === 0}
+                    onClick={() => void generateBatchKeyframes('missing')}
+                    title="仅补当前可见、尚无画面的镜头"
+                  >
+                    缺图补关键帧
+                  </button>
+                  <button
+                    type="button"
+                    className="sg-btn sg-btn--primary"
+                    disabled={!payload || batchRunning || visibleShots.length === 0}
+                    onClick={() => void generateBatchKeyframes('visible')}
+                    data-testid="preview-batch-keyframe"
+                  >
+                    {batchMode === 'keyframe' ? `关键帧 ${batchProgress}` : `批量关键帧 · ${visibleShots.length}`}
                   </button>
                 </div>
               </div>
@@ -1497,6 +2095,55 @@ function StoryboardDeskBlock(props: NodeProps) {
                   kinds={GLOBAL_MENTION_KINDS}
                   className="sg-textarea"
                 />
+              </label>
+              <label className="sg-field">
+                <span className="sg-label">线稿构图提示词 sketchPrompt</span>
+                <AssetMentionInput
+                  as="textarea"
+                  rows={3}
+                  value={editDraft.sketchPrompt ?? ''}
+                  onChange={(next) => setEditDraft({ ...editDraft, sketchPrompt: next })}
+                  kinds={GLOBAL_MENTION_KINDS}
+                  placeholder="黑白线稿构图：站位 / 前中后景 / 轮廓 / 机位；无色彩无材质"
+                  className="sg-textarea"
+                />
+                <div style={{ display: 'flex', gap: 6, marginTop: 6, flexWrap: 'wrap' }}>
+                  <button
+                    type="button"
+                    className="sg-btn sg-btn--ghost"
+                    onClick={() => {
+                      const filled = buildLineArtShotPrompt(
+                        [
+                          editDraft.scriptText || editDraft.visual || editDraft.title,
+                          editDraft.scene ? `location: ${editDraft.scene}` : '',
+                          editDraft.shotSize ? `${editDraft.shotSize} shot` : '',
+                          editDraft.cameraMove ? `camera: ${editDraft.cameraMove}` : '',
+                          editDraft.cameraAngle ? `angle: ${editDraft.cameraAngle}` : '',
+                          editDraft.characters?.length ? `characters: ${editDraft.characters.join(', ')}` : '',
+                        ].filter(Boolean).join('\n'),
+                        editDraft.shotSize,
+                      );
+                      setEditDraft({ ...editDraft, sketchPrompt: filled });
+                    }}
+                  >
+                    用镜头信息填充线稿词
+                  </button>
+                  <button
+                    type="button"
+                    className="sg-btn sg-btn--ghost"
+                    disabled={!editDraft.sketchPrompt?.trim()}
+                    onClick={() => {
+                      const v = (editDraft.sketchPrompt ?? '').trim();
+                      if (!v) return;
+                      void navigator.clipboard.writeText(v).then(
+                        () => toastSuccess('已复制线稿提示词'),
+                        () => toastSuccess('已复制线稿提示词'),
+                      );
+                    }}
+                  >
+                    复制线稿词
+                  </button>
+                </div>
               </label>
               <label className="sg-field">
                 <span className="sg-label">排除项 negativePrompt</span>

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Clapperboard, FolderLock, X } from 'lucide-react';
+import './create-workspace-dialog.css';
 
 export interface CreateWorkspaceDialogProps {
   open: boolean;
@@ -46,40 +47,43 @@ export function CreateWorkspaceDialog({
   };
 
   return (
-    <div className="fixed inset-0 z-[90] flex items-center justify-center p-4">
+    <div className="nx9-create-project fixed inset-0 z-[90] flex items-center justify-center p-4">
       <button
         type="button"
-        className="absolute inset-0 bg-ink/45 backdrop-blur-sm"
+        className="nx9-create-project__backdrop absolute inset-0"
         aria-label="关闭"
         onClick={onClose}
       />
       <div
         role="dialog"
         aria-modal="true"
-        className="relative w-full max-w-md bg-[#FFFCFA] rounded-2xl shadow-2xl border border-line overflow-hidden"
+        className="nx9-create-project__panel relative w-full max-w-md overflow-hidden"
       >
-        <div className="flex items-center justify-between px-5 py-4 border-b border-line">
-          <h2 className="font-semibold text-base text-ink">新建一部剧</h2>
-          <button type="button" onClick={onClose} className="p-1.5 rounded-lg hover:bg-surface text-ink/50">
+        <div className="nx9-create-project__header flex items-center justify-between px-5 py-4">
+          <div>
+            <h2 className="font-semibold text-base">新建一部剧</h2>
+            <p className="text-[11px] opacity-55 mt-0.5">从核心制作流程开始，或创建空白画布</p>
+          </div>
+          <button type="button" onClick={onClose} className="nx9-create-project__close">
             <X size={18} />
           </button>
         </div>
 
         <div className="p-5 space-y-4">
-          <div className="flex items-start gap-3 rounded-xl border border-line p-4 bg-surface/40">
-            <FolderLock size={20} className="text-brand shrink-0 mt-0.5" />
-            <p className="text-xs text-ink/55 leading-relaxed">
+          <div className="nx9-create-project__notice flex items-start gap-3 rounded-xl p-4">
+            <FolderLock size={20} className="shrink-0 mt-0.5" />
+            <p className="text-xs leading-relaxed">
               创建制作项目。推荐载入核心流程：剧本拆分 → 分镜 → 出图批审 → 视频 → 导出。
             </p>
           </div>
 
           <label className="block">
-            <span className="text-xs text-ink/50 mb-1 block">项目名称</span>
+            <span className="nx9-create-project__label text-xs mb-1 block">项目名称</span>
             <input
               value={title}
               onChange={(e) => setTitle(e.target.value)}
               placeholder="例如：短剧第一季"
-              className="w-full rounded-xl border border-line px-3 py-2 text-sm focus:outline-none focus:border-brand/40 bg-white"
+              className="nx9-create-project__input w-full rounded-xl px-3 py-2 text-sm focus:outline-none"
               autoFocus
               onKeyDown={(e) => {
                 if (e.key === 'Enter') void handleSubmit();
@@ -87,7 +91,7 @@ export function CreateWorkspaceDialog({
             />
           </label>
 
-          <label className="flex items-start gap-3 rounded-xl border border-brand/20 bg-brand/[0.04] p-3 cursor-pointer">
+          <label className="nx9-create-project__option flex items-start gap-3 rounded-xl p-3 cursor-pointer">
             <input
               type="checkbox"
               checked={bootstrapCore}
@@ -95,22 +99,22 @@ export function CreateWorkspaceDialog({
               className="mt-0.5 accent-[var(--nx9-brand)]"
             />
             <span className="min-w-0">
-              <span className="flex items-center gap-1.5 text-sm font-medium text-ink">
-                <Clapperboard size={14} className="text-brand" />
+              <span className="flex items-center gap-1.5 text-sm font-medium">
+                <Clapperboard size={14} />
                 载入核心制作流程
               </span>
-              <span className="block text-[11px] text-ink/50 mt-0.5 leading-relaxed">
+              <span className="block text-[11px] mt-0.5 leading-relaxed opacity-60">
                 自动放置剧本拆分、分镜网格、出图、批审、视频与导出节点，并可在右侧「编剧」开始粘贴剧本。
               </span>
             </span>
           </label>
         </div>
 
-        <div className="flex justify-end gap-2 px-5 py-4 border-t border-line bg-surface/40">
+        <div className="nx9-create-project__footer flex justify-end gap-2 px-5 py-4">
           <button
             type="button"
             onClick={onClose}
-            className="px-4 py-2 rounded-xl text-sm text-ink/60 hover:bg-surface"
+            className="nx9-create-project__ghost px-4 py-2 rounded-xl text-sm"
           >
             取消
           </button>
@@ -118,7 +122,7 @@ export function CreateWorkspaceDialog({
             type="button"
             disabled={submitting || !title.trim()}
             onClick={() => void handleSubmit()}
-            className="px-4 py-2 rounded-xl bg-brand text-white text-sm font-medium disabled:opacity-50"
+            className="nx9-create-project__primary px-4 py-2 rounded-xl text-sm font-medium disabled:opacity-50"
           >
             {submitting ? '创建中…' : bootstrapCore ? '创建并开始制作' : '创建空白项目'}
           </button>

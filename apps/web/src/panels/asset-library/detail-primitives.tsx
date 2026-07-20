@@ -1,5 +1,7 @@
 import type { ReactNode } from 'react';
-import { Copy, RefreshCw } from 'lucide-react';
+import { useMemo, useState } from 'react';
+import { Copy, RefreshCw, ZoomIn } from 'lucide-react';
+import { ImageLightbox, type ImageLightboxItem } from '../../components/ui/ImageLightbox';
 
 export function DetailSection({ title, children }: { title: string; children: ReactNode }) {
   return (
@@ -130,29 +132,74 @@ export function MediaSlot({
   accept,
   onUpload,
   hint,
+  gallery,
 }: {
   label: string;
   url?: string | null;
   accept: string;
   onUpload: (file: File) => void;
   hint?: string;
+  /** 放大时的图集（含当前图）；不传则仅当前图 */
+  gallery?: ImageLightboxItem[];
 }) {
+  const [open, setOpen] = useState(false);
+  const isImage = Boolean(url && !/\.(mp3|wav|ogg|m4a)(\?|$)/i.test(url));
+  const items = useMemo<ImageLightboxItem[]>(() => {
+    if (gallery && gallery.length > 0) return gallery.filter((g) => g.url);
+    if (url && isImage) return [{ url, label }];
+    return [];
+  }, [gallery, url, isImage, label]);
+  const startIndex = Math.max(0, items.findIndex((g) => g.url === url));
+
   return (
-    <label className="block text-[10px] text-ink/50 cursor-pointer">
+    <div className="block text-[10px] text-ink/50">
       <span className="mb-1 block">{label}</span>
-      <input
-        type="file"
-        accept={accept}
-        className="hidden"
-        onChange={(e) => {
-          const f = e.target.files?.[0];
-          if (f) onUpload(f);
-        }}
-      />
-      <div className="rounded-lg border border-dashed border-line py-4 text-center hover:border-brand/30 text-[10px]">
-        {url ? '已上传 · 点击替换' : hint ?? '点击上传'}
+      <div className="overflow-hidden rounded-lg border border-dashed border-line hover:border-brand/30">
+        {url && isImage ? (
+          <div className="relative">
+            <button
+              type="button"
+              className="group relative block aspect-square w-full overflow-hidden bg-surface"
+              onClick={() => setOpen(true)}
+              title={`放大查看：${label}`}
+            >
+              <img src={url} alt={label} className="h-full w-full object-cover" />
+              <span className="pointer-events-none absolute inset-0 grid place-items-center bg-black/0 transition group-hover:bg-black/30">
+                <ZoomIn size={16} className="text-white opacity-0 drop-shadow transition group-hover:opacity-100" />
+              </span>
+            </button>
+            <label className="flex cursor-pointer items-center justify-center border-t border-line bg-white/70 px-2 py-1 text-[10px] text-ink/55 hover:bg-brand/5 hover:text-brand">
+              更换
+              <input
+                type="file"
+                accept={accept}
+                className="hidden"
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (f) onUpload(f);
+                  e.currentTarget.value = '';
+                }}
+              />
+            </label>
+          </div>
+        ) : (
+          <label className="flex min-h-[84px] cursor-pointer flex-col items-center justify-center gap-1 px-2 py-4 text-center text-[10px] text-ink/45">
+            <input
+              type="file"
+              accept={accept}
+              className="hidden"
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (f) onUpload(f);
+                e.currentTarget.value = '';
+              }}
+            />
+            <span>{url ? '已上传 · 点击替换' : hint ?? '点击上传'}</span>
+          </label>
+        )}
       </div>
-    </label>
+      <ImageLightbox open={open} items={items} index={startIndex < 0 ? 0 : startIndex} onClose={() => setOpen(false)} />
+    </div>
   );
 }
 
@@ -190,27 +237,79 @@ export function VariantGrid({
   title,
   items,
   onChangeItem,
+  onUploadItem,
+  columns = 2,
+  maxHeightClass = 'max-h-48',
+  /** 传入完整角色图集时，放大可左右切换所有角色图 */
+  sharedGallery,
 }: {
   title: string;
-  items: Array<{ id: string; label: string; prompt?: string }>;
+  items: Array<{ id: string; label: string; prompt?: string; imageUrl?: string }>;
   onChangeItem: (id: string, patch: { prompt?: string; imageUrl?: string }) => void;
+  onUploadItem?: (id: string, file: File) => void;
+  columns?: 2 | 3 | 4 | 5;
+  maxHeightClass?: string;
+  sharedGallery?: ImageLightboxItem[];
 }) {
+  const colClass =
+    columns === 5 ? 'grid-cols-5' : columns === 4 ? 'grid-cols-4' : columns === 3 ? 'grid-cols-3' : 'grid-cols-2';
+  const [open, setOpen] = useState(false);
+  const [index, setIndex] = useState(0);
+  const localGallery = useMemo(
+    () => items.filter((item) => item.imageUrl).map((item) => ({ url: item.imageUrl as string, label: item.label })),
+    [items],
+  );
+  const gallery = sharedGallery && sharedGallery.length > 0 ? sharedGallery : localGallery;
+
   return (
     <div className="space-y-1.5">
       <p className="text-[10px] text-ink/40">{title}</p>
-      <div className="grid grid-cols-2 gap-1.5 max-h-40 overflow-y-auto nx9-scroll">
-        {items.map((item) => (
-          <div key={item.id} className="rounded-lg border border-line/80 p-1.5 space-y-1">
-            <span className="text-[10px] font-medium text-ink/70">{item.label}</span>
-            <input
-              value={item.prompt ?? ''}
-              onChange={(e) => onChangeItem(item.id, { prompt: e.target.value })}
-              placeholder="prompt…"
-              className="w-full text-[10px] rounded border border-line px-1.5 py-1 font-mono"
-            />
-          </div>
-        ))}
+      <div className={`grid ${colClass} gap-1.5 ${maxHeightClass} overflow-y-auto nx9-scroll`}>
+        {items.map((item) => {
+          const galleryIndex = gallery.findIndex((g) => g.url === item.imageUrl);
+          return (
+            <div key={item.id} className="space-y-1 rounded-lg border border-line/80 p-1.5">
+              <div className="relative aspect-square overflow-hidden rounded-md border border-line bg-surface">
+                {item.imageUrl ? (
+                  <button
+                    type="button"
+                    className="group relative h-full w-full"
+                    onClick={() => {
+                      setIndex(Math.max(0, galleryIndex));
+                      setOpen(true);
+                    }}
+                    title={`放大查看：${item.label}`}
+                  >
+                    <img src={item.imageUrl} alt={item.label} className="h-full w-full object-cover" />
+                    <span className="pointer-events-none absolute inset-0 grid place-items-center bg-black/0 transition group-hover:bg-black/30">
+                      <ZoomIn size={14} className="text-white opacity-0 drop-shadow transition group-hover:opacity-100" />
+                    </span>
+                  </button>
+                ) : (
+                  <div className="grid h-full place-items-center text-[9px] text-ink/30">待回填</div>
+                )}
+                {onUploadItem ? (
+                  <label className="absolute inset-x-0 bottom-0 cursor-pointer bg-black/45 px-1 py-0.5 text-center text-[9px] text-white/90">
+                    上传
+                    <input
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      onChange={(e) => {
+                        const f = e.target.files?.[0];
+                        if (f) onUploadItem(item.id, f);
+                        e.currentTarget.value = '';
+                      }}
+                    />
+                  </label>
+                ) : null}
+              </div>
+              <span className="block truncate text-[10px] font-medium text-ink/70" title={item.label}>{item.label}</span>
+            </div>
+          );
+        })}
       </div>
+      <ImageLightbox open={open} items={gallery} index={index} onClose={() => setOpen(false)} />
     </div>
   );
 }

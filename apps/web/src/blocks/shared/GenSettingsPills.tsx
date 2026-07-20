@@ -25,6 +25,7 @@ function GenSettingsPills({ label, options, value, onChange, className = '', com
             <button
               key={opt.id}
               type="button"
+              title={opt.id}
               onClick={() => onChange(opt.id)}
               className={`nodrag nopan text-[10px] px-1.5 py-0.5 rounded-full border transition-colors ${
                 value === opt.id
@@ -48,6 +49,7 @@ function GenSettingsPills({ label, options, value, onChange, className = '', com
           <button
             key={opt.id}
             type="button"
+            title={opt.id}
             onClick={() => onChange(opt.id)}
             className={`nodrag nopan text-[10px] px-2 py-1 rounded-full border transition-colors ${
               value === opt.id

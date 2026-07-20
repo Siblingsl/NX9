@@ -1,8 +1,14 @@
 import {
   enrichPromptWithCharacters,
+  enrichPromptWithAssetMentions,
   buildCharacterContext,
   resolvePromptBatch,
   resolveImageRequestSize,
+  characterToItem,
+  workspaceItemToAsset,
+  soundToItem,
+  templateToAsset,
+  BUILTIN_BACKLOT_TEMPLATES,
   type FlowBlock,
   type PromptBatchJob,
 } from '@nx9/shared';
@@ -22,6 +28,17 @@ function characterContextForBlock(block: FlowBlock, upstreamPictures: string[] =
   const shot = linkedShotForBlock(block.id, d);
   const library = useWorkspaceDocument.getState().characters.characters;
   return buildCharacterContext(d, shot, library, upstreamPictures);
+}
+
+function assetLibraryItemsForPrompt() {
+  const doc = useWorkspaceDocument.getState();
+  const privateItems = [
+    ...doc.characters.characters.map((c) => characterToItem(c, 'private')),
+    ...doc.soundLibrary.sounds.map((s) => soundToItem(s, 'private')),
+    ...doc.backlotWorkspace.items.map((i) => workspaceItemToAsset(i, 'private')),
+  ];
+  const publicItems = BUILTIN_BACKLOT_TEMPLATES.map((tpl) => templateToAsset(tpl as any, 'public', true));
+  return { privateItems, publicItems };
 }
 
 export async function runPictureGenExecutor(ctx: BlockExecutorContext): Promise<void> {
@@ -96,7 +113,9 @@ export async function runPictureGenExecutor(ctx: BlockExecutorContext): Promise<
     lastPrompt = '图片高清';
   } else {
     for (const job of finalJobs) {
+      const { privateItems, publicItems } = assetLibraryItemsForPrompt();
       let finalPrompt = enrichPromptWithCharacters(job.prompt, enhancedCtx.characters);
+      finalPrompt = enrichPromptWithAssetMentions(finalPrompt, privateItems, publicItems);
       finalPrompt = composePictureProPrompt(finalPrompt, proAction);
       const neg = (d.negativePrompt as string | undefined)?.trim();
       if (neg) {

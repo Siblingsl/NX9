@@ -453,7 +453,7 @@ async function executeBlock(
     );
     const finalJobs = jobs.length > 0 ? jobs : [{ prompt: prompt || 'a scenic landscape' }];
     const composeAction = upstream.promptDispatch?.composeAction ?? 'generate';
-    const modelId = (d.model as string) || 'dall-e-3';
+    const modelId = (d.model as string) || 'gemini-2.5-flash-image';
     const { resolveImageRequestSize } = await import('@nx9/shared');
     const quality = (d.quality as string) || 'auto';
     const aspectRatio = (d.aspectRatio as string) || '1:1';
@@ -570,6 +570,7 @@ async function executeBlock(
           styleImageUrl,
           strength: imageStrength,
           n: imageCount,
+          resolutionTier: (d.resolutionTier as string) || undefined,
           mode: pictureGenMode === 'panorama-720' ? 'panorama-720' : 'standard',
           negativePrompt: d.negativePrompt as string | undefined,
           seed: d.seed as number | undefined,

@@ -29,7 +29,7 @@ export function useAssetLibraryItems(scope: AssetScope, kind?: AssetLibraryKind)
     for (const tpl of listBacklotTemplates('character', backlotCustom)) {
       if ('createdAt' in tpl) privateItems.push(templateToAsset(tpl, 'private'));
     }
-    for (const kindKey of ['scene', 'shot', 'emotion', 'hook'] as const) {
+    for (const kindKey of ['costume', 'scene', 'shot', 'emotion', 'hook'] as const) {
       for (const tpl of listBacklotTemplates(kindKey, backlotCustom)) {
         if ('createdAt' in tpl) privateItems.push(templateToAsset(tpl, 'private'));
       }

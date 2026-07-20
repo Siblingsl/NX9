@@ -58,6 +58,10 @@ export interface AppSettings {
   /** Local GrokGo bridge Base URL; defaults to http://127.0.0.1:8787/v1. */
   grokGoBaseUrl?: string;
   rhApiKey?: string;
+  /** Google Gemini / Imagen API Key（AI Studio） */
+  geminiApiKey?: string;
+  /** Gemini API Base URL，默认 https://generativelanguage.googleapis.com/v1beta */
+  geminiBaseUrl?: string;
   llmApiKey?: string;
   /** Base URL for chat/text models; falls back to primaryBaseUrl/OpenAI when empty. */
   llmBaseUrl?: string;

@@ -154,6 +154,8 @@ export interface ScriptBreakdownShot {
   audiovisualLanguage?: string;
   imagePrompt: string;
   videoPrompt: string;
+  /** 线稿 / 草图构图提示词：用于分镜预览草稿、AI 线稿或手绘画板参考，不直接替代正式出图 Prompt。 */
+  sketchPrompt?: string;
   continuityNotes?: string[];
   negativePrompt?: string;
   referenceImageUrl?: string | null;
@@ -243,14 +245,18 @@ export const DEFAULT_SCRIPT_BREAKDOWN_CONFIG: ScriptBreakdownConfig = {
 
 export const DEFAULT_SCRIPT_BREAKDOWN_PROMPTS: ScriptBreakdownPromptTemplates = {
   episodePlannerSystem: [
-    '你是一名拥有20年以上经验的影视导演、分镜师、编剧和动画导演，负责把原文规划成可直接生产的影视/漫剧项目。',
-    '必须忠于原文事实、人物关系和事件顺序；不要把不同分集压进同一集。',
-    '每集必须有明确开场、推进、高潮或信息转折以及结尾钩子。',
-    '不要按标点或自然段机械切分；必须先理解剧情因果、人物目标、冲突升级和情绪转折。',
-    '如果原文较短，也要按专业短剧/漫剧制作逻辑规划成完整的一集，而不是逐句拆段。',
-    '必须建立稳定角色档案：身份、年龄、外貌、服装、标志性元素、性格、关系、目标、当前情绪、固定视觉关键词。',
-    '必须给出故事整体分析：类型、核心主题、时代/地点/世界观、整体视觉风格。',
-    '必须给出幕/章节拆解：剧情目标、冲突、情绪变化、关键事件、角色变化。',
+    '你是一名拥有20年以上经验的影视导演、分镜师、编剧和动画导演，同时熟悉短剧、漫剧、动漫与真人短片工业化生产流程。',
+    '任务：把原文规划成可直接进入分镜生产的多集项目蓝图；你是项目架构师，不是摘要机器。',
+    '必须忠于原文事实、人物关系、因果链与事件顺序；禁止把不同分集剧情压进同一集，禁止无依据新增主线事件。',
+    '每集必须具备可拍的戏剧弧：开场钩子 → 目标推进 → 冲突升级/信息转折 → 集末钩子；明确本集观众获得的情绪与信息。',
+    '禁止按标点、自然段或字数机械切分；先识别人物目标、障碍、反转与情绪拐点，再决定集边界。',
+    '若原文较短，仍需按专业短剧/漫剧制作逻辑补齐可拍结构（不编造与原文冲突的主线），避免逐句拆段。',
+    '角色档案必须稳定可复用：身份、年龄感、外貌、发型、体型、服装、标志性元素、性格、关系、目标、当前情绪、fixedVisualKeywords（英文关键词串）。',
+    '故事整体分析必须包含：类型、核心主题、时代/地点/世界观、整体视觉风格、叙事节奏建议。',
+    '幕/章节拆解必须写清：剧情目标、冲突、情绪变化、关键事件、角色变化；用于后续分镜的戏剧骨架。',
+    '角色与场景只输出候选设定，不假定已入库；同名角色必须唯一稳定；新增角色要能被设定检查节点识别。',
+    '场景输出可复用环境概念（地点+时间+光色规则）；禁止一句话一个新场景，仅当地点/时间/视觉规则明显不同才新建。',
+    '输出必须可被下游分镜拆解直接消费：名称稳定、字段完整、无互相矛盾的设定。',
     '仅输出 JSON 对象，不要 markdown，不要解释。',
   ].join('\n'),
   episodeBreakdownSystem: [
@@ -260,7 +266,10 @@ export const DEFAULT_SCRIPT_BREAKDOWN_PROMPTS: ScriptBreakdownPromptTemplates = 
     '每个场景必须有明确戏剧目的：信息揭示、人物选择、关系变化、危险逼近、反转或情绪推进。',
     '每个镜头必须服务于场景目的，允许合并多句原文为一个可拍镜头，也允许把关键动作拆成多个镜头。',
     '每镜必须可拍、可画、动作连续，角色名称稳定；对白必须标注说话人和情绪。',
-    '每镜必须包含：purpose、visual、action、sound、audiovisualLanguage、imagePrompt、videoPrompt。',
+    '每镜必须包含：purpose、visual、action、sound、audiovisualLanguage、imagePrompt、videoPrompt、sketchPrompt。',
+    '必须保持资产一致性：同一角色的 fixedVisualKeywords、服装标志、发型、年龄感不得在镜头之间漂移；场景的时代、建筑、光线和空间关系不得随意改变。',
+    '镜头里的 characters 必须使用 characters 档案中的稳定名称；如果出现新角色，必须在 characters 中补充候选档案。',
+    '镜头里的 scene 必须使用清晰可复用的场景名称，并与 scenes/location 对应，避免“一句话一个新场景”。',
     '',
     '【视听语言 audiovisualLanguage — 最高优先级字段之一】',
     'audiovisualLanguage 必须是 1～3 句完整的中文镜头叙事描写，写「镜头如何讲故事」，而不是标签清单。',
@@ -287,10 +296,13 @@ export const DEFAULT_SCRIPT_BREAKDOWN_PROMPTS: ScriptBreakdownPromptTemplates = 
     '',
     '请根据导演控制中的图片风格/视频风格/目标形态自动选择语感：真人写实偏摄影与材质，动漫偏线、影、速度线与夸张表情，古风/国漫偏烟尘、光雾与器物质感。',
     '',
+    'sketchPrompt 描述黑白线稿分镜构图：人物站位、前中后景、镜头角度、轮廓关系、画面重心；只用于草图/线稿，不写颜色和最终质感。',
     'imagePrompt 描述单一关键帧（英文优先），videoPrompt 描述从该关键帧开始的动作、镜头运动和连续性。',
-    'AI 图片提示词英文优先，必须包含角色固定视觉关键词、环境、动作、镜头、光影、艺术风格。',
-    'AI 视频提示词必须包含镜头运动、人物动作、环境变化、时间变化与情绪变化。',
-    '连续镜头必须说明服装、道具、人物相对位置、朝向、光线和时间状态的延续。',
+    '【imagePrompt 专业标准】英文优先，单帧可执行；必须包含：角色 fixedVisualKeywords、服装标志、环境锚点、动作定格、景别/机位、光线、材质、艺术风格；建议结构 Subject + Action + Environment + Camera + Lighting + Style + Quality。',
+    '【videoPrompt 专业标准】必须可直接驱动图生视频/文生视频：起幅状态、动作过程、镜头运动动机、环境/时间变化、情绪曲线、时长感；保持与 imagePrompt 角色与场景一致。',
+    '【sketchPrompt 专业标准】英文优先；必须包含 black and white storyboard sketch、clean pencil line art、clear silhouettes、readable pose/eyeline、foreground/midground/background、composition guide、no color、no shading、white background；禁止写最终渲染、材质、色彩分级。',
+    'Prompt 必须可直接给图像生成/视频生成/线稿节点使用；禁止“同上”“参考前文”“保持刚才风格”等依赖上下文短语；每条独立可执行。',
+    '连续镜头必须说明服装、道具、人物相对位置、朝向、光线和时间状态的延续；跨镜角色与场景资产名称保持稳定。',
     '仅输出 JSON 对象，不要 markdown，不要解释。',
   ].join('\n'),
 };
@@ -345,6 +357,7 @@ export function storyboardShotsFromScriptBreakdown(
       sceneId: shot.sceneId,
       sceneCode: shot.sceneCode,
       notes: shot.continuityNotes?.length ? shot.continuityNotes.join('\n') : undefined,
+      sketchPrompt: shot.sketchPrompt ?? null,
       keyframeStatus: approved ? 'approved' : hasPreview ? 'review' : 'draft',
       videoStatus: 'draft',
     } satisfies StoryboardShot;

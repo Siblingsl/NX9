@@ -9,6 +9,7 @@ const SECRET_KEYS = [
   'xaiApiKey',
   'grokGoApiKey',
   'rhApiKey',
+  'geminiApiKey',
   'llmApiKey',
   'ttsApiKey',
   'categoryKeys',
@@ -46,6 +47,7 @@ export class SettingsService {
       xaiApiKey: maskSecret(raw.xaiApiKey),
       grokGoApiKey: maskSecret(raw.grokGoApiKey),
       rhApiKey: maskSecret(raw.rhApiKey),
+      geminiApiKey: maskSecret(raw.geminiApiKey),
       llmApiKey: maskSecret(raw.llmApiKey),
       ttsApiKey: maskSecret(raw.ttsApiKey),
       categoryKeys: raw.categoryKeys

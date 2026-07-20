@@ -1,4 +1,5 @@
 import type { FlowBlock, FlowLink } from '../types/workspace';
+import { BLOCK_KIND_MIGRATION_PATCHES, migrateBlockKind } from '../catalog/migrate-block-kinds';
 
 export interface WorkflowTemplate {
   id: string;
@@ -18,11 +19,19 @@ function uid(seed: string) {
 }
 
 function node(type: string, col: number, row: number, data: Record<string, unknown> = {}): FlowBlock {
+  const migratedType = migrateBlockKind(type);
+  const patch = BLOCK_KIND_MIGRATION_PATCHES[type] ?? {};
   return {
-    id: uid(type),
-    type,
+    id: uid(migratedType),
+    type: migratedType,
     position: { x: BX + col * DX, y: BY + row * DY },
-    data: { blockIndex: col + row + 1, status: 'idle', ...data },
+    data: {
+      blockIndex: col + row + 1,
+      status: 'idle',
+      ...patch,
+      ...data,
+      ...(migratedType !== type ? { migratedFrom: type } : {}),
+    },
   };
 }
 

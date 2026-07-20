@@ -2,14 +2,16 @@ import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import path from 'path';
 
-const sharedDist = path.resolve(__dirname, '../../packages/shared/dist/esm/index.js');
+// Dev: resolve @nx9/shared to source so new named exports (e.g. getCostumeCreative)
+// are available without waiting for a full shared dist rebuild / stale Vite cache.
+const sharedSrc = path.resolve(__dirname, '../../packages/shared/src/index.ts');
 
 export default defineConfig({
   plugins: [react()],
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),
-      '@nx9/shared': sharedDist,
+      '@nx9/shared': sharedSrc,
       '@nx9/director3d': path.resolve(__dirname, '../../packages/director3d/src/index.ts'),
     },
   },
@@ -19,8 +21,11 @@ export default defineConfig({
   server: {
     host: '127.0.0.1',
     port: 5173,
+    fs: {
+      allow: [path.resolve(__dirname, '../..')],
+    },
     watch: {
-      ignored: ['!**/packages/shared/dist/**'],
+      ignored: ['!**/packages/shared/src/**'],
     },
     proxy: {
       '/api': { target: 'http://127.0.0.1:3001', changeOrigin: true },

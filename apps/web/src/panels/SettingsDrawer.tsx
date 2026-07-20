@@ -8,6 +8,7 @@ import { useStageDeckFlag } from '../stores/stage-deck-flag';
 import { useWorkspaceDocument } from '../stores/workspace-document';
 import { api } from '../api/client';
 import { getRuntime } from '../platform/runtime-bridge';
+import './settings-drawer.css';
 
 type SettingsSection = 'connection' | 'canvas' | 'prefs';
 
@@ -29,26 +30,29 @@ export function SettingsDrawer() {
   if (!settingsOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex justify-end">
+    <div className="nx9-settings fixed inset-0 z-50 flex justify-end">
       <button
         type="button"
-        className="flex-1 bg-ink/20 backdrop-blur-[2px]"
+        className="nx9-settings__backdrop flex-1"
         onClick={() => toggleSettings(false)}
         aria-label="关闭设置"
       />
-      <div className="w-full max-w-md h-full bg-white shadow-panel flex flex-col">
-        <div className="flex items-center justify-between px-5 py-4 border-b border-line">
+      <div className="nx9-settings__panel w-full max-w-md h-full flex flex-col">
+        <div className="nx9-settings__header flex items-center justify-between px-5 py-4">
           <div className="flex items-center gap-2">
-            <Key size={18} className="text-brand" />
-            <h2 className="text-lg font-semibold">设置</h2>
+            <span className="nx9-settings__icon"><Key size={16} /></span>
+            <div>
+              <h2 className="text-lg font-semibold">设置</h2>
+              <p className="text-[11px] opacity-55">模型连接 · 画布外观 · 创作偏好</p>
+            </div>
           </div>
-          <button type="button" onClick={() => toggleSettings(false)} className="p-1 hover:text-brand">
+          <button type="button" onClick={() => toggleSettings(false)} className="nx9-settings__close">
             <X size={20} />
           </button>
         </div>
 
         {/* 分区 Tab */}
-        <div className="flex border-b border-line">
+        <div className="nx9-settings__tabs flex">
           {([
             { id: 'connection' as const, label: translate('连接') },
             { id: 'canvas' as const, label: translate('画布') },
@@ -58,18 +62,14 @@ export function SettingsDrawer() {
               key={id}
               type="button"
               onClick={() => setSection(id)}
-              className={`flex-1 text-sm py-2.5 font-medium border-b-2 transition-colors ${
-                section === id
-                  ? 'border-brand text-brand'
-                  : 'border-transparent text-ink/50 hover:text-ink/70'
-              }`}
+              className={`nx9-settings__tab flex-1 ${section === id ? 'is-on' : ''}`}
             >
               {label}
             </button>
           ))}
         </div>
 
-        <div className="flex-1 overflow-y-auto nx9-scroll p-5 space-y-4">
+        <div className="nx9-settings__body flex-1 overflow-y-auto nx9-scroll p-5 space-y-4">
           {section === 'connection' && (
             <ConnectionSettings
               draft={draft}
@@ -88,7 +88,7 @@ export function SettingsDrawer() {
           )}
         </div>
 
-        <div className="p-5 border-t border-line">
+        <div className="nx9-settings__footer p-5">
           <button
             type="button"
             onClick={() => {
@@ -96,7 +96,7 @@ export function SettingsDrawer() {
                 useStageDeckFlag.getState().setOverride(null);
               });
             }}
-            className="w-full flex items-center justify-center gap-2 rounded-xl bg-brand text-white py-2.5 hover:bg-brand/90"
+            className="nx9-settings__save w-full flex items-center justify-center gap-2 rounded-xl py-2.5"
           >
             <Save size={16} />
             保存设置
@@ -120,9 +120,9 @@ function ConnectionSettings({
 }) {
   return (
     <div className="space-y-4">
-      <div className="rounded-2xl border border-brand/15 bg-brand/[0.04] p-3">
-        <p className="text-sm font-semibold text-ink">模型与服务连接</p>
-        <p className="mt-1 text-[11px] leading-relaxed text-ink/50">
+      <div className="nx9-settings__hero">
+        <p className="nx9-settings__hero-title">模型与服务连接</p>
+        <p className="nx9-settings__hero-desc">
           按生产流程拆开配置：文字负责剧本/提示词，图片负责出图，视频负责成片，音频负责配音。Magic Hour 的 Key 仍从{' '}
           <code className="text-ink/70">apps/server/.env</code> 读取。
         </p>
@@ -168,15 +168,30 @@ function ConnectionSettings({
 
       <SettingCard
         title="图片模型"
-        badge="分镜图 · 角色图 · 720° 全景图"
-        description="OpenAI 兼容图片模型默认使用上面的通用 Key/Base URL；Magic Hour 图片模型会自动走 .env 里的 MAGIC_HOUR_API_KEY。"
+        badge="分镜图 · 角色图 · Gemini · 720° 全景图"
+        description="OpenAI 兼容图片模型用上面的通用 Key/Base URL；Gemini / Imagen 用本组 Key；Magic Hour 走 apps/server/.env 的 MAGIC_HOUR_API_KEY。"
       >
+        <Field
+          label="Gemini API Key（Google AI Studio）"
+          value={draft.geminiApiKey ?? ''}
+          onChange={(v) => setDraft({ ...draft, geminiApiKey: v })}
+        />
+        <Field
+          label="Gemini Base URL"
+          value={draft.geminiBaseUrl ?? ''}
+          onChange={(v) => setDraft({ ...draft, geminiBaseUrl: v })}
+          placeholder="https://generativelanguage.googleapis.com/v1beta"
+          plain
+        />
+        <p className="nx9-settings__hint">
+          Pro 会员可在 Google AI Studio 申请 Key（免费图片额度按 Google 当日策略）。图像节点/素材库可选手动选择模型：Gemini 3.1 Flash Image（Pro 推荐）、3 Pro Image、2.5 Flash Image、Imagen 4/Ultra/Fast。填 Key 后保存并重启 server；也可在 apps/server/.env 写 GEMINI_API_KEY。若报 fetch failed/无法连接，需给 Node 配 HTTPS_PROXY 或填可访问的 Base URL 中转。若报 429 配额不足：Google AI Studio 网页 Pro ≠ API 出图额度，需在 https://ai.dev/rate-limit 查看，并为项目开通 Billing。
+        </p>
         <Field
           label="RunningHub Key（可选）"
           value={draft.rhApiKey ?? ''}
           onChange={(v) => setDraft({ ...draft, rhApiKey: v })}
         />
-        <p className="text-[10px] leading-relaxed text-ink/45">
+        <p className="nx9-settings__hint">
           后续如果接 ComfyUI、RunningHub 或专门的全景图服务，会放在这一组，不再混进视频配置里。
         </p>
       </SettingCard>
@@ -196,8 +211,8 @@ function ConnectionSettings({
             { value: 'custom', label: '自定义兼容通道' },
           ]}
         />
-        <div className="rounded-xl bg-surface/80 p-3 space-y-2">
-          <p className="text-xs font-semibold text-ink/70">xAI 官方 Grok</p>
+        <div className="nx9-settings__inset">
+          <p className="nx9-settings__inset-title">xAI 官方 Grok</p>
           <Field
             label="xAI 官方 API Key"
             value={draft.xaiApiKey ?? ''}
@@ -211,8 +226,8 @@ function ConnectionSettings({
             plain
           />
         </div>
-        <div className="rounded-xl bg-surface/80 p-3 space-y-2">
-          <p className="text-xs font-semibold text-ink/70">本地 GrokGo 测试桥</p>
+        <div className="nx9-settings__inset">
+          <p className="nx9-settings__inset-title">本地 GrokGo 测试桥</p>
           <Field
             label="GrokGo Key"
             value={draft.grokGoApiKey ?? ''}
@@ -226,8 +241,8 @@ function ConnectionSettings({
             plain
           />
         </div>
-        <details className="rounded-xl border border-line/70 bg-white px-3 py-2">
-          <summary className="cursor-pointer text-xs font-medium text-ink/60">自定义兼容通道 / 旧配置</summary>
+        <details className="nx9-settings__details">
+          <summary className="nx9-settings__details-summary">自定义兼容通道 / 旧配置</summary>
           <div className="mt-3 space-y-2">
             <Field
               label="自定义视频 API Key"
@@ -263,12 +278,12 @@ function ConnectionSettings({
           plain
         />
 
-        <div className="rounded-xl border border-line/70 bg-white p-3 space-y-2">
-          <div className="flex items-center gap-2 text-sm font-medium">
+        <div className="nx9-settings__inset">
+          <div className="nx9-settings__inset-title">
             <Radio size={16} className="text-accent" />
             Voicebox 本地桥接
           </div>
-        <label className="flex items-center gap-2 text-sm">
+        <label className="nx9-settings__check">
           <input
             type="checkbox"
             checked={draft.voiceboxEnabled ?? false}
@@ -312,8 +327,8 @@ function ConnectionSettings({
         {vbStatus && <p className="text-[10px] text-ink/50">{vbStatus}</p>}
       </div>
 
-        <div className="rounded-xl border border-line/70 bg-white p-3 space-y-2">
-        <div className="flex items-center gap-2 text-sm font-medium">
+        <div className="nx9-settings__inset">
+        <div className="nx9-settings__inset-title">
           <Radio size={16} className="text-brand" />
           LuxTTS 本地克隆
         </div>
@@ -323,7 +338,7 @@ function ConnectionSettings({
           ，需先运行 <code className="text-[10px]">npm run luxtts:install</code> 与{' '}
           <code className="text-[10px]">npm run luxtts:start</code>。参考音频 ≥3 秒。
         </p>
-        <label className="flex items-center gap-2 text-sm">
+        <label className="nx9-settings__check">
           <input
             type="checkbox"
             checked={draft.luxTtsEnabled ?? false}
@@ -406,7 +421,7 @@ function ConnectionSettings({
         badge="连接检测 · 数据迁移"
         description="这些不是模型参数，只在排查问题或迁移数据时使用。"
       >
-      <div className="rounded-xl border border-line/70 bg-white p-3 space-y-2">
+      <div className="nx9-settings__inset">
         <p className="text-sm font-medium">数据库（Prisma）</p>
         <p className="text-[10px] text-ink/50">将 JSON 工作区迁移到 SQLite。迁移后设置环境变量 NX9_STORAGE=prisma 并重启服务。</p>
         <button type="button" onClick={() => void api.migrateToPrisma().then((r) => alert(`已迁移 ${r.migrated} 个工作区，跳过 ${r.skipped}`))}
@@ -468,7 +483,7 @@ function CanvasSettings() {
 
       <div className="space-y-1">
         <p className="text-xs font-medium text-ink/60">主题模式</p>
-        <p className="text-[10px] text-ink/40">默认深色 desk · 浅色为暖纸新风格 · 全部节点同步</p>
+        <p className="nx9-settings__hint">默认深色 desk · 浅色为暖纸新风格 · 全部节点同步</p>
         <div className="flex gap-1">
           {(['dark', 'light'] as CanvasThemeMode[]).map((mode) => (
             <button
@@ -605,7 +620,7 @@ function PrefsCheckbox({ draft, setDraft, field, defaultVal, label }: {
   const prefs = draft.preferences;
   const checked = Boolean(prefs?.[field] ?? defaultVal);
   return (
-    <label className="flex items-center gap-2 text-sm mt-3">
+    <label className="nx9-settings__check">
       <input
         type="checkbox"
         checked={checked}
@@ -636,17 +651,15 @@ function SettingCard({
   children: ReactNode;
 }) {
   return (
-    <section className="rounded-2xl border border-line bg-white p-4 shadow-[0_1px_0_rgba(15,23,42,0.03)] space-y-3">
-      <div className="space-y-1">
-        <div className="flex items-center gap-2">
-          <h3 className="text-sm font-semibold text-ink">{title}</h3>
-          <span className="rounded-full bg-brand/8 px-2 py-0.5 text-[10px] font-medium text-brand">
-            {badge}
-          </span>
+    <section className="nx9-settings__card">
+      <div className="nx9-settings__card-head">
+        <div className="nx9-settings__card-title-row">
+          <h3 className="nx9-settings__card-title">{title}</h3>
+          <span className="nx9-settings__badge">{badge}</span>
         </div>
-        <p className="text-[11px] leading-relaxed text-ink/50">{description}</p>
+        <p className="nx9-settings__card-desc">{description}</p>
       </div>
-      <div className="space-y-3">{children}</div>
+      <div className="nx9-settings__fields">{children}</div>
     </section>
   );
 }
@@ -663,12 +676,12 @@ function SelectField({
   options: { value: string; label: string }[];
 }) {
   return (
-    <label className="block">
-      <span className="text-xs font-medium text-ink/60 mb-1 block">{label}</span>
+    <label className="nx9-settings__field">
+      <span className="nx9-settings__label">{label}</span>
       <select
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="w-full rounded-xl border border-line px-3 py-2 text-sm focus:outline-none focus:border-brand/40"
+        className="nx9-settings__select"
       >
         {options.map((option) => (
           <option key={option.value} value={option.value}>
@@ -686,9 +699,9 @@ function ProbeProvidersBlock() {
   const [probing, setProbing] = useState(false);
 
   return (
-    <div className="rounded-xl border border-line p-3 space-y-2">
-      <div className="flex items-center justify-between">
-        <p className="text-sm font-medium">探测模型</p>
+    <div className="nx9-settings__inset">
+      <div className="flex items-center justify-between gap-2">
+        <p className="nx9-settings__inset-title">探测模型</p>
         <button
           type="button"
           disabled={probing}
@@ -696,19 +709,19 @@ function ProbeProvidersBlock() {
             setProbing(true);
             void api.probeProviders().then((r) => setResults(r.providers)).catch(() => setResults([])).finally(() => setProbing(false));
           }}
-          className="text-xs text-brand hover:underline disabled:opacity-40"
+          className="nx9-settings__link-btn"
         >
           {probing ? '探测中…' : '探测模型'}
         </button>
       </div>
-      {results && results.length === 0 && <p className="text-[10px] text-ink/50">未配置 Provider 或无可用 Provider</p>}
+      {results && results.length === 0 && <p className="nx9-settings__hint">未配置 Provider 或无可用 Provider</p>}
       {results && results.length > 0 && (
-        <div className="space-y-1">
+        <div className="space-y-1.5">
           {results.map((r) => (
-            <div key={r.id} className={`flex items-center gap-2 text-xs ${r.available ? '' : 'opacity-40'}`}>
-              <span className={`inline-block w-1.5 h-1.5 rounded-full ${r.available ? 'bg-green-500' : 'bg-red-400'}`} />
+            <div key={r.id} className={`nx9-settings__probe-row ${r.available ? '' : 'opacity-45'}`}>
+              <span className={`nx9-settings__probe-dot ${r.available ? 'is-ok' : 'is-bad'}`} />
               <span className="font-medium">{r.label}</span>
-              <span className="text-ink/50 ml-auto">{r.message}</span>
+              <span className="ml-auto text-[11px] opacity-70">{r.message}</span>
             </div>
           ))}
         </div>
@@ -731,13 +744,13 @@ function Field({
   plain?: boolean;
 }) {
   return (
-    <label className="block">
-      <span className="text-xs font-medium text-ink/60 mb-1 block">{label}</span>
+    <label className="nx9-settings__field">
+      <span className="nx9-settings__label">{label}</span>
       <input
         type={plain ? 'text' : 'password'}
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="w-full rounded-xl border border-line px-3 py-2 text-sm focus:outline-none focus:border-brand/40"
+        className="nx9-settings__input"
         placeholder={placeholder ?? (plain ? '' : '••••••••')}
       />
     </label>

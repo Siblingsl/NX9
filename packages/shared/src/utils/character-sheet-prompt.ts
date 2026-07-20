@@ -87,7 +87,13 @@ export function buildCharacterSheetPrompt(input: CharacterSheetInput): string {
   if (input.palette?.trim()) parts.push(`color palette: ${input.palette.trim()}`);
   if (input.forbiddenTraits?.trim()) parts.push(`avoid: ${input.forbiddenTraits.trim()}`);
 
-  parts.push('consistent character design, same outfit and proportions across shots');
+  parts.push(
+    'production character key art',
+    'locked facial structure and hairline',
+    'same outfit and body proportions across shots',
+    'readable silhouette, high detail face and fabric',
+    'no watermark, no extra limbs, no identity drift',
+  );
   return parts.filter(Boolean).join(', ');
 }
 

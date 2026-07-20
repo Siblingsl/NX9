@@ -26,10 +26,11 @@ export function AssetLinkField({
   const activeProjectId = useWorkspaceCatalog((s) => s.activeId);
   const [pickerOpen, setPickerOpen] = useState(false);
 
-  const options = useMemo(
-    () => allItems.filter((i) => !i.builtin),
-    [allItems],
-  );
+  const options = useMemo(() => {
+    // 服装库需要展示内置模板；其它类型仍优先工作区/自定义素材
+    if (kind === 'costume') return allItems;
+    return allItems.filter((i) => !i.builtin);
+  }, [allItems, kind]);
 
   const handlePick = useCallback(
     (id: string) => {

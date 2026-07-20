@@ -215,6 +215,13 @@ export const VERTICAL_SOCKETS: Record<string, VerticalSocketSpec[]> = {
       id: 'asset-gate',
       label: '角色设定',
     },
+    {
+      kind: 'picture',
+      position: 'top',
+      type: 'target',
+      id: 'exec-picture',
+      // 连接图像生成：生成角色设定板 / 接收上游图
+    },
   ],
   'scene-card': [
     {
@@ -279,6 +286,10 @@ export function isStoryboardPreviewHostKind(kind?: string | null): boolean {
   return kind === 'storyboard-desk' || kind === 'storyboard-preview' || kind === 'story-grid';
 }
 
+export function isAssetSheetPictureHostKind(kind?: string | null): boolean {
+  return kind === 'character-sheet' || kind === 'scene-card';
+}
+
 export function isStoryboardExecLink(
   sourceKind: string,
   targetKind: string,
@@ -291,7 +302,14 @@ export function isStoryboardExecLink(
   const pair =
     (sourceKind === 'picture-gen' && isStoryboardPreviewHostKind(targetKind)) ||
     (isStoryboardPreviewHostKind(sourceKind) && targetKind === 'picture-gen') ||
+    (sourceKind === 'picture-gen' && isAssetSheetPictureHostKind(targetKind)) ||
+    (isAssetSheetPictureHostKind(sourceKind) && targetKind === 'picture-gen') ||
     (sourceKind === 'director-3d' && isStoryboardPreviewHostKind(targetKind)) ||
     (isStoryboardPreviewHostKind(sourceKind) && targetKind === 'director-3d');
+  // 能力口连线必须带 exec handle；资产设定板也允许普通 picture 口互连
+  if (isAssetSheetPictureHostKind(sourceKind) || isAssetSheetPictureHostKind(targetKind)) {
+    return pair;
+  }
   return usesExec && pair;
 }
+

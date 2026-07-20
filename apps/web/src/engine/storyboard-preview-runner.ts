@@ -37,7 +37,7 @@ export function resolvePictureGenSettings(
     snapToStep: (data.snapToStep as boolean) ?? true,
   });
   return {
-    modelId: (data.model as string) || 'dall-e-3',
+    modelId: (data.model as string) || 'gemini-2.5-flash-image',
     size: resolvedSize.size,
   };
 }
@@ -70,7 +70,7 @@ export async function generateStoryboardPanorama720(
   pictureNodeData: Record<string, unknown>,
 ): Promise<string> {
   if (!prompt.trim()) throw new Error('请先描述全景场景');
-  const configuredModel = (pictureNodeData.model as string) || 'dall-e-3';
+  const configuredModel = (pictureNodeData.model as string) || 'gemini-2.5-flash-image';
   const modelId = configuredModel === 'flux-i2i' ? 'flux-dev' : configuredModel;
   const urls = await runPictureGenJob({
     prompt,

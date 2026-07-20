@@ -66,13 +66,17 @@ export function characterPromptSuffix(characters: CharacterProfile[]): string {
         c.creative?.prompts?.bible?.text?.trim() ||
         c.consistencyPrompt?.trim() ||
         c.descriptionZh?.trim();
-      if (!desc) return null;
-      return `[Character ${c.name}]: ${desc}`;
+      const costume =
+        c.creative?.costumePrompt?.trim() ||
+        (c.creative?.costumeLabel ? `wardrobe: ${c.creative.costumeLabel}` : '');
+      if (!desc && !costume) return null;
+      const body = [desc, costume ? `Costume lock: ${costume}` : ''].filter(Boolean).join('\n');
+      return `[Character ${c.name}]: ${body}`;
     })
     .filter(Boolean);
 
   if (parts.length === 0) return '';
-  return `Character consistency:\n${parts.join('\n')}`;
+  return `Character consistency (identity lock):\n${parts.join('\n')}\nRules: keep face structure, hairline, body proportion, costume landmarks identical; no wardrobe drift; no identity drift.`;
 }
 
 export function enrichPromptWithCharacters(

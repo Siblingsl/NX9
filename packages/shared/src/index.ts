@@ -333,6 +333,7 @@ export type {
   CreativeVariantEntry,
   CharacterCreativeExtension,
   SceneCreativeExtension,
+  CostumeCreativeExtension,
   ShotCreativeExtension,
   EmotionCreativeExtension,
   HookCreativeExtension,
@@ -348,6 +349,12 @@ export {
   CAC_VOICE_GENDERS,
   CAC_VOICE_EMOTIONS,
   defaultCharacterVariants,
+  CAC_SHEET_EXPRESSION_PRESETS,
+  CAC_MICRO_EXPRESSION_PRESETS,
+  CAC_SHEET_POSE_PRESETS,
+  CAC_SHEET_HEAD_ANGLE_PRESETS,
+  CAC_COSTUME_DETAIL_PRESETS,
+  CAC_HAND_REF_PRESETS,
 } from './data/creative-asset-presets';
 export {
   CHARACTER_SHEET_PROMPT_TEMPLATE,
@@ -358,6 +365,13 @@ export {
   buildCharacterSheetGenerationPrompt,
   buildCharacterNegativePrompt,
   buildSceneBiblePrompt,
+  buildCostumeBiblePrompt,
+  buildCostumeImagePrompt,
+  buildCostumeNegativePrompt,
+  buildCostumeSheetGenerationPrompt,
+  COSTUME_SHEET_PROMPT_TEMPLATE,
+  getCostumeCreative,
+  regenerateCostumePrompts,
   buildSceneSheetGenerationPrompt,
   buildShotPrompt,
   buildEmotionPrompt,
@@ -371,6 +385,29 @@ export {
   getVoiceCreative,
   resolveAssetPromptText,
 } from './utils/creative-asset-prompts';
+
+export {
+  CHARACTER_SHEET_MASTER_PROMPT_TEMPLATE,
+  CHARACTER_SHEET_PANEL_LAYOUT,
+  CHARACTER_SHEET_STYLE_LABELS,
+  CHARACTER_SHEET_GRID_COLS,
+  CHARACTER_SHEET_GRID_ROWS,
+  buildCharacterMasterSheetPrompt,
+  buildCharacterSheetLockedLayoutPrompt,
+  formatPanelGridSpec,
+  panelRectToPixels,
+  groupCharacterSheetPanels,
+  describeCharacterSheetGrid,
+  type CharacterSheetStyleMode,
+  type CharacterSheetPanelId,
+  type CharacterSheetPanelLayout,
+  type CharacterSheetPromptInput,
+} from './utils/character-sheet-master';
+
+export {
+  applyCroppedPanelsToCharacter,
+  listCharacterSheetPanels,
+} from './utils/character-sheet-crop-fill';
 export {
   newCharacterProfile,
   normalizeCharacterProfile,
@@ -394,6 +431,7 @@ export {
   soundToItem,
   resolveAssetRef,
   enrichPromptWithAssets,
+  enrichPromptWithAssetMentions,
   type AssetLibraryKind,
   type AssetScope,
   type AssetRef,
@@ -411,6 +449,7 @@ export {
 export {
   buildStudioImagePrompt,
   buildStudioVideoPrompt,
+  buildStudioLineArtPrompt,
   applyStudioPromptsToShot,
   type StudioPromptContext,
 } from './utils/studio-prompt-builder';
@@ -535,6 +574,7 @@ export {
 } from './utils/character-sheet-prompt';
 export {
   PICTURE_GEN_MODELS,
+  DEFAULT_PICTURE_GEN_MODEL_ID,
   PICTURE_GEN_SIZES,
   CLIP_GEN_MODELS,
   CLIP_GEN_ASPECTS,

@@ -100,6 +100,16 @@ export function refreshCharacterPrompts(c: CharacterProfile): CharacterProfile {
 
 export function refreshWorkspacePrompts(item: BacklotWorkspaceItem): BacklotWorkspaceItem {
   const creative = regenerateWorkspacePrompts(item);
+  if (item.kind === 'costume') {
+    const costume = creative as import('../types/creative-asset-center').CostumeCreativeExtension | undefined;
+    const imagePrompt = costume?.prompts?.image?.text?.trim();
+    return {
+      ...item,
+      creative,
+      promptEn: item.promptEn?.trim() || imagePrompt || item.promptEn,
+      promptZh: item.promptZh?.trim() || costume?.description || item.promptZh,
+    };
+  }
   return { ...item, creative };
 }
 

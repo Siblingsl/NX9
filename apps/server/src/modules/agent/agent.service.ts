@@ -250,6 +250,11 @@ export function normalizeProductionEpisode(args: {
       for (const line of dialogue) if (!characters.includes(line.speaker)) characters.push(line.speaker);
       const visual = String(row.imagePrompt ?? row.image_prompt ?? '').trim() || `${args.config.visualStyle}，${scriptText}`;
       const motion = String(row.videoPrompt ?? row.video_prompt ?? row.videoDesc ?? '').trim() || `根据关键帧生成 ${durationSec} 秒视频：${scriptText}，动作自然，镜头连续`;
+      const sketchPrompt = String(row.sketchPrompt ?? row.sketch_prompt ?? '').trim() || [
+        scriptText || visual,
+        'black and white storyboard sketch, clean pencil line art, clear silhouettes,',
+        'foreground midground background composition guide, camera angle blocking, no color, no shading',
+      ].filter(Boolean).join(' ');
       const shotSize = ['ECU', 'CU', 'MS', 'FS', 'WS', 'OTS'].includes(String(row.shotSize).toUpperCase())
         ? String(row.shotSize).toUpperCase() as ScriptBreakdownShot['shotSize']
         : 'MS';
@@ -293,6 +298,7 @@ export function normalizeProductionEpisode(args: {
         }),
         imagePrompt: visual,
         videoPrompt: motion,
+        sketchPrompt,
         negativePrompt: String(row.negativePrompt ?? '').trim() || undefined,
         continuityNotes: stringArray(row.continuityNotes),
         referenceImageUrl: null,
@@ -646,6 +652,10 @@ export class AgentService {
             audiovisualLanguage: shot.audiovisualLanguage,
             imagePrompt: shot.imagePrompt,
             videoPrompt: shot.videoPrompt,
+            sketchPrompt: [
+              shot.scriptText || shot.imagePrompt,
+              'black and white storyboard sketch, clean pencil line art, clear silhouettes, composition guide, no color, no shading',
+            ].filter(Boolean).join(' '),
             continuityNotes: [],
           }],
         }));

@@ -70,6 +70,7 @@ function buildSceneConsistencyPrompt(input: {
     base,
     input.forbidden ? `Never change scene anchors: ${input.forbidden}` : '',
     'Maintain the same spatial layout, architecture, material texture, lighting logic and color continuity across shots.',
+    'Production location bible: stable vanishing lines, fixed prop anchors, coherent time-of-day lighting, no watermark, no UI chrome.',
   );
 }
 
@@ -452,39 +453,80 @@ function SceneCardBlock(props: NodeProps) {
             </span>
           </div>
 
-          {/* 场记表概览：不钉死某一个场景 */}
+          {/* 画布摘要卡：场景库状态，详表仅在场记台 */}
           <button
             type="button"
-            className="ss-mini"
+            className="ss-summary-card"
             onClick={openStudio}
             title="打开场景场记台 · 从库选场景再编辑"
           >
             {rosterStats.total > 0 ? (
               <>
-                <div className="ss-mini__head ss-mini__head--roster">
-                  <span>场景</span>
-                  <span>锚点</span>
-                  <span>状态</span>
+                <div className="ss-summary-card__hero">
+                  <div>
+                    <span className="ss-summary-card__eyebrow">场景场记</span>
+                    <strong>
+                      {rosterStats.pending === 0
+                        ? '场记齐备，可进分镜'
+                        : `${rosterStats.pending} 场待补设定`}
+                    </strong>
+                    <p>
+                      {rosterPreview[0]
+                        ? `代表：${compact(rosterPreview[0].name, 12)} · ${compact(rosterPreview[0].summary, 22)}`
+                        : '打开后维护环境锚点、光影与参考图'}
+                    </p>
+                  </div>
+                  <span className="ss-summary-card__metric">
+                    {rosterStats.total}
+                    <small>场</small>
+                  </span>
                 </div>
-                {rosterPreview.map((row) => (
-                  <div key={row.key} className="ss-mini__row ss-mini__row--roster">
-                    <span className="is-title">{compact(row.name, 10)}</span>
-                    <span>{compact(row.summary, 12)}</span>
-                    <span className={`ss-mini__badge is-${row.tone}`}>{row.status}</span>
-                  </div>
-                ))}
-                {rosterStats.total > 4 ? (
-                  <div className="ss-mini__more">
-                    另有 {rosterStats.total - 4} 场 · 开表查看全部
-                  </div>
-                ) : null}
+                <div className="ss-summary-card__stats" aria-label="场景库摘要">
+                  <span><b>{rosterStats.ready}</b> 齐备</span>
+                  <span><b>{rosterStats.needRef}</b> 缺图</span>
+                  <span><b>{rosterStats.needAnchor}</b> 缺锚</span>
+                </div>
+                <div className="ss-summary-card__chips">
+                  {(rosterPreview.length
+                    ? rosterPreview.map((r) => r.name)
+                    : ['场景库']
+                  ).map((label) => (
+                    <span key={label}>{compact(label, 10)}</span>
+                  ))}
+                </div>
+                <div className="ss-summary-card__trail">
+                  {rosterStats.pending === 0
+                    ? '点击进入场记台 · 维护环境一致性'
+                    : `待补 ${rosterStats.pending} · 点击开表补齐锚点/参考`}
+                </div>
               </>
             ) : (
-              <div className="ss-mini__empty">
-                场景场记为空
-                <br />
-                开表新建，或由剧本拆分补入
-              </div>
+              <>
+                <div className="ss-summary-card__hero is-empty">
+                  <div>
+                    <span className="ss-summary-card__eyebrow">准备中</span>
+                    <strong>建立场景场记</strong>
+                    <p>开表新建，或由剧本拆分 / 设定检查同步场景候选后再编辑。</p>
+                  </div>
+                  <span className="ss-summary-card__metric">
+                    0
+                    <small>场</small>
+                  </span>
+                </div>
+                <div className="ss-summary-card__stats" aria-label="空库状态">
+                  <span><b>0</b> 齐备</span>
+                  <span><b>—</b> 参考</span>
+                  <span><b>—</b> 光影</span>
+                </div>
+                <div className="ss-summary-card__chips">
+                  <span>环境锚点</span>
+                  <span>设定图</span>
+                  <span>氛围</span>
+                </div>
+                <div className="ss-summary-card__trail">
+                  点击进入场景场记台
+                </div>
+              </>
             )}
           </button>
 

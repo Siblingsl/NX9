@@ -1,0 +1,114 @@
+.nx9-create-project {
+  --cp-bg: var(--desk-bg, #141618);
+  --cp-bg-2: var(--desk-bg-2, #1a1c1f);
+  --cp-panel: var(--desk-panel, rgba(255,255,255,0.055));
+  --cp-ink: var(--desk-ink, rgba(236,232,224,0.94));
+  --cp-muted: var(--desk-muted, rgba(236,232,224,0.66));
+  --cp-faint: var(--desk-faint, rgba(236,232,224,0.42));
+  --cp-line: var(--desk-line, rgba(255,255,255,0.08));
+  --cp-line-strong: var(--desk-line-strong, rgba(255,255,255,0.12));
+  --cp-accent: var(--desk-accent, #c4a574);
+  --cp-accent-soft: var(--desk-accent-soft, rgba(196,165,116,0.14));
+  color: var(--cp-ink);
+}
+
+.nx9-create-project__backdrop {
+  background:
+    radial-gradient(circle at 48% 18%, rgba(196, 165, 116, 0.14), transparent 30%),
+    rgba(0, 0, 0, 0.48);
+  backdrop-filter: blur(7px);
+}
+
+.nx9-create-project__panel {
+  border-radius: 24px;
+  border: 1px solid var(--cp-line-strong);
+  background:
+    radial-gradient(circle at 92% 0%, rgba(196, 165, 116, 0.18), transparent 34%),
+    linear-gradient(180deg, rgba(255,255,255,0.05), transparent 150px),
+    color-mix(in srgb, var(--cp-bg) 92%, transparent);
+  box-shadow: 0 26px 72px rgba(0, 0, 0, 0.52);
+  backdrop-filter: blur(22px) saturate(1.14);
+}
+
+.nx9-create-project__header,
+.nx9-create-project__footer {
+  background: color-mix(in srgb, var(--cp-bg-2) 84%, transparent);
+  border-color: var(--cp-line);
+}
+
+.nx9-create-project__header {
+  border-bottom: 1px solid var(--cp-line);
+}
+
+.nx9-create-project__footer {
+  border-top: 1px solid var(--cp-line);
+}
+
+.nx9-create-project__close {
+  padding: 7px;
+  border-radius: 12px;
+  color: var(--cp-faint);
+  border: 1px solid var(--cp-line);
+  background: transparent;
+}
+
+.nx9-create-project__close:hover {
+  color: var(--cp-ink);
+  background: var(--cp-panel);
+}
+
+.nx9-create-project__notice,
+.nx9-create-project__option {
+  border: 1px solid var(--cp-line-strong);
+  background: var(--cp-panel);
+}
+
+.nx9-create-project__notice svg,
+.nx9-create-project__option svg {
+  color: var(--cp-accent);
+}
+
+.nx9-create-project__notice p,
+.nx9-create-project__label {
+  color: var(--cp-muted);
+}
+
+.nx9-create-project__input {
+  color: var(--cp-ink);
+  background: color-mix(in srgb, var(--cp-bg) 82%, transparent);
+  border: 1px solid var(--cp-line-strong);
+}
+
+.nx9-create-project__input::placeholder {
+  color: var(--cp-faint);
+}
+
+.nx9-create-project__input:focus {
+  border-color: color-mix(in srgb, var(--cp-accent) 55%, transparent);
+}
+
+.nx9-create-project__option {
+  border-color: color-mix(in srgb, var(--cp-accent) 28%, transparent);
+  background: var(--cp-accent-soft);
+}
+
+.nx9-create-project__option input {
+  accent-color: var(--cp-accent);
+}
+
+.nx9-create-project__ghost {
+  color: var(--cp-muted);
+  border: 1px solid var(--cp-line);
+  background: transparent;
+}
+
+.nx9-create-project__ghost:hover {
+  color: var(--cp-ink);
+  background: var(--cp-panel);
+}
+
+.nx9-create-project__primary {
+  color: var(--desk-btn-primary-ink, #1a1714);
+  background: linear-gradient(135deg, var(--cp-accent), color-mix(in srgb, var(--cp-accent) 74%, #fff));
+  box-shadow: 0 10px 24px color-mix(in srgb, var(--cp-accent) 24%, transparent);
+}

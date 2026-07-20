@@ -79,16 +79,44 @@ export interface CharacterCreativeExtension {
   worldView?: string;
   fullSheetUrl?: string | null;
   frontViewUrl?: string | null;
+  /** 主身份 3/4 站姿 */
+  threeQuarterViewUrl?: string | null;
   sideViewUrl?: string | null;
   backViewUrl?: string | null;
+  /** 正面/侧面剪影 */
+  silhouetteFrontUrl?: string | null;
+  silhouetteSideUrl?: string | null;
+  /** 情绪特写（胸部以上） */
+  emotionalCloseupUrl?: string | null;
   viewsLocked?: boolean;
   bodyMetrics?: CharacterBodyMetrics;
   appearanceDetails?: CharacterAppearanceDetails;
   expressions?: CreativeVariantEntry[];
   poses?: CreativeVariantEntry[];
   angles?: CreativeVariantEntry[];
+  /** 微表情局部特写 */
+  microExpressions?: CreativeVariantEntry[];
+  /** 服装/材质细节格 */
+  costumeDetails?: CreativeVariantEntry[];
+  /** 手部参考格 */
+  handRefs?: CreativeVariantEntry[];
   consistency?: CharacterConsistencyMeta;
   prompts?: CharacterPromptPack;
+  /** 绑定的服装库条目 id */
+  costumeId?: string | null;
+  /** 绑定服装名称 */
+  costumeLabel?: string | null;
+  /** 绑定服装的可注入 Prompt 快照 */
+  costumePrompt?: string | null;
+  /** 设定板生成风格模式 */
+  sheetStyleMode?: string | null;
+  /** 核心主题一句话 */
+  coreTheme?: string | null;
+  /** 体型关键词 */
+  bodyType?: string | null;
+  /** 风格关键词 */
+  styleKeywords?: string | null;
+  gender?: string | null;
 }
 
 export interface SceneCreativeExtension {
@@ -164,8 +192,51 @@ export interface VoiceCreativeExtension {
   };
 }
 
+/** 服装库 Creative Asset Center 扩展 */
+export interface CostumeCreativeExtension {
+  /** 套装简述 / 造型名 */
+  description?: string;
+  /** 服装类别：日常 / 正装 / 古装 / 战甲 等 */
+  category?: string;
+  /** 时代 / 风格 */
+  eraStyle?: string;
+  /** 主色与辅色 */
+  colorPalette?: string;
+  /** 面料与质感 */
+  materials?: string;
+  /** 剪裁与廓形 */
+  silhouette?: string;
+  /** 上衣 */
+  top?: string;
+  /** 下装 */
+  bottom?: string;
+  /** 外套 */
+  outerwear?: string;
+  /** 鞋履 */
+  footwear?: string;
+  /** 配饰 / 标志物 */
+  accessories?: string;
+  /** 适合角色（名称列表） */
+  recommendedCharacters?: string[];
+  /** 适用场景 */
+  recommendedScenes?: string[];
+  tags?: string[];
+  /** 参考图 */
+  referenceUrls?: string[];
+  /** 服装设定板 */
+  sheetUrl?: string | null;
+  /** 锁定后防漂移 */
+  locked?: boolean;
+  prompts?: {
+    costume?: StructuredPrompt;
+    image?: StructuredPrompt;
+    negative?: StructuredPrompt;
+  };
+}
+
 export type WorkspaceCreativeExtension =
   | SceneCreativeExtension
   | ShotCreativeExtension
   | EmotionCreativeExtension
-  | HookCreativeExtension;
+  | HookCreativeExtension
+  | CostumeCreativeExtension;

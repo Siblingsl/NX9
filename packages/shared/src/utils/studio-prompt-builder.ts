@@ -7,6 +7,7 @@ import type { EnvironmentProfile } from '../types/environment';
 import type { EpisodeMeta, StoryboardShot } from '../types/storyboard';
 import { enrichPromptWithCharacters } from './character-prompt';
 import { enrichPromptWithEnvironment } from './environment-prompt';
+import { buildLineArtShotPrompt } from './line-art-prompt';
 
 export interface StudioPromptContext {
   shot: StoryboardShot;
@@ -68,7 +69,7 @@ export function buildStudioImagePrompt(ctx: StudioPromptContext): string {
   const { shot, characters = [], environment, episode, globalArtDirection, artStyle } = ctx;
   const lines: string[] = [];
 
-  lines.push('Professional storyboard keyframe, single cinematic still frame, high detail, production quality.');
+  lines.push('Professional storyboard keyframe, single cinematic still frame, high narrative clarity, production quality, locked character/environment continuity.');
   lines.push(shotSizeEn(shot.shotType));
 
   const cam = translateCamera(shot.cameraMove);
@@ -95,7 +96,7 @@ export function buildStudioImagePrompt(ctx: StudioPromptContext): string {
   if (environment) prompt = enrichPromptWithEnvironment(prompt, environment);
 
   prompt +=
-    '\nConstraints: consistent character identity, coherent environment, no watermark, no UI chrome, no multi-panel grid.';
+    '\nConstraints: consistent character identity across franchise bible, coherent environment continuity, single frame only, no watermark, no UI chrome, no multi-panel grid, no text overlay.';
   return prompt.trim();
 }
 
@@ -106,7 +107,7 @@ export function buildStudioVideoPrompt(ctx: StudioPromptContext): string {
   const { shot, characters = [], environment, episode, globalArtDirection, artStyle } = ctx;
   const lines: string[] = [];
 
-  lines.push('Cinematic continuous shot, natural motion, production-ready short clip.');
+  lines.push('Cinematic continuous shot, natural motion, production-ready short clip, identity-locked from first frame.');
   lines.push(`Duration intent: about ${shot.durationSec || 4} seconds.`);
   lines.push(shotSizeEn(shot.shotType));
 
@@ -134,8 +135,30 @@ export function buildStudioVideoPrompt(ctx: StudioPromptContext): string {
   if (environment) prompt = enrichPromptWithEnvironment(prompt, environment);
 
   prompt +=
-    '\nConstraints: maintain identity from first frame, no jump cuts, no text overlay, filmic motion blur only when motivated.';
+    '\nConstraints: maintain character identity and costume from first frame, continuous motivated camera, no jump cuts, no text overlay, filmic motion blur only when motivated, keep spatial continuity.';
   return prompt.trim();
+}
+
+/**
+ * 分镜线稿提示词：用于草图确认、构图预览、手绘画板参考。
+ * 不替代正式关键帧出图；它故意去掉色彩、材质和最终渲染词，避免污染成图 Prompt。
+ */
+export function buildStudioLineArtPrompt(ctx: StudioPromptContext): string {
+  const { shot, characters = [], environment, episode, globalArtDirection } = ctx;
+  const base = [
+    shot.sketchPrompt?.trim(),
+    shot.descriptionZh?.trim(),
+    shot.sceneName ? `location: ${shot.sceneName}` : '',
+    shotSizeEn(shot.shotType),
+    translateCamera(shot.cameraMove),
+    episode?.cameraStyle ? `episode camera language: ${episode.cameraStyle}` : '',
+    globalArtDirection ? `overall art direction reference: ${globalArtDirection}` : '',
+  ].filter(Boolean).join('\n');
+
+  let prompt = buildLineArtShotPrompt(base, shot.shotType);
+  if (characters.length) prompt = enrichPromptWithCharacters(prompt, characters);
+  if (environment) prompt = enrichPromptWithEnvironment(prompt, environment);
+  return `${prompt}\nConstraints: composition draft only; preserve character identity via silhouette, hairline and costume landmarks; no color, no shading fill, no polished render, no photoreal skin, no watermark, no multi-panel collage.`.trim();
 }
 
 /** 一键为镜头写入专业提示词字段（不覆盖用户非空手写时可选 force） */
@@ -148,11 +171,13 @@ export function applyStudioPromptsToShot(
   const full: StudioPromptContext = { ...ctx, shot };
   const image = buildStudioImagePrompt(full);
   const video = buildStudioVideoPrompt(full);
+  const sketch = buildStudioLineArtPrompt(full);
   return {
     imagePromptPro: force || !shot.imagePromptPro?.trim() ? image : shot.imagePromptPro,
     videoPromptPro: force || !shot.videoPromptPro?.trim() ? video : shot.videoPromptPro,
     // 同步到执行链常用字段，便于出图/出视频 runner 读取
     promptEn: force || !shot.promptEn?.trim() ? image : shot.promptEn,
     videoPromptEn: force || !shot.videoPromptEn?.trim() ? video : shot.videoPromptEn,
+    sketchPrompt: force || !shot.sketchPrompt?.trim() ? sketch : shot.sketchPrompt,
   };
 }

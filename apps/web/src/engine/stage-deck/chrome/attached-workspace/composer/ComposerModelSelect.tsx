@@ -24,6 +24,7 @@ export function ComposerModelSelect({
   const btnRef = useRef<HTMLButtonElement>(null);
   const [open, setOpen] = useState(false);
   const label = options.find((o) => o.id === value)?.label ?? value;
+  const shortLabel = label.includes(' · ') ? label.split(' · ')[0] : label;
 
   return (
     <>
@@ -32,10 +33,11 @@ export function ComposerModelSelect({
         type="button"
         onMouseDown={stop}
         onClick={() => setOpen((v) => !v)}
-        className="inline-flex items-center gap-0.5 px-2 py-1 rounded-lg text-[11px] text-ink/60 hover:text-ink hover:bg-surface/80 transition-colors"
+        title={value}
+        className="inline-flex items-center gap-0.5 px-2 py-1 rounded-lg text-[11px] text-ink/60 hover:text-ink hover:bg-surface/80 transition-colors max-w-[220px]"
       >
-        {label}
-        <ChevronDown size={11} className="text-ink/30" />
+        <span className="truncate">{shortLabel}</span>
+        <ChevronDown size={11} className="text-ink/30 shrink-0" />
       </button>
       <ComposerPopover
         open={open}

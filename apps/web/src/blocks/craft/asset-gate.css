@@ -62,6 +62,163 @@
   font-weight: 650;
 }
 
+
+/* ── 画布摘要卡（对齐剧本拆分，不展示迷你表格） ── */
+.ag-summary-card {
+  width: 100%;
+  border: 1px solid var(--ag-line-strong, var(--ag-line));
+  border-radius: 12px;
+  overflow: hidden;
+  background:
+    radial-gradient(circle at 88% 0%, color-mix(in srgb, var(--ag-accent) 18%, transparent), transparent 30%),
+    linear-gradient(180deg, var(--ag-bg-2, var(--ag-bg)), var(--ag-bg));
+  cursor: pointer;
+  text-align: left;
+  padding: 12px;
+  display: block;
+  transition: border-color 0.12s, transform 0.12s, background 0.12s;
+}
+
+.ag-summary-card:hover {
+  border-color: var(--ag-accent-line, var(--ag-accent));
+  transform: translateY(-1px);
+}
+
+.ag-summary-card__hero {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+}
+
+.ag-summary-card__hero > div {
+  min-width: 0;
+  flex: 1;
+}
+
+.ag-summary-card__eyebrow {
+  display: block;
+  margin-bottom: 3px;
+  font-size: 9px;
+  font-weight: 750;
+  letter-spacing: 0.06em;
+  color: var(--ag-faint);
+  text-transform: uppercase;
+}
+
+.ag-summary-card__hero strong {
+  display: block;
+  color: var(--ag-ink);
+  font-size: 13px;
+  font-weight: 750;
+  line-height: 1.2;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ag-summary-card__hero p {
+  margin: 6px 0 0;
+  color: var(--ag-muted);
+  font-size: 10px;
+  line-height: 1.45;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.ag-summary-card__hero.is-empty p {
+  color: var(--ag-faint);
+}
+
+.ag-summary-card__metric {
+  flex: 0 0 auto;
+  min-width: 48px;
+  height: 48px;
+  border-radius: 14px;
+  display: grid;
+  place-items: center;
+  align-content: center;
+  border: 1px solid var(--ag-accent-line, color-mix(in srgb, var(--ag-accent) 45%, transparent));
+  background: var(--ag-accent-soft, color-mix(in srgb, var(--ag-accent) 14%, transparent));
+  color: var(--ag-accent);
+  font-size: 18px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+
+.ag-summary-card__metric small {
+  display: block;
+  margin-top: -2px;
+  font-size: 9px;
+  font-weight: 700;
+  color: var(--ag-faint);
+}
+
+.ag-summary-card__stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+  margin-top: 12px;
+}
+
+.ag-summary-card__stats span {
+  min-width: 0;
+  border: 1px solid var(--ag-line);
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.14);
+  color: var(--ag-faint);
+  font-size: 9px;
+  font-weight: 650;
+  line-height: 1.2;
+  padding: 7px 6px;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ag-summary-card__stats b {
+  color: var(--ag-ink);
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+
+.ag-summary-card__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 10px;
+}
+
+.ag-summary-card__chips span {
+  max-width: 88px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  border: 1px solid var(--ag-line);
+  border-radius: 999px;
+  padding: 3px 7px;
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--ag-faint);
+  font-size: 9px;
+  font-weight: 650;
+}
+
+.ag-summary-card__trail {
+  margin-top: 10px;
+  padding-top: 9px;
+  border-top: 1px solid var(--ag-line);
+  color: var(--ag-muted);
+  font-size: 10px;
+  line-height: 1.35;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .ag-mini {
   width: 100%;
   border: 1px solid var(--ag-line-strong);

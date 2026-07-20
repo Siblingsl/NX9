@@ -4,6 +4,12 @@ import {
   CLIP_GEN_ASPECTS,
   CLIP_GEN_MODELS,
   enrichPromptWithCharacters,
+  enrichPromptWithAssetMentions,
+  characterToItem,
+  workspaceItemToAsset,
+  soundToItem,
+  templateToAsset,
+  BUILTIN_BACKLOT_TEMPLATES,
   gatherUpstream,
   pickReferenceImage,
   resolveBlockCharacters,
@@ -16,6 +22,7 @@ import {
   VIDEO_DURATION_OPTIONS,
   VIDEO_SIZE_PRESETS,
   resolveVideoGenParams,
+  buildStudioVideoPrompt,
 } from '@nx9/shared';
 import { BlockShell } from '../shared/BlockShell';
 import { CharacterBadge, CharacterSelect } from '../shared/CharacterSelect';
@@ -109,21 +116,43 @@ function ClipGenBlock(props: NodeProps) {
         if (refs) bridgeRefs.push(...refs);
       }
       const videoParams = resolveVideoGenParams({ resolution, orientation, aspect, durationSec });
+      const studioVideo = linkedShot
+        ? buildStudioVideoPrompt({
+            shot: linkedShot,
+            characters: activeCharacters,
+          })
+        : '';
       const base =
         upstreamMedia.prompts.filter(Boolean).join('\n\n') ||
         localContent ||
         linkedShot?.videoPromptPro ||
         linkedShot?.videoPromptEn ||
+        studioVideo ||
         linkedShot?.promptEn ||
         (props.data?.content as string) ||
         '';
       const bridgeSuffix = bridgePromptSuffix(
         bridgeRefs.length ? [{ bridgePreset: 'dissolve', durationSec: 0.5, refImageIds: bridgeRefs }] : [],
       );
-      const prompt = enrichPromptWithCharacters(
-        `${base}${bridgeSuffix ? `\n${bridgeSuffix}` : ''}${videoParams.aspect !== '16:9' ? `, aspect ratio ${videoParams.aspect}` : ''}${videoParams.durationSec ? `, ${videoParams.durationSec}s clip` : ''}`.trim(),
+      const motionLocks = [
+        videoParams.aspect !== '16:9' ? `aspect ratio ${videoParams.aspect}` : '',
+        videoParams.durationSec ? `${videoParams.durationSec}s continuous clip` : '',
+        'identity-locked motion, no jump cuts, no text overlay',
+      ].filter(Boolean).join(', ');
+      let prompt = enrichPromptWithCharacters(
+        `${base}${bridgeSuffix ? `\n${bridgeSuffix}` : ''}${motionLocks ? `\n${motionLocks}` : ''}`.trim(),
         activeCharacters,
       );
+      {
+        const doc = useWorkspaceDocument.getState();
+        const privateItems = [
+          ...doc.characters.characters.map((c) => characterToItem(c, 'private')),
+          ...doc.soundLibrary.sounds.map((s) => soundToItem(s, 'private')),
+          ...doc.backlotWorkspace.items.map((i) => workspaceItemToAsset(i, 'private')),
+        ];
+        const publicItems = BUILTIN_BACKLOT_TEMPLATES.map((tpl) => templateToAsset(tpl as any, 'public', true));
+        prompt = enrichPromptWithAssetMentions(prompt, privateItems, publicItems);
+      }
       const res = await api.proxyVideo({
         prompt,
         model,

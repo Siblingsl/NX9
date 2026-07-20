@@ -8,6 +8,7 @@ import type {
 } from '@nx9/shared';
 import {
   ASSET_LIBRARY_TABS,
+  BUILTIN_BACKLOT_TEMPLATES,
   isPrivateWorkspace,
   newBacklotWorkspaceItem,
   newCharacterProfile,
@@ -16,7 +17,13 @@ import {
   refreshCharacterPrompts,
   refreshVoicePrompts,
   refreshWorkspacePrompts,
+  templateToWorkspaceItem,
   workspaceItemToCustomTemplate,
+  buildCostumeSheetGenerationPrompt,
+  buildCharacterSheetGenerationPrompt,
+  applyCroppedPanelsToCharacter,
+  CHARACTER_SHEET_PANEL_LAYOUT,
+  resolveConnectedPictureGenId,
 } from '@nx9/shared';
 import {
   ArrowLeft,
@@ -24,6 +31,8 @@ import {
   FolderLock,
   Layers,
   Plus,
+  Sparkles,
+  Loader2,
   Search,
   ShieldCheck,
   AlertTriangle,
@@ -39,9 +48,15 @@ import { useWorkspaceCatalog } from '../stores/workspace-catalog';
 import { useWorkspaceDocument } from '../stores/workspace-document';
 import { useActivityLog } from '../stores/activity-log';
 import { toastSuccess } from '../stores/toast';
+import { useFlowRuntime } from '../stores/flow-runtime';
+import { useAssetLibraryGenSettings } from '../stores/asset-library-gen-settings';
+import AssetLibraryGenSettings, { resolveAssetLibraryImageRequest } from './asset-library/AssetLibraryGenSettings';
+import { runPictureGenJob } from '../engine/picture-gen-runner';
+import { cropCharacterSheetPanels } from '../engine/character-sheet-crop';
 import { PrivateProjectList } from './PrivateProjectList';
 import {
   CharacterDetailFields,
+  CostumeDetailFields,
   SceneDetailFields,
   ShotDetailFields,
   EmotionDetailFields,
@@ -170,6 +185,11 @@ const KIND_META: Record<
     emptyHint: '创建角色用于一致性注入与 @角色 引用',
     promptPlaceholder: '一致性 prompt…',
   },
+  costume: {
+    newLabel: '新建服装',
+    emptyHint: '创建服装套装，维护面料/配色/标志物，可在节点中 @服装 引用',
+    promptPlaceholder: '造型、面料、配色、标志物…',
+  },
   scene: {
     newLabel: '新建场景',
     emptyHint: '场景描述，可在节点中 @场景 引用',
@@ -253,6 +273,15 @@ export function AssetLibraryModal() {
 
   const [query, setQuery] = useState('');
   const [editId, setEditId] = useState<string | null>(null);
+  const [costumeGenBusy, setCostumeGenBusy] = useState(false);
+  const [costumeGenProgress, setCostumeGenProgress] = useState<string | null>(null);
+  const [charSheetGenBusy, setCharSheetGenBusy] = useState(false);
+  const [charSheetGenProgress, setCharSheetGenProgress] = useState<string | null>(null);
+  const runtime = useFlowRuntime((s) => s.runtime);
+  const characterSheetGen = useAssetLibraryGenSettings((s) => s.characterSheet);
+  const costumeSheetGen = useAssetLibraryGenSettings((s) => s.costumeSheet);
+  const setCharacterSheetGen = useAssetLibraryGenSettings((s) => s.setCharacterSheet);
+  const setCostumeSheetGen = useAssetLibraryGenSettings((s) => s.setCostumeSheet);
 
   useEffect(() => {
     if (open) void fetchPublic();
@@ -316,18 +345,49 @@ export function AssetLibraryModal() {
     if (scope === 'private') {
       return workspaceItems.find((i) => i.id === editId && i.kind === tab);
     }
-    const tpl = publicTemplates.find((t) => t.id === editId && t.kind === tab);
+    const tpl =
+      publicTemplates.find((x) => x.id === editId && x.kind === tab)
+      ?? BUILTIN_BACKLOT_TEMPLATES.find((x) => x.id === editId && x.kind === tab);
     if (!tpl || tpl.kind === 'character') return undefined;
+    // 只读预览内置/公共模板；要编辑请点「导入」
     return {
       id: tpl.id,
-      kind: tpl.kind,
+      kind: tpl.kind as Exclude<AssetLibraryKind, 'character' | 'sound'>,
       label: tpl.label,
       promptEn: tpl.promptEn,
       promptZh: tpl.promptZh,
       hookPhase: tpl.hookPhase,
-      creative: tpl.creative,
+      creative: 'creative' in tpl ? tpl.creative : undefined,
+      sourceTemplateId: tpl.id,
     };
   }, [tab, scope, workspaceItems, publicTemplates, editId]);
+
+  const costumeBindOptions = useMemo(() => {
+    const privateCostumes = workspaceItems
+      .filter((i) => i.kind === 'costume')
+      .map((i) => ({
+        id: i.id,
+        label: i.label,
+        prompt: i.promptEn || i.promptZh || '',
+      }));
+    const publicCostumes = [
+      ...publicTemplates.filter((x) => x.kind === 'costume'),
+      ...BUILTIN_BACKLOT_TEMPLATES.filter((x) => x.kind === 'costume'),
+    ].map((i) => ({
+      id: i.id,
+      label: i.label,
+      prompt: i.promptEn || i.promptZh || '',
+    }));
+    const seen = new Set<string>();
+    const out: Array<{ id: string; label: string; prompt: string }> = [];
+    for (const row of [...privateCostumes, ...publicCostumes]) {
+      const key = row.id || row.label;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push(row);
+    }
+    return out;
+  }, [workspaceItems, publicTemplates]);
 
   const tabMeta = KIND_META[tab];
   const canEditPrivate =
@@ -423,6 +483,37 @@ export function AssetLibraryModal() {
     publicUpsertTemplate,
   ]);
 
+  const handleCloneBuiltin = useCallback(
+    (templateId: string) => {
+      if (tab === 'character' || tab === 'sound') return;
+      if (scope === 'private' && !canEditPrivate) return;
+      const tpl = BUILTIN_BACKLOT_TEMPLATES.find((x) => x.id === templateId && x.kind === tab);
+      if (!tpl || tpl.kind === 'character') return;
+      const base = templateToWorkspaceItem(tpl, tpl.id);
+      if (!base) return;
+      const item = refreshWorkspacePrompts(base);
+      if (scope === 'private') {
+        saveWorkspaceItem(item);
+        setEditId(item.id);
+        toastSuccess(`已从模板导入「${item.label}」`);
+        appendLog(`服装/素材库：导入模板 ${item.label}`);
+        return;
+      }
+      const custom = workspaceItemToCustomTemplate(item, tpl.group || '公共库');
+      publicUpsertTemplate(custom);
+      setEditId(custom.id);
+      toastSuccess(`已导入公共库「${custom.label}」`);
+    },
+    [
+      tab,
+      scope,
+      canEditPrivate,
+      saveWorkspaceItem,
+      publicUpsertTemplate,
+      appendLog,
+    ],
+  );
+
   const handleDelete = useCallback(
     (id: string) => {
       if (tab === 'character') {
@@ -460,26 +551,236 @@ export function AssetLibraryModal() {
   );
 
   const handleUploadCharacterView = useCallback(
-    async (file: File, char: CharacterProfile, view: 'full' | 'front' | 'side' | 'back') => {
+    async (file: File, char: CharacterProfile, view: string) => {
       const res = await api.uploadAsset(file);
-      const key =
-        view === 'full'
-          ? 'fullSheetUrl'
-          : view === 'front'
-            ? 'frontViewUrl'
-            : view === 'side'
-              ? 'sideViewUrl'
-              : 'backViewUrl';
+      const fieldMap: Record<string, string> = {
+        full: 'fullSheetUrl',
+        front: 'frontViewUrl',
+        threeQuarter: 'threeQuarterViewUrl',
+        side: 'sideViewUrl',
+        back: 'backViewUrl',
+        silhouetteFront: 'silhouetteFrontUrl',
+        silhouetteSide: 'silhouetteSideUrl',
+        emotionalCloseup: 'emotionalCloseupUrl',
+      };
+
+      // variant uploads: expr:id / micro:id / angle:id / pose:id / costumeDetail:id / hand:id
+      if (view.includes(':')) {
+        const [group, id] = view.split(':');
+        const creative = { ...(char.creative ?? {}) } as Record<string, unknown>;
+        const groupKey =
+          group === 'expr' ? 'expressions'
+            : group === 'micro' ? 'microExpressions'
+              : group === 'angle' ? 'angles'
+                : group === 'pose' ? 'poses'
+                  : group === 'costumeDetail' ? 'costumeDetails'
+                    : group === 'hand' ? 'handRefs'
+                      : null;
+        if (!groupKey) return;
+        const list = Array.isArray(creative[groupKey]) ? [...(creative[groupKey] as any[])] : [];
+        const idx = list.findIndex((item) => item.id === id);
+        if (idx >= 0) list[idx] = { ...list[idx], imageUrl: res.url };
+        else list.push({ id, label: id, imageUrl: res.url });
+        creative[groupKey] = list;
+        saveCharacter({ ...char, creative: creative as CharacterProfile['creative'] });
+        return;
+      }
+
+      const key = fieldMap[view] ?? 'frontViewUrl';
       saveCharacter({
         ...char,
         creative: {
           ...char.creative,
           [key]: res.url,
         },
-        referenceImageUrl: view === 'front' ? res.url : char.referenceImageUrl,
+        referenceImageUrl: view === 'front' || view === 'full' ? res.url : char.referenceImageUrl,
       });
     },
     [saveCharacter],
+  );
+
+
+  const findPictureGenNode = useCallback(() => {
+    const nodes = runtime?.getNodes() ?? [];
+    const edges = runtime?.getEdges() ?? [];
+    // 1) 选中节点若连着图像生成
+    const selectedId = useFlowRuntime.getState().selectedBlockId;
+    if (selectedId) {
+      const via = resolveConnectedPictureGenId(selectedId, nodes, edges);
+      if (via) {
+        const n = nodes.find((x) => x.id === via);
+        if (n?.type === 'picture-gen') return n;
+      }
+      const self = nodes.find((x) => x.id === selectedId);
+      if (self?.type === 'picture-gen') return self;
+    }
+    // 2) 任意角色设定 / 场景设定已连接的图像节点
+    for (const n of nodes) {
+      if (n.type !== 'character-sheet' && n.type !== 'scene-card' && n.type !== 'storyboard-desk') continue;
+      const via = resolveConnectedPictureGenId(n.id, nodes, edges);
+      if (via) {
+        const pic = nodes.find((x) => x.id === via);
+        if (pic?.type === 'picture-gen') return pic;
+      }
+    }
+    // 3) 画布上第一个图像生成节点
+    return nodes.find((n) => n.type === 'picture-gen');
+  }, [runtime]);
+
+
+  const resolveAssetGenRequest = useCallback((
+    kind: 'character-sheet' | 'costume-sheet',
+    pictureNode?: { data?: Record<string, unknown> } | null,
+  ) => {
+    const ui = kind === 'character-sheet' ? characterSheetGen : costumeSheetGen;
+    const picData = (pictureNode?.data ?? {}) as Record<string, unknown>;
+    // 素材库 UI 选择优先；图像节点参数仅作缺省回填
+    return resolveAssetLibraryImageRequest(ui, {
+      model: (picData.model as string) || undefined,
+      quality: (picData.quality as string) || undefined,
+      aspectRatio: (picData.aspectRatio as string) || (kind === 'character-sheet' ? '4:3' : '1:1'),
+      resolutionTier: (picData.resolutionTier as string) || undefined,
+      width: (picData.width as number) || undefined,
+      height: (picData.height as number) || undefined,
+    });
+  }, [characterSheetGen, costumeSheetGen]);
+
+  const generateCostumeSheets = useCallback(
+    async (items: BacklotWorkspaceItem[]) => {
+      if (scope !== 'private') {
+        appendLog('服装设定板：请先导入到私有项目库再生成');
+        return;
+      }
+      if (!canEditPrivate) {
+        appendLog('服装设定板：当前项目不可编辑');
+        return;
+      }
+      const targets = items.filter((i) => i.kind === 'costume');
+      if (targets.length === 0) {
+        appendLog('服装设定板：没有可生成的服装条目');
+        return;
+      }
+      const pictureNode = findPictureGenNode();
+      if (!pictureNode) {
+        appendLog('服装设定板：画布上未找到「图像生成」节点。请添加并（建议）用能力口连接到角色设定/分镜台。');
+        return;
+      }
+
+      setCostumeGenBusy(true);
+      setCostumeGenProgress(`0/${targets.length}`);
+      appendLog(`开始生成服装设定板 · ${targets.length} 件 · 经节点 ${pictureNode.id}`);
+
+      const { modelId, quality, aspectRatio, size, resolutionTier } = resolveAssetGenRequest('costume-sheet', pictureNode);
+      appendLog(`服装设定板参数 · 模型 ${modelId} · 清晰度 ${resolutionTier} · 质量 ${quality} · 比例 ${aspectRatio} · ${size}`);
+
+      let ok = 0;
+      let fail = 0;
+      for (let i = 0; i < targets.length; i++) {
+        const item = targets[i];
+        setCostumeGenProgress(`${i + 1}/${targets.length}`);
+        try {
+          const refreshed = refreshWorkspacePrompts(item);
+          const prompt = buildCostumeSheetGenerationPrompt(refreshed);
+          const urls = await runPictureGenJob({
+            prompt,
+            modelId,
+            size,
+            n: 1,
+            resolutionTier,
+          });
+          const imageUrl = urls[0];
+          if (!imageUrl) throw new Error('未返回图片');
+          const ext = (refreshed.creative ?? {}) as Record<string, unknown>;
+          saveWorkspaceItem({
+            ...refreshed,
+            creative: {
+              ...ext,
+              sheetUrl: imageUrl,
+            } as BacklotWorkspaceItem['creative'],
+          });
+          ok += 1;
+          appendLog(`服装设定板完成 · ${item.label}`);
+        } catch (e) {
+          fail += 1;
+          appendLog(`服装设定板失败 · ${item.label}: ${String(e)}`);
+        }
+      }
+
+      setCostumeGenBusy(false);
+      setCostumeGenProgress(null);
+      appendLog(`服装设定板批量结束 · 成功 ${ok} · 失败 ${fail}`);
+      if (ok > 0) toastSuccess(`服装设定板完成 ${ok}/${targets.length}`);
+    },
+    [appendLog, canEditPrivate, findPictureGenNode, resolveAssetGenRequest, saveWorkspaceItem, scope],
+  );
+
+  const generateCharacterMasterSheet = useCallback(
+    async (char: CharacterProfile) => {
+      if (scope === 'private' && !canEditPrivate) {
+        appendLog('角色设定板：当前项目不可编辑');
+        return;
+      }
+      const pictureNode = findPictureGenNode();
+      if (!pictureNode) {
+        appendLog('角色设定板：画布上未找到「图像生成」节点。请先添加图像生成节点（建议连接角色设定节点）。');
+        return;
+      }
+
+      setCharSheetGenBusy(true);
+      setCharSheetGenProgress('生成整板 0/2');
+      appendLog(`开始生成角色设定板 · ${char.name || char.id}`);
+
+      try {
+        const refreshed = refreshCharacterPrompts(char);
+        const prompt = buildCharacterSheetGenerationPrompt(refreshed);
+        const { modelId, quality, aspectRatio, size, resolutionTier } = resolveAssetGenRequest('character-sheet', pictureNode);
+        appendLog(`角色设定板参数 · 模型 ${modelId} · 清晰度 ${resolutionTier} · 质量 ${quality} · 比例 ${aspectRatio} · ${size}`);
+        const refUrl =
+          refreshed.creative?.fullSheetUrl
+          || refreshed.referenceImageUrl
+          || refreshed.creative?.frontViewUrl
+          || undefined;
+
+        setCharSheetGenProgress('生成整板 1/2');
+        const urls = await runPictureGenJob({
+          prompt,
+          modelId,
+          size,
+          n: 1,
+          resolutionTier,
+          referenceImageUrl: refUrl || undefined,
+        });
+        const sheetUrl = urls[0];
+        if (!sheetUrl) throw new Error('设定板未返回图片');
+
+        setCharSheetGenProgress('裁切回填 2/2');
+        const blobs = await cropCharacterSheetPanels(sheetUrl);
+        const panelUrls: Record<string, string> = {};
+        const entries = Object.entries(blobs);
+        for (let i = 0; i < entries.length; i++) {
+          const [panelId, blob] = entries[i];
+          setCharSheetGenProgress(`上传裁切 ${i + 1}/${entries.length}`);
+          const file = new File([blob], `char-sheet-${char.id}-${panelId}.jpg`, { type: 'image/jpeg' });
+          const uploaded = await api.uploadAsset(file);
+          panelUrls[panelId] = uploaded.url;
+        }
+
+        const next = applyCroppedPanelsToCharacter(refreshed, {
+          panelUrls,
+          fullSheetUrl: sheetUrl,
+          overwrite: true,
+        });
+        saveCharacter(next);
+        appendLog(`角色设定板完成并回填 ${Object.keys(panelUrls).length} 格 · ${char.name || char.id}`);
+        toastSuccess(`设定板已回填 ${Object.keys(panelUrls).length} 个面板`);
+      } catch (e) {
+        appendLog(`角色设定板失败: ${String(e)}`);
+      } finally {
+        setCharSheetGenBusy(false);
+        setCharSheetGenProgress(null);
+      }
+    },
+    [appendLog, canEditPrivate, findPictureGenNode, resolveAssetGenRequest, saveCharacter, scope],
   );
 
   const handleUploadWorkspaceMedia = useCallback(
@@ -653,6 +954,18 @@ export function AssetLibraryModal() {
                       />
                     </div>
                     <span className="text-[10px] text-ink/40 shrink-0">{filtered.length} 项</span>
+                    {tab === 'costume' && scope === 'private' && canEditPrivate && (
+                      <button
+                        type="button"
+                        disabled={costumeGenBusy || workspaceItems.filter((i) => i.kind === 'costume').length === 0}
+                        onClick={() => void generateCostumeSheets(workspaceItems.filter((i) => i.kind === 'costume'))}
+                        className="shrink-0 flex items-center gap-1 text-xs px-3 py-1.5 rounded-lg border border-brand/30 bg-brand/5 text-brand disabled:opacity-45"
+                        title="批量生成当前私有库全部服装设定板（需画布有图像生成节点）"
+                      >
+                        {costumeGenBusy ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
+                        {costumeGenBusy ? (costumeGenProgress || '生成中') : '批量设定板'}
+                      </button>
+                    )}
                     {canCreateAsset && (
                       <button
                         type="button"
@@ -664,6 +977,17 @@ export function AssetLibraryModal() {
                       </button>
                     )}
                   </div>
+
+                  {costumeGenBusy ? (
+                    <div className="shrink-0 px-4 py-1.5 text-[11px] text-brand bg-brand/5 border-b border-brand/15">
+                      服装设定板生成中 {costumeGenProgress || ''} · 请保持画布图像生成节点可用
+                    </div>
+                  ) : null}
+                  {charSheetGenBusy ? (
+                    <div className="shrink-0 px-4 py-1.5 text-[11px] text-brand bg-brand/5 border-b border-brand/15">
+                      角色设定板生成/裁切中 {charSheetGenProgress || ''} · 完成后自动回填各参考格
+                    </div>
+                  ) : null}
 
                   <div className="flex-1 flex min-h-0">
                     <ul className="w-52 shrink-0 border-r border-line overflow-y-auto nx9-scroll p-2 space-y-0.5">
@@ -686,7 +1010,19 @@ export function AssetLibraryModal() {
                             )}
                             {item.label}
                           </button>
-                          {!item.builtin && (
+                          {item.builtin ? (
+                            <button
+                              type="button"
+                              title="导入到当前库并编辑"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleCloneBuiltin(item.id);
+                              }}
+                              className="absolute right-1 top-1/2 -translate-y-1/2 px-1.5 py-0.5 rounded text-[10px] text-brand/80 hover:bg-brand/10 opacity-0 group-hover:opacity-100"
+                            >
+                              导入
+                            </button>
+                          ) : (
                             <button
                               type="button"
                               onClick={() => handleDelete(item.id)}
@@ -712,6 +1048,18 @@ export function AssetLibraryModal() {
                           onUploadImage={(f) => void handleUploadImage(f, selectedChar)}
                           onUploadAudio={(f) => void handleUploadAudio(f, { kind: 'character', id: selectedChar.id })}
                           onUploadView={(view, f) => void handleUploadCharacterView(f, selectedChar, view)}
+                          costumeOptions={costumeBindOptions}
+                          generatingMasterSheet={charSheetGenBusy}
+                          masterSheetProgress={charSheetGenProgress}
+                          onGenerateMasterSheet={() => void generateCharacterMasterSheet(selectedChar)}
+                          genSettingsSlot={(
+                            <AssetLibraryGenSettings
+                              preset="character-sheet"
+                              value={characterSheetGen}
+                              onChange={setCharacterSheetGen}
+                              hint="与图像生成节点同级：模型 / 清晰度 / 质量 / 比例"
+                            />
+                          )}
                         />
                       )}
 
@@ -731,6 +1079,55 @@ export function AssetLibraryModal() {
                           onRefreshPrompts={() => saveWorkspaceItem(refreshWorkspacePrompts(selectedWorkspaceItem))}
                           onUploadRef={(f) => void handleUploadWorkspaceMedia(f, selectedWorkspaceItem, 'referenceUrls')}
                           onUploadSheet={(f) => void handleUploadWorkspaceMedia(f, selectedWorkspaceItem, 'sheetUrl')}
+                        />
+                      )}
+
+                      {tab === 'costume' && selectedWorkspaceItem && scope === 'public' && selectedWorkspaceItem.sourceTemplateId === selectedWorkspaceItem.id && (
+                        <div className="mb-3 rounded-xl border border-brand/20 bg-brand/5 px-3 py-2 text-[11px] text-ink/70">
+                          当前为模板预览。点击左侧「导入」复制到可编辑库后再改字段与参考图。
+                          <button
+                            type="button"
+                            className="ml-2 text-brand hover:underline"
+                            onClick={() => handleCloneBuiltin(selectedWorkspaceItem.id)}
+                          >
+                            立即导入
+                          </button>
+                        </div>
+                      )}
+                      {tab === 'costume' && selectedWorkspaceItem && (
+                        <CostumeDetailFields
+                          item={selectedWorkspaceItem}
+                          onChange={saveWorkspaceItem}
+                          onRefreshPrompts={() => saveWorkspaceItem(refreshWorkspacePrompts(selectedWorkspaceItem))}
+                          onUploadRef={(f) => void handleUploadWorkspaceMedia(f, selectedWorkspaceItem, 'referenceUrls')}
+                          onUploadSheet={(f) => void handleUploadWorkspaceMedia(f, selectedWorkspaceItem, 'sheetUrl')}
+                          generatingSheet={costumeGenBusy}
+                          genSettingsSlot={(
+                            <AssetLibraryGenSettings
+                              preset="costume-sheet"
+                              value={costumeSheetGen}
+                              onChange={setCostumeSheetGen}
+                              hint="与图像生成节点同级：模型 / 清晰度 / 质量 / 比例；批量设定板共用此参数"
+                            />
+                          )}
+                          onGenerateSheet={
+                            scope === 'private' && canEditPrivate
+                              ? () => {
+                                  // 内置/公共预览：先导入再生成
+                                  const isPreviewOnly = Boolean(
+                                    selectedWorkspaceItem.sourceTemplateId
+                                    && selectedWorkspaceItem.sourceTemplateId === selectedWorkspaceItem.id
+                                    && !workspaceItems.some((w) => w.id === selectedWorkspaceItem.id),
+                                  );
+                                  if (isPreviewOnly) {
+                                    handleCloneBuiltin(selectedWorkspaceItem.id);
+                                    appendLog('已导入服装模板，请在导入后的条目上再次点击生成设定板');
+                                    return;
+                                  }
+                                  void generateCostumeSheets([selectedWorkspaceItem]);
+                                }
+                              : undefined
+                          }
                         />
                       )}
 
@@ -781,3 +1178,5 @@ export function AssetLibraryModal() {
     </div>
   );
 }
+
+

@@ -94,7 +94,7 @@ export function PictureWorkspace({ blockId, kind, onCollapse }: PictureWorkspace
     onHistoryPush: pushHistoryDebounced,
   });
 
-  const model = (data.model as string) ?? 'dall-e-3';
+  const model = (data.model as string) ?? 'gemini-2.5-flash-image';
   const status = (data.status as string) ?? 'idle';
   const pictureGenMode = readPictureGenMode(data);
   const proActionId = (data.pictureProAction as string) || undefined;
@@ -562,9 +562,12 @@ export function PictureWorkspace({ blockId, kind, onCollapse }: PictureWorkspace
           />
           <ComposerModelSelect
             value={model}
-            options={PICTURE_GEN_MODELS.map((m) => ({ id: m.id, label: m.label }))}
+            options={PICTURE_GEN_MODELS.map((m) => ({
+              id: m.id,
+              label: m.hint ? `${m.label} · ${m.hint}` : m.label,
+            }))}
             onChange={(v) => handlePatch({ model: v })}
-            width={180}
+            width={260}
             tone="desk"
           />
         </div>

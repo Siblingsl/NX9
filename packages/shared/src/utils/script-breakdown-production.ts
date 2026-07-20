@@ -241,7 +241,7 @@ export function buildEpisodeBreakdownUserPrompt(args: {
       '"characters":["稳定角色名"],"scriptText":"对应剧情与可视动作","visual":"电影级关键帧画面描述：环境、人物位置、光线、动作、情绪、构图","action":"动作设计：开始动作、变化、结束动作",',
       '"dialogue":[{"speaker":"角色名","text":"对白","emotion":"情绪"}],"narration":"旁白，可为空","sound":"环境声音与音乐设计",',
       '"audiovisualLanguage":"视听语言：1-3句中文成段描写，写运镜如何服务情绪与戏剧信息、景别功能、光色/材质对比、声画关系；禁止只罗列景别运镜词条",',
-      '"imagePrompt":"可直接生成单帧的完整提示词","videoPrompt":"动作+运镜+时长+连续性提示词","negativePrompt":"排除项",',
+      '"imagePrompt":"可直接生成单帧的完整提示词","videoPrompt":"动作+运镜+时长+连续性提示词","sketchPrompt":"黑白线稿分镜构图提示词","negativePrompt":"排除项",',
       '"continuityNotes":["服装/道具/位置/朝向/光线延续"]}]}]}。',
       `每镜 ${config.minShotDurationSec}-${config.maxShotDurationSec} 秒；本集最多 ${config.maxShotsPerEpisode} 镜；目标总时长约 ${config.targetEpisodeDurationSec} 秒。`,
       `画幅 ${config.aspectRatio}；目标形态 ${config.targetFormat}；节奏 ${config.pacing}；改编忠实度 ${config.adaptationFidelity}；对白密度 ${config.dialogueDensity}。`,
@@ -251,8 +251,9 @@ export function buildEpisodeBreakdownUserPrompt(args: {
       '动漫范例：「跟镜压进角色侧脸，速度线在背景炸开，特写咬紧的牙关把崩溃情绪钉死。硬边阴影与高饱和对比色把怒意推到前景。」',
       '国漫/3D 范例：「缓推穿过灵雾落在袍角与剑光交击，再切近眼部高光；冷青体积光与暖金法阵分层，烟尘粒子拖出余韵。」',
       'shotSize/cameraMove/cameraAngle 仍可填写技术字段；audiovisualLanguage 必须另行写出叙事化视听描写，二者不可互相替代。',
-      '图片 Prompt 必须英文优先，并包含：(masterpiece), cinematic scene, fixed character description, environment, action, camera angle, lighting, film photography, high detail。',
-      '视频 Prompt 必须包含：镜头运动、人物动作过程、环境变化、时间变化、情绪变化。',
+      '图片 Prompt 必须英文优先、单帧可执行，建议结构：Subject + Action freeze + Environment anchors + Camera (shot size/angle/lens) + Lighting + Materials + Style + Quality tokens；必须嵌入角色 fixedVisualKeywords 与服装标志。',
+      '视频 Prompt 必须包含：起幅状态、镜头运动动机、人物动作过程、环境/时间变化、情绪曲线与时长感，并与图片 Prompt 的角色/场景保持一致。',
+      '线稿 sketchPrompt 必须英文优先：black and white storyboard sketch, clean pencil line art, clear silhouettes, readable pose and eyeline, foreground/midground/background, composition guide, no color, no shading, white background；只服务构图确认，不写最终质感。',
       '不得仅写“同上”“保持一致”；每条 Prompt 与 audiovisualLanguage 必须独立可执行。',
     ].join('\n'),
     `本集原文：\n${args.sourceText}`,
@@ -316,6 +317,7 @@ export function validateScriptBreakdownPayload(payload: ScriptBreakdownPayload):
       if (!shot.scriptText?.trim()) diagnostics.push({ level: 'error', code: 'shot_text_empty', episodeId: episode.id, message: `${shot.sceneCode || shot.id} 缺少剧情/动作描述` });
       if (!shot.imagePrompt?.trim()) diagnostics.push({ level: 'error', code: 'image_prompt_empty', episodeId: episode.id, message: `${shot.sceneCode || shot.id} 缺少图片 Prompt` });
       if (!shot.videoPrompt?.trim()) diagnostics.push({ level: 'error', code: 'video_prompt_empty', episodeId: episode.id, message: `${shot.sceneCode || shot.id} 缺少视频 Prompt` });
+      if (!shot.sketchPrompt?.trim()) diagnostics.push({ level: 'info', code: 'sketch_prompt_empty', episodeId: episode.id, message: `${shot.sceneCode || shot.id} 缺少线稿 Prompt，后续会用镜头信息兜底` });
       if (!shot.audiovisualLanguage?.trim() || shot.audiovisualLanguage.trim().length < 12) {
         diagnostics.push({
           level: 'warning',

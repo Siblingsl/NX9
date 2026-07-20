@@ -35,6 +35,7 @@ export function buildPictureGenDelegatePatch(
 
 /** 构建单帧图像生成 Prompt */
 export function buildStoryboardFramePrompt(frame: StoryboardPreviewFrame): string {
+  const isLineArt = (frame.stylePreset || '').toLowerCase().includes('line');
   return [
     frame.promptSummary,
     frame.director3dGuide?.cameraPrompt
@@ -42,8 +43,13 @@ export function buildStoryboardFramePrompt(frame: StoryboardPreviewFrame): strin
       : '',
     buildDirectorCharacterPlacementPrompt(frame.director3dGuide),
     frame.reviewNote ? `Revision request from storyboard review: ${frame.reviewNote}` : '',
-    frame.stylePreset ? `Style preset: ${frame.stylePreset}` : '',
+    isLineArt
+      ? 'Render mode: black and white storyboard line art, clean pencil contours, no color, no shading fill, composition draft only, white background'
+      : frame.stylePreset
+        ? `Style preset: ${frame.stylePreset}`
+        : '',
     frame.sceneAssetRef ? `Scene: ${frame.sceneAssetRef}` : '',
+    frame.characterNames?.length ? `Characters on frame: ${frame.characterNames.join(', ')}` : '',
   ]
     .filter(Boolean)
     .join('\n');
@@ -119,6 +125,14 @@ export function resolveConnectedPictureGenId(
   return edge.source === previewBlockId ? edge.target : edge.source;
 }
 
+function isAssetSheetPictureHostKind(kind?: string | null): boolean {
+  return kind === 'character-sheet' || kind === 'scene-card' || kind === 'costume-sheet';
+}
+
+function isPictureExecHostKind(kind?: string | null): boolean {
+  return isStoryboardPreviewHostKind(kind) || isAssetSheetPictureHostKind(kind);
+}
+
 function findStoryboardExecEdge(
   blockId: string,
   nodes: Array<{ id: string; type?: string | null }>,
@@ -129,17 +143,21 @@ function findStoryboardExecEdge(
     const source = byId.get(e.source);
     const target = byId.get(e.target);
     const isPair =
-      (source?.type === 'picture-gen' && isStoryboardPreviewHostKind(target?.type)) ||
-      (isStoryboardPreviewHostKind(source?.type) && target?.type === 'picture-gen') ||
+      (source?.type === 'picture-gen' && isPictureExecHostKind(target?.type)) ||
+      (isPictureExecHostKind(source?.type) && target?.type === 'picture-gen') ||
       (source?.type === 'director-3d' && isStoryboardPreviewHostKind(target?.type)) ||
       (isStoryboardPreviewHostKind(source?.type) && target?.type === 'director-3d');
     if (!isPair) return false;
     return e.source === blockId || e.target === blockId;
   });
-  return related.find(
-    (e) =>
-      EXEC_PICTURE_HANDLES.has(e.sourceHandle ?? '') ||
-      EXEC_PICTURE_HANDLES.has(e.targetHandle ?? ''),
+  // 能力口优先；若节点只做普通 picture 连线（角色设定/场景设定），也允许匹配
+  return (
+    related.find(
+      (e) =>
+        EXEC_PICTURE_HANDLES.has(e.sourceHandle ?? '') ||
+        EXEC_PICTURE_HANDLES.has(e.targetHandle ?? ''),
+    )
+    ?? related[0]
   );
 }
 

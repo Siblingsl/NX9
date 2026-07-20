@@ -24,7 +24,7 @@ export async function autoFixContinuityIssue(input: InpaintRepairInput): Promise
   try {
     const res = await api.proxyImage({
       prompt: `修复: ${input.issueDescription}`,
-      model: 'dall-e-3',
+      model: 'gemini-2.5-flash-image',
       size: '1024x1024',
       referenceImageUrl: input.imageUrl,
       n: 1,

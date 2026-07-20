@@ -1,29 +1,101 @@
 export interface PictureGenModelDef {
   id: string;
   label: string;
-  provider: 'openai' | 'fal' | 'magichour';
+  provider: 'openai' | 'fal' | 'magichour' | 'gemini';
   /** OpenAI model id、Fal model path，或 Magic Hour 路由名 */
   model: string;
   supportsReference?: boolean;
   defaultSize?: string;
   /** Fal 模型分辨率上限（超过会报错），undefined 表示无限制 */
   resolutionCap?: number;
+  /** UI 分组提示（可选） */
+  group?: 'gemini' | 'openai' | 'fal' | 'other';
+  /** 简短能力说明 */
+  hint?: string;
 }
 
+/**
+ * 图片生成可选模型。
+ * Gemini / Imagen 走服务端 GeminiAdapter（需 Gemini API Key）。
+ *
+ * 免费 API 优先用 gemini-2.5-flash-image（Nano Banana）。
+ * 3.1 / Pro 等多需付费 API 配额（网页 Pro ≠ API 额度）。
+ */
 export const PICTURE_GEN_MODELS: PictureGenModelDef[] = [
+  {
+    id: 'gemini-2.5-flash-image',
+    label: 'Gemini 2.5 Flash Image（免费）',
+    provider: 'gemini',
+    model: 'gemini-2.5-flash-image',
+    supportsReference: true,
+    defaultSize: '1024x1024',
+    group: 'gemini',
+    hint: 'API 免费档首选 · Nano Banana',
+  },
+  {
+    id: 'gemini-3.1-flash-image',
+    label: 'Gemini 3.1 Flash Image',
+    provider: 'gemini',
+    model: 'gemini-3.1-flash-image',
+    supportsReference: true,
+    defaultSize: '1024x1024',
+    group: 'gemini',
+    hint: '需 API 付费配额 · Nano Banana 2',
+  },
+  {
+    id: 'gemini-3.1-flash-lite-image',
+    label: 'Gemini 3.1 Flash Lite Image',
+    provider: 'gemini',
+    model: 'gemini-3.1-flash-lite-image',
+    supportsReference: false,
+    defaultSize: '1024x1024',
+    group: 'gemini',
+    hint: '轻量 · 多需付费配额',
+  },
+  {
+    id: 'gemini-3-pro-image',
+    label: 'Gemini 3 Pro Image',
+    provider: 'gemini',
+    model: 'gemini-3-pro-image',
+    supportsReference: true,
+    defaultSize: '1024x1024',
+    group: 'gemini',
+    hint: '高阶 · 需 API 付费配额',
+  },
+  {
+    id: 'imagen-4',
+    label: 'Imagen 4',
+    provider: 'gemini',
+    model: 'imagen-4.0-generate-001',
+    defaultSize: '1024x1024',
+    group: 'gemini',
+    hint: 'Google Imagen · 多需付费',
+  },
+  {
+    id: 'imagen-4-ultra',
+    label: 'Imagen 4 Ultra',
+    provider: 'gemini',
+    model: 'imagen-4.0-ultra-generate-001',
+    defaultSize: '1024x1024',
+    group: 'gemini',
+    hint: 'Imagen 最高画质',
+  },
+  {
+    id: 'imagen-4-fast',
+    label: 'Imagen 4 Fast',
+    provider: 'gemini',
+    model: 'imagen-4.0-fast-generate-001',
+    defaultSize: '1024x1024',
+    group: 'gemini',
+    hint: 'Imagen 快速档',
+  },
   {
     id: 'dall-e-3',
     label: 'DALL·E 3',
     provider: 'openai',
     model: 'dall-e-3',
     defaultSize: '1024x1024',
-  },
-  {
-    id: 'magic-hour',
-    label: 'Magic Hour',
-    provider: 'magichour',
-    model: 'magic-hour',
-    defaultSize: '1024x1024',
+    group: 'openai',
   },
   {
     id: 'dall-e-2',
@@ -31,6 +103,15 @@ export const PICTURE_GEN_MODELS: PictureGenModelDef[] = [
     provider: 'openai',
     model: 'dall-e-2',
     defaultSize: '1024x1024',
+    group: 'openai',
+  },
+  {
+    id: 'magic-hour',
+    label: 'Magic Hour',
+    provider: 'magichour',
+    model: 'magic-hour',
+    defaultSize: '1024x1024',
+    group: 'other',
   },
   {
     id: 'flux-dev',
@@ -38,6 +119,7 @@ export const PICTURE_GEN_MODELS: PictureGenModelDef[] = [
     provider: 'fal',
     model: 'fal-ai/flux/dev',
     defaultSize: '1024x1024',
+    group: 'fal',
   },
   {
     id: 'flux-i2i',
@@ -46,6 +128,7 @@ export const PICTURE_GEN_MODELS: PictureGenModelDef[] = [
     model: 'fal-ai/flux/dev/image-to-image',
     supportsReference: true,
     defaultSize: '1024x1024',
+    group: 'fal',
   },
 ];
 
@@ -77,6 +160,17 @@ export const CLIP_GEN_ASPECTS = [
   { id: '1:1', label: '1:1 方屏' },
 ] as const;
 
+/** 默认图片模型：免费 API 友好的 2.5 Flash Image */
+export const DEFAULT_PICTURE_GEN_MODEL_ID = 'gemini-2.5-flash-image';
+
 export function lookupPictureModel(id?: string): PictureGenModelDef {
-  return PICTURE_GEN_MODELS.find((m) => m.id === id) ?? PICTURE_GEN_MODELS[0];
+  if (id) {
+    const hit = PICTURE_GEN_MODELS.find((m) => m.id === id || m.model === id);
+    if (hit) return hit;
+  }
+  return (
+    PICTURE_GEN_MODELS.find((m) => m.id === DEFAULT_PICTURE_GEN_MODEL_ID) ||
+    PICTURE_GEN_MODELS.find((m) => m.provider === 'gemini') ||
+    PICTURE_GEN_MODELS[0]
+  );
 }

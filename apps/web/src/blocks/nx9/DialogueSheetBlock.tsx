@@ -693,10 +693,28 @@ function DialogueSheetBlock(props: NodeProps) {
   }, [appendLog, setEnvironments, upsertBacklotWorkspace]);
 
   const hasResult = Boolean(payload);
-  const previewShots = useMemo(() => shots.slice(0, 4), [shots]);
   const totalSourceChars = useMemo(
     () => sourceEpisodes.reduce((sum, ep) => sum + ep.text.trim().length, 0),
     [sourceEpisodes],
+  );
+  const latestEpisode = payload?.episodes[payload.episodes.length - 1];
+  const latestShot = shots[shots.length - 1];
+  const topScenes = useMemo(
+    () => unique(shots.map((shot) => shot.scene || shot.title).filter(Boolean)).slice(0, 3),
+    [shots],
+  );
+  const topCharacters = useMemo(
+    () => unique(shots.flatMap((shot) => shot.characters ?? []).filter(Boolean)).slice(0, 4),
+    [shots],
+  );
+  const selectedStyleTags = useMemo(
+    () => [
+      ...config.directorControls.storyGenres,
+      ...config.directorControls.emotionalTones,
+      ...config.directorControls.imageStyles,
+      ...config.directorControls.videoStyles,
+    ].slice(0, 4),
+    [config.directorControls],
   );
   const statusClass = parsing
     ? 'is-run'
@@ -742,33 +760,84 @@ function DialogueSheetBlock(props: NodeProps) {
 
           <button
             type="button"
-            className="ds-mini-table"
+            className="ds-summary-card"
             onClick={() => openStudio()}
-            title="打开分镜表"
+            title="打开剧本拆分工作台"
           >
-            {hasResult && previewShots.length > 0 ? (
+            {hasResult ? (
               <>
-                <div className="ds-mini-table__head">
-                  <span>镜</span>
-                  <span>场景</span>
-                  <span>内容</span>
-                </div>
-                {previewShots.map((shot) => (
-                  <div key={shot.id} className="ds-mini-table__row">
-                    <span className="is-code">{shot.sceneCode || `S${shot.index}`}</span>
-                    <span className="is-title">{shot.scene || shot.title || '—'}</span>
-                    <span>{compact(shot.dialogue[0]?.text || shot.scriptText || shot.action || '', 28) || '—'}</span>
+                <div className="ds-summary-card__hero">
+                  <div>
+                    <span className="ds-summary-card__eyebrow">最近生成</span>
+                    <strong>{latestEpisode?.title || payload?.title || '分镜剧本'}</strong>
+                    <p>{latestShot ? compact(latestShot.scriptText || latestShot.visual || latestShot.title, 54) : '已生成专业分镜结果'}</p>
                   </div>
-                ))}
+                  <span className="ds-summary-card__metric">
+                    {shots.length}
+                    <small>镜</small>
+                  </span>
+                </div>
+
+                <div className="ds-summary-card__stats" aria-label="拆分结果摘要">
+                  <span><b>{payload!.episodes.length}</b> 集</span>
+                  <span><b>{characterCandidates.length}</b> 角色候选</span>
+                  <span><b>{sceneCandidates.length}</b> 场景候选</span>
+                </div>
+
+                <div className="ds-summary-card__chips">
+                  {(topScenes.length ? topScenes : ['待同步到分镜网格']).map((label) => (
+                    <span key={label}>{compact(label, 10)}</span>
+                  ))}
+                </div>
+
+                <div className="ds-summary-card__trail">
+                  {topCharacters.length ? `角色：${topCharacters.join('、')}` : '打开后可查看分镜表、角色候选、场景候选'}
+                </div>
               </>
             ) : (
-              <div className="ds-mini-table__empty">
-                {!directorLocked
-                  ? '先设定并锁定导演控制，再填文本'
-                  : hasSavedEpisodes
-                    ? '按集「去生成」· 多选可批量'
-                    : '导演已锁定 · 保存分集后按集生成'}
-              </div>
+              <>
+                <div className="ds-summary-card__hero is-empty">
+                  <div>
+                    <span className="ds-summary-card__eyebrow">
+                      {!directorLocked ? '第一步' : hasSavedEpisodes ? '下一步' : '准备中'}
+                    </span>
+                    <strong>
+                      {!directorLocked
+                        ? '锁定导演控制'
+                        : hasSavedEpisodes
+                          ? '按集生成分镜'
+                          : '保存剧本文本'}
+                    </strong>
+                    <p>
+                      {!directorLocked
+                        ? '先选择风格、镜头语言与平台，或让 AI 根据故事自动匹配。'
+                        : hasSavedEpisodes
+                          ? '已保存分集，可单集生成，也可多选批量生成。'
+                          : '导演已锁定，开始按集粘贴剧本/小说/文案。'}
+                    </p>
+                  </div>
+                  <span className="ds-summary-card__metric">
+                    {sourceEpisodes.length}
+                    <small>集</small>
+                  </span>
+                </div>
+
+                <div className="ds-summary-card__stats" aria-label="准备状态">
+                  <span><b>{selectedDirectorControlCount}</b> 控制项</span>
+                  <span><b>{totalSourceChars}</b> 字</span>
+                  <span><b>{directorLocked ? '已锁' : '未锁'}</b> 导演</span>
+                </div>
+
+                <div className="ds-summary-card__chips">
+                  {(selectedStyleTags.length ? selectedStyleTags : ['剧情类型', '画面风格', '镜头语言']).map((label) => (
+                    <span key={label}>{compact(label, 10)}</span>
+                  ))}
+                </div>
+
+                <div className="ds-summary-card__trail">
+                  {runTip || '点击卡片进入导演控制、分集文本与生产级拆分。'}
+                </div>
+              </>
             )}
           </button>
 

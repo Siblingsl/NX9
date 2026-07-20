@@ -1,7 +1,7 @@
 import type { CharacterProfile } from '../types/character';
 import { CAMERA_PROMPT_PRESETS } from './prompt-presets';
 
-export type BacklotTemplateKind = 'character' | 'scene' | 'shot' | 'emotion' | 'hook';
+export type BacklotTemplateKind = 'character' | 'scene' | 'shot' | 'emotion' | 'hook' | 'costume';
 
 export type BacklotHookPhase = 'opening' | 'ending';
 
@@ -80,10 +80,12 @@ const WORKSPACE_DEFAULT_LABELS: Record<BacklotWorkspaceKind, string> = {
   shot: '新镜头',
   emotion: '新情绪',
   hook: '新钩子',
+  costume: '新服装',
 };
 
 export const BACKLOT_TEMPLATE_TABS: { key: BacklotTemplateKind; label: string; hint: string }[] = [
   { key: 'character', label: '角色库', hint: '人设 archetype + 工作区角色' },
+  { key: 'costume', label: '服装库', hint: '造型套装、面料、配色与标志物' },
   { key: 'scene', label: '场景库', hint: '环境、光线、时代与空间' },
   { key: 'shot', label: '镜头库', hint: '运镜、景别、机位描述' },
   { key: 'emotion', label: '情绪库', hint: '表情、氛围、色调与节奏' },
@@ -439,8 +441,101 @@ const HOOK_TEMPLATES: BacklotTemplate[] = [
   },
 ];
 
+
+const COSTUME_TEMPLATES: BacklotTemplate[] = [
+  {
+    id: 'costume-urban-casual',
+    kind: 'costume',
+    group: '日常',
+    label: '都市休闲套',
+    description: '通勤日常、干净现代',
+    promptEn:
+      'modern urban casual outfit, clean silhouette, soft cotton top, straight trousers, minimal sneakers, muted palette, production costume continuity',
+    promptZh: '都市休闲：简洁上衣 + 直筒裤 + 基础运动鞋，低饱和配色',
+    tags: ['casual', 'modern'],
+  },
+  {
+    id: 'costume-tailored-suit',
+    kind: 'costume',
+    group: '正装',
+    label: '高定西装',
+    description: '权力感、职场、精英',
+    promptEn:
+      'tailored dark business suit, sharp lapels, crisp white shirt, slim tie, polished leather shoes, restrained luxury, locked wardrobe continuity',
+    promptZh: '高定深色西装、白衬衫、细领带、皮鞋，克制奢华',
+    tags: ['formal', 'ceo'],
+  },
+  {
+    id: 'costume-school-uniform',
+    kind: 'costume',
+    group: '职业',
+    label: '学院制服',
+    description: '青春校园',
+    promptEn:
+      'classic school uniform, blazer with crest, pleated skirt or straight trousers, white blouse, loafers, youthful clean look, consistent costume details',
+    promptZh: '学院制服：西装外套、白衬衫、百褶裙/西裤、乐福鞋',
+    tags: ['school'],
+  },
+  {
+    id: 'costume-hanfu-flowing',
+    kind: 'costume',
+    group: '古装',
+    label: '流云汉服',
+    description: '古风仙侠日常',
+    promptEn:
+      'flowing hanfu costume, layered silk robes, soft sash belt, embroidered cuffs, traditional footwear, elegant drapery, historical fantasy wardrobe continuity',
+    promptZh: '流云汉服：多层丝质长袍、束带、绣纹袖口',
+    tags: ['hanfu', 'period'],
+  },
+  {
+    id: 'costume-xianxia-armor',
+    kind: 'costume',
+    group: '战甲',
+    label: '仙侠轻甲',
+    description: '战斗场次',
+    promptEn:
+      'light xianxia armor over robes, metal shoulder plates, leather straps, flowing cape accents, sword-ready silhouette, consistent armor landmarks',
+    promptZh: '仙侠轻甲：袍甲结合、肩甲、束带、可战斗轮廓',
+    tags: ['armor', 'xianxia'],
+  },
+  {
+    id: 'costume-cyber-street',
+    kind: 'costume',
+    group: '赛博',
+    label: '赛博街头',
+    description: '未来都市',
+    promptEn:
+      'cyberpunk streetwear, layered tech jacket, reflective panels, utility belts, high boots, neon accent trims, futuristic wardrobe continuity',
+    promptZh: '赛博街头：科技外套、反光裁片、机能腰带、高筒靴',
+    tags: ['cyberpunk'],
+  },
+  {
+    id: 'costume-evening-gown',
+    kind: 'costume',
+    group: '礼服',
+    label: '晚宴礼服',
+    description: '宴会 / 红毯',
+    promptEn:
+      'elegant evening gown, refined silhouette, subtle shimmer fabric, minimal jewelry, formal heels, glamorous but identity-preserving costume design',
+    promptZh: '晚宴礼服：修身廓形、微闪面料、精简首饰',
+    tags: ['gown', 'formal'],
+  },
+  {
+    id: 'costume-trench-detective',
+    kind: 'costume',
+    group: '职业',
+    label: '侦探风衣套',
+    description: '悬疑短剧高频',
+    promptEn:
+      'classic detective trench coat over dark shirt, belt cinched waist, practical trousers, leather boots, understated noir wardrobe, fixed costume landmarks',
+    promptZh: '侦探风衣：深色内搭、束腰、皮靴，黑色电影气质',
+    tags: ['detective', 'noir'],
+  },
+];
+
 export const BUILTIN_BACKLOT_TEMPLATES: BacklotTemplate[] = [
   ...CHARACTER_ARCHETYPES,
+  ...COSTUME_TEMPLATES,
   ...SCENE_TEMPLATES,
   ...SHOT_TEMPLATES,
   ...EMOTION_TEMPLATES,
@@ -477,6 +572,7 @@ export function listBacklotTemplates(
 /** 各库默认分组（下拉选项基准） */
 export const DEFAULT_BACKLOT_GROUPS: Record<BacklotTemplateKind, string[]> = {
   character: ['主角型', '日常型', '职业型', '幻想型', '配角型'],
+  costume: ['日常', '正装', '职业', '古装', '奇幻', '战甲', '赛博', '礼服'],
   scene: ['都市', '室内', '自然', '废墟', '历史'],
   shot: ['推拉', '环绕', '升降', '横移', '转场', '特殊', '固定'],
   emotion: ['积极', '消极', '张力', '怀旧', '悬疑', '浪漫', '喜剧'],
@@ -586,6 +682,7 @@ export function workspaceItemToCustomTemplate(
     group: group || hookGroup || '未分组',
     hookPhase: item.hookPhase,
     stageDeckScene: item.stageDeckScene,
+    creative: item.creative,
     createdAt: existing?.createdAt ?? Date.now(),
   };
 }
@@ -596,6 +693,22 @@ export function templateToWorkspaceItem(
 ): BacklotWorkspaceItem | null {
   if (tpl.kind === 'character') return null;
   const linkedId = sourceTemplateId ?? ('createdAt' in tpl ? tpl.id : undefined);
+  const creative = 'creative' in tpl ? tpl.creative : undefined;
+  // 内置模板没有 creative：按文案预填服装/场景基础字段
+  const seededCreative =
+    creative
+    ?? (tpl.kind === 'costume'
+      ? {
+          description: tpl.promptZh || tpl.description || tpl.label,
+          category: tpl.group,
+          tags: tpl.tags ?? [],
+        }
+      : tpl.kind === 'scene'
+        ? {
+            description: tpl.promptZh || tpl.description || tpl.label,
+            tags: tpl.tags ?? [],
+          }
+        : undefined);
   return {
     id: `ws-${tpl.kind}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
     kind: tpl.kind,
@@ -605,5 +718,6 @@ export function templateToWorkspaceItem(
     hookPhase: tpl.hookPhase,
     stageDeckScene: 'stageDeckScene' in tpl ? tpl.stageDeckScene : undefined,
     sourceTemplateId: linkedId,
+    creative: seededCreative as BacklotWorkspaceItem['creative'],
   };
 }

@@ -137,29 +137,6 @@ function AssetGateBlock(props: NodeProps) {
           ? 'is-warn'
           : '';
 
-  const miniRows = useMemo(() => {
-    if (!payload) return [];
-    return [
-      {
-        code: '角',
-        title: charN ? `${charN} 个角色` : '未识别角色',
-        detail: missC ? `缺 ${missC}` : charN ? '库内齐' : '—',
-        tone: missC ? 'warn' as const : charN ? 'ok' as const : 'todo' as const,
-      },
-      {
-        code: '场',
-        title: sceneN ? `${sceneN} 个场景` : '未识别场景',
-        detail: missS ? `缺 ${missS}` : sceneN ? '库内齐' : '—',
-        tone: missS ? 'warn' as const : sceneN ? 'ok' as const : 'todo' as const,
-      },
-      {
-        code: '门',
-        title: passed ? '放行分镜网格' : hasChecked ? '需补齐资产' : '等待检查',
-        detail: hasChecked ? (passed ? '通过' : '阻断') : '未跑',
-        tone: passed ? 'ok' as const : hasChecked ? 'warn' as const : 'todo' as const,
-      },
-    ];
-  }, [charN, hasChecked, missC, missS, passed, payload, sceneN]);
 
   const charRows = useMemo(() => {
     const names = requiredCharacters.length
@@ -202,33 +179,89 @@ function AssetGateBlock(props: NodeProps) {
 
           <button
             type="button"
-            className="ag-mini"
+            className="ag-summary-card"
             onClick={openStudio}
             title="打开设定检查台"
           >
             {payload ? (
               <>
-                <div className="ag-mini__head ag-mini__head--roster">
-                  <span>项</span>
-                  <span>内容</span>
-                  <span>状态</span>
-                </div>
-                {miniRows.map((row) => (
-                  <div key={row.code} className="ag-mini__row ag-mini__row--roster">
-                    <span className="is-code" style={{ color: 'var(--ag-accent)', fontWeight: 650 }}>
-                      {row.code}
-                    </span>
-                    <span className="is-title">{row.title}</span>
-                    <span className={`ag-mini__badge is-${row.tone}`}>{row.detail}</span>
+                <div className="ag-summary-card__hero">
+                  <div>
+                    <span className="ag-summary-card__eyebrow">设定门禁</span>
+                    <strong>
+                      {passed
+                        ? '资产齐备，可放行分镜'
+                        : hasChecked
+                          ? (missC + missS > 0 ? `缺口 ${missC + missS} · 需补齐` : '已检查')
+                          : '待运行检查'}
+                    </strong>
+                    <p>
+                      {passed
+                        ? '角色与场景库均覆盖剧本需求，可进入分镜台。'
+                        : missC + missS > 0
+                          ? `角色缺口 ${missC} · 场景缺口 ${missS}；检查后可同步入库。`
+                          : '连接剧本拆分后运行检查，识别角色/场景需求与缺口。'}
+                    </p>
                   </div>
-                ))}
+                  <span className="ag-summary-card__metric">
+                    {missC + missS}
+                    <small>缺</small>
+                  </span>
+                </div>
+                <div className="ag-summary-card__stats" aria-label="设定检查摘要">
+                  <span><b>{charN}</b> 角色</span>
+                  <span><b>{sceneN}</b> 场景</span>
+                  <span><b>{passed ? '放行' : hasChecked ? '阻断' : '待检'}</b> 门禁</span>
+                </div>
+                <div className="ag-summary-card__chips">
+                  {([
+                    ...(missingCharacters.length ? missingCharacters : requiredCharacters).slice(0, 2),
+                    ...(missingScenes.length ? missingScenes : requiredScenes).slice(0, 1),
+                  ].filter(Boolean).length
+                    ? [
+                        ...(missingCharacters.length ? missingCharacters : requiredCharacters).slice(0, 2),
+                        ...(missingScenes.length ? missingScenes : requiredScenes).slice(0, 1),
+                      ]
+                    : ['角色需求', '场景需求', '同步入库']
+                  ).slice(0, 4).map((label) => (
+                    <span key={String(label)}>{compact(String(label), 10)}</span>
+                  ))}
+                </div>
+                <div className="ag-summary-card__trail">
+                  {syncedC || syncedS
+                    ? `已同步入库 角色 ${syncedC} / 场景 ${syncedS}`
+                    : hasChecked
+                      ? (passed ? '点击查看门禁报告' : '点击开台补齐缺口')
+                      : '点击开台或运行检查'}
+                </div>
               </>
             ) : (
-              <div className="ag-mini__empty">
-                等待上游剧本拆分
-                <br />
-                连接后检查角色 / 场景缺口
-              </div>
+              <>
+                <div className="ag-summary-card__hero is-empty">
+                  <div>
+                    <span className="ag-summary-card__eyebrow">等待上游</span>
+                    <strong>连接剧本拆分</strong>
+                    <p>接入拆分结果后检查角色 / 场景缺口，并可一键同步入库。</p>
+                  </div>
+                  <span className="ag-summary-card__metric">
+                    —
+                    <small>门</small>
+                  </span>
+                </div>
+                <div className="ag-summary-card__stats" aria-label="等待状态">
+                  <span><b>0</b> 角色</span>
+                  <span><b>0</b> 场景</span>
+                  <span><b>待接</b> 上游</span>
+                </div>
+                <div className="ag-summary-card__chips">
+                  <span>角色需求</span>
+                  <span>场景需求</span>
+                  <span>同步入库</span>
+                </div>
+                <div className="ag-summary-card__trail">
+                  连接剧本拆分节点后运行检查
+                </div>
+              </>
             )}
           </button>
 

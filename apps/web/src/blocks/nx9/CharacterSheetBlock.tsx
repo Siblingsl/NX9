@@ -1,14 +1,18 @@
-import { memo, useCallback, useMemo, useState } from 'react';
+﻿import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import { type NodeProps, useReactFlow } from '@xyflow/react';
 import {
+  applyCroppedPanelsToCharacter,
   buildCharacterConsistencyPrompt,
+  buildCharacterSheetGenerationPrompt,
   characterSheetFromNodeData,
   getCharacterCreative,
+  getCostumeCreative,
   normalizeCharacterProfile,
   refreshCharacterPrompts,
+  resolveConnectedPictureGenId,
   type CharacterProfile,
 } from '@nx9/shared';
-import { Plus, ShieldCheck, UserRound } from 'lucide-react';
+import { Loader2, Plus, ShieldCheck, Sparkles, UserRound } from 'lucide-react';
 import { BlockShell } from '../shared/BlockShell';
 import { ScreenModal } from '../../components/ui/ScreenModal';
 import ImageUploadSlot from '../shared/ImageUploadSlot';
@@ -16,10 +20,44 @@ import { AssetLinkField, assetRefFromData, patchWithAssetRef } from '../shared/A
 import { useWorkspaceDocument } from '../../stores/workspace-document';
 import { useActivityLog } from '../../stores/activity-log';
 import { toastSuccess } from '../../stores/toast';
+import { useAssetLibraryGenSettings } from '../../stores/asset-library-gen-settings';
+import AssetLibraryGenSettings, { resolveAssetLibraryImageRequest } from '../../panels/asset-library/AssetLibraryGenSettings';
+import { useAllAssetLibraryItems } from '../../hooks/use-asset-library-items';
+import { runPictureGenJob } from '../../engine/picture-gen-runner';
+import { cropCharacterSheetPanels } from '../../engine/character-sheet-crop';
+import { api } from '../../api/client';
+import { ImageLightbox, type ImageLightboxItem } from '../../components/ui/ImageLightbox';
 import './character-sheet.css';
 
 /** 库 →（选中后）设定 → 参考 */
 type StudioTab = 'library' | 'profile' | 'refs';
+
+function galleryFromCharacter(character: CharacterProfile): ImageLightboxItem[] {
+  const ext = getCharacterCreative(character);
+  const items: ImageLightboxItem[] = [];
+  const push = (url?: string | null, label?: string) => {
+    const u = (url ?? '').trim();
+    if (!u) return;
+    if (items.some((x) => x.url === u)) return;
+    items.push({ url: u, label: label || character.name });
+  };
+  push(ext.fullSheetUrl, '完整设定板');
+  push(character.referenceImageUrl, '主参考');
+  push(ext.frontViewUrl, '正面');
+  push(ext.threeQuarterViewUrl, '3/4');
+  push(ext.sideViewUrl, '侧面');
+  push(ext.backViewUrl, '背面');
+  push(ext.silhouetteFrontUrl, '剪影正');
+  push(ext.silhouetteSideUrl, '剪影侧');
+  push(ext.emotionalCloseupUrl, '情绪特写');
+  for (const v of ext.expressions ?? []) push(v.imageUrl, `表情·${v.label}`);
+  for (const v of ext.microExpressions ?? []) push(v.imageUrl, `微表情·${v.label}`);
+  for (const v of ext.angles ?? []) push(v.imageUrl, `头部·${v.label}`);
+  for (const v of ext.poses ?? []) push(v.imageUrl, `姿态·${v.label}`);
+  for (const v of ext.costumeDetails ?? []) push(v.imageUrl, `细节·${v.label}`);
+  for (const v of ext.handRefs ?? []) push(v.imageUrl, `手部·${v.label}`);
+  return items;
+}
 
 function line(...parts: Array<string | undefined | null | false>): string {
   return parts.filter((part) => part && String(part).trim()).join('\n');
@@ -34,8 +72,17 @@ function buildLockedCharacterPrompt(data: Record<string, unknown>): string {
   const sheet = characterSheetFromNodeData(data);
   const base = buildCharacterConsistencyPrompt(sheet);
   const forbidden = (data.forbiddenTraits as string | undefined)?.trim();
+  const wardrobe = (data.wardrobeAnchor as string | undefined)?.trim();
+  const costumePrompt = (data.costumePrompt as string | undefined)?.trim();
+  const costumeLabel = (data.costumeLabel as string | undefined)?.trim();
   return line(
     base,
+    wardrobe ? `Wardrobe landmarks: ${wardrobe}` : '',
+    costumePrompt
+      ? `Costume lock (${costumeLabel || 'bound'}): ${costumePrompt}`
+      : costumeLabel
+        ? `Costume lock: ${costumeLabel}`
+        : '',
     forbidden ? `Never change: ${forbidden}` : '',
     'Keep the same face, hairstyle, outfit, body proportion, signature accessories and color palette across every shot.',
   );
@@ -67,7 +114,7 @@ function characterRosterStatus(character: CharacterProfile): {
 }
 
 function CharacterSheetBlock(props: NodeProps) {
-  const { updateNodeData } = useReactFlow();
+  const { updateNodeData, getNodes, getEdges } = useReactFlow();
   const [studioOpen, setStudioOpen] = useState(false);
   const [studioTab, setStudioTab] = useState<StudioTab>('library');
   /**
@@ -78,14 +125,32 @@ function CharacterSheetBlock(props: NodeProps) {
   const appendLog = useActivityLog((s) => s.append);
   const upsertCharacter = useWorkspaceDocument((s) => s.upsertCharacter);
   const characters = useWorkspaceDocument((s) => s.characters.characters);
+  const backlotItems = useWorkspaceDocument((s) => s.backlotWorkspace.items);
+  const { allItems: costumeItems } = useAllAssetLibraryItems('costume');
+  const characterSheetGen = useAssetLibraryGenSettings((s) => s.characterSheet);
+  const setCharacterSheetGen = useAssetLibraryGenSettings((s) => s.setCharacterSheet);
   const upstream = props.data?.upstream as { pictures?: string[]; prompts?: string[] } | undefined;
   const data = props.data as Record<string, unknown>;
   const assetRef = assetRefFromData(data);
+  const [sheetGenerating, setSheetGenerating] = useState(false);
+  const [sheetPreviewOpen, setSheetPreviewOpen] = useState(false);
+  const [sheetPreviewIndex, setSheetPreviewIndex] = useState(0);
+  const [overrideGallery, setOverrideGallery] = useState<ImageLightboxItem[] | null>(null);
+
+  // 默认打开顶部能力口，便于连接图像生成做设定板
+  useEffect(() => {
+    if (data.showExecPorts === undefined) {
+      updateNodeData(props.id, { showExecPorts: true });
+    }
+  }, [data.showExecPorts, props.id, updateNodeData]);
 
   const name = (data.characterName as string | undefined) ?? (data.name as string | undefined) ?? '';
   const identity = (data.identity as string | undefined) ?? '';
   const appearance = (data.appearanceAnchor as string | undefined) ?? '';
   const wardrobe = (data.wardrobeAnchor as string | undefined) ?? '';
+  const costumeId = (data.costumeId as string | undefined) ?? '';
+  const costumeLabel = (data.costumeLabel as string | undefined) ?? '';
+  const costumePrompt = (data.costumePrompt as string | undefined) ?? '';
   const personality = (data.personality as string | undefined) ?? '';
   const forbidden = (data.forbiddenTraits as string | undefined) ?? '';
   const aliasesText = Array.isArray(data.aliases)
@@ -101,6 +166,58 @@ function CharacterSheetBlock(props: NodeProps) {
   const backUrl = (data.backUrl as string | undefined) ?? '';
   const locked = Boolean(data.assetLocked);
   const previewUrl = fullSheetUrl || frontUrl || upstream?.pictures?.[0];
+
+  const characterGallery = useMemo<ImageLightboxItem[]>(() => {
+    const items: ImageLightboxItem[] = [];
+    const push = (url?: string | null, label?: string) => {
+      const u = (url ?? '').trim();
+      if (!u) return;
+      if (items.some((x) => x.url === u)) return;
+      items.push({ url: u, label: label || '角色图' });
+    };
+    push(fullSheetUrl, '完整设定板');
+    push(frontUrl, '正面');
+    push(sideUrl, '侧面');
+    push(backUrl, '背面');
+    push(previewUrl, '预览');
+    for (const u of upstream?.pictures ?? []) push(u, '上游图');
+    // 若当前节点已绑定角色库条目，把库内更多参考图并入图集
+    const boundId = data.characterId as string | undefined;
+    const bound = boundId ? characters.find((c) => c.id === boundId) : undefined;
+    if (bound) {
+      const ext = getCharacterCreative(bound);
+      push(ext.fullSheetUrl, '库·设定板');
+      push(ext.frontViewUrl, '库·正面');
+      push(ext.threeQuarterViewUrl, '库·3/4');
+      push(ext.sideViewUrl, '库·侧面');
+      push(ext.backViewUrl, '库·背面');
+      push(ext.silhouetteFrontUrl, '库·剪影正');
+      push(ext.silhouetteSideUrl, '库·剪影侧');
+      push(ext.emotionalCloseupUrl, '库·情绪特写');
+      for (const v of ext.expressions ?? []) push(v.imageUrl, `表情·${v.label}`);
+      for (const v of ext.microExpressions ?? []) push(v.imageUrl, `微表情·${v.label}`);
+      for (const v of ext.angles ?? []) push(v.imageUrl, `头部·${v.label}`);
+      for (const v of ext.poses ?? []) push(v.imageUrl, `姿态·${v.label}`);
+      for (const v of ext.costumeDetails ?? []) push(v.imageUrl, `细节·${v.label}`);
+      for (const v of ext.handRefs ?? []) push(v.imageUrl, `手部·${v.label}`);
+    }
+    return items;
+  }, [fullSheetUrl, frontUrl, sideUrl, backUrl, previewUrl, upstream?.pictures, data.characterId, characters]);
+
+  const openGalleryAt = useCallback((url?: string, preferredItems?: ImageLightboxItem[]) => {
+    if (preferredItems && preferredItems.length > 0) {
+      const idx = url ? preferredItems.findIndex((g) => g.url === url) : 0;
+      setOverrideGallery(preferredItems);
+      setSheetPreviewIndex(idx >= 0 ? idx : 0);
+      setSheetPreviewOpen(true);
+      return;
+    }
+    if (!url) return;
+    const idx = characterGallery.findIndex((g) => g.url === url);
+    setOverrideGallery(null);
+    setSheetPreviewIndex(idx >= 0 ? idx : 0);
+    setSheetPreviewOpen(true);
+  }, [characterGallery]);
   const prompt = useMemo(() => buildLockedCharacterPrompt(data), [data]);
   const duplicate = useMemo(
     () => characters.some((c) => c.name.trim() === name.trim() && c.id !== data.characterId),
@@ -213,14 +330,162 @@ function CharacterSheetBlock(props: NodeProps) {
     setStudioTab('refs');
   }, [appendLog, commit, upstream?.pictures]);
 
-  const loadCharacter = useCallback((character: CharacterProfile) => {
+
+  const applyCostumeFromLibrary = useCallback((itemId: string) => {
+    if (!itemId) {
+      commit({
+        costumeId: '',
+        costumeLabel: '',
+        costumePrompt: '',
+        wardrobeAnchor: '',
+      });
+      appendLog('已清除绑定服装');
+      return;
+    }
+    const hit = costumeItems.find((i) => i.id === itemId);
+    if (!hit) {
+      appendLog('服装库中未找到该套装');
+      return;
+    }
+    // 若是工作区服装，尝试取更完整 creative prompt
+    const ws = backlotItems.find((i) => i.id === itemId && i.kind === 'costume');
+    const promptText = (
+      (ws ? (getCostumeCreative(ws).prompts?.image?.text || getCostumeCreative(ws).prompts?.costume?.text || ws.promptEn || ws.promptZh) : '')
+      || hit.prompt
+      || hit.label
+    ).trim();
+    const wardrobeText = [
+      hit.label,
+      ws ? getCostumeCreative(ws).accessories : '',
+      ws ? getCostumeCreative(ws).colorPalette : '',
+    ].filter(Boolean).join(' · ');
+    commit({
+      costumeId: hit.id,
+      costumeLabel: hit.label,
+      costumePrompt: promptText,
+      wardrobeAnchor: wardrobeText || hit.label,
+    });
+    appendLog(`已从服装库绑定：${hit.label}`);
+    toastSuccess(`已绑定服装「${hit.label}」`);
+  }, [appendLog, backlotItems, commit, costumeItems]);
+
+  const generateCharacterSheetViaPicture = useCallback(async () => {
+    if (!name.trim() || !appearance.trim()) {
+      appendLog('角色设定板：请先填写角色名与外貌锚点');
+      setStudioTab('profile');
+      return;
+    }
+    const pictureId = resolveConnectedPictureGenId(props.id, getNodes(), getEdges());
+    if (!pictureId) {
+      appendLog('角色设定板：请先用顶部能力口连接「图像生成」节点');
+      return;
+    }
+    const pictureNode = getNodes().find((n) => n.id === pictureId);
+    if (!pictureNode) return;
+    setSheetGenerating(true);
+    try {
+      const id = (data.characterId as string | undefined) ?? `char-${props.id}`;
+      const previous = characters.find((c) => c.id === id);
+      const profile = normalizeCharacterProfile(refreshCharacterPrompts({
+        id,
+        name: name.trim(),
+        descriptionZh: [identity, personality].filter(Boolean).join(' · '),
+        consistencyPrompt: prompt,
+        referenceImageUrl: fullSheetUrl || frontUrl || null,
+        bible: {
+          identity: identity || undefined,
+          appearance: appearance || undefined,
+          personality: personality || undefined,
+        },
+        creative: {
+          ...(previous?.creative ?? {}),
+          costumeId: costumeId || null,
+          costumeLabel: costumeLabel || null,
+          costumePrompt: costumePrompt || null,
+          fullSheetUrl: fullSheetUrl || null,
+          frontViewUrl: frontUrl || null,
+          sideViewUrl: sideUrl || null,
+          backViewUrl: backUrl || null,
+        },
+      }));
+
+      const sheetPrompt = buildCharacterSheetGenerationPrompt(profile);
+      const picData = (pictureNode.data ?? {}) as Record<string, unknown>;
+      const {
+        modelId,
+        quality,
+        aspectRatio,
+        size,
+        resolutionTier,
+      } = resolveAssetLibraryImageRequest(characterSheetGen, {
+        model: (picData.model as string) || undefined,
+        quality: (picData.quality as string) || undefined,
+        aspectRatio: (picData.aspectRatio as string) || '4:3',
+        resolutionTier: (picData.resolutionTier as string) || undefined,
+        width: (picData.width as number) || undefined,
+        height: (picData.height as number) || undefined,
+      });
+      appendLog(`角色设定板参数 · 模型 ${modelId} · 清晰度 ${resolutionTier} · 质量 ${quality} · 比例 ${aspectRatio} · ${size}`);
+      const urls = await runPictureGenJob({
+        prompt: sheetPrompt,
+        modelId,
+        size,
+        n: 1,
+        resolutionTier,
+        referenceImageUrl: fullSheetUrl || frontUrl || undefined,
+      });
+      const sheetUrl = urls[0];
+      if (!sheetUrl) throw new Error('设定板生成失败');
+
+      // 裁切回填
+      const blobs = await cropCharacterSheetPanels(sheetUrl);
+      const panelUrls: Record<string, string> = {};
+      for (const [panelId, blob] of Object.entries(blobs)) {
+        const file = new File([blob], `cs-${props.id}-${panelId}.jpg`, { type: 'image/jpeg' });
+        const uploaded = await api.uploadAsset(file);
+        panelUrls[panelId] = uploaded.url;
+      }
+      const filled = applyCroppedPanelsToCharacter(profile, {
+        panelUrls,
+        fullSheetUrl: sheetUrl,
+        overwrite: true,
+      });
+      const ext = filled.creative ?? {};
+      commit({
+        fullSheetUrl: ext.fullSheetUrl || sheetUrl,
+        frontUrl: ext.frontViewUrl || frontUrl,
+        sideUrl: ext.sideViewUrl || sideUrl,
+        backUrl: ext.backViewUrl || backUrl,
+        status: 'success',
+      });
+      // 同步角色库（若已有 id）
+      upsertCharacter(filled);
+      appendLog(`角色设定板已生成并回填 ${Object.keys(panelUrls).length} 格 · ${name}`);
+      toastSuccess(`设定板已回填 ${Object.keys(panelUrls).length} 格`);
+      setStudioTab('refs');
+    } catch (e) {
+      appendLog(`角色设定板生成失败: ${String(e)}`);
+    } finally {
+      setSheetGenerating(false);
+    }
+  }, [
+    appearance, appendLog, backUrl, characters, commit, costumeId, costumeLabel, costumePrompt,
+    data.characterId, frontUrl, fullSheetUrl, getEdges, getNodes, identity, name, personality,
+    prompt, props.id, sideUrl, upsertCharacter, characterSheetGen,
+  ]);
+
+
+    const loadCharacter = useCallback((character: CharacterProfile) => {
     const ext = getCharacterCreative(character);
     commit({
       characterId: character.id,
       characterName: character.name,
       identity: character.bible?.identity ?? character.descriptionZh ?? '',
       appearanceAnchor: character.bible?.appearance ?? character.consistencyPrompt ?? '',
-      wardrobeAnchor: '',
+      wardrobeAnchor: ext.costumeLabel || '',
+      costumeId: ext.costumeId ?? '',
+      costumeLabel: ext.costumeLabel ?? '',
+      costumePrompt: ext.costumePrompt ?? '',
       personality: character.bible?.personality ?? '',
       forbiddenTraits: ext.consistency?.negativePrompt ?? '',
       aliases: ext.aliases ?? [],
@@ -242,6 +507,9 @@ function CharacterSheetBlock(props: NodeProps) {
       identity: '',
       appearanceAnchor: '',
       wardrobeAnchor: '',
+      costumeId: '',
+      costumeLabel: '',
+      costumePrompt: '',
       personality: '',
       forbiddenTraits: '',
       aliases: [],
@@ -302,6 +570,9 @@ function CharacterSheetBlock(props: NodeProps) {
           negativePrompt: forbidden || ext.consistency?.negativePrompt,
         },
         aliases: [...new Set([...(ext.aliases ?? []), ...aliases])],
+        costumeId: costumeId || ext.costumeId || null,
+        costumeLabel: costumeLabel || ext.costumeLabel || null,
+        costumePrompt: costumePrompt || ext.costumePrompt || null,
       },
     }));
     upsertCharacter(profile);
@@ -315,7 +586,7 @@ function CharacterSheetBlock(props: NodeProps) {
     toastSuccess(`角色「${finalName}」已保存到角色库`);
     appendLog(`角色一致性资产已保存 · ${finalName}`);
   }, [
-    aliases, appendLog, appearance, backUrl, characters, data.characterId, forbidden,
+    aliases, appendLog, appearance, backUrl, characters, costumeId, costumeLabel, costumePrompt, data.characterId, forbidden,
     frontUrl, fullSheetUrl, identity, locked, name, personality, prompt, props.id,
     sessionPicked, sideUrl, updateNodeData, upsertCharacter, upstream?.pictures, wardrobe,
   ]);
@@ -333,39 +604,84 @@ function CharacterSheetBlock(props: NodeProps) {
             </span>
           </div>
 
-          {/* 名册概览：展示库内角色清单，不钉死「当前编辑的那一个」 */}
+          {/* 画布摘要卡：状态 + 关键指标 + 角色 chips，详表仅在工作台 */}
           <button
             type="button"
-            className="cs-mini"
+            className="cs-summary-card"
             onClick={openStudio}
             title="打开角色名册 · 从库选人再编辑"
           >
             {rosterStats.total > 0 ? (
               <>
-                <div className="cs-mini__head cs-mini__head--roster">
-                  <span>角色</span>
-                  <span>身份</span>
-                  <span>状态</span>
+                <div className="cs-summary-card__hero">
+                  <div>
+                    <span className="cs-summary-card__eyebrow">角色名册</span>
+                    <strong>
+                      {rosterStats.pending === 0
+                        ? '名册齐备，可进分镜'
+                        : `${rosterStats.pending} 人待补设定`}
+                    </strong>
+                    <p>
+                      {rosterPreview[0]
+                        ? `代表：${compact(rosterPreview[0].name, 12)}${
+                            rosterPreview[0].identity && rosterPreview[0].identity !== '—'
+                              ? ` · ${compact(rosterPreview[0].identity, 18)}`
+                              : ''
+                          }`
+                        : '打开后从库选人、补参考与一致性 Prompt'}
+                    </p>
+                  </div>
+                  <span className="cs-summary-card__metric">
+                    {rosterStats.total}
+                    <small>人</small>
+                  </span>
                 </div>
-                {rosterPreview.map((row) => (
-                  <div key={row.id} className="cs-mini__row cs-mini__row--roster">
-                    <span className="is-title">{compact(row.name, 10)}</span>
-                    <span>{compact(row.identity, 12)}</span>
-                    <span className={`cs-mini__badge is-${row.tone}`}>{row.status}</span>
-                  </div>
-                ))}
-                {rosterStats.total > 4 ? (
-                  <div className="cs-mini__more">
-                    另有 {rosterStats.total - 4} 人 · 开表查看全部
-                  </div>
-                ) : null}
+                <div className="cs-summary-card__stats" aria-label="角色库摘要">
+                  <span><b>{rosterStats.ready}</b> 齐备</span>
+                  <span><b>{rosterStats.needRef}</b> 缺图</span>
+                  <span><b>{rosterStats.needAnchor}</b> 缺锚</span>
+                </div>
+                <div className="cs-summary-card__chips">
+                  {(rosterPreview.length
+                    ? rosterPreview.map((r) => r.name)
+                    : ['角色库']
+                  ).map((label) => (
+                    <span key={label}>{compact(label, 10)}</span>
+                  ))}
+                </div>
+                <div className="cs-summary-card__trail">
+                  {rosterStats.pending === 0
+                    ? '点击进入档案台 · 锁定与参考图管理'
+                    : `待补 ${rosterStats.pending} · 点击开表补齐外观/参考`}
+                </div>
               </>
             ) : (
-              <div className="cs-mini__empty">
-                角色名册为空
-                <br />
-                开表从库新建，或由剧本拆分补入
-              </div>
+              <>
+                <div className="cs-summary-card__hero is-empty">
+                  <div>
+                    <span className="cs-summary-card__eyebrow">准备中</span>
+                    <strong>建立角色名册</strong>
+                    <p>开表新建，或由剧本拆分 / 设定检查同步角色候选后再编辑。</p>
+                  </div>
+                  <span className="cs-summary-card__metric">
+                    0
+                    <small>人</small>
+                  </span>
+                </div>
+                <div className="cs-summary-card__stats" aria-label="空库状态">
+                  <span><b>0</b> 齐备</span>
+                  <span><b>—</b> 参考</span>
+                  <span><b>—</b> 锁定</span>
+                </div>
+                <div className="cs-summary-card__chips">
+                  <span>外观锚点</span>
+                  <span>设定板</span>
+                  <span>一致性</span>
+                </div>
+                <div className="cs-summary-card__trail">
+                  点击进入角色档案台
+                </div>
+              </>
             )}
           </button>
 
@@ -510,7 +826,25 @@ function CharacterSheetBlock(props: NodeProps) {
                             onClick={() => loadCharacter(character)}
                           >
                             {url ? (
-                              <img src={url} alt="" className="cs-lib-thumb" />
+                              <span
+                                className="cs-lib-thumb-btn"
+                                role="button"
+                                tabIndex={0}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  openGalleryAt(url, galleryFromCharacter(character));
+                                }}
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter' || e.key === ' ') {
+                                    e.preventDefault();
+                                    e.stopPropagation();
+                                    openGalleryAt(url, galleryFromCharacter(character));
+                                  }
+                                }}
+                                title="放大查看"
+                              >
+                                <img src={url} alt="" className="cs-lib-thumb" />
+                              </span>
                             ) : (
                               <span className="cs-lib-thumb is-empty">
                                 <UserRound size={14} />
@@ -597,6 +931,41 @@ function CharacterSheetBlock(props: NodeProps) {
                   />
                 </label>
 
+                <div className="cs-field">
+                  <span className="cs-label">从服装库选择</span>
+                  <div className="cs-costume-row">
+                    <select
+                      className="cs-select"
+                      value={costumeId}
+                      onChange={(e) => applyCostumeFromLibrary(e.target.value)}
+                    >
+                      <option value="">未绑定服装</option>
+                      {costumeItems.map((item) => (
+                        <option key={`${item.scope}-${item.id}`} value={item.id}>
+                          {item.builtin ? '内置 · ' : item.scope === 'public' ? '公共 · ' : '私有 · '}
+                          {item.label}
+                        </option>
+                      ))}
+                    </select>
+                    {costumeId ? (
+                      <button
+                        type="button"
+                        className="cs-btn cs-btn--ghost cs-btn--sm"
+                        onClick={() => applyCostumeFromLibrary('')}
+                      >
+                        清除
+                      </button>
+                    ) : null}
+                  </div>
+                  {costumeLabel ? (
+                    <p className="cs-hint">
+                      已绑定 <code>@服装:{costumeLabel}</code> · 保存角色时写入 Costume lock
+                    </p>
+                  ) : (
+                    <p className="cs-hint">可从服装库绑定套装，保持跨镜造型一致</p>
+                  )}
+                </div>
+
                 <div className="cs-grid-2">
                   <label className="cs-field">
                     <span className="cs-label">服装 / 标志物</span>
@@ -604,7 +973,7 @@ function CharacterSheetBlock(props: NodeProps) {
                       className="cs-textarea cs-textarea--sm"
                       value={wardrobe}
                       onChange={(e) => commit({ wardrobeAnchor: e.target.value })}
-                      placeholder="风衣、怀表、耳坠…"
+                      placeholder="风衣、怀表、耳坠…（可被服装库绑定覆盖）"
                     />
                   </label>
                   <label className="cs-field">
@@ -635,20 +1004,45 @@ function CharacterSheetBlock(props: NodeProps) {
                 <div className="cs-panel">
                   <div className="cs-panel__head">
                     <h3 className="cs-panel__title">参考视图</h3>
-                    <button
-                      type="button"
-                      className="cs-btn cs-btn--ghost cs-btn--sm"
-                      onClick={fillFromUpstream}
-                    >
-                      用上游图
-                    </button>
+                    <div className="cs-panel__acts">
+                      <button
+                        type="button"
+                        className="cs-btn cs-btn--ghost cs-btn--sm"
+                        onClick={fillFromUpstream}
+                      >
+                        用上游图
+                      </button>
+                      <button
+                        type="button"
+                        className="cs-btn cs-btn--soft cs-btn--sm"
+                        disabled={sheetGenerating}
+                        onClick={() => void generateCharacterSheetViaPicture()}
+                        title="通过连接的图像生成节点出角色设定板"
+                      >
+                        {sheetGenerating ? <Loader2 size={12} className="animate-spin" /> : <Sparkles size={12} />}
+                        {sheetGenerating ? '生成中' : '生成设定板'}
+                      </button>
+                    </div>
+                  </div>
+                  <p className="cs-hint" style={{ marginTop: 0, marginBottom: 8 }}>
+                    顶部能力口连接「图像生成」后，可一键生成角色设定板并写入主参考。
+                  </p>
+                  <div className="mb-2">
+                    <AssetLibraryGenSettings
+                      preset="character-sheet"
+                      value={characterSheetGen}
+                      onChange={setCharacterSheetGen}
+                      compact
+                      hint="与素材库共用参数"
+                    />
                   </div>
                   <div className="cs-views">
                     <div className="cs-slot">
                       <ImageUploadSlot
                         url={fullSheetUrl}
-                        label="主参考"
+                        label="完整设定板"
                         compact
+                        gallery={characterGallery}
                         onUploaded={(url) => commit({ fullSheetUrl: url })}
                         onClear={() => commit({ fullSheetUrl: '' })}
                       />
@@ -658,6 +1052,7 @@ function CharacterSheetBlock(props: NodeProps) {
                         url={frontUrl}
                         label="正面"
                         compact
+                        gallery={characterGallery}
                         onUploaded={(url) => commit({ frontUrl: url })}
                         onClear={() => commit({ frontUrl: '' })}
                       />
@@ -667,6 +1062,7 @@ function CharacterSheetBlock(props: NodeProps) {
                         url={sideUrl}
                         label="侧面"
                         compact
+                        gallery={characterGallery}
                         onUploaded={(url) => commit({ sideUrl: url })}
                         onClear={() => commit({ sideUrl: '' })}
                       />
@@ -676,11 +1072,15 @@ function CharacterSheetBlock(props: NodeProps) {
                         url={backUrl}
                         label="背面"
                         compact
+                        gallery={characterGallery}
                         onUploaded={(url) => commit({ backUrl: url })}
                         onClear={() => commit({ backUrl: '' })}
                       />
                     </div>
                   </div>
+                  <p className="cs-hint">
+                    一键生成会裁切回填完整设定板与多面板资产；详细表情/微表情/手部格请在「素材库 · 角色」中查看。
+                  </p>
                 </div>
 
                 <div className="cs-panel">
@@ -734,8 +1134,18 @@ function CharacterSheetBlock(props: NodeProps) {
           </div>
         </div>
       </ScreenModal>
+      <ImageLightbox
+        open={sheetPreviewOpen}
+        items={overrideGallery && overrideGallery.length > 0 ? overrideGallery : characterGallery}
+        index={sheetPreviewIndex}
+        onClose={() => {
+          setSheetPreviewOpen(false);
+          setOverrideGallery(null);
+        }}
+      />
     </div>
   );
 }
 
 export default memo(CharacterSheetBlock);
+

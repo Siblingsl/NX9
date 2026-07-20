@@ -17,6 +17,9 @@ export interface PictureGenJobInput {
   seed?: number;
   /** 高清放大倍率，默认 2 */
   upscaleScale?: number;
+  /** 清晰度档位 1k/2k/4k，透传 Gemini imageSize */
+  imageSizeTier?: string;
+  resolutionTier?: string;
 }
 
 export const PANORAMA_720_PROMPT_SUFFIX = [
@@ -107,12 +110,25 @@ export async function runPictureGenJob(input: PictureGenJobInput): Promise<strin
       ? '1024x1024'
       : '1792x1024'
     : input.size || def.defaultSize || '1024x1024';
+  const refForProxy =
+    input.referenceImageUrl?.trim() ||
+    input.referenceImageUrls?.find((u) => u?.trim())?.trim() ||
+    input.styleImageUrl?.trim() ||
+    '';
+  const tier =
+    input.imageSizeTier?.trim() ||
+    input.resolutionTier?.trim() ||
+    undefined;
   const res = (await api.proxyImage({
     prompt: safePrompt,
     model: def.model,
     provider: def.provider,
     size: requestSize,
     n: panorama ? 1 : n,
+    ...(tier ? { imageSizeTier: tier, resolutionTier: tier } : {}),
+    ...(refForProxy && (def.supportsReference || def.provider === 'gemini')
+      ? { referenceImageUrl: refForProxy }
+      : {}),
   })) as {
     ok?: boolean;
     url?: string;

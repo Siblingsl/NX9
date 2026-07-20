@@ -668,7 +668,7 @@ function DirectorDeskBlock(props: NodeProps) {
         <p className="dd-meta">
           {pictureNode
             ? `出图：图像生成 · ${(pictureNode.data as Record<string, unknown>)?.model ?? '默认'}`
-            : '出图：默认 dall-e-3（建议放图像生成节点）'}
+            : '出图：默认 Gemini 2.5 Flash Image（建议放图像生成节点）'}
           {clipNode ? ' · 可送视频' : ''}
           {storyboard.activeEpisodeId ? ' · 仅当前集' : ''}
         </p>
