@@ -96,7 +96,7 @@ export function buildStudioImagePrompt(ctx: StudioPromptContext): string {
   if (environment) prompt = enrichPromptWithEnvironment(prompt, environment);
 
   prompt +=
-    '\nConstraints: consistent character identity across franchise bible, coherent environment continuity, single frame only, no watermark, no UI chrome, no multi-panel grid, no text overlay.';
+    '\nConstraints: consistent character identity across franchise bible, coherent environment continuity, keep environment realistic, single frame only, no watermark, no UI chrome, no multi-panel grid, no text overlay, no arrows, no colored guide lines, no annotation labels, no timestamps.';
   return prompt.trim();
 }
 
@@ -135,7 +135,9 @@ export function buildStudioVideoPrompt(ctx: StudioPromptContext): string {
   if (environment) prompt = enrichPromptWithEnvironment(prompt, environment);
 
   prompt +=
-    '\nConstraints: maintain character identity and costume from first frame, continuous motivated camera, no jump cuts, no text overlay, filmic motion blur only when motivated, keep spatial continuity.';
+    '\nConstraints: maintain character identity and costume from first frame, continuous motivated camera, no jump cuts, no text overlay, filmic motion blur only when motivated, keep spatial continuity, keep environment realistic.';
+  prompt +=
+    '\nGuide policy: reference may include colored director arrows/marks (red=action, blue=camera, orange=light, green=compose, purple=emotion). Use them only as motion/staging intent. Never render arrows, guide lines, labels, or timestamps in any video frame.';
   return prompt.trim();
 }
 

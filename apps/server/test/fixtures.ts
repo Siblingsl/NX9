@@ -15,7 +15,7 @@ export const FIXTURE_WS_IMPORT = {
   blocks: [
     {
       id: 'blk-prompt-001',
-      type: 'prompt',
+      type: 'picture-gen',
       position: { x: 100, y: 100 },
       data: { blockIndex: 1, status: 'idle', content: 'FIXTURE: cinematic coffee shop, morning golden light, young woman' },
     },

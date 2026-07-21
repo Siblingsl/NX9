@@ -11,7 +11,6 @@ import {
   AlignStartHorizontal,
   AlignStartVertical,
   AlignVerticalSpaceBetween,
-  Check,
   ChevronRight,
   Clapperboard,
   Copy,
@@ -28,7 +27,6 @@ import {
   RefreshCw,
 } from 'lucide-react';
 import type { NodeAlignAction } from './node-align';
-import { FLOW_EDGE_TYPES, type FlowEdgeTypeId } from './flow-edge-types';
 
 const QUICK_BLOCK_KINDS = [
   'prompt',
@@ -157,9 +155,7 @@ interface EdgeContextMenuProps {
   x: number;
   y: number;
   edgeId: string;
-  edgeType: FlowEdgeTypeId;
   onClose: () => void;
-  onChangeType: (type: FlowEdgeTypeId) => void;
   onDelete: () => void;
 }
 
@@ -167,14 +163,12 @@ export function EdgeContextMenu({
   x,
   y,
   edgeId,
-  edgeType,
   onClose,
-  onChangeType,
   onDelete,
 }: EdgeContextMenuProps) {
-  const menuWidth = 208;
+  const menuWidth = 180;
   const left = Math.min(x, window.innerWidth - menuWidth - 12);
-  const top = Math.min(y, window.innerHeight - 320);
+  const top = Math.min(y, window.innerHeight - 120);
 
   return (
     <>
@@ -187,29 +181,6 @@ export function EdgeContextMenu({
           <span>连接线</span>
           <span className="text-[10px] font-normal opacity-60">#{edgeId.slice(-6)}</span>
         </div>
-
-        <div className="px-3 py-1.5 text-[10px] font-bold text-ink/55">线条类型</div>
-        {FLOW_EDGE_TYPES.map((item) => {
-          const active = edgeType === item.id;
-          return (
-            <button
-              key={item.id}
-              type="button"
-              className={`nx9-context-menu__item ${active ? 'bg-brand/5 text-brand' : ''}`}
-              onClick={() => {
-                if (!active) onChangeType(item.id);
-                onClose();
-              }}
-            >
-              <span className="inline-flex w-5 justify-center">
-                {active ? <Check size={13} /> : null}
-              </span>
-              <span>{item.label}</span>
-            </button>
-          );
-        })}
-
-        <div className="nx9-context-menu__divider" />
         <button
           type="button"
           className="nx9-context-menu__item nx9-context-menu__item--danger"

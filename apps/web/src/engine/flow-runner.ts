@@ -13,8 +13,6 @@ import {
   promptItemsToBatch,
   resolvePromptBatch,
   buildLightRigPrompt,
-  characterSheetFromNodeData,
-  syncCharacterSheetNodeOutput,
   resolveVideoGenParams,
   resolveAssetImportItems,
   type ClipChainState,
@@ -31,12 +29,20 @@ import {
   resolveStoryboardPreviewPictureSettings,
   activeEpisodeShots,
   migrateBlockKind,
+  filterStoryboardGuideOverlay,
+  resolveStoryboardGuideOverlay,
+  buildVideoGuidePromptSuffix,
 } from '@nx9/shared';
 import { buildCameraPrompt, normalizeDirectorProject } from '@nx9/director3d';
 import { api } from '../api/client';
 import { runClipChain } from './clip-chain-runner';
 import { pollVideoUntilDone } from './poll-task';
 import { useWorkspaceDocument } from '../stores/workspace-document';
+import {
+  enabledGuideKinds,
+  readStoryboardGuidePrefs,
+} from '../stores/storyboard-guide-prefs';
+import { composeStoryboardGuideFrameDataUrl } from './storyboard-guide-compose';
 
 function linkedShotForBlock(blockId: string, data: Record<string, unknown>): StoryboardShot | undefined {
   const shots = useWorkspaceDocument.getState().storyboard.shots;
@@ -135,8 +141,6 @@ export const RUNNABLE_BLOCKS = new Set([
   'motion-story',
   'shot-script',
   'reference-board',
-  'character-sheet',
-  'scene-card',
   'dialogue-sheet',
   'asset-gate',
   'voice-cast',
@@ -683,15 +687,36 @@ async function executeBlock(
       const count = Math.min(breakdownShots.length, upstream.pictures.length);
       for (let i = 0; i < count; i++) {
         const shot = breakdownShots[i];
-        const imageUrl = upstream.pictures[i];
+        let imageUrl = upstream.pictures[i];
         const modelId = (d.model as string) || 'veo';
         if (modelId.startsWith('grok-imagine-video') && !imageUrl) {
           throw new Error('Grok Imagine 当前需要首图，请先连接图像生成节点或使用分镜预览生成首图');
         }
-        const finalPrompt = enrichPromptWithCharacters(
+        const boardShot = useWorkspaceDocument.getState().storyboard.shots.find(
+          (s) => s.id === shot.id || s.index === i,
+        );
+        let finalPrompt = enrichPromptWithCharacters(
           shot.videoPrompt || shot.imagePrompt || prompt || 'cinematic scene',
           charCtx.characters,
         );
+        if (boardShot && imageUrl) {
+          const guidePrefs = readStoryboardGuidePrefs();
+          if (guidePrefs.useForVideo) {
+            const guide = filterStoryboardGuideOverlay(
+              resolveStoryboardGuideOverlay(boardShot),
+              { enabled: true, kinds: enabledGuideKinds(guidePrefs) },
+            );
+            finalPrompt = `${finalPrompt}\n\n${buildVideoGuidePromptSuffix(guide)}`.trim();
+            if (guide.arrows.length || guide.marks.length) {
+              try {
+                const composed = await composeStoryboardGuideFrameDataUrl(imageUrl, guide);
+                if (composed) imageUrl = composed;
+              } catch {
+                /* keep clean */
+              }
+            }
+          }
+        }
         const res = (await api.proxyVideo({
           prompt: finalPrompt,
           model: modelId,
@@ -709,9 +734,6 @@ async function executeBlock(
         if (!videoUrl) throw new Error(res.message ?? `镜头 ${i + 1} 视频生成失败`);
         clips.push(videoUrl);
         // 写回故事板 SSOT
-        const boardShot = useWorkspaceDocument.getState().storyboard.shots.find(
-          (s) => s.id === shot.id || s.index === i,
-        );
         if (boardShot) {
           useWorkspaceDocument.getState().updateShot(boardShot.id, {
             videoAssetId: videoUrl,
@@ -1270,17 +1292,6 @@ async function executeBlock(
     return;
   }
 
-  if (kind === 'character-sheet') {
-    const sheet = characterSheetFromNodeData(d);
-    const out = syncCharacterSheetNodeOutput(sheet);
-    updateNodeData(block.id, {
-      status: 'success',
-      ...out,
-      characterId: d.characterId,
-    });
-    return;
-  }
-
   if (kind === 'inpaint-edit') {
     const img = upstream.pictures?.[0] || (d.imageUrl as string);
     const mask = (d.maskUrl as string) || '';
@@ -1411,26 +1422,6 @@ async function executeBlock(
       results,
       sounds: audioUrls,
       meta: { total: results.length, failed: results.filter((r) => r.error).length },
-    });
-    return;
-  }
-
-  if (kind === 'scene-card') {
-    const sceneName = (d.sceneName as string) ?? '';
-    const description = (d.description as string) ?? '';
-    const era = (d.era as string) ?? '';
-    const lighting = (d.lighting as string) ?? '';
-    const props = (d.props as string[]) ?? [];
-    const referenceUrls = (d.referenceUrls as string[]) ?? [];
-    const compiledPrompt = [sceneName, description, era, lighting, ...props, ...referenceUrls]
-      .filter(Boolean)
-      .join(' | ');
-    updateNodeData(block.id, {
-      status: 'success',
-      content: compiledPrompt,
-      output: compiledPrompt,
-      meta: { sceneName, description, era, lighting, props, referenceUrls },
-      pictures: referenceUrls.length ? referenceUrls : undefined,
     });
     return;
   }

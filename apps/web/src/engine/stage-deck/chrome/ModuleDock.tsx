@@ -47,13 +47,13 @@ function blocksForLane(lane: LaneId, query: string): BlockDefinition[] {
 const STEP_KINDS: Record<string, string[]> = {
   script: ['dialogue-sheet'],
   'script-breakdown': ['dialogue-sheet'],
-  'scene-split': ['text-chunker'],
+  'scene-split': ['dialogue-sheet'],
   storyboard: ['asset-gate', 'storyboard-desk'],
   'story-grid': ['asset-gate', 'storyboard-desk'],
   'storyboard-preview': ['storyboard-desk'],
   'storyboard-desk': ['storyboard-desk'],
-  'character-bible': ['character-sheet'],
-  'environment-bible': ['scene-card'],
+  'character-bible': [],
+  'environment-bible': [],
   'camera-3d': ['director-3d'],
   'camera-live': ['director-desk'],
   'keyframe-gen': ['picture-gen', 'director-desk'],
@@ -63,6 +63,9 @@ const STEP_KINDS: Record<string, string[]> = {
   'episode-studio': ['clip-editor'],
   'review-gate': ['review-gate'],
   export: ['export-pack'],
+  source: ['link-parser', 'asset-import'],
+  analyze: ['link-parser', 'reference-board'],
+  generate: ['picture-gen', 'clip-gen'],
 };
 
 export function ModuleDock({ onPick }: ModuleDockProps) {

@@ -1,7 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Image, Monitor, Upload, X } from 'lucide-react';
-import { DEFAULT_CANVAS_APPEARANCE, type CanvasAppearance, type CanvasGridStyle, type CanvasThemeMode } from '@nx9/shared';
+import {
+  DEFAULT_CANVAS_APPEARANCE,
+  type CanvasAppearance,
+  type CanvasEdgePathType,
+  type CanvasGridStyle,
+  type CanvasSocketStyle,
+  type CanvasThemeMode,
+} from '@nx9/shared';
 import { api } from '../api/client';
+import { FLOW_EDGE_TYPES } from '../engine/flow-edge-types';
 import { useWorkspaceDocument } from '../stores/workspace-document';
 
 export type CanvasThemeUISetting = CanvasThemeMode | 'system';
@@ -105,6 +113,52 @@ export function CanvasAppearancePanel() {
               }`}
             >
               {style === 'dots' ? '点' : style === 'lines' ? '线' : '空白'}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="space-y-1">
+        <p className="text-[10px] text-ink/50">连接点样式</p>
+        <div className="flex gap-1">
+          {(
+            [
+              { id: 'dot' as const, label: '点状' },
+              { id: 'plus' as const, label: '加号' },
+              { id: 'hidden' as const, label: '移入' },
+            ] satisfies { id: CanvasSocketStyle; label: string }[]
+          ).map(({ id, label }) => (
+            <button
+              key={id}
+              type="button"
+              onClick={() => update({ socketStyle: id })}
+              className={`nodrag nopan text-[10px] px-3 py-1.5 rounded-lg border transition-colors flex-1 ${
+                (canvasAppearance.socketStyle ?? 'dot') === id
+                  ? 'bg-brand/10 text-brand border-brand/30'
+                  : 'border-line text-ink/60 hover:border-brand/30'
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="space-y-1">
+        <p className="text-[10px] text-ink/50">连接线类型</p>
+        <div className="flex flex-wrap gap-1">
+          {FLOW_EDGE_TYPES.map(({ id, label }) => (
+            <button
+              key={id}
+              type="button"
+              onClick={() => update({ edgePathType: id as CanvasEdgePathType })}
+              className={`nodrag nopan text-[10px] px-2 py-1.5 rounded-lg border transition-colors ${
+                (canvasAppearance.edgePathType ?? 'default') === id
+                  ? 'bg-brand/10 text-brand border-brand/30'
+                  : 'border-line text-ink/60 hover:border-brand/30'
+              }`}
+            >
+              {label}
             </button>
           ))}
         </div>

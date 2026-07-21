@@ -1,21 +1,25 @@
-import type { StoryboardPreviewFrame, StoryboardPreviewGridColumns } from '@nx9/shared';
+import type {
+  StoryboardGuideKind,
+  StoryboardPreviewFrame,
+  StoryboardPreviewGridColumns,
+  StoryboardShot,
+} from '@nx9/shared';
 import { StoryboardPreviewFrameCard } from './StoryboardPreviewFrameCard';
+import '../../../../../styles/storyboard-board.css';
 
 function stop(e: React.SyntheticEvent) {
   e.stopPropagation();
 }
 
-const COL_CLASS: Record<StoryboardPreviewGridColumns, string> = {
-  2: 'grid-cols-2',
-  3: 'grid-cols-3',
-  4: 'grid-cols-4',
-};
-
 export interface StoryboardPreviewGridProps {
   frames: StoryboardPreviewFrame[];
   columns: StoryboardPreviewGridColumns;
+  /** shotId → 镜头，用于标题/运镜/对白等专业故事板标注 */
+  shotById?: Map<string, StoryboardShot>;
   selectedFrameId?: string | null;
   selectedIds?: Set<string>;
+  showGuide?: boolean;
+  guideKinds?: readonly StoryboardGuideKind[] | null;
   onSelect: (frameId: string) => void;
   onToggleSelect?: (frameId: string) => void;
   onToggleLock: (frameId: string) => void;
@@ -28,8 +32,11 @@ export interface StoryboardPreviewGridProps {
 export function StoryboardPreviewGrid({
   frames,
   columns,
+  shotById,
   selectedFrameId,
   selectedIds,
+  showGuide = true,
+  guideKinds = null,
   onSelect,
   onToggleSelect,
   onToggleLock,
@@ -42,7 +49,7 @@ export function StoryboardPreviewGrid({
 
   return (
     <div
-      className={`grid ${COL_CLASS[columns]} gap-2 px-3 pb-2 nodrag nopan`}
+      className={`sb-board sb-board-grid is-cols-${columns} nodrag nopan`}
       onMouseDown={stop}
     >
       {sorted.map((frame, index) => (
@@ -67,8 +74,11 @@ export function StoryboardPreviewGrid({
         >
           <StoryboardPreviewFrameCard
             frame={frame}
+            shot={shotById?.get(frame.sourceShotId) ?? null}
             selected={selectedFrameId === frame.id}
             checked={selectedIds?.has(frame.id)}
+            showGuide={showGuide}
+            guideKinds={guideKinds}
             onSelect={() => onSelect(frame.id)}
             onToggleSelect={onToggleSelect ? () => onToggleSelect(frame.id) : undefined}
             onToggleLock={() => onToggleLock(frame.id)}

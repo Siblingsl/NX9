@@ -1,37 +1,75 @@
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
-  ArrowLeft,
   Archive,
+  ArrowLeft,
+  Bell,
   Check,
   ChevronDown,
   ChevronUp,
   Clapperboard,
   Download,
   Film,
+  HelpCircle,
+  Home,
   ImagePlus,
   Info,
   LayoutGrid,
   Loader2,
   MapPin,
   Mic2,
+  Play,
   Plus,
+  Search,
+  Settings,
   Sparkles,
   Trash2,
   User,
+  Users,
   Video,
+  X,
 } from 'lucide-react';
-import type { CharacterProfile, EnvironmentProfile } from '@nx9/shared';
+import {
+  buildShotTimeline,
+  formatShotTimeRange,
+  type CharacterProfile,
+  type EnvironmentProfile,
+} from '@nx9/shared';
 import { useAppSurface } from '../stores/app-surface';
 import { useWorkspaceCatalog } from '../stores/workspace-catalog';
+import { useCredentialVault } from '../stores/credential-vault';
 import ImageUploadSlot from '../blocks/shared/ImageUploadSlot';
 import {
   CAMERA_MOVE_PRESETS,
   COLOR_GRADE_PRESETS,
   LIGHTING_PRESETS,
   STUDIO_STEPS,
+  type StudioStepId,
 } from './studio/studio-types';
 import { useStudioDesk, type StudioDesk } from './studio/useStudioDesk';
+import {
+  formatDuration,
+  groupShotsIntoScenes,
+  parseShotPlace,
+  projectProgressPct,
+  shotTypeLabel,
+} from './studio/atelier-utils';
 import './studio/studio-desk.css';
+import './studio/atelier-desk.css';
+
+type AtelierSheet =
+  | null
+  | 'script'
+  | 'storyboard'
+  | 'preview'
+  | 'review'
+  | 'video'
+  | 'voice'
+  | 'export'
+  | 'episodes'
+  | 'assets'
+  | 'characters'
+  | 'scenes'
+  | 'produce';
 
 function mediaUrl(path?: string | null): string | undefined {
   if (!path) return undefined;
@@ -41,235 +79,515 @@ function mediaUrl(path?: string | null): string | undefined {
 }
 
 /**
- * 制作台 · 独立剧集生产系统（非画布附庸）
- * 三枢纽：剧集架 / 资产库 / 本集制作
- * 分镜预览 = 故事板关键帧静帧，不是成片
+ * 制作台 · NX9 Atelier 木质场记桌
+ * 桌面：场次/镜头卡；底栏：快捷入口；详细步骤在浮层完成
  */
 export function ProductionStudioPage() {
   const goHome = useAppSurface((s) => s.goHome);
   const goCanvas = useAppSurface((s) => s.goCanvas);
+  const toggleSettings = useCredentialVault((s) => s.toggleSettings);
   const activeId = useWorkspaceCatalog((s) => s.activeId);
   const items = useWorkspaceCatalog((s) => s.items);
+  const selectWorkspace = useWorkspaceCatalog((s) => s.selectWorkspace);
   const project = items.find((i) => i.id === activeId);
   const desk = useStudioDesk();
+  const [sheet, setSheet] = useState<AtelierSheet>(null);
+  const [focusSceneKey, setFocusSceneKey] = useState<string | null>(null);
 
   const running = desk.queuePhase === 'running';
   const pct =
     desk.queueProgress.total > 0
       ? Math.round((desk.queueProgress.done / desk.queueProgress.total) * 100)
       : 0;
+  const projectPct = projectProgressPct(desk.stepDone, STUDIO_STEPS.length);
+
+  const scenes = useMemo(() => groupShotsIntoScenes(desk.shots), [desk.shots]);
+  const polaroids = useMemo(
+    () => desk.shots.filter((s) => s.firstFrameAssetId).slice(0, 2),
+    [desk.shots],
+  );
+  const frameShot = useMemo(
+    () => desk.shots.find((s) => s.firstFrameAssetId) ?? null,
+    [desk.shots],
+  );
+
+  const title =
+    desk.seriesTitle?.trim() ||
+    project?.title ||
+    desk.activeEpisode?.title ||
+    '未命名项目';
+
+  const openStep = (step: StudioStepId) => {
+    desk.setHub('produce');
+    desk.setStep(step);
+    setSheet(step);
+  };
+
+  const openSheet = (id: AtelierSheet) => {
+    if (id === 'episodes') {
+      desk.setHub('episodes');
+      setSheet('episodes');
+      return;
+    }
+    if (id === 'assets' || id === 'characters' || id === 'scenes') {
+      desk.setHub('assets');
+      setSheet(id);
+      return;
+    }
+    if (id === 'produce') {
+      desk.setHub('produce');
+      setSheet(desk.step);
+      return;
+    }
+    if (id) openStep(id as StudioStepId);
+  };
+
+  const closeSheet = () => {
+    setSheet(null);
+    desk.setHub('produce');
+  };
+
+  useEffect(() => {
+    if (!sheet) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') closeSheet();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sheet]);
+
+  const sheetTitle = (() => {
+    if (sheet === 'episodes') return { t: '剧集架', s: '多集归档与切换' };
+    if (sheet === 'assets' || sheet === 'characters' || sheet === 'scenes')
+      return { t: '资产库', s: '角色 · 场景 · 声音' };
+    if (sheet && sheet !== 'produce') {
+      const def = STUDIO_STEPS.find((x) => x.id === sheet);
+      return { t: def?.label ?? '制作', s: def?.hint ?? '' };
+    }
+    return { t: '制作', s: '' };
+  })();
 
   return (
-    <div className="studio-desk">
-      <header className="studio-desk__top">
-        <button type="button" className="studio-desk__ghost" onClick={goHome}>
-          <ArrowLeft size={14} /> 导航
-        </button>
-        <div className="studio-desk__brand min-w-0 flex-1">
-          <span className="studio-desk__mark">N9</span>
+    <div className="atelier">
+      <header className="atelier__topbar">
+        <div className="atelier__brand">
+          <button type="button" className="atelier__icon-btn" onClick={goHome} title="返回导航">
+            <Home size={15} />
+          </button>
+          <span className="atelier__mark">N9</span>
           <div className="min-w-0">
-            <div className="studio-desk__title truncate">
-              制作台
-              {project ? ` · ${project.title}` : desk.seriesTitle ? ` · ${desk.seriesTitle}` : ''}
-              {desk.activeEpisode ? ` · ${desk.activeEpisode.title}` : ''}
-            </div>
-            <div className="studio-desk__sub">
-              独立剧集生产 · 分镜预览图=故事板静帧 · 非节点画布附庸
+            <div className="atelier__brand-name">
+              NX9 Atelier
+              <span className="atelier__pro">PRO</span>
             </div>
           </div>
         </div>
-        <button type="button" className="studio-desk__btn-accent" onClick={goCanvas}>
-          <LayoutGrid size={14} /> 高级画布
-        </button>
+        <div className="atelier__top-actions">
+          <button type="button" className="atelier__icon-btn" title="搜索" onClick={() => openSheet('storyboard')}>
+            <Search size={15} />
+          </button>
+          <button
+            type="button"
+            className="atelier__icon-btn"
+            title="帮助"
+            onClick={() => openStep(STUDIO_STEPS.find((s) => !desk.stepDone[s.id])?.id ?? 'script')}
+          >
+            <HelpCircle size={15} />
+          </button>
+          <button type="button" className="atelier__icon-btn" title="设置" onClick={() => toggleSettings(true)}>
+            <Settings size={15} />
+          </button>
+          <button type="button" className="atelier__icon-btn" title="任务" onClick={() => desk.nextAction.go()}>
+            <Bell size={15} />
+          </button>
+          <button type="button" className="atelier__icon-btn" title="高级画布" onClick={goCanvas}>
+            <LayoutGrid size={15} />
+          </button>
+          <span className="atelier__avatar" title={title}>
+            {(title[0] ?? 'N').toUpperCase()}
+          </span>
+        </div>
       </header>
 
       {running && (
-        <div className="studio-desk__queue">
-          <Loader2 size={14} className="animate-spin" style={{ color: 'var(--sd-brand)' }} />
+        <div className="atelier__queue">
+          <Loader2 size={14} className="animate-spin" style={{ color: 'var(--at-brand)' }} />
           <span>
             {desk.queueLabel || '批量任务'} · {desk.queueProgress.done}/{desk.queueProgress.total}
           </span>
           <div className="bar">
             <i style={{ width: `${pct}%` }} />
           </div>
-          <button type="button" className="studio-desk__ghost" onClick={() => desk.cancelQueue()}>
-            停止
+          <button type="button" className="atelier__icon-btn" onClick={() => desk.cancelQueue()} title="停止">
+            <X size={14} />
           </button>
         </div>
       )}
 
-      <div className="studio-desk__hubs" role="tablist">
-        {(
-          [
-            ['episodes', '剧集架', Archive],
-            ['assets', '资产库', User],
-            ['produce', '本集制作', Clapperboard],
-          ] as const
-        ).map(([id, label, Icon]) => (
-          <button
-            key={id}
-            type="button"
-            role="tab"
-            className={`studio-desk__hub ${desk.hub === id ? 'is-on' : ''}`}
-            onClick={() => desk.setHub(id)}
+      <div className="atelier__work">
+        <aside className="atelier__project">
+          <select
+            className="atelier__project-select"
+            value={activeId ?? ''}
+            onChange={(e) => {
+              const id = e.target.value;
+              if (id) void selectWorkspace(id);
+            }}
           >
-            <span className="inline-flex items-center gap-1.5">
-              <Icon size={14} /> {label}
-            </span>
-          </button>
-        ))}
-      </div>
+            {items.length === 0 && <option value="">未选择项目</option>}
+            {items.map((it) => (
+              <option key={it.id} value={it.id}>
+                《{it.title}》
+              </option>
+            ))}
+          </select>
 
-      {desk.hub === 'produce' && (
-        <nav className="studio-desk__strip" aria-label="本集步骤">
-          <div className="studio-desk__steps">
-            {STUDIO_STEPS.map((s) => {
-              const st = desk.stepStatuses[s.id];
-              return (
-                <button
-                  key={s.id}
-                  type="button"
-                  className={`studio-desk__step ${desk.step === s.id ? 'is-current' : ''} ${
-                    st === 'done' ? 'is-done' : ''
-                  } ${st === 'blocked' ? 'is-blocked' : ''}`}
-                  onClick={() => desk.setStep(s.id)}
-                >
-                  <span className="studio-desk__step-idx">
-                    {st === 'done' ? (
-                      <span className="inline-flex items-center gap-1">
-                        <Check size={10} /> 完成
-                      </span>
-                    ) : (
-                      `STEP ${s.index}`
-                    )}
-                  </span>
-                  <span className="studio-desk__step-label">{s.label}</span>
-                  <span className="studio-desk__step-hint">{s.hint}</span>
-                </button>
-              );
-            })}
+          <div className="atelier__progress-label">
+            <span>项目进度</span>
+            <span>{projectPct}%</span>
           </div>
-        </nav>
-      )}
+          <div className="atelier__progress">
+            <i style={{ width: `${projectPct}%` }} />
+          </div>
 
-      <div className="studio-desk__body">
-        <main className="studio-desk__stage">
-          {desk.hub === 'episodes' && <EpisodesHub desk={desk} />}
-          {desk.hub === 'assets' && <AssetsHub desk={desk} />}
-          {desk.hub === 'produce' && (
-            <>
-              {desk.step === 'script' && <ScriptStage desk={desk} />}
-              {desk.step === 'storyboard' && <StoryboardStage desk={desk} />}
-              {desk.step === 'preview' && <PreviewStage desk={desk} />}
-              {desk.step === 'review' && <ReviewStage desk={desk} />}
-              {desk.step === 'video' && <VideoStage desk={desk} />}
-              {desk.step === 'voice' && <VoiceStage desk={desk} />}
-              {desk.step === 'export' && <ExportStage desk={desk} />}
-            </>
+          <p className="atelier__scene-list-title">场次</p>
+          {scenes.length === 0 && (
+            <p className="text-[11px]" style={{ color: 'var(--at-faint)', margin: '0 0 8px' }}>
+              导入剧本后生成场次
+            </p>
           )}
-        </main>
-
-        <aside className="studio-desk__callsheet">
-          <h4>通告单</h4>
-          <div className="studio-desk__stat-grid">
-            <div className="studio-desk__stat">
-              <b>{desk.stats.episodeCount}</b>
-              <span>剧集</span>
-            </div>
-            <div className="studio-desk__stat">
-              <b>{desk.stats.completedEpisodes}</b>
-              <span>已完成</span>
-            </div>
-            <div className="studio-desk__stat">
-              <b>{desk.stats.total}</b>
-              <span>本集镜头</span>
-            </div>
-            <div className="studio-desk__stat">
-              <b>
-                {desk.stats.withImage}/{desk.stats.total || 0}
-              </b>
-              <span>预览图</span>
-            </div>
-            <div className="studio-desk__stat">
-              <b>
-                {desk.stats.withVideo}/{desk.stats.total || 0}
-              </b>
-              <span>视频</span>
-            </div>
-            <div className="studio-desk__stat">
-              <b>{desk.stats.charCount}</b>
-              <span>角色</span>
-            </div>
-          </div>
-
-          <p className="text-[11px] mb-2" style={{ color: 'var(--sd-muted)' }}>
-            当前集：
-            <strong style={{ color: 'var(--sd-ink)' }}>
-              {desk.activeEpisode?.title || '（未命名）'}
-            </strong>
-            <br />
-            状态：{desk.activeEpisode?.status || 'draft'} · 场景 {desk.stats.envCount} · 声音资产{' '}
-            {desk.stats.soundCount}
-          </p>
-
-          <div className="studio-desk__progress">
-            <i
-              style={{
-                width: `${Math.round(
-                  (Object.values(desk.stepDone).filter(Boolean).length / STUDIO_STEPS.length) * 100,
-                )}%`,
+          {scenes.map((sc) => (
+            <button
+              key={sc.key}
+              type="button"
+              className={`atelier__scene-item ${focusSceneKey === sc.key ? 'is-on' : ''}`}
+              onClick={() => {
+                setFocusSceneKey(sc.key);
+                const el = document.getElementById(`atelier-lane-${sc.key}`);
+                el?.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'start' });
               }}
-            />
-          </div>
+            >
+              <span className="truncate">
+                {String(sc.index).padStart(2, '0')} {sc.title}
+              </span>
+              <span>{sc.shots.length} 镜</span>
+            </button>
+          ))}
 
-          {desk.hub === 'produce' && (
-            <div className="studio-desk__next">
-              <p>
-                <strong style={{ color: 'var(--sd-ink)' }}>建议下一步</strong>
-                <br />
-                {STUDIO_STEPS.find((s) => s.id === desk.step)?.hint}
-              </p>
-              <button
-                type="button"
-                className="studio-desk__btn-primary w-full"
-                disabled={Boolean(desk.busy) || running}
-                onClick={() => desk.nextAction.go()}
-              >
-                {desk.busy || running ? (
-                  <Loader2 size={14} className="animate-spin" />
-                ) : (
-                  <Sparkles size={14} />
-                )}
-                {desk.nextAction.label}
-              </button>
-            </div>
-          )}
-
-          <div className="mt-3 space-y-2">
+          <div style={{ marginTop: 12, display: 'grid', gap: 6 }}>
             <button
               type="button"
               className="studio-desk__btn w-full"
-              onClick={() => desk.startNextEpisode()}
+              style={{ justifyContent: 'center' }}
+              onClick={() => openSheet('episodes')}
             >
-              <Plus size={14} /> 新建下一集
+              <Archive size={13} /> 剧集架
             </button>
-            <button type="button" className="studio-desk__btn w-full" onClick={goCanvas}>
-              <LayoutGrid size={14} /> 高级画布精调
+            <button
+              type="button"
+              className="studio-desk__btn-primary w-full"
+              style={{ justifyContent: 'center' }}
+              disabled={Boolean(desk.busy) || running}
+              onClick={() => desk.nextAction.go()}
+            >
+              {desk.busy || running ? <Loader2 size={13} className="animate-spin" /> : <Sparkles size={13} />}
+              {desk.nextAction.label}
             </button>
-          </div>
-
-          {desk.lastMessage && <div className="studio-desk__log">{desk.lastMessage}</div>}
-
-          <div className="studio-desk__tip mt-4 mb-0 text-[11px]">
-            <Info size={13} className="shrink-0 mt-0.5" />
-            <span>
-              <strong>分镜预览图</strong>
-              即故事板关键帧静帧，用于定构图与一致性；
-              <strong>镜头视频</strong>才是成片素材。完成集在「剧集架」归档，不依赖画布。
-            </span>
           </div>
         </aside>
+
+        <div className="atelier__surface nx9-scroll">
+          <div className="atelier__pinboard">
+            <article className="atelier__meta-card">
+              <h3>
+                <span className="truncate">{title}</span>
+                <span className="atelier__badge">
+                  {desk.activeEpisode?.status === 'completed' ? '已完成' : '制作中'}
+                </span>
+              </h3>
+              <ul className="atelier__meta-rows">
+                <li>
+                  <b>本集</b>
+                  {desk.activeEpisode?.title || '第 1 集'}
+                </li>
+                <li>
+                  <b>镜头</b>
+                  {desk.stats.total} · 预览 {desk.stats.withImage}/{desk.stats.total || 0}
+                </li>
+                <li>
+                  <b>视频</b>
+                  {desk.stats.withVideo}/{desk.stats.total || 0}
+                </li>
+                <li>
+                  <b>角色</b>
+                  {desk.stats.charCount} · 场景 {desk.stats.envCount}
+                </li>
+              </ul>
+              <p className="atelier__meta-note">
+                {desk.globalArtDirection?.trim() ||
+                  desk.lastMessage ||
+                  '在桌面整理场次与镜头；底栏导入剧本、打开资产库。'}
+              </p>
+            </article>
+
+            <div className="atelier__sticky atelier__sticky--y">
+              <h4>拍摄注意</h4>
+              <ul>
+                <li>夜景多用低机位</li>
+                <li>环境光为主</li>
+                <li>注意反光细节</li>
+                <li>预览图=关键帧静帧</li>
+              </ul>
+            </div>
+
+            <div className="atelier__polaroids">
+              {polaroids.length > 0 ? (
+                polaroids.map((s) => (
+                  <div key={s.id} className="atelier__polaroid">
+                    <img src={mediaUrl(s.firstFrameAssetId)} alt="" />
+                  </div>
+                ))
+              ) : (
+                <>
+                  <div className="atelier__polaroid">
+                    <div className="ph">待出图</div>
+                  </div>
+                  <div className="atelier__polaroid">
+                    <div className="ph">待出图</div>
+                  </div>
+                </>
+              )}
+            </div>
+
+            <div className="atelier__sticky atelier__sticky--p">
+              <h4>待办事项</h4>
+              <ul>
+                {STUDIO_STEPS.filter((s) => !desk.stepDone[s.id])
+                  .slice(0, 4)
+                  .map((s) => (
+                    <li key={s.id}>{s.label}</li>
+                  ))}
+                {Object.values(desk.stepDone).every(Boolean) && <li>本集步骤已齐</li>}
+              </ul>
+            </div>
+
+            <figure className="atelier__frame">
+              {frameShot?.firstFrameAssetId ? (
+                <img src={mediaUrl(frameShot.firstFrameAssetId)} alt="" />
+              ) : (
+                <div className="ph" />
+              )}
+              <figcaption>{title.slice(0, 12)} / 制作台</figcaption>
+            </figure>
+          </div>
+
+          {scenes.length === 0 ? (
+            <div className="atelier__empty-board">
+              <h3>桌面还是空的</h3>
+              <p>导入本集剧本并拆镜后，场次与镜头卡片会出现在这张木桌上。</p>
+              <button type="button" className="studio-desk__btn-primary" onClick={() => openSheet('script')}>
+                <Plus size={14} /> 导入剧本
+              </button>
+            </div>
+          ) : (
+            scenes.map((sc) => {
+              const cover =
+                sc.shots.find((s) => s.firstFrameAssetId)?.firstFrameAssetId ?? null;
+              return (
+                <div
+                  key={sc.key}
+                  id={`atelier-lane-${sc.key}`}
+                  className="atelier__lane"
+                >
+                  <button
+                    type="button"
+                    className={`atelier__scene-card ${focusSceneKey === sc.key ? 'is-on' : ''}`}
+                    onClick={() => {
+                      setFocusSceneKey(sc.key);
+                      openSheet('storyboard');
+                    }}
+                  >
+                    <div className="atelier__scene-card-head">
+                      <strong>
+                        {String(sc.index).padStart(2, '0')} {sc.title}
+                      </strong>
+                      <span>{sc.shots.length} 镜</span>
+                    </div>
+                    <div className="atelier__scene-thumb">
+                      {cover ? (
+                        <img src={mediaUrl(cover)} alt="" />
+                      ) : (
+                        <div className="empty">无预览</div>
+                      )}
+                    </div>
+                    <p className="atelier__scene-mood">场景氛围：{sc.mood}</p>
+                    <div className="atelier__scene-progress">
+                      <span>进度 {sc.progress}%</span>
+                      <div className="bar">
+                        <i style={{ width: `${sc.progress}%` }} />
+                      </div>
+                    </div>
+                  </button>
+
+                  {sc.shots.map((shot) => {
+                    const place = parseShotPlace(shot);
+                    const selected = desk.selectedShotId === shot.id;
+                    return (
+                      <button
+                        key={shot.id}
+                        type="button"
+                        className={`atelier__shot ${selected ? 'is-on' : ''}`}
+                        onClick={() => {
+                          desk.setSelectedShotId(shot.id);
+                          openSheet('storyboard');
+                        }}
+                      >
+                        <div className="atelier__shot-head">
+                          <em>
+                            {place.code.includes('-')
+                              ? place.code
+                              : `${String(sc.index).padStart(2, '0')}-${String(shot.index).padStart(2, '0')}`}
+                          </em>
+                          <span>
+                            {place.ie} {place.tod} {place.place}
+                          </span>
+                        </div>
+                        <div className="atelier__shot-thumb">
+                          {shot.firstFrameAssetId ? (
+                            <img src={mediaUrl(shot.firstFrameAssetId)} alt="" />
+                          ) : (
+                            <div className="empty">静帧</div>
+                          )}
+                          {shot.videoAssetId && <span className="atelier__shot-badge">视频</span>}
+                        </div>
+                        <div className="atelier__shot-meta">
+                          <b>时长</b>
+                          <span>{formatDuration(shot.durationSec)}</span>
+                          <b>景别</b>
+                          <span>{shotTypeLabel(shot.shotType)}</span>
+                          <b>运镜</b>
+                          <span>{shot.cameraMove || '固定'}</span>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              );
+            })
+          )}
+        </div>
       </div>
+
+      <div className="atelier__dock-wrap">
+        <nav className="atelier__dock" aria-label="制作台工具">
+          <button
+            type="button"
+            className="atelier__dock-btn"
+            onClick={() => {
+              desk.addEmptyShot();
+              openSheet('storyboard');
+            }}
+          >
+            <Plus size={16} />
+            新建镜头
+          </button>
+          <button
+            type="button"
+            className={`atelier__dock-btn ${sheet === 'script' ? 'is-on' : ''}`}
+            onClick={() => openSheet('script')}
+          >
+            <Clapperboard size={16} />
+            导入剧本
+          </button>
+          <button
+            type="button"
+            className={`atelier__dock-btn ${sheet === 'assets' ? 'is-on' : ''}`}
+            onClick={() => openSheet('assets')}
+          >
+            <Film size={16} />
+            素材库
+          </button>
+          <button
+            type="button"
+            className={`atelier__dock-btn ${sheet === 'characters' ? 'is-on' : ''}`}
+            onClick={() => openSheet('characters')}
+          >
+            <Users size={16} />
+            角色库
+          </button>
+          <button
+            type="button"
+            className={`atelier__dock-btn ${sheet === 'scenes' ? 'is-on' : ''}`}
+            onClick={() => openSheet('scenes')}
+          >
+            <MapPin size={16} />
+            场景库
+          </button>
+          <button
+            type="button"
+            className={`atelier__dock-btn ${sheet === 'storyboard' ? 'is-on' : ''}`}
+            onClick={() => openSheet('storyboard')}
+          >
+            <LayoutGrid size={16} />
+            镜头库
+          </button>
+          <button
+            type="button"
+            className={`atelier__dock-btn ${sheet === 'preview' || sheet === 'video' ? 'is-on' : ''}`}
+            onClick={() => openSheet(desk.stepDone.preview ? 'video' : 'preview')}
+          >
+            <Play size={16} />
+            预览播放
+          </button>
+        </nav>
+      </div>
+
+      {sheet && (
+        <div className="atelier__sheet" role="dialog" aria-modal="true" aria-label={sheetTitle.t}>
+          <button type="button" className="atelier__sheet-backdrop" aria-label="关闭" onClick={closeSheet} />
+          <div className="atelier__sheet-panel studio-desk">
+            <div className="atelier__sheet-head">
+              <div className="min-w-0">
+                <h2>{sheetTitle.t}</h2>
+                {sheetTitle.s && <p>{sheetTitle.s}</p>}
+              </div>
+              <div className="flex items-center gap-2">
+                {sheet !== 'episodes' && sheet !== 'assets' && sheet !== 'characters' && sheet !== 'scenes' && (
+                  <div className="hidden sm:flex gap-1 flex-wrap max-w-[420px] justify-end">
+                    {STUDIO_STEPS.map((s) => (
+                      <button
+                        key={s.id}
+                        type="button"
+                        className={`studio-desk__chip ${sheet === s.id ? 'is-on' : ''}`}
+                        onClick={() => openStep(s.id)}
+                      >
+                        {s.short}
+                      </button>
+                    ))}
+                  </div>
+                )}
+                <button type="button" className="atelier__icon-btn" onClick={closeSheet} title="关闭">
+                  <X size={16} />
+                </button>
+              </div>
+            </div>
+            <div className="atelier__sheet-body nx9-scroll">
+              {(sheet === 'episodes') && <EpisodesHub desk={desk} />}
+              {(sheet === 'assets' || sheet === 'characters' || sheet === 'scenes') && (
+                <AssetsHub desk={desk} initialTab={sheet === 'scenes' ? 'env' : sheet === 'characters' ? 'char' : 'char'} />
+              )}
+              {sheet === 'script' && <ScriptStage desk={desk} />}
+              {sheet === 'storyboard' && <StoryboardStage desk={desk} />}
+              {sheet === 'preview' && <PreviewStage desk={desk} />}
+              {sheet === 'review' && <ReviewStage desk={desk} />}
+              {sheet === 'video' && <VideoStage desk={desk} />}
+              {sheet === 'voice' && <VoiceStage desk={desk} />}
+              {sheet === 'export' && <ExportStage desk={desk} />}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -373,8 +691,17 @@ function EpisodesHub({ desk }: { desk: StudioDesk }) {
 
 /* ═══════════ 资产库 ═══════════ */
 
-function AssetsHub({ desk }: { desk: StudioDesk }) {
-  const [tab, setTab] = useState<'char' | 'env' | 'sound'>('char');
+function AssetsHub({
+  desk,
+  initialTab = 'char',
+}: {
+  desk: StudioDesk;
+  initialTab?: 'char' | 'env' | 'sound';
+}) {
+  const [tab, setTab] = useState<'char' | 'env' | 'sound'>(initialTab);
+  useEffect(() => {
+    setTab(initialTab);
+  }, [initialTab]);
   const [charName, setCharName] = useState('');
   const [charPrompt, setCharPrompt] = useState('');
   const [envName, setEnvName] = useState('');
@@ -982,14 +1309,21 @@ function StoryboardStage({ desk }: { desk: StudioDesk }) {
 
 function PreviewStage({ desk }: { desk: StudioDesk }) {
   const missing = desk.stats.total - desk.stats.withImage;
+  const timeline = useMemo(() => buildShotTimeline(desk.shots), [desk.shots]);
+  const timeById = useMemo(
+    () => new Map(timeline.map((t) => [t.shotId, t])),
+    [timeline],
+  );
+  const totalDur = timeline.at(-1)?.endSec ?? 0;
   return (
     <>
       <div className="studio-desk__hero">
         <div>
-          <h2>③ 分镜预览图（故事板）</h2>
+          <h2>③ 分镜预览图</h2>
           <p>
-            这里生成的是<strong>分镜预览静帧 / 故事板关键帧</strong>
-            ，用来定构图、光色与角色一致性，不是最终成片视频。
+            每镜一张<strong>关键帧静帧</strong>（非成片）。宫格按本集顺序排列，标注
+            <strong>几秒到几秒</strong>。默认单镜约 3 秒。
+            {totalDur > 0 ? ` 本集总长约 ${Math.round(totalDur * 10) / 10}s。` : ''}
           </p>
         </div>
         <div className="studio-desk__actions">
@@ -1019,27 +1353,37 @@ function PreviewStage({ desk }: { desk: StudioDesk }) {
       <div className="studio-desk__tip">
         <Info size={15} className="shrink-0" />
         <span>
-          出图前会自动补全专业提示词（角色一致性 + 场景 + 运镜色调）。需在设置中配置图像模型
+          起止秒按本集镜头顺序累加。画布「导演台」可将全部预览图拼成一张故事板大图。出图需配置图像
           API。
         </span>
       </div>
-      <div className="studio-desk__shot-grid">
-        {desk.shots.map((s) => (
-          <div key={s.id} className="studio-desk__shot" style={{ cursor: 'default' }}>
-            <div className="studio-desk__shot-thumb">
-              {s.firstFrameAssetId ? (
-                <img src={mediaUrl(s.firstFrameAssetId)} alt="" />
-              ) : (
-                <span className="text-[11px] opacity-40">待预览图</span>
-              )}
-              <span className="studio-desk__shot-badge">#{s.index}</span>
+      <div className="studio-desk__shot-grid studio-desk__shot-grid--preview">
+        {desk.shots.map((s) => {
+          const t = timeById.get(s.id);
+          const timeLabel = t
+            ? formatShotTimeRange(t.startSec, t.endSec)
+            : `${s.durationSec}s`;
+          return (
+            <div key={s.id} className="studio-desk__shot" style={{ cursor: 'default' }}>
+              <div className="studio-desk__shot-thumb">
+                {s.firstFrameAssetId ? (
+                  <img src={mediaUrl(s.firstFrameAssetId)} alt="" />
+                ) : (
+                  <span className="text-[11px] opacity-40">待预览图</span>
+                )}
+                <span className="studio-desk__shot-badge">#{s.index}</span>
+                <span className="studio-desk__shot-time">{timeLabel}</span>
+              </div>
+              <div className="studio-desk__shot-body">
+                <strong>
+                  {s.firstFrameAssetId ? '预览图就绪' : '缺失'}
+                  <em>{timeLabel}</em>
+                </strong>
+                <p>{s.descriptionZh || `分镜 ${s.index}`}</p>
+              </div>
             </div>
-            <div className="studio-desk__shot-body">
-              <strong>{s.firstFrameAssetId ? '预览图就绪' : '缺失'}</strong>
-              <p>{s.descriptionZh}</p>
-            </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
       {desk.stats.withImage > 0 && (
         <div className="studio-desk__actions mt-4">

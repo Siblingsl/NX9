@@ -19,7 +19,7 @@
     "remotion": "remotion studio"
   },
   "dependencies": {
-    "@nx9/shared": "*",
+    "@nx9/shared": "workspace:*",
     "react": "^19.0.0"
   },
   "peerDependencies": {

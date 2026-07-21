@@ -1,4 +1,4 @@
-import { memo, useState } from 'react';
+import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import {
   BaseEdge,
   EdgeLabelRenderer,
@@ -8,10 +8,11 @@ import {
   getStraightPath,
   type EdgeProps,
 } from '@xyflow/react';
-import { SOCKET_COLORS, type SocketKind, isStoryboardExecLink } from '@nx9/shared';
+import { SOCKET_COLORS, type SocketKind } from '@nx9/shared';
+import { X } from 'lucide-react';
 import type { FlowEdgeTypeId } from '../../flow-edge-types';
 import { normalizeFlowEdgeType } from '../../flow-edge-types';
-import { EdgeMidpointMenu } from './EdgeMidpointMenu';
+import { useWorkspaceDocument } from '../../../stores/workspace-document';
 import { useStageDeckEdgeMenu } from '../stores/edge-menu-ui';
 
 function resolvePath(
@@ -51,47 +52,69 @@ function resolvePath(
 }
 
 export const ChannelEdge = memo(function ChannelEdge(props: EdgeProps) {
-  const pathType = (props.data?.pathType as FlowEdgeTypeId | undefined) ?? 'default';
   const cascadeActive = Boolean(props.data?.cascadeActive);
   const highlighted = Boolean(props.data?.highlighted);
   const dimmed = Boolean(props.data?.dimmed);
   const handleKind = (props.sourceHandleId ?? 'prompt') as SocketKind;
   const execLink = Boolean(props.data?.execLink);
   const stroke = execLink ? SOCKET_COLORS.picture : (SOCKET_COLORS[handleKind] ?? SOCKET_COLORS.prompt);
+  const settingsPath = useWorkspaceDocument((s) => s.canvasAppearance.edgePathType ?? 'default');
+  const pathType = normalizeFlowEdgeType(execLink ? 'straight' : settingsPath);
   const [edgePath, labelX, labelY] = resolvePath(pathType, props);
-  const [midHover, setMidHover] = useState(false);
-  const menu = useStageDeckEdgeMenu((s) => s.menu);
-  const setMenu = useStageDeckEdgeMenu((s) => s.setMenu);
-  const onChangeType = useStageDeckEdgeMenu((s) => s.onChangeType);
+  const [lineHover, setLineHover] = useState(false);
+  const leaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const onDelete = useStageDeckEdgeMenu((s) => s.onDelete);
+
+  const enterLine = useCallback(() => {
+    if (leaveTimer.current) {
+      clearTimeout(leaveTimer.current);
+      leaveTimer.current = null;
+    }
+    setLineHover(true);
+  }, []);
+
+  const leaveLine = useCallback(() => {
+    if (leaveTimer.current) clearTimeout(leaveTimer.current);
+    leaveTimer.current = setTimeout(() => {
+      setLineHover(false);
+      leaveTimer.current = null;
+    }, 100);
+  }, []);
+
+  useEffect(
+    () => () => {
+      if (leaveTimer.current) clearTimeout(leaveTimer.current);
+    },
+    [],
+  );
 
   const strokeWidth = execLink ? 3 : props.selected || highlighted ? 3 : 2;
   const opacity = dimmed ? 0.25 : 1;
-  const edgeType = normalizeFlowEdgeType(
-    props.type === 'channel' ? pathType : props.type,
-  );
+  const showCut = lineHover || props.selected;
 
   return (
     <>
-      <path
-        d={edgePath}
-        fill="none"
-        stroke="transparent"
-        strokeWidth={18}
-        className="react-flow__edge-interaction"
-      />
-      <BaseEdge
-        path={edgePath}
-        markerEnd={props.markerEnd}
-        style={{
-          stroke,
-          strokeWidth,
-          opacity,
-          strokeDasharray: cascadeActive ? '8 6' : undefined,
-          animation: cascadeActive ? 'nx9-cascade-flow 0.8s linear infinite' : undefined,
-        }}
-        className={props.selected ? 'selected' : undefined}
-      />
+      <g onMouseEnter={enterLine} onMouseLeave={leaveLine}>
+        <path
+          d={edgePath}
+          fill="none"
+          stroke="transparent"
+          strokeWidth={18}
+          className="react-flow__edge-interaction"
+        />
+        <BaseEdge
+          path={edgePath}
+          markerEnd={props.markerEnd}
+          style={{
+            stroke,
+            strokeWidth,
+            opacity,
+            strokeDasharray: cascadeActive ? '8 6' : undefined,
+            animation: cascadeActive ? 'nx9-cascade-flow 0.8s linear infinite' : undefined,
+          }}
+          className={props.selected ? 'selected' : undefined}
+        />
+      </g>
       <EdgeLabelRenderer>
         <div
           className="nodrag nopan"
@@ -99,39 +122,29 @@ export const ChannelEdge = memo(function ChannelEdge(props: EdgeProps) {
             position: 'absolute',
             transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)`,
             pointerEvents: 'all',
+            opacity: showCut ? 1 : 0.55,
           }}
-          onMouseEnter={() => setMidHover(true)}
-          onMouseLeave={() => setMidHover(false)}
+          onMouseEnter={enterLine}
+          onMouseLeave={leaveLine}
         >
           <button
             type="button"
-            className={`w-3 h-3 rounded-full border-2 border-white shadow transition-transform ${
-              midHover || menu?.edgeId === props.id ? 'scale-125 bg-brand' : 'bg-ink/30'
+            className={`flex items-center justify-center rounded-full border-2 border-white shadow transition-all ${
+              showCut
+                ? 'h-5 w-5 bg-rose-500 text-white scale-110'
+                : 'h-3 w-3 bg-ink/30'
             }`}
-            aria-label="连接线操作"
+            aria-label="断开连接线"
+            title="断开连接线"
             onClick={(e) => {
               e.stopPropagation();
-              setMenu({
-                x: e.clientX,
-                y: e.clientY,
-                edgeId: props.id,
-                edgeType,
-              });
+              onDelete?.(props.id);
             }}
-          />
+          >
+            {showCut ? <X size={11} strokeWidth={2.5} /> : null}
+          </button>
         </div>
       </EdgeLabelRenderer>
-      {menu?.edgeId === props.id && onChangeType && onDelete && (
-        <EdgeMidpointMenu
-          x={menu.x}
-          y={menu.y}
-          edgeId={menu.edgeId}
-          edgeType={menu.edgeType}
-          onChangeType={(type) => onChangeType(menu.edgeId, type)}
-          onDelete={() => onDelete(menu.edgeId)}
-          onClose={() => setMenu(null)}
-        />
-      )}
     </>
   );
 });

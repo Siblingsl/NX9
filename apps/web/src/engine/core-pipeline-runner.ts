@@ -20,12 +20,20 @@ import {
   appendEpisodeExportRecord,
   appendStoryboardReviewEvent,
   buildDirectorCharacterPlacementPrompt,
+  buildVideoGuidePromptSuffix,
   resolveActiveEpisodeId,
+  filterStoryboardGuideOverlay,
+  resolveStoryboardGuideOverlay,
   buildCharacterContext,
   resolveVideoGenParams,
   type StoryboardPreviewPayload,
 } from '@nx9/shared';
 import { useExecutionQueue } from '../stores/execution-queue';
+import {
+  enabledGuideKinds,
+  readStoryboardGuidePrefs,
+} from '../stores/storyboard-guide-prefs';
+import { composeStoryboardGuideFrameDataUrl } from './storyboard-guide-compose';
 
 function log(msg: string) {
   useActivityLog.getState().append(msg);
@@ -341,7 +349,22 @@ export async function batchGenerateVideosFromShots(
       (item) => item.id === shot.sceneAssetId,
     );
     const scenePrompt = environment?.consistencyPrompt || environment?.descriptionZh;
-    const prompt = [basePrompt, cameraPrompt, placementPrompt, characterContext.promptSuffix, scenePrompt]
+    const guidePrefs = readStoryboardGuidePrefs();
+    const guideOverlay = filterStoryboardGuideOverlay(resolveStoryboardGuideOverlay(shot), {
+      enabled: guidePrefs.useForVideo,
+      kinds: enabledGuideKinds(guidePrefs),
+    });
+    const guideSuffix = guidePrefs.useForVideo
+      ? buildVideoGuidePromptSuffix(guideOverlay)
+      : '';
+    const prompt = [
+      basePrompt,
+      cameraPrompt,
+      placementPrompt,
+      characterContext.promptSuffix,
+      scenePrompt,
+      guideSuffix,
+    ]
       .filter(Boolean)
       .join('\n\n');
     try {
@@ -350,10 +373,27 @@ export async function batchGenerateVideosFromShots(
         throw new Error('Grok Imagine 当前需要首图，请先在分镜预览生成首图');
       }
       doc.updateShot(shot.id, { videoStatus: 'draft' });
+      // 出片参考用「带箭头引导图」加强意图；提示词强制成片不画出箭头
+      let guideImageUrl = shot.firstFrameAssetId ?? undefined;
+      if (
+        guidePrefs.useForVideo
+        && shot.firstFrameAssetId
+        && (guideOverlay.arrows.length || guideOverlay.marks.length)
+      ) {
+        try {
+          const composed = await composeStoryboardGuideFrameDataUrl(
+            shot.firstFrameAssetId,
+            guideOverlay,
+          );
+          if (composed) guideImageUrl = composed;
+        } catch {
+          /* 合成失败则回退干净首帧 + 文案引导 */
+        }
+      }
       const res = (await api.proxyVideo({
         prompt,
         model: modelId,
-        imageUrl: shot.firstFrameAssetId ?? undefined,
+        imageUrl: guideImageUrl,
         duration: Math.min(8, Math.max(4, shot.durationSec || videoParams.durationSec)),
         aspect_ratio: videoParams.aspect,
         size: videoParams.size,

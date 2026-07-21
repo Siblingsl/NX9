@@ -37,9 +37,8 @@ function ParamChip({
         type="button"
         onMouseDown={stop}
         onClick={() => setOpen((v) => !v)}
-        className={`inline-flex items-center px-2 py-0.5 rounded-md text-[10px] transition-colors ${
-          open ? 'bg-surface/90 text-ink' : 'text-ink/55 hover:text-ink hover:bg-surface/90'
-        }`}
+        className={`kp__btn ${open ? 'is-on' : ''}`}
+        style={{ padding: '4px 8px', fontSize: 10 }}
       >
         {label}
       </button>
@@ -77,15 +76,16 @@ export function StoryboardPreviewGenSettings({
 
   return (
     <div
-      className="shrink-0 flex flex-wrap items-center gap-2 px-3 py-1.5 border-b border-line/20 bg-surface/10"
+      className="sb-preview-gen shrink-0 flex flex-wrap items-center gap-2 px-3 py-1.5"
       onMouseDown={stop}
     >
       <ComposerModelSelect
         value={settings.model}
         options={PICTURE_GEN_MODELS.map((m) => ({ id: m.id, label: m.label }))}
         onChange={(model: string) => onChange({ model })}
+        tone="desk"
       />
-      <span className="w-px h-3.5 bg-line/50" />
+      <span className="kp__sep" />
       <PictureGenModeChip
         mode={settings.pictureGenMode as PictureGenMode}
         modes={['text-to-image', 'image-to-image']}
@@ -95,7 +95,7 @@ export function StoryboardPreviewGenSettings({
           }
         }}
       />
-      <span className="w-px h-3.5 bg-line/50" />
+      <span className="kp__sep" />
       <ParamChip
         label={qualityLabel}
         active={settings.quality}
@@ -109,7 +109,7 @@ export function StoryboardPreviewGenSettings({
         onSelect={(aspectRatio) => onChange({ aspectRatio })}
         width={152}
       />
-      <span className="text-[9px] text-ink/35 ml-auto">每镜 ×1</span>
+      <span className="kp__hint" style={{ marginLeft: 'auto' }}>每镜 ×1</span>
     </div>
   );
 }

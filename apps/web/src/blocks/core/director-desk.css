@@ -384,3 +384,153 @@
   width: 100px;
   flex: 0 0 auto;
 }
+
+/* ── 画布摘要卡（对齐设定检查 / 角色设定） ── */
+.dd-summary-card {
+  width: 100%;
+  border: 1px solid var(--dd-line);
+  border-radius: 12px;
+  overflow: hidden;
+  background:
+    radial-gradient(circle at 88% 0%, color-mix(in srgb, var(--dd-accent) 18%, transparent), transparent 30%),
+    linear-gradient(180deg, var(--desk-bg-2, var(--desk-panel)), var(--desk-panel));
+  cursor: pointer;
+  text-align: left;
+  padding: 12px;
+  display: block;
+  transition: border-color 0.12s, transform 0.12s;
+}
+.dd-summary-card:hover {
+  border-color: var(--dd-accent-line);
+  transform: translateY(-1px);
+}
+.dd-summary-card__hero {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+.dd-summary-card__hero.is-empty strong { opacity: 0.85; }
+.dd-summary-card__eyebrow {
+  display: block;
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  color: var(--dd-faint);
+  margin-bottom: 4px;
+}
+.dd-summary-card__hero strong {
+  display: block;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--dd-ink);
+}
+.dd-summary-card__hero p {
+  margin: 4px 0 0;
+  font-size: 11px;
+  color: var(--dd-muted);
+  line-height: 1.45;
+}
+.dd-summary-card__metric {
+  flex: 0 0 auto;
+  font-size: 22px;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--dd-accent);
+}
+.dd-summary-card__metric small {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--dd-faint);
+  margin-left: 2px;
+}
+.dd-summary-card__stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 10px;
+  font-size: 11px;
+  color: var(--dd-faint);
+}
+.dd-summary-card__stats b {
+  color: var(--dd-ink);
+  font-weight: 650;
+  margin-right: 2px;
+}
+.dd-summary-card__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 10px;
+}
+.dd-summary-card__chips span {
+  font-size: 10px;
+  padding: 2px 7px;
+  border-radius: 99px;
+  border: 1px solid var(--dd-line);
+  color: var(--dd-muted);
+  background: color-mix(in srgb, var(--desk-bg) 40%, transparent);
+}
+.dd-summary-card__trail {
+  margin-top: 10px;
+  font-size: 10px;
+  color: var(--dd-faint);
+  letter-spacing: 0.02em;
+}
+.dd-card__hint {
+  margin: 8px 0 0;
+  font-size: 10px;
+  color: var(--dd-muted);
+}
+.dd-card__hint.is-warn { color: var(--dd-warn); }
+.dd-card__actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+  justify-content: flex-end;
+}
+.dd-card__actions .dd-btn {
+  min-width: 0;
+  flex: 0 0 auto;
+}
+
+.dd-studio {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+}
+
+.dd-studio .dd-queue {
+  max-height: min(42vh, 380px);
+}
+
+.nx9-screen-modal__panel.dd-modal {
+  background: #141618 !important;
+  border: 1px solid rgba(255, 255, 255, 0.1) !important;
+  box-shadow:
+    0 24px 64px rgba(0, 0, 0, 0.55),
+    0 0 0 1px rgba(0, 0, 0, 0.4) !important;
+  color: var(--dd-ink) !important;
+  width: min(980px, calc(100vw - 24px)) !important;
+  max-width: min(980px, calc(100vw - 24px)) !important;
+  border-radius: 8px !important;
+}
+.nx9-screen-modal__panel.dd-modal .nx9-screen-modal__chrome {
+  background: #1a1c1f !important;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08) !important;
+}
+.nx9-screen-modal__panel.dd-modal .nx9-screen-modal__title {
+  color: rgba(236, 232, 224, 0.94) !important;
+  font-size: 14px !important;
+  font-weight: 650 !important;
+}
+.nx9-screen-modal__panel.dd-modal .nx9-screen-modal__sub {
+  color: rgba(236, 232, 224, 0.4) !important;
+  font-size: 11px !important;
+}
+.nx9-screen-modal__panel.dd-modal .nx9-screen-modal__body {
+  max-height: min(78vh, 820px);
+  overflow: auto;
+  padding: 12px 14px 16px !important;
+  background: #141618 !important;
+}

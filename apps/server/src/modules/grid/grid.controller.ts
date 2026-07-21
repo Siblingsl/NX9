@@ -11,8 +11,10 @@ export class GridController {
   }
 
   @Post('compose')
-  compose(@Body() body: { imageUrls: string[]; rows: number; cols: number }) {
-    return this.grid.composeGrid(body.imageUrls, body.rows, body.cols);
+  compose(
+    @Body() body: { imageUrls: string[]; rows: number; cols: number; labels?: string[] },
+  ) {
+    return this.grid.composeGrid(body.imageUrls, body.rows, body.cols, body.labels);
   }
 
   @Post('generate')

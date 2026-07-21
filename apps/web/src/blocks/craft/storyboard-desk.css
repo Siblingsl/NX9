@@ -954,7 +954,199 @@
   color: var(--sg-ink) !important;
 }
 
-/* 分镜表 */
+/* 分镜故事板宫格（主视图） */
+.sg-story-hint {
+  margin: 0 0 10px;
+  font-size: 12px;
+  color: var(--sg-faint);
+  line-height: 1.4;
+}
+.sg-story-scroll {
+  overflow: auto;
+  max-height: min(56vh, 560px);
+  padding: 2px 4px 8px 0;
+  scrollbar-gutter: stable;
+}
+.sg-story-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 10px;
+}
+.sg-story-cell {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--sg-line-strong);
+  border-radius: 12px;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.03);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.sg-story-cell:hover {
+  border-color: var(--sg-accent-line);
+}
+.sg-story-cell.is-on {
+  border-color: var(--sg-accent);
+  box-shadow: 0 0 0 1px rgba(201, 162, 88, 0.28);
+}
+.sg-story-cell.is-run {
+  border-color: #6ea8fe;
+  box-shadow: 0 0 0 1px rgba(110, 168, 254, 0.35);
+}
+.sg-story-cell__hit {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+}
+.sg-story-cell__media {
+  position: relative;
+  aspect-ratio: 16 / 9;
+  background: #0e1014;
+  display: grid;
+  place-items: center;
+}
+.sg-story-cell__media img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.sg-story-cell__empty {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: rgba(243, 240, 234, 0.35);
+}
+.sg-story-badge {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  background: rgba(0, 0, 0, 0.55);
+  color: rgba(243, 240, 234, 0.75);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+.sg-story-badge.is-ok {
+  color: #9fd4a8;
+  border-color: rgba(159, 212, 168, 0.35);
+}
+.sg-story-badge.is-miss {
+  color: rgba(243, 240, 234, 0.55);
+}
+.sg-story-badge.is-run {
+  color: #9ec1ff;
+  border-color: rgba(110, 168, 254, 0.4);
+}
+.sg-story-cell__meta {
+  padding: 8px 9px 6px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+.sg-story-cell__meta strong {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--sg-ink);
+}
+.sg-story-cell__meta strong em {
+  font-style: normal;
+  font-weight: 600;
+  font-size: 11px;
+  color: var(--sg-accent);
+  font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
+}
+.sg-story-cell__tech {
+  display: block;
+  margin-top: 2px;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--sg-faint);
+}
+.sg-story-cell__meta p {
+  margin: 4px 0 0;
+  font-size: 11px;
+  line-height: 1.35;
+  color: rgba(243, 240, 234, 0.58);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.sg-story-cell__sub {
+  display: block;
+  margin-top: 4px;
+  font-size: 10px;
+  color: var(--sg-faint);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.sg-story-cell__acts {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+.sg-story-cell__act {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  margin: 0;
+  padding: 7px 4px;
+  border: 0;
+  border-right: 1px solid rgba(255, 255, 255, 0.06);
+  background: transparent;
+  color: var(--sg-muted);
+  font-size: 10px;
+  font-weight: 650;
+  cursor: pointer;
+}
+.sg-story-cell__act:last-child {
+  border-right: 0;
+}
+.sg-story-cell__act:hover:not(:disabled) {
+  color: var(--sg-accent);
+  background: var(--sg-accent-soft);
+}
+.sg-story-cell__act:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+.sg-edit-frame {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 12px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--sg-line);
+}
+.sg-edit-frame .sg-frame-cell {
+  width: min(100%, 280px);
+}
+.sg-edit-frame .sg-frame-cell__preview {
+  width: 100%;
+  height: auto;
+  aspect-ratio: 16 / 9;
+}
+
+/* 分镜表（保留样式，主视图已改宫格） */
 .sg-sheet-scroll {
   overflow: auto;
   max-height: min(52vh, 480px);

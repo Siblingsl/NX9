@@ -51,21 +51,22 @@ export function openDirector3dStage(ctx: Director3dOpenContext): void {
         null);
   const linkedFrame = previewPayload.frames.find((frame) => frame.id === linkedFrameId);
 
-  const referenceUrl = linkedFrame?.imageUrl ?? linkedFrame?.referenceImageUrl ?? undefined;
+  // 仅真实 720 全景可作天空盒；2D 关键帧/参考图不可塞 panorama（会变成照片背景+网格）
   const panoramaUrl = previewPayload.panorama720?.imageUrl;
+  const referenceUrl = linkedFrame?.imageUrl ?? linkedFrame?.referenceImageUrl ?? undefined;
   const lineArtUrl =
     (data.linkedShotId as string | undefined) &&
     useWorkspaceDocument
       .getState()
       .storyboard.shots.find((s) => s.id === data.linkedShotId)?.firstFrameAssetId;
 
-  const environmentProject: DirectorProject = panoramaUrl
+  let environmentProject: DirectorProject = panoramaUrl
     ? { ...project, panorama: { url: panoramaUrl, yaw: 0, exposure: 1 } }
-    : referenceUrl && !project.panorama
-      ? { ...project, panorama: { url: referenceUrl, yaw: 0, exposure: 1 } }
-      : lineArtUrl && !project.panorama
-        ? { ...project, panorama: { url: lineArtUrl, yaw: 0, exposure: 1 } }
-        : project;
+    : project;
+  const flatRefs = new Set([referenceUrl, lineArtUrl].filter(Boolean) as string[]);
+  if (environmentProject.panorama?.url && flatRefs.has(environmentProject.panorama.url)) {
+    environmentProject = { ...environmentProject, panorama: null };
+  }
 
   const nextProject = prepareDirectorProjectForShot(
     environmentProject,

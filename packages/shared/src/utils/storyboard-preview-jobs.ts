@@ -5,6 +5,7 @@ import type {
 } from '../types/storyboard-preview';
 import { EXEC_PICTURE_HANDLES, isStoryboardPreviewHostKind } from '../catalog/socket-registry';
 import type { StoryboardDirector3dGuide } from '../types/storyboard';
+import { buildKeyframeNoGuidePromptSuffix } from './storyboard-guide';
 
 export function buildDirectorCharacterPlacementPrompt(
   guide: StoryboardDirector3dGuide | null | undefined,
@@ -50,6 +51,7 @@ export function buildStoryboardFramePrompt(frame: StoryboardPreviewFrame): strin
         : '',
     frame.sceneAssetRef ? `Scene: ${frame.sceneAssetRef}` : '',
     frame.characterNames?.length ? `Characters on frame: ${frame.characterNames.join(', ')}` : '',
+    buildKeyframeNoGuidePromptSuffix(),
   ]
     .filter(Boolean)
     .join('\n');
@@ -126,7 +128,8 @@ export function resolveConnectedPictureGenId(
 }
 
 function isAssetSheetPictureHostKind(kind?: string | null): boolean {
-  return kind === 'character-sheet' || kind === 'scene-card' || kind === 'costume-sheet';
+  void kind;
+  return false;
 }
 
 function isPictureExecHostKind(kind?: string | null): boolean {

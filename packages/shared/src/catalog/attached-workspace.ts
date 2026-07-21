@@ -163,19 +163,6 @@ export const ATTACHED_WORKSPACE_REGISTRY: Record<string, AttachedWorkspaceSpec> 
     showPreview: true,
     phase: 'P1',
   },
-  'scene-card': {
-    kind: 'scene-card',
-    functionalClass: 'resource-editor',
-    workspaceType: 'editor',
-    /** 自有 ScreenModal 场记台，不走底部 Attached Workspace */
-    attachToNode: false,
-    /** 必须 false：保留暗色场记表节点 UI */
-    compactCanvas: false,
-    showRun: false,
-    showPreview: false,
-    phase: 'P2',
-    note: '场景设定：画布暗色场记表 + ScreenModal 库/设定/参考',
-  },
   'style-lab': {
     kind: 'style-lab',
     functionalClass: 'generation',
@@ -262,13 +249,14 @@ export const ATTACHED_WORKSPACE_REGISTRY: Record<string, AttachedWorkspaceSpec> 
     kind: 'director-desk',
     functionalClass: 'generation',
     workspaceType: 'none',
-    /** 节点卡自包含批出队列，不挂底部工作区 */
+    /** 自有 ScreenModal 导演台，不走底部 Attached Workspace */
     attachToNode: false,
+    /** 必须 false：保留摘要卡节点 UI */
     compactCanvas: false,
     showRun: true,
     showPreview: true,
     phase: 'P1',
-    note: '关键帧批生产：镜头队列 + 批量出图 + 写回故事板',
+    note: '关键帧批生产：画布摘要卡 + ScreenModal 队列/批出/审阅',
   },
   'thumbnail-maker': {
     kind: 'thumbnail-maker',
@@ -283,19 +271,6 @@ export const ATTACHED_WORKSPACE_REGISTRY: Record<string, AttachedWorkspaceSpec> 
   },
 
   // ── §7.2 资源编辑类 → Editor / Board / Table ──
-  'character-sheet': {
-    kind: 'character-sheet',
-    functionalClass: 'resource-editor',
-    workspaceType: 'editor',
-    /** 自有 ScreenModal 档案台，不走底部 Attached Workspace */
-    attachToNode: false,
-    /** 必须 false：保留暗色迷你档案表节点 UI */
-    compactCanvas: false,
-    showRun: false,
-    showPreview: false,
-    phase: 'P3',
-    note: '角色设定：画布暗色档案表 + ScreenModal 库/设定/参考',
-  },
   'asset-gate': {
     kind: 'asset-gate',
     functionalClass: 'analysis-report',

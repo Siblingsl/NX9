@@ -12,7 +12,10 @@ export const SOCKET_REGISTRY: Record<string, SocketProfile> = {
   'storyboard-desk': { accepts: ['prompt', 'picture', 'meta'], emits: ['prompt', 'picture', 'meta'] },
   'clip-editor': { accepts: ['clip', 'sound', 'picture'], emits: ['clip', 'sound'] },
   'motion-story': { accepts: ['prompt', 'picture', 'clip', 'sound'], emits: ['clip'] },
-  'director-desk': { accepts: ['prompt', 'picture', 'clip', 'sound'], emits: ['picture', 'prompt'] },
+  'director-desk': {
+    accepts: ['prompt', 'picture', 'clip', 'sound', 'mesh'],
+    emits: ['picture', 'prompt', 'mesh'],
+  },
   'sound-gen': { accepts: ['prompt', 'sound'], emits: ['sound'] },
   'chat-model': { accepts: ['prompt', 'picture', 'clip'], emits: ['prompt'] },
 
@@ -22,9 +25,7 @@ export const SOCKET_REGISTRY: Record<string, SocketProfile> = {
   'model-market': { accepts: ['prompt', 'picture', 'clip', 'sound'], emits: ['prompt', 'picture', 'clip', 'sound', 'mesh'] },
   'shot-script': { accepts: ['prompt'], emits: ['prompt', 'meta'] },
   'reference-board': { accepts: ['prompt', 'picture'], emits: ['prompt', 'picture'] },
-  'character-sheet': { accepts: ['prompt', 'picture', 'meta'], emits: ['prompt', 'meta'] },
   'continuity-check': { accepts: ['prompt', 'picture', 'clip'], emits: ['prompt', 'meta'] },
-  'scene-card': { accepts: ['prompt', 'picture'], emits: ['prompt', 'meta'] },
   'dialogue-sheet': { accepts: ['prompt'], emits: ['prompt', 'meta'] },
   'asset-gate': { accepts: ['prompt', 'meta'], emits: ['prompt', 'meta'] },
   'voice-cast': { accepts: ['prompt', 'sound'], emits: ['sound', 'meta'] },
@@ -206,32 +207,9 @@ export const EXEC_PICTURE_HANDLES = new Set([
   'exec-picture-out',
 ]);
 
+export const EXEC_3D_HANDLES = new Set(['exec-3d', 'exec-3d-out']);
+
 export const VERTICAL_SOCKETS: Record<string, VerticalSocketSpec[]> = {
-  'character-sheet': [
-    {
-      kind: 'meta',
-      position: 'bottom',
-      type: 'source',
-      id: 'asset-gate',
-      label: '角色设定',
-    },
-    {
-      kind: 'picture',
-      position: 'top',
-      type: 'target',
-      id: 'exec-picture',
-      // 连接图像生成：生成角色设定板 / 接收上游图
-    },
-  ],
-  'scene-card': [
-    {
-      kind: 'meta',
-      position: 'bottom',
-      type: 'source',
-      id: 'asset-gate',
-      label: '场景设定',
-    },
-  ],
   'picture-gen': [
     {
       kind: 'picture',
@@ -243,11 +221,20 @@ export const VERTICAL_SOCKETS: Record<string, VerticalSocketSpec[]> = {
   ],
   'director-3d': [
     {
-      kind: 'picture',
+      kind: 'mesh',
       position: 'bottom',
+      type: 'target',
+      id: 'exec-3d',
+      // 底口单点：承接导演台顶口（分镜图走左右 picture 口）
+    },
+  ],
+  'director-desk': [
+    {
+      kind: 'mesh',
+      position: 'top',
       type: 'source',
-      id: 'exec-picture',
-      // 与图像生成共用能力口：向分镜预览回写 3D 机位参考
+      id: 'exec-3d',
+      // 顶口单点：连到 3D 导演台底口
     },
   ],
   'storyboard-preview': [
@@ -287,7 +274,8 @@ export function isStoryboardPreviewHostKind(kind?: string | null): boolean {
 }
 
 export function isAssetSheetPictureHostKind(kind?: string | null): boolean {
-  return kind === 'character-sheet' || kind === 'scene-card';
+  void kind;
+  return false;
 }
 
 export function isStoryboardExecLink(
@@ -311,5 +299,26 @@ export function isStoryboardExecLink(
     return pair;
   }
   return usesExec && pair;
+}
+
+function isExec3dHandle(handle?: string | null): boolean {
+  if (!handle) return false;
+  if (EXEC_3D_HANDLES.has(handle)) return true;
+  return handle === 'exec-3d' || handle.startsWith('exec-3d');
+}
+
+/** 导演台 ↔ 3D 导演台 竖直 mesh 能力口 */
+export function isDirector3dDeskLink(
+  sourceKind: string,
+  targetKind: string,
+  sourceHandle?: string | null,
+  targetHandle?: string | null,
+): boolean {
+  const uses3d = isExec3dHandle(sourceHandle) || isExec3dHandle(targetHandle);
+  if (!uses3d) return false;
+  return (
+    (sourceKind === 'director-desk' && targetKind === 'director-3d') ||
+    (sourceKind === 'director-3d' && targetKind === 'director-desk')
+  );
 }
 

@@ -21,6 +21,7 @@ import {
 } from '@nx9/shared';
 import { useWorkspaceDocument } from '../../../../../stores/workspace-document';
 import { useActivityLog } from '../../../../../stores/activity-log';
+import { api } from '../../../../../api/client';
 import {
   checkStoryboardConsistencyWithAi,
   findConnectedPictureGenNode,
@@ -28,6 +29,18 @@ import {
   generateStoryboardPanorama720,
   scoreStoryboardKeyframes,
 } from '../../../../storyboard-preview-runner';
+
+/** 参与宫格合成的帧签名：url + 列数，变化则重合成 */
+export function buildContactSheetSignature(
+  frames: StoryboardPreviewFrame[],
+  cols: number,
+): string {
+  const parts = [...frames]
+    .sort((a, b) => a.order - b.order)
+    .filter((f) => Boolean(f.imageUrl))
+    .map((f) => `${f.id}:${f.imageUrl}`);
+  return `c${cols}|${parts.join('|')}`;
+}
 
 function nextInsertOrder(frames: StoryboardPreviewFrame[], afterOrder: number): number {
   const following = frames.filter((f) => f.order > afterOrder);
@@ -133,12 +146,9 @@ export function useStoryboardPreviewState(blockId: string) {
         const pictureSettings = { ...current.pictureSettings, ...patch };
         nextSettings = pictureSettings;
         return {
-          ...node,
-          data: {
             ...data,
             storyboardPreview: { ...current, pictureSettings },
-          },
-        };
+          };
       });
       if (nextSettings) syncPictureSettingsToExecNode(nextSettings);
     },
@@ -160,29 +170,89 @@ export function useStoryboardPreviewState(blockId: string) {
         const frames = next.frames;
         const summary = frames.filter((f) => f.status === 'success' || f.status === 'locked').length;
         return {
-          ...node,
-          data: {
             ...data,
             storyboardPreview: next,
             previewUrls: frames.map((f) => f.imageUrl).filter(Boolean),
             batchCount: frames.length,
             content: `Storyboard Preview · ${frames.length} Images · ${summary === frames.length ? 'Ready' : `${summary}/${frames.length}`}`,
             status: summary === frames.length && frames.length > 0 ? 'success' : 'idle',
-          },
-        };
+          };
       });
     },
     [blockId, readPayload, updateNodeData],
   );
 
+  const resolveLocalBreakdown = useCallback((): ScriptBreakdownPayload | undefined => {
+    const node = getNodes().find((item) => item.id === blockId);
+    const data = (node?.data ?? {}) as Record<string, unknown>;
+    const local = data.scriptBreakdown as ScriptBreakdownPayload | undefined;
+    if (local?.version === 1) return local;
+    return scopedUpstreamBreakdown;
+  }, [blockId, getNodes, scopedUpstreamBreakdown]);
+
+  const mergePreviewFrames = useCallback(
+    (next: StoryboardPreviewFrame[], prev: StoryboardPreviewFrame[]): StoryboardPreviewFrame[] => {
+      if (prev.length === 0) return next;
+      const prevByKey = new Map<string, StoryboardPreviewFrame>();
+      for (const frame of prev) {
+        if (frame.sourceShotId) prevByKey.set(frame.sourceShotId, frame);
+        prevByKey.set(frame.id, frame);
+      }
+      return next.map((frame) => {
+        const old =
+          (frame.sourceShotId ? prevByKey.get(frame.sourceShotId) : undefined)
+          ?? prevByKey.get(frame.id)
+          ?? prevByKey.get(`frame-${frame.sourceShotId}`)
+          ?? prevByKey.get(`spf-${frame.sourceShotId}`);
+        if (!old) return frame;
+        const imageUrl = frame.imageUrl || old.imageUrl || null;
+        const locked = old.locked;
+        return {
+          ...frame,
+          imageUrl,
+          referenceImageUrl: frame.referenceImageUrl ?? old.referenceImageUrl ?? null,
+          director3dGuide: old.director3dGuide ?? frame.director3dGuide ?? null,
+          stylePreset: old.stylePreset ?? frame.stylePreset ?? null,
+          promptSummary: old.userModified ? old.promptSummary : (frame.promptSummary || old.promptSummary),
+          userModified: old.userModified ?? false,
+          reviewNote: old.reviewNote ?? frame.reviewNote ?? null,
+          suggestRegenerate: old.suggestRegenerate,
+          locked,
+          status: locked
+            ? 'locked'
+            : imageUrl
+              ? old.status === 'modified'
+                ? 'modified'
+                : 'success'
+              : frame.status === 'error'
+                ? 'error'
+                : 'idle',
+          errorMessage: old.errorMessage ?? frame.errorMessage,
+        };
+      });
+    },
+    [],
+  );
+
   const syncFromStoryboard = useCallback(() => {
-    const breakdownShots = flattenScriptBreakdownShots(scopedUpstreamBreakdown);
-    const frames = shots.length
+    const node = getNodes().find((item) => item.id === blockId);
+    const data = (node?.data ?? {}) as Record<string, unknown>;
+    const current = readPayload(data);
+    let breakdown = resolveLocalBreakdown();
+    if (breakdown && storyboard.activeEpisodeId) {
+      const episode = breakdown.episodes.find((item) => item.id === storyboard.activeEpisodeId);
+      if (episode) breakdown = { ...breakdown, episodes: [episode] };
+    }
+    const breakdownShots = flattenScriptBreakdownShots(breakdown);
+    const built = shots.length
       ? buildStoryboardPreviewFrames(shots)
       : buildStoryboardPreviewFramesFromBreakdown(breakdownShots);
-    const node = getNodes().find((item) => item.id === blockId);
-    const current = readPayload((node?.data ?? {}) as Record<string, unknown>);
-    const selected = frames.find((frame) => frame.id === current.selectedFrameId) ?? frames[0];
+    const frames = mergePreviewFrames(built, current.frames);
+    const prevSelected = current.frames.find((f) => f.id === current.selectedFrameId);
+    const selected =
+      frames.find((frame) => frame.id === current.selectedFrameId)
+      ?? frames.find((frame) => prevSelected?.sourceShotId && frame.sourceShotId === prevSelected.sourceShotId)
+      ?? frames[0];
     const scopeKey = panoramaScopeKey(storyboard.activeEpisodeId, selected);
     const scopedPanorama = current.panorama720ByScope?.[scopeKey]
       ?? (Object.keys(current.panorama720ByScope ?? {}).length === 0 ? current.panorama720 : null);
@@ -195,10 +265,24 @@ export function useStoryboardPreviewState(blockId: string) {
       selectedFrameId: selected?.id ?? null,
       panorama720: scopedPanorama ?? null,
     });
-    if (scopedUpstreamBreakdown) {
+    if (
+      scopedUpstreamBreakdown
+      && !((data.scriptBreakdown as ScriptBreakdownPayload | undefined)?.version === 1)
+    ) {
       updateNodeData(blockId, { scriptBreakdown: scopedUpstreamBreakdown });
     }
-  }, [blockId, getNodes, patchPayload, readPayload, scopedUpstreamBreakdown, shots, storyboard.activeEpisodeId, updateNodeData]);
+  }, [
+    blockId,
+    getNodes,
+    mergePreviewFrames,
+    patchPayload,
+    readPayload,
+    resolveLocalBreakdown,
+    scopedUpstreamBreakdown,
+    shots,
+    storyboard.activeEpisodeId,
+    updateNodeData,
+  ]);
 
   const setViewMode = useCallback(
     (viewMode: StoryboardPreviewViewMode) => patchPayload({ viewMode }),
@@ -218,16 +302,13 @@ export function useStoryboardPreviewState(blockId: string) {
         const selected = current.frames.find((frame) => frame.id === selectedFrameId);
         const scopeKey = panoramaScopeKey(storyboard.activeEpisodeId, selected);
         return {
-          ...node,
-          data: {
             ...data,
             storyboardPreview: {
               ...current,
               selectedFrameId,
               panorama720: current.panorama720ByScope?.[scopeKey] ?? null,
             },
-          },
-        };
+          };
       });
     },
     [blockId, readPayload, storyboard.activeEpisodeId, updateNodeData],
@@ -249,12 +330,9 @@ export function useStoryboardPreviewState(blockId: string) {
             : f,
         );
         return {
-          ...node,
-          data: {
             ...data,
             storyboardPreview: { ...current, frames, confirmed: false },
-          },
-        };
+          };
       });
     },
     [blockId, readPayload, updateNodeData],
@@ -274,10 +352,7 @@ export function useStoryboardPreviewState(blockId: string) {
             status: locked ? 'locked' : f.imageUrl ? 'success' : 'idle',
           };
         });
-        return {
-          ...node,
-          data: { ...data, storyboardPreview: { ...current, frames } },
-        };
+        return { ...data, storyboardPreview: { ...current, frames } };
       });
     },
     [blockId, readPayload, updateNodeData],
@@ -297,7 +372,7 @@ export function useStoryboardPreviewState(blockId: string) {
             status: locked ? 'locked' : f.imageUrl ? 'success' : 'idle',
           };
         });
-        return { ...node, data: { ...data, storyboardPreview: { ...current, frames } } };
+        return { ...data, storyboardPreview: { ...current, frames } };
       });
     },
     [blockId, readPayload, updateNodeData],
@@ -313,10 +388,7 @@ export function useStoryboardPreviewState(blockId: string) {
           .filter((f) => !idSet.has(f.id) || f.locked)
           .sort((a, b) => a.order - b.order)
           .map((f, i) => ({ ...f, order: i + 1, label: `Shot${String(i + 1).padStart(2, '0')}` }));
-        return {
-          ...node,
-          data: previewNodePatch(current, frames, readBreakdown(data)),
-        };
+        return previewNodePatch(current, frames, readBreakdown(data));
       });
     },
     [blockId, readBreakdown, readPayload, updateNodeData],
@@ -333,10 +405,7 @@ export function useStoryboardPreviewState(blockId: string) {
             ? { ...f, stylePreset, userModified: true, status: 'modified' as const }
             : f,
         );
-        return {
-          ...node,
-          data: { ...data, storyboardPreview: { ...current, frames, confirmed: false } },
-        };
+        return { ...data, storyboardPreview: { ...current, frames, confirmed: false } };
       });
     },
     [blockId, readPayload, updateNodeData],
@@ -349,7 +418,7 @@ export function useStoryboardPreviewState(blockId: string) {
         const current = readPayload(data);
         const sorted = [...current.frames].sort((a, b) => a.order - b.order);
         const from = sorted.findIndex((f) => f.id === frameId);
-        if (from < 0) return node;
+        if (from < 0) return {};
         const [item] = sorted.splice(from, 1);
         sorted.splice(targetIndex, 0, item);
         let cursor = 0;
@@ -366,10 +435,7 @@ export function useStoryboardPreviewState(blockId: string) {
             endSec,
           };
         });
-        return {
-          ...node,
-          data: previewNodePatch(current, frames, readBreakdown(data)),
-        };
+        return previewNodePatch(current, frames, readBreakdown(data));
       });
     },
     [blockId, readBreakdown, readPayload, updateNodeData],
@@ -382,7 +448,7 @@ export function useStoryboardPreviewState(blockId: string) {
         const current = readPayload(data);
         const sorted = [...current.frames].sort((a, b) => a.order - b.order);
         const ref = sorted.find((f) => f.id === afterFrameId);
-        if (!ref) return node;
+        if (!ref) return {};
         const order = nextInsertOrder(current.frames, ref.order);
         const mid = (ref.startSec + ref.endSec) / 2;
         const newFrame: StoryboardPreviewFrame = {
@@ -398,10 +464,7 @@ export function useStoryboardPreviewState(blockId: string) {
           userModified: true,
         };
         const frames = [...current.frames, newFrame].sort((a, b) => a.order - b.order);
-        return {
-          ...node,
-          data: previewNodePatch(current, frames, readBreakdown(data)),
-        };
+        return previewNodePatch(current, frames, readBreakdown(data));
       });
     },
     [blockId, readBreakdown, readPayload, updateNodeData],
@@ -413,15 +476,12 @@ export function useStoryboardPreviewState(blockId: string) {
         const data = (node.data ?? {}) as Record<string, unknown>;
         const current = readPayload(data);
         const target = current.frames.find((f) => f.id === frameId);
-        if (target?.locked) return node;
+        if (target?.locked) return {};
         const frames = current.frames
           .filter((f) => f.id !== frameId)
           .sort((a, b) => a.order - b.order)
           .map((f, i) => ({ ...f, order: i + 1, label: `Shot${String(i + 1).padStart(2, '0')}` }));
-        return {
-          ...node,
-          data: previewNodePatch(current, frames, readBreakdown(data)),
-        };
+        return previewNodePatch(current, frames, readBreakdown(data));
       });
     },
     [blockId, readBreakdown, readPayload, updateNodeData],
@@ -440,15 +500,12 @@ export function useStoryboardPreviewState(blockId: string) {
         const data = (node.data ?? {}) as Record<string, unknown>;
         const current = readPayload(data);
         const frame = current.frames.find((f) => f.id === frameId);
-        if (!frame || frame.locked) return node;
+        if (!frame || frame.locked) return {};
         targetFrame = frame;
         const frames = current.frames.map((f) =>
           f.id === frameId ? { ...f, status: 'generating' as const } : f,
         );
-        return {
-          ...node,
-          data: { ...data, storyboardPreview: { ...current, frames, confirmed: false } },
-        };
+        return { ...data, storyboardPreview: { ...current, frames, confirmed: false } };
       });
       if (!targetFrame) return;
 
@@ -488,10 +545,7 @@ export function useStoryboardPreviewState(blockId: string) {
             targetFrame!.sourceShotId,
             imageUrl,
           );
-          return {
-            ...node,
-            data: previewNodePatch(current, frames, breakdown),
-          };
+          return previewNodePatch(current, frames, breakdown);
         });
         updateNodeData(pictureNode.id, {
           status: 'success',
@@ -517,10 +571,7 @@ export function useStoryboardPreviewState(blockId: string) {
               ? { ...f, status: 'error' as const, errorMessage: String(e) }
               : f,
           );
-          return {
-            ...node,
-            data: { ...data, storyboardPreview: { ...current, frames, confirmed: false } },
-          };
+          return { ...data, storyboardPreview: { ...current, frames, confirmed: false } };
         });
         updateNodeData(pictureNode.id, { status: 'error', error: String(e) });
         appendLog(`单张重新生成失败: ${String(e)}`);
@@ -537,19 +588,25 @@ export function useStoryboardPreviewState(blockId: string) {
         return;
       }
       const pictureData = (pictureNode.data ?? {}) as Record<string, unknown>;
-      const node = getNodes().find((n) => n.id === blockId);
-      const data = (node?.data ?? {}) as Record<string, unknown>;
-      const pictureSettings = readPayload(data).pictureSettings;
+      let node = getNodes().find((n) => n.id === blockId);
+      let data = (node?.data ?? {}) as Record<string, unknown>;
+      let current = readPayload(data);
+      if (current.frames.length === 0) {
+        syncFromStoryboard();
+        node = getNodes().find((n) => n.id === blockId);
+        data = (node?.data ?? {}) as Record<string, unknown>;
+        current = readPayload(data);
+      }
+      const pictureSettings = current.pictureSettings;
       syncPictureSettingsToExecNode(pictureSettings);
-      const current = readPayload(data);
       const targets = current.frames.filter((f) => {
         if (f.locked) return false;
         if (f.status === 'generating') return false;
-        if (onlyMissing && (f.status === 'success' || f.status === 'locked')) return false;
+        if (onlyMissing && (f.imageUrl || f.status === 'success' || f.status === 'locked')) return false;
         return true;
       });
       if (targets.length === 0) {
-        appendLog('没有需要生成的分镜');
+        appendLog(current.frames.length === 0 ? '没有可同步的分镜，请先在故事板确认镜头' : '没有需要生成的分镜');
         return;
       }
 
@@ -595,7 +652,17 @@ export function useStoryboardPreviewState(blockId: string) {
       appendLog(`批量生成完成 · ${targets.length} 张`);
       updateNodeData(blockId, { status: 'idle' });
     },
-    [appendLog, blockId, connectedPictureNode, getNodes, readBreakdown, readPayload, syncPictureSettingsToExecNode, updateNodeData],
+    [
+      appendLog,
+      blockId,
+      connectedPictureNode,
+      getNodes,
+      readBreakdown,
+      readPayload,
+      syncFromStoryboard,
+      syncPictureSettingsToExecNode,
+      updateNodeData,
+    ],
   );
 
   const generatePanorama720 = useCallback(
@@ -639,8 +706,6 @@ export function useStoryboardPreviewState(blockId: string) {
             updatedAt: new Date().toISOString(),
           };
           return {
-            ...node,
-            data: {
               ...data,
               status: 'idle',
               storyboardPreview: {
@@ -651,8 +716,7 @@ export function useStoryboardPreviewState(blockId: string) {
                   [scopeKey]: panorama,
                 },
               },
-            },
-          };
+            };
         });
         updateNodeData(pictureNode.id, {
           status: 'success',
@@ -678,7 +742,7 @@ export function useStoryboardPreviewState(blockId: string) {
     updateNodeData(blockId, (node) => {
       const data = (node.data ?? {}) as Record<string, unknown>;
       const current = readPayload(data);
-      if (!canConfirmStoryboardPreview(current)) return node;
+      if (!canConfirmStoryboardPreview(current)) return {};
       // 分镜预览只提交批审；批准动作统一由下游 review-gate 完成。
       for (const frame of current.frames) {
         if (frame.sourceShotId && frame.imageUrl) {
@@ -690,8 +754,6 @@ export function useStoryboardPreviewState(blockId: string) {
         }
       }
       return {
-        ...node,
-        data: {
           ...data,
           storyboardPreview: {
             ...current,
@@ -699,8 +761,7 @@ export function useStoryboardPreviewState(blockId: string) {
             confirmedAt: new Date().toISOString(),
           },
           status: 'success',
-        },
-      };
+        };
     });
   }, [blockId, readPayload, updateNodeData]);
 
@@ -708,7 +769,16 @@ export function useStoryboardPreviewState(blockId: string) {
     async (dimension: 'character' | 'scene' | 'other' | 'full' = 'full') => {
       const node = getNodes().find((n) => n.id === blockId);
       const data = (node?.data ?? {}) as Record<string, unknown>;
-      const current = readPayload(data);
+      let current = readPayload(data);
+      if (current.frames.length === 0) {
+        syncFromStoryboard();
+        const fresh = getNodes().find((n) => n.id === blockId);
+        current = readPayload((fresh?.data ?? {}) as Record<string, unknown>);
+      }
+      if (current.frames.length === 0) {
+        appendLog('没有可评分的关键帧，请先同步并出图');
+        return null;
+      }
       updateNodeData(blockId, { status: 'running' });
       try {
         if (dimension === 'full') {
@@ -745,15 +815,77 @@ export function useStoryboardPreviewState(blockId: string) {
         return null;
       }
     },
-    [appendLog, blockId, getNodes, readPayload, updateNodeData],
+    [appendLog, blockId, getNodes, readPayload, syncFromStoryboard, updateNodeData],
   );
 
   const shotCount = shots.length;
+  const localBreakdownShotCount = useMemo(() => {
+    const breakdown = resolveLocalBreakdown();
+    if (!breakdown) return 0;
+    if (storyboard.activeEpisodeId) {
+      const episode = breakdown.episodes.find((item) => item.id === storyboard.activeEpisodeId);
+      if (episode) return episode.shots.length;
+    }
+    return flattenScriptBreakdownShots(breakdown).length;
+  }, [resolveLocalBreakdown, storyboard.activeEpisodeId]);
+
+  /** 将已出图分镜合成为一张宫格大图；无图时清空 */
+  const composeContactSheet = useCallback(
+    async (force = false): Promise<string | null> => {
+      const node = getNodes().find((item) => item.id === blockId);
+      const data = (node?.data ?? {}) as Record<string, unknown>;
+      const current = readPayload(data);
+      const cols = current.gridColumns || 4;
+      const ready = [...current.frames]
+        .sort((a, b) => a.order - b.order)
+        .filter((f) => Boolean(f.imageUrl?.trim()));
+      const signature = buildContactSheetSignature(current.frames, cols);
+
+      if (ready.length === 0) {
+        if (current.contactSheetUrl || current.contactSheetSignature) {
+          patchPayload({ contactSheetUrl: null, contactSheetSignature: null });
+        }
+        return null;
+      }
+
+      if (
+        !force
+        && current.contactSheetUrl
+        && current.contactSheetSignature === signature
+      ) {
+        return current.contactSheetUrl;
+      }
+
+      const imageUrls = ready.map((f) => f.imageUrl!.trim());
+      const labels = ready.map((f, i) => {
+        const n = f.order || i + 1;
+        const title = (f.label || f.sceneCode || '').replace(/\s+/g, ' ').trim();
+        return title ? `${n}. ${title}` : `${n}.`;
+      });
+      const rows = Math.ceil(imageUrls.length / cols) || 1;
+
+      try {
+        const res = await api.gridCompose({ imageUrls, rows, cols, labels });
+        if (!res.ok || !res.url) throw new Error('合成失败');
+        patchPayload({
+          contactSheetUrl: res.url,
+          contactSheetSignature: signature,
+        });
+        appendLog(`关键帧宫格大图已合成 · ${imageUrls.length} 格`);
+        return res.url;
+      } catch (e) {
+        appendLog(`关键帧宫格合成失败: ${String(e)}`);
+        return null;
+      }
+    },
+    [appendLog, blockId, getNodes, patchPayload, readPayload],
+  );
 
   return useMemo(
     () => ({
       shots,
       shotCount,
+      localBreakdownShotCount,
       activeEpisodeId: storyboard.activeEpisodeId ?? null,
       upstreamBreakdown: scopedUpstreamBreakdown,
       connectedPictureNode,
@@ -779,10 +911,12 @@ export function useStoryboardPreviewState(blockId: string) {
       patchPayload,
       updatePictureSettings,
       syncPictureSettingsToExecNode,
+      composeContactSheet,
     }),
     [
       shots,
       shotCount,
+      localBreakdownShotCount,
       storyboard.activeEpisodeId,
       scopedUpstreamBreakdown,
       connectedPictureNode,
@@ -808,6 +942,7 @@ export function useStoryboardPreviewState(blockId: string) {
       patchPayload,
       updatePictureSettings,
       syncPictureSettingsToExecNode,
+      composeContactSheet,
     ],
   );
 }

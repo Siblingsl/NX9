@@ -44,37 +44,73 @@ export class GridService {
     return { ok: true, urls, rows, cols };
   }
 
-  async composeGrid(imageUrls: string[], rows: number, cols: number) {
+  /**
+   * 将多张分镜图合成为一张宫格大图（纸面分镜条）。
+   * labels 可选：每格左上角编号/标题。
+   */
+  async composeGrid(
+    imageUrls: string[],
+    rows: number,
+    cols: number,
+    labels?: string[],
+  ) {
     const paths = imageUrls.map((u) => resolveMediaUrl(u)).filter(Boolean) as string[];
     if (paths.length === 0) throw new Error('无有效图片');
-    const count = Math.min(paths.length, rows * cols);
+    const count = Math.min(paths.length, Math.max(1, rows) * Math.max(1, cols));
+    const safeCols = Math.max(1, cols);
+    const safeRows = Math.max(1, rows, Math.ceil(count / safeCols));
 
-    const metas = await Promise.all(paths.slice(0, count).map((p) => sharp(p).metadata()));
-    const cellW = Math.max(...metas.map((m) => m.width ?? 256));
-    const cellH = Math.max(...metas.map((m) => m.height ?? 256));
-    const canvasW = cellW * cols;
-    const canvasH = cellH * rows;
+    const gap = 10;
+    const pad = 14;
+    const titleH = 28;
+    const cellW = 480;
+    const cellH = 300;
+    const panelW = cellW;
+    const panelH = titleH + cellH;
+    const canvasW = pad * 2 + safeCols * panelW + (safeCols - 1) * gap;
+    const canvasH = pad * 2 + safeRows * panelH + (safeRows - 1) * gap;
 
     const composites: sharp.OverlayOptions[] = [];
     for (let i = 0; i < count; i++) {
-      const r = Math.floor(i / cols);
-      const c = i % cols;
-      const buf = await sharp(paths[i])
-        .resize(cellW, cellH, { fit: 'cover' })
+      const r = Math.floor(i / safeCols);
+      const c = i % safeCols;
+      const left = pad + c * (panelW + gap);
+      const top = pad + r * (panelH + gap);
+      const labelRaw = (labels?.[i] ?? `${i + 1}.`).replace(/[<>&"]/g, '').slice(0, 36);
+
+      const frameSvg = Buffer.from(
+        `<svg width="${panelW}" height="${panelH}" xmlns="http://www.w3.org/2000/svg">
+          <rect x="0.75" y="0.75" width="${panelW - 1.5}" height="${panelH - 1.5}" fill="#ffffff" stroke="#2a241c" stroke-width="1.5"/>
+          <rect x="1" y="1" width="${panelW - 2}" height="${titleH - 1}" fill="#ffffff"/>
+          <line x1="1" y1="${titleH}" x2="${panelW - 1}" y2="${titleH}" stroke="#2a241c" stroke-width="1" stroke-opacity="0.55"/>
+          <text x="8" y="${Math.round(titleH * 0.72)}" font-family="sans-serif" font-size="14" font-weight="700" fill="#1a1a1a">${labelRaw}</text>
+        </svg>`,
+      );
+      composites.push({ input: frameSvg, left, top });
+
+      const imgBuf = await sharp(paths[i])
+        .resize(cellW - 4, cellH - 4, { fit: 'contain', background: '#f7f5f1' })
+        .jpeg({ quality: 90 })
         .toBuffer();
-      composites.push({ input: buf, left: c * cellW, top: r * cellH });
+      composites.push({ input: imgBuf, left: left + 2, top: top + titleH + 2 });
     }
 
     const name = `compose-${Date.now()}.jpg`;
     const out = join(PATHS.images, name);
     await sharp({
-      create: { width: canvasW, height: canvasH, channels: 3, background: '#FAFAF8' },
+      create: { width: canvasW, height: canvasH, channels: 3, background: '#f3f1ec' },
     })
       .composite(composites)
-      .jpeg({ quality: 90 })
+      .jpeg({ quality: 92 })
       .toFile(out);
 
-    return { ok: true, url: `/media/images/${name}`, rows, cols };
+    return {
+      ok: true,
+      url: this.assets.publicUrl('images', name),
+      rows: safeRows,
+      cols: safeCols,
+      count,
+    };
   }
 
   async generateStoryGrid(prompt: string, rows = 3, cols = 3, style: 'cinematic' | 'line-art' = 'cinematic') {

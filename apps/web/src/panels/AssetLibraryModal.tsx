@@ -10,6 +10,7 @@ import {
   ASSET_LIBRARY_TABS,
   BUILTIN_BACKLOT_TEMPLATES,
   isPrivateWorkspace,
+  MAX_ENV_REFERENCE_IMAGES,
   newBacklotWorkspaceItem,
   newCharacterProfile,
   newSoundAsset,
@@ -24,7 +25,12 @@ import {
   applyCroppedPanelsToCharacter,
   CHARACTER_SHEET_PANEL_LAYOUT,
   resolveConnectedPictureGenId,
+  getSceneCreative,
 } from '@nx9/shared';
+import {
+  sceneCandidateToWorkspaceItem,
+  workspaceItemToEnvironmentProfile,
+} from '../engine/script-asset-candidates';
 import {
   ArrowLeft,
   Globe2,
@@ -182,37 +188,37 @@ const KIND_META: Record<
 > = {
   character: {
     newLabel: '新建角色',
-    emptyHint: '创建角色用于一致性注入与 @角色 引用',
+    emptyHint: '角色设定主入口：档案、三视图、设定板生成；可在生成节点 @角色 引用',
     promptPlaceholder: '一致性 prompt…',
   },
   costume: {
     newLabel: '新建服装',
-    emptyHint: '创建服装套装，维护面料/配色/标志物，可在节点中 @服装 引用',
+    emptyHint: '创建服装套装，维护面料/配色/标志物，可在生成节点 @服装 引用',
     promptPlaceholder: '造型、面料、配色、标志物…',
   },
   scene: {
     newLabel: '新建场景',
-    emptyHint: '场景描述，可在节点中 @场景 引用',
+    emptyHint: '场景设定主入口：空间锚点、多参考图、环境圣经同步；可在生成节点 @场景 引用',
     promptPlaceholder: '环境、光线、空间描述…',
   },
   shot: {
     newLabel: '新建镜头',
-    emptyHint: '运镜与机位描述，可在节点中 @镜头 引用',
+    emptyHint: '运镜与机位描述，可在生成节点 @镜头 引用',
     promptPlaceholder: '运镜、景别、机位描述…',
   },
   emotion: {
     newLabel: '新建情绪',
-    emptyHint: '表情与氛围描述，可在节点中 @情绪 引用',
+    emptyHint: '表情与氛围描述，可在生成节点 @情绪 引用',
     promptPlaceholder: '表情、氛围、色调描述…',
   },
   hook: {
     newLabel: '新建钩子',
-    emptyHint: '开场或结尾钩子，可在节点中 @钩子 引用',
+    emptyHint: '开场或结尾钩子，可在生成节点 @钩子 引用',
     promptPlaceholder: '钩子文案…',
   },
   sound: {
     newLabel: '新建声音',
-    emptyHint: '参考音频、配音样本，可在节点中 @声音 引用',
+    emptyHint: '参考音频、配音样本，可在生成节点 @声音 引用',
     promptPlaceholder: '声音描述…',
   },
 };
@@ -252,6 +258,8 @@ export function AssetLibraryModal() {
   const removeSound = useWorkspaceDocument((s) => s.removeSound);
   const upsertBacklotWorkspace = useWorkspaceDocument((s) => s.upsertBacklotWorkspace);
   const removeBacklotWorkspace = useWorkspaceDocument((s) => s.removeBacklotWorkspace);
+  const setEnvironments = useWorkspaceDocument((s) => s.setEnvironments);
+  const environmentLibrary = useWorkspaceDocument((s) => s.environments);
   const characters = useWorkspaceDocument((s) => s.characters.characters);
   const sounds = useWorkspaceDocument((s) => s.soundLibrary.sounds);
   const workspaceItems = useWorkspaceDocument((s) => s.backlotWorkspace.items);
@@ -394,6 +402,28 @@ export function AssetLibraryModal() {
     scope !== 'private' || (Boolean(selectedProjectId) && activeId === selectedProjectId);
   const canCreateAsset = scope === 'public' || canEditPrivate;
 
+  /** 环境圣经 → 素材库场景页：补齐缺失条目，保证主路径只认素材库也能看到 extract 结果 */
+  useEffect(() => {
+    if (!open || scope !== 'private' || tab !== 'scene' || !canEditPrivate) return;
+    const envs = environmentLibrary?.environments ?? [];
+    if (envs.length === 0) return;
+    const items = useWorkspaceDocument.getState().backlotWorkspace.items;
+    for (const env of envs) {
+      const existing = items.find((item) => {
+        if (item.kind !== 'scene') return false;
+        const creative = getSceneCreative(item);
+        return (
+          creative.environmentId === env.id
+          || item.id === `scene-${env.id}`
+          || normalizeName(item.label) === normalizeName(env.name)
+        );
+      });
+      if (!existing) {
+        upsertBacklotWorkspace(sceneCandidateToWorkspaceItem(env));
+      }
+    }
+  }, [open, scope, tab, canEditPrivate, environmentLibrary, upsertBacklotWorkspace]);
+
   const handleEnterProject = useCallback(
     (id: string) => {
       void selectWorkspace(id);
@@ -427,12 +457,39 @@ export function AssetLibraryModal() {
   const saveWorkspaceItem = useCallback(
     (item: BacklotWorkspaceItem) => {
       if (scope === 'private') {
-        upsertBacklotWorkspace(item);
+        let next = item;
+        if (item.kind === 'scene') {
+          const currentEnvs = useWorkspaceDocument.getState().environments?.environments ?? [];
+          const existingEnv = currentEnvs.find((env) => {
+            const creative = getSceneCreative(item);
+            return (
+              env.id === creative.environmentId
+              || env.id === item.id.replace(/^scene-/, '')
+              || normalizeName(env.name) === normalizeName(item.label)
+            );
+          });
+          const env = workspaceItemToEnvironmentProfile(item, existingEnv);
+          next = {
+            ...item,
+            creative: {
+              ...getSceneCreative(item),
+              environmentId: env.id,
+              sceneCode: env.sceneCode,
+              props: env.props,
+              referenceUrls: env.referenceUrls,
+            } as BacklotWorkspaceItem['creative'],
+          };
+          setEnvironments({
+            version: 1,
+            environments: [...currentEnvs.filter((e) => e.id !== env.id), env],
+          });
+        }
+        upsertBacklotWorkspace(next);
         return;
       }
       publicUpsertTemplate(workspaceItemToCustomTemplate(item, '公共库'));
     },
-    [scope, upsertBacklotWorkspace, publicUpsertTemplate],
+    [scope, upsertBacklotWorkspace, publicUpsertTemplate, setEnvironments],
   );
 
   const saveSound = useCallback(
@@ -523,6 +580,19 @@ export function AssetLibraryModal() {
         if (scope === 'private') removeSound(id);
         else publicRemoveSound(id);
       } else if (scope === 'private') {
+        if (tab === 'scene') {
+          const item = workspaceItems.find((x) => x.id === id);
+          if (item) {
+            const env = workspaceItemToEnvironmentProfile(item);
+            const current = useWorkspaceDocument.getState().environments?.environments ?? [];
+            setEnvironments({
+              version: 1,
+              environments: current.filter(
+                (e) => e.id !== env.id && normalizeName(e.name) !== normalizeName(item.label),
+              ),
+            });
+          }
+        }
         removeBacklotWorkspace(id);
       } else {
         publicRemoveTemplate(id);
@@ -532,13 +602,15 @@ export function AssetLibraryModal() {
     [
       tab,
       scope,
+      editId,
+      workspaceItems,
       removeCharacter,
       publicRemoveCharacter,
       removeSound,
       publicRemoveSound,
       removeBacklotWorkspace,
       publicRemoveTemplate,
-      editId,
+      setEnvironments,
     ],
   );
 
@@ -614,9 +686,9 @@ export function AssetLibraryModal() {
       const self = nodes.find((x) => x.id === selectedId);
       if (self?.type === 'picture-gen') return self;
     }
-    // 2) 任意角色设定 / 场景设定已连接的图像节点
+    // 2) 分镜台已连接的图像节点
     for (const n of nodes) {
-      if (n.type !== 'character-sheet' && n.type !== 'scene-card' && n.type !== 'storyboard-desk') continue;
+      if (n.type !== 'storyboard-desk') continue;
       const via = resolveConnectedPictureGenId(n.id, nodes, edges);
       if (via) {
         const pic = nodes.find((x) => x.id === via);
@@ -662,7 +734,7 @@ export function AssetLibraryModal() {
       }
       const pictureNode = findPictureGenNode();
       if (!pictureNode) {
-        appendLog('服装设定板：画布上未找到「图像生成」节点。请添加并（建议）用能力口连接到角色设定/分镜台。');
+        appendLog('服装设定板：画布上未找到「图像生成」节点。请先在画布添加「图像生成」。');
         return;
       }
 
@@ -722,7 +794,7 @@ export function AssetLibraryModal() {
       }
       const pictureNode = findPictureGenNode();
       if (!pictureNode) {
-        appendLog('角色设定板：画布上未找到「图像生成」节点。请先添加图像生成节点（建议连接角色设定节点）。');
+        appendLog('角色设定板：画布上未找到「图像生成」节点。请先在画布添加「图像生成」。');
         return;
       }
 
@@ -786,11 +858,38 @@ export function AssetLibraryModal() {
   const handleUploadWorkspaceMedia = useCallback(
     async (file: File, item: BacklotWorkspaceItem, field: string) => {
       const res = await api.uploadAsset(file);
-      const creative = { ...(item.creative as Record<string, unknown>), [field]: res.url };
+      const creative = { ...(item.creative as Record<string, unknown>) };
       if (field === 'referenceUrls') {
-        creative.referenceUrls = [res.url];
+        const prev = Array.isArray(creative.referenceUrls)
+          ? (creative.referenceUrls.filter(Boolean) as string[])
+          : [];
+        if (prev.includes(res.url)) {
+          appendLog('参考图已存在，跳过重复上传');
+          return;
+        }
+        if (prev.length >= MAX_ENV_REFERENCE_IMAGES) {
+          appendLog(`参考图已达上限 ${MAX_ENV_REFERENCE_IMAGES} 张`);
+          return;
+        }
+        creative.referenceUrls = [...prev, res.url];
+      } else {
+        creative[field] = res.url;
       }
       saveWorkspaceItem({ ...item, creative: creative as BacklotWorkspaceItem['creative'] });
+    },
+    [appendLog, saveWorkspaceItem],
+  );
+
+  const handleRemoveSceneRef = useCallback(
+    (item: BacklotWorkspaceItem, index: number) => {
+      const creative = getSceneCreative(item);
+      const refs = [...(creative.referenceUrls ?? [])];
+      if (index < 0 || index >= refs.length) return;
+      refs.splice(index, 1);
+      saveWorkspaceItem({
+        ...item,
+        creative: { ...creative, referenceUrls: refs } as BacklotWorkspaceItem['creative'],
+      });
     },
     [saveWorkspaceItem],
   );
@@ -1079,6 +1178,7 @@ export function AssetLibraryModal() {
                           onRefreshPrompts={() => saveWorkspaceItem(refreshWorkspacePrompts(selectedWorkspaceItem))}
                           onUploadRef={(f) => void handleUploadWorkspaceMedia(f, selectedWorkspaceItem, 'referenceUrls')}
                           onUploadSheet={(f) => void handleUploadWorkspaceMedia(f, selectedWorkspaceItem, 'sheetUrl')}
+                          onRemoveRef={(idx) => handleRemoveSceneRef(selectedWorkspaceItem, idx)}
                         />
                       )}
 

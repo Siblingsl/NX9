@@ -1,7 +1,7 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { BlockDefinition } from '@nx9/shared';
 import { isPrivateWorkspace } from '@nx9/shared';
-import { SettingsDrawer } from '../panels/SettingsDrawer';
+import { SettingsModal } from '../panels/SettingsModal';
 import { ShortcutsModal } from '../panels/ShortcutsModal';
 import { LogPanel } from '../panels/LogPanel';
 import { ToastHost } from '../components/ToastHost';
@@ -277,7 +277,7 @@ export default function AppShell() {
         <ShortcutsModal open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
       )}
 
-      {isSurfaceEnabled('settings') && <SettingsDrawer />}
+      {isSurfaceEnabled('settings') && <SettingsModal />}
       <Suspense fallback={null}>
         {isSurfaceEnabled('skillsDrawer') && <SkillsDrawer />}
         <Director3dPanel />

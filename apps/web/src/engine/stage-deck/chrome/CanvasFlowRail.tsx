@@ -11,6 +11,8 @@ import {
 import { useWorkspaceDocument } from '../../../stores/workspace-document';
 import { useFlowRuntime } from '../../../stores/flow-runtime';
 import { useContextRailUi } from '../stores/context-rail-ui';
+import { useAssetLibraryModalUi } from '../../../stores/asset-library-modal-ui';
+import { useWorkspaceCatalog } from '../../../stores/workspace-catalog';
 import { focusStepNodes } from '../../playbook-focus';
 import { translate } from '@nx9/shared';
 import '../../../styles/canvas-flow-rail.css';
@@ -33,6 +35,8 @@ export function CanvasFlowRail() {
   const runtime = useFlowRuntime((s) => s.runtime);
   const selectedBlockId = useFlowRuntime((s) => s.selectedBlockId);
   const requestRailTab = useContextRailUi((s) => s.requestTab);
+  const openAssetLibraryAt = useAssetLibraryModalUi((s) => s.openAt);
+  const activeProjectId = useWorkspaceCatalog((s) => s.activeId);
   const [hoveredStepId, setHoveredStepId] = useState<string | null>(null);
   const [tooltip, setTooltip] = useState<TooltipData | null>(null);
   const [flashStepId, setFlashStepId] = useState<string | null>(null);
@@ -90,8 +94,8 @@ export function CanvasFlowRail() {
     const key = step.readinessKey;
     if (key === 'has_environment_bibles') {
       const envs = environments?.environments ?? [];
-      if (envs.length === 0) reasons.push('缺少场景参考图，请先生成环境卡');
-      else if (!envs.some((e) => (e.referenceUrls?.length ?? 0) >= 1)) reasons.push('缺少场景参考图，请上传场景参考图片');
+      if (envs.length === 0) reasons.push('缺少场景参考图，请先在素材库完善场景设定');
+      else if (!envs.some((e) => (e.referenceUrls?.length ?? 0) >= 1)) reasons.push('缺少场景参考图，请在素材库上传场景参考图片');
     } else if (key === 'has_source_text') {
       reasons.push('请先在左侧 Rail › Script 中粘贴剧本');
     } else if (key === 'has_scene_split') {
@@ -101,7 +105,7 @@ export function CanvasFlowRail() {
     } else if (key === 'story_grid_confirmed') {
       reasons.push('请先在分镜网格检查并确认当前集');
     } else if (key === 'has_character_bibles') {
-      reasons.push('请先提取角色，填写六层设定 + 上传参考图');
+      reasons.push('请先在素材库完善角色设定并上传参考图');
     } else if (key === 'has_camera_blocks') {
       reasons.push('请先为镜头关联导演台/3D 机位模块');
     } else if (key === 'has_keyframes') {
@@ -128,7 +132,8 @@ export function CanvasFlowRail() {
     if (!playbook) return '去修复';
     const step = playbook.steps.find((s) => s.id === stepId);
     if (!step) return '去修复';
-    if (step.readinessKey === 'has_environment_bibles') return '打开环境卡面板';
+    if (step.readinessKey === 'has_environment_bibles') return '打开素材库 · 场景';
+    if (step.readinessKey === 'has_character_bibles') return '打开素材库 · 角色';
     const action = step.primaryAction;
     switch (action.type) {
       case 'open_rail': return '打开 Rail 面板';
@@ -146,6 +151,14 @@ export function CanvasFlowRail() {
     if (!playbook || !runtime) return;
     const step = playbook.steps.find((s) => s.id === stepId);
     if (!step) return;
+    if (step.readinessKey === 'has_character_bibles' || step.readinessKey === 'has_environment_bibles') {
+      openAssetLibraryAt({
+        tab: step.readinessKey === 'has_character_bibles' ? 'character' : 'scene',
+        projectId: activeProjectId ?? undefined,
+        scope: 'private',
+      });
+      return;
+    }
     const action = step.primaryAction;
     if (action.type === 'open_rail') {
       requestRailTab(action.tab, action.sub ? { librarySub: action.sub as any } : undefined);
@@ -178,7 +191,7 @@ export function CanvasFlowRail() {
         useViewMode.getState().setMode(action.mode);
       });
     }
-  }, [playbook, runtime, requestRailTab]);
+  }, [playbook, runtime, requestRailTab, openAssetLibraryAt, activeProjectId]);
 
   const handleStepClick = useCallback((stepId: string, state: StepVisualState) => {
     setTooltip(null);

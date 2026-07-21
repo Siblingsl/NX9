@@ -91,28 +91,16 @@ const CATEGORY_DEFAULT: Record<BlockCategory, NodeInteractionClass> = {
 
 /**
  * 仅以下节点类型打开 Prompt Bar（白名单）。
- * 角色设定、素材导入、局部增强等结构化/配置/逻辑节点不在此列。
+ * 素材库角色/场景、素材导入、局部增强等结构化/配置/逻辑节点不在此列。
  */
 export const PROMPT_BAR_KINDS = new Set<string>([
-  'prompt',
   'picture-gen',
   'clip-gen',
   'sound-gen',
-  'motion-story',
-  'photo-speak',
-  'music-gen',
   'inpaint-edit',
-  'chat-model',
-  'prompt-studio',
-  'style-lab',
-  'story-grid',
-  'grid-prompt-reverse',
-  'shot-script',
-  'director-desk',
   'caption-asr',
-  'seedance-chain',
-  'bridge-clip',
-  'thumbnail-maker',
+  'link-parser',
+  'reference-board',
 ]);
 
 /** 生成类节点 — Prompt Bar 底部展示模型/比例等高级参数 */
@@ -120,9 +108,6 @@ export const PROMPT_BAR_GEN_KINDS = new Set<string>([
   'picture-gen',
   'clip-gen',
   'sound-gen',
-  'motion-story',
-  'photo-speak',
-  'music-gen',
   'inpaint-edit',
 ]);
 

@@ -44,6 +44,7 @@ export type {
   EpisodeMeta,
   EpisodeStatus,
   StoryboardDirector3dGuide,
+  StoryboardGuideOverlay,
   StoryboardShot,
   StoryboardPayload,
   VoiceProfile,
@@ -52,6 +53,25 @@ export type {
   VoiceLineStatus,
   WorkspacePreferences,
 } from './types/storyboard';
+export type {
+  StoryboardGuideKind,
+  StoryboardGuideArrow,
+  StoryboardGuideMark,
+} from './types/storyboard-guide';
+export {
+  STORYBOARD_GUIDE_COLORS,
+  STORYBOARD_GUIDE_LEGEND,
+  STORYBOARD_GUIDE_KINDS,
+  emptyStoryboardGuideOverlay,
+  isStoryboardGuideOverlay,
+  filterStoryboardGuideOverlay,
+} from './types/storyboard-guide';
+export {
+  resolveStoryboardGuideOverlay,
+  buildStoryboardGuideOverlayFromShot,
+  buildVideoGuidePromptSuffix,
+  buildKeyframeNoGuidePromptSuffix,
+} from './utils/storyboard-guide';
 export {
   emptyStoryboard,
   emptyVoice,
@@ -105,6 +125,15 @@ export {
   validateScriptBreakdownPayload,
   type ScriptEpisodeChunk,
 } from './utils/script-breakdown-production';
+export {
+  DEFAULT_SHOT_DURATION_SEC,
+  buildShotTimeline,
+  shotTimelineMap,
+  formatShotTimeRange,
+  suggestStoryboardGridCols,
+  type ShotTimelineInput,
+  type ShotTimelineEntry,
+} from './utils/shot-timeline';
 
 export type {
   StoryboardPreviewFrameStatus,
@@ -315,9 +344,11 @@ export {
   socketsCompatible,
   validateLink,
   EXEC_PICTURE_HANDLES,
+  EXEC_3D_HANDLES,
   VERTICAL_SOCKETS,
   resolveVerticalSockets,
   isStoryboardExecLink,
+  isDirector3dDeskLink,
   isStoryboardPreviewHostKind,
 } from './catalog/socket-registry';
 export type { VerticalSocketSpec } from './catalog/socket-registry';
@@ -611,6 +642,8 @@ export {
   CANVAS_THEMES,
   type CanvasThemeMode,
   type CanvasGridStyle,
+  type CanvasSocketStyle,
+  type CanvasEdgePathType,
   type CanvasAppearance,
 } from './utils/canvas-theme';
 export type {

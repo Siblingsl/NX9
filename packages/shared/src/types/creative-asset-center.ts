@@ -129,6 +129,12 @@ export interface SceneCreativeExtension {
   weather?: string;
   lighting?: string;
   colorTone?: string;
+  /** 对应 EnvironmentProfile.id，素材库 ↔ 环境圣经双向同步 */
+  environmentId?: string;
+  sceneCode?: string;
+  props?: string[];
+  locked?: boolean;
+  forbiddenDrift?: string;
   recommendedCharacters?: string[];
   recommendedShots?: string[];
   recommendedMusic?: string[];

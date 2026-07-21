@@ -1,17 +1,16 @@
 import { memo, useCallback } from 'react';
-import { Handle, Position, useReactFlow, type NodeProps } from '@xyflow/react';
+import { useReactFlow, type NodeProps } from '@xyflow/react';
 import {
+  EXEC_3D_HANDLES,
   EXEC_PICTURE_HANDLES,
   lookupBlock,
   resolveAccepts,
   resolveEmits,
   resolveVerticalSockets,
-  SOCKET_COLORS,
-  type SocketKind,
-  type VerticalSocketSpec,
 } from '@nx9/shared';
 import { Loader2 } from 'lucide-react';
 import { useStageDeckFlag } from '../../stores/stage-deck-flag';
+import { SideSocketRails, VerticalSocketRails } from './NodeSockets';
 import '../../styles/node-stage-card.css';
 
 interface BlockShellProps extends NodeProps {
@@ -20,72 +19,30 @@ interface BlockShellProps extends NodeProps {
 }
 
 function isVerticalPortEdgeForNode(
-  edge: { source: string; target: string; sourceHandle?: string | null; targetHandle?: string | null },
+  edge: {
+    source: string;
+    target: string;
+    sourceHandle?: string | null;
+    targetHandle?: string | null;
+  },
   nodeId: string,
   handleIds: Set<string>,
 ): boolean {
   if (edge.source !== nodeId && edge.target !== nodeId) return false;
+  const sh = edge.sourceHandle ?? '';
+  const th = edge.targetHandle ?? '';
+  const strip = (h: string) => (h.endsWith('-out') ? h.slice(0, -4) : h);
   return (
-    handleIds.has(edge.sourceHandle ?? '') ||
-    handleIds.has(edge.targetHandle ?? '') ||
-    EXEC_PICTURE_HANDLES.has(edge.sourceHandle ?? '') ||
-    EXEC_PICTURE_HANDLES.has(edge.targetHandle ?? '')
-  );
-}
-
-function SocketHandle({
-  kind,
-  type,
-  id,
-  hidden,
-}: {
-  kind: SocketKind;
-  type: 'source' | 'target';
-  id?: string;
-  hidden?: boolean;
-}) {
-  if (hidden) return null;
-  return (
-    <Handle
-      type={type}
-      position={type === 'target' ? Position.Left : Position.Right}
-      id={id ?? kind}
-      className="nx9-socket !w-2.5 !h-2.5 !border-2 !border-white"
-      style={{ background: SOCKET_COLORS[kind] }}
-    />
-  );
-}
-
-function VerticalSocketHandle({
-  spec,
-  hidden,
-}: {
-  spec: VerticalSocketSpec;
-  hidden?: boolean;
-}) {
-  if (hidden) return null;
-  const position = spec.position === 'top' ? Position.Top : Position.Bottom;
-  const isDualPurposePort = spec.type === 'both';
-  const commonClass = `nx9-socket nx9-socket-exec ${
-    isDualPurposePort ? '!w-2.5 !h-2.5' : '!w-3 !h-3'
-  } !border-2 !border-white`;
-  const commonStyle = { background: SOCKET_COLORS[spec.kind], left: `${spec.offsetPct ?? 50}%` };
-  if (isDualPurposePort) {
-    return (
-      <>
-        <Handle type="target" position={position} id={spec.id} className={commonClass} style={commonStyle} />
-        <Handle type="source" position={position} id={spec.id} className={commonClass} style={commonStyle} />
-      </>
-    );
-  }
-  return (
-    <Handle
-      type={spec.type === 'both' ? 'target' : spec.type}
-      position={position}
-      id={spec.id}
-      className={commonClass}
-      style={commonStyle}
-    />
+    handleIds.has(sh) ||
+    handleIds.has(th) ||
+    handleIds.has(strip(sh)) ||
+    handleIds.has(strip(th)) ||
+    EXEC_PICTURE_HANDLES.has(sh) ||
+    EXEC_PICTURE_HANDLES.has(th) ||
+    EXEC_3D_HANDLES.has(sh) ||
+    EXEC_3D_HANDLES.has(th) ||
+    EXEC_3D_HANDLES.has(strip(sh)) ||
+    EXEC_3D_HANDLES.has(strip(th))
   );
 }
 
@@ -147,59 +104,46 @@ export const BlockShell = memo(function BlockShell({
     <div
       className={`nx9-stage-card nowheel ${selected ? 'is-selected' : ''} ${
         status === 'running' ? 'is-running' : ''
-      } ${execPortsVisible && verticalTop.length > 0 ? 'mt-3' : ''} ${
-        execPortsVisible && verticalBottom.length > 0 ? 'mb-3' : ''
+      } ${execPortsVisible && verticalTop.length > 0 ? 'has-ports-top' : ''} ${
+        execPortsVisible && verticalBottom.length > 0 ? 'has-ports-bottom' : ''
       }`}
     >
-      <div className="nx9-stage-card__accent" style={{ background: accent }} aria-hidden />
+      <VerticalSocketRails
+        top={verticalTop}
+        bottom={verticalBottom}
+        hidden={!execPortsVisible}
+      />
+      <SideSocketRails accepts={accepts} emits={emits} hidden={hideSockets} />
 
-      {execPortsVisible && verticalTop.length > 0 && (
-        <div className="absolute inset-x-0 top-0 h-0 z-10">
-          {verticalTop.map((spec) => (
-            <VerticalSocketHandle key={spec.id} spec={spec} />
-          ))}
+      <div className="nx9-stage-card__surface">
+        <div className="nx9-stage-card__accent" style={{ background: accent }} aria-hidden />
+
+        <div className="nx9-stage-card__head">
+          <span className="nx9-stage-card__title">{meta?.label ?? type}</span>
+          {hasExecPorts && (
+            <button
+              type="button"
+              onClick={toggleExecPorts}
+              className={`nx9-stage-card__port-toggle nodrag nopan ${showExecPorts ? 'is-on' : ''}`}
+              title={showExecPorts ? '关闭上下连接口并切断相关连接' : '打开上下连接口'}
+            >
+              口
+            </button>
+          )}
+          {blockIndex != null && !hideBlockIndex && (
+            <span className="nx9-stage-card__badge">#{blockIndex}</span>
+          )}
+          {status === 'running' ? (
+            <Loader2 size={13} className="animate-spin text-teal-300 shrink-0" />
+          ) : (
+            <span className={`nx9-stage-card__status ${statusClass}`} title={status ?? 'idle'} />
+          )}
         </div>
-      )}
 
-      <div className="nx9-stage-card__head">
-        <span className="nx9-stage-card__title">{meta?.label ?? type}</span>
-        {hasExecPorts && (
-          <button
-            type="button"
-            onClick={toggleExecPorts}
-            className={`nx9-stage-card__port-toggle nodrag nopan ${showExecPorts ? 'is-on' : ''}`}
-            title={showExecPorts ? '关闭顶部连接口并切断相关连接' : '打开顶部连接口'}
-          >
-            口
-          </button>
-        )}
-        {blockIndex != null && !hideBlockIndex && (
-          <span className="nx9-stage-card__badge">#{blockIndex}</span>
-        )}
-        {status === 'running' ? (
-          <Loader2 size={13} className="animate-spin text-teal-300 shrink-0" />
-        ) : (
-          <span className={`nx9-stage-card__status ${statusClass}`} title={status ?? 'idle'} />
-        )}
-      </div>
-
-      <div className="nx9-stage-card__body nodrag nopan nowheel nx9-stage-card-fallback">
-        {accepts.map((kind) => (
-          <SocketHandle key={`in-${kind}`} kind={kind} type="target" hidden={hideSockets} />
-        ))}
-        {children}
-        {emits.map((kind) => (
-          <SocketHandle key={`out-${kind}`} kind={kind} type="source" hidden={hideSockets} />
-        ))}
-      </div>
-
-      {execPortsVisible && verticalBottom.length > 0 && (
-        <div className="absolute inset-x-0 bottom-0 h-0 z-10">
-          {verticalBottom.map((spec) => (
-            <VerticalSocketHandle key={spec.id} spec={spec} />
-          ))}
+        <div className="nx9-stage-card__body nodrag nopan nowheel nx9-stage-card-fallback">
+          {children}
         </div>
-      )}
+      </div>
     </div>
   );
 });

@@ -134,48 +134,48 @@ export const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
   {
     id: 'tpl-photo-speak',
     label: '照片说话',
-    description: '素材图 + 文案 → 口播视频（小云雀）',
+    description: '素材图 → 口播视频（clip-gen · photo-speak 模式）',
     category: 'video',
     build() {
       const a = node('asset-import', 0, 0, { mediaKind: 'picture' });
-      const b = node('prompt', 0, 1, { content: '大家好，欢迎来到我的频道…' });
-      const c = node('photo-speak', 1, 0);
-      const d = node('preview-sink', 2, 0);
+      const b = node('clip-gen', 1, 0, {
+        videoMode: 'photo-speak',
+        content: '大家好，欢迎来到我的频道…',
+      });
+      const c = node('export-pack', 2, 0);
       return {
-        blocks: [a, b, c, d],
-        links: [edge(a.id, c.id), edge(b.id, c.id), edge(c.id, d.id)],
+        blocks: [a, b, c],
+        links: [edge(a.id, b.id), edge(b.id, c.id)],
       };
     },
   },
   {
     id: 'tpl-shot-script-desk',
-    label: '镜头脚本 → 导演台',
-    description: 'NX9 镜头脚本 → 导演台 → 动效分镜（§9.4）',
+    label: '镜头脚本 → 分镜台',
+    description: '分镜台 → 视频生成 → 交付打包',
     category: 'story',
     build() {
-      const a = node('shot-script', 0, 0);
-      const b = node('director-desk', 1, 0);
-      const c = node('clip-gen', 2, 0);
-      const d = node('export-pack', 3, 0);
+      const a = node('storyboard-desk', 0, 0);
+      const b = node('clip-gen', 1, 0);
+      const c = node('export-pack', 2, 0);
       return {
-        blocks: [a, b, c, d],
-        links: [edge(a.id, b.id), edge(b.id, c.id), edge(c.id, d.id)],
+        blocks: [a, b, c],
+        links: [edge(a.id, b.id), edge(b.id, c.id)],
       };
     },
   },
   {
     id: 'tpl-nx9-review-pipeline',
     label: '分镜 → 审阅 → 交付',
-    description: '镜头脚本 → 导演台 → 审阅关卡 → 交付打包（NX9 审片流）',
+    description: '分镜台 → 审阅关卡 → 交付打包',
     category: 'story',
     build() {
-      const a = node('shot-script', 0, 0);
-      const b = node('director-desk', 1, 0);
-      const c = node('review-gate', 2, 0);
-      const d = node('export-pack', 3, 0);
+      const a = node('storyboard-desk', 0, 0);
+      const b = node('review-gate', 1, 0);
+      const c = node('export-pack', 2, 0);
       return {
-        blocks: [a, b, c, d],
-        links: [edge(a.id, b.id), edge(b.id, c.id), edge(c.id, d.id)],
+        blocks: [a, b, c],
+        links: [edge(a.id, b.id), edge(b.id, c.id)],
       };
     },
   },
@@ -198,16 +198,15 @@ export const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
   {
     id: 'tpl-batch-pictures',
     label: '批量生图',
-    description: '文本切分 → 迭代器 → 图像生成 → 预览',
+    description: '迭代器 → 图像生成 → 交付',
     category: 'tool',
     build() {
-      const a = node('text-chunker', 0, 0, { mode: 'paragraph' });
-      const b = node('iterator', 1, 0);
-      const c = node('picture-gen', 2, 0);
-      const d = node('preview-sink', 3, 0);
+      const a = node('iterator', 0, 0);
+      const b = node('picture-gen', 1, 0);
+      const c = node('export-pack', 2, 0);
       return {
-        blocks: [a, b, c, d],
-        links: [edge(a.id, b.id), edge(b.id, c.id), edge(c.id, d.id)],
+        blocks: [a, b, c],
+        links: [edge(a.id, b.id), edge(b.id, c.id)],
       };
     },
   },
@@ -246,34 +245,30 @@ export const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
   {
     id: 'tpl-sclass-seedance',
     label: 'S-Class Seedance 连续镜头',
-    description: '镜头脚本 → 导演台 → S-Class 分组 → 审阅门控 → 交付（Seedance 合规 ≤15s 分组）',
+    description: '分镜台 → Seedance 连续镜头 → 审阅 → 交付',
     category: 'story',
     build() {
-      const a = node('shot-script', 0, 0);
-      const b = node('director-desk', 1, 0);
-      const c = node('clip-gen', 2, 0, { sclassEnabled: true });
-      const d = node('review-gate', 3, 0);
-      const e = node('export-pack', 4, 0);
+      const a = node('storyboard-desk', 0, 0);
+      const b = node('clip-gen', 1, 0, { sclassEnabled: true, videoMode: 'chain', model: 'seedance' });
+      const c = node('review-gate', 2, 0);
+      const d = node('export-pack', 3, 0);
       return {
-        blocks: [a, b, c, d, e],
-        links: [edge(a.id, b.id), edge(b.id, c.id), edge(c.id, d.id), edge(d.id, e.id)],
+        blocks: [a, b, c, d],
+        links: [edge(a.id, b.id), edge(b.id, c.id), edge(c.id, d.id)],
       };
     },
   },
   {
     id: 'tpl-novel-import',
     label: '小说拆镜 → 开拍',
-    description: 'AI 对话 · 小说拆分为分镜 → 导演台 → 开拍准备（先 AI 拆镜）',
+    description: '剧本拆分 → 分镜台 → 开拍准备',
     category: 'story',
     build() {
-      const a = node('chat-model', 0, 0, {
-        systemPrompt: '你是短剧分镜编剧。将用户提供的小说/章节改写为分镜脚本，用 Markdown 表格输出：| 序号 | 景别 | 时长(s) | 动作描述 | 对白 |',
-      });
-      const b = node('shot-script', 0, 1);
-      const c = node('director-desk', 1, 0, {});
+      const a = node('dialogue-sheet', 0, 0);
+      const b = node('storyboard-desk', 1, 0);
       return {
-        blocks: [a, b, c],
-        links: [edge(a.id, b.id), edge(b.id, c.id)],
+        blocks: [a, b],
+        links: [edge(a.id, b.id)],
       };
     },
   },
@@ -296,11 +291,11 @@ export const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
   {
     id: 'tpl-contact-sheet',
     label: '宫格联系板',
-    description: '宫格生成 → 切分 → 连续性检查（分镜一致性审核流程）',
+    description: '分镜台 → 宫格 → 连贯性检查',
     category: 'story',
     build() {
       const a = node('storyboard-desk', 0, 0, { rows: 3, cols: 3 });
-      const b = node('grid-split', 1, 0, {});
+      const b = node('grid-compose', 1, 0, { gridMode: 'split' });
       const c = node('continuity-check', 2, 0, {});
       return {
         blocks: [a, b, c],
@@ -323,17 +318,23 @@ export const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
   },
   {
     id: 'tpl-link-replicate',
-    label: '爆款复刻（素材采集 → 分析 → 生成）',
-    description: '从自媒体链接解析素材，分析参考片，生成相似风格内容',
+    label: '爆款复刻（链接采集 → 参考 → 生成）',
+    description: '链接解析素材 → 参考板约束 → 图/视生成 → 导出',
     category: 'video',
     build() {
       const a = node('link-parser', 0, 0, { url: '', hint: '' });
-      const b = node('chat-model', 1, 0, { skillId: '', prompt: '分析此素材的镜头语言、景别、节奏、风格特点' });
-      const c = node('shot-script', 2, 0);
-      const d = node('director-desk', 3, 0);
+      const b = node('reference-board', 1, 0);
+      const c = node('picture-gen', 2, 0);
+      const d = node('clip-gen', 3, 0);
+      const e = node('export-pack', 4, 0);
       return {
-        blocks: [a, b, c, d],
-        links: [edge(a.id, b.id), edge(b.id, c.id), edge(c.id, d.id)],
+        blocks: [a, b, c, d, e],
+        links: [
+          edge(a.id, b.id),
+          edge(b.id, c.id),
+          edge(c.id, d.id),
+          edge(d.id, e.id),
+        ],
       };
     },
   },
@@ -364,29 +365,12 @@ export const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
   {
     id: 'tpl-toonflow-lite',
     label: 'AI 编剧流水线',
-    description: '文本切分 → 编剧台 → 故事板 → 线稿网格 → 审阅门控（完整编剧→分镜→审阅链）',
+    description: '剧本拆分 → 分镜台 → 宫格 → 审阅',
     category: 'story',
     build() {
-      const a = node('text-chunker', 0, 0, { mode: 'paragraph' });
-      const b = node('shot-script', 0, 1);
-      const c = node('storyboard-desk', 1, 0, { rows: 3, cols: 3, style: 'line-art' });
-      const d = node('grid-split', 2, 0, { rows: 3, cols: 3 });
-      const e = node('review-gate', 3, 0);
-      return {
-        blocks: [a, b, c, d, e],
-        links: [edge(a.id, b.id), edge(b.id, c.id), edge(c.id, d.id), edge(d.id, e.id)],
-      };
-    },
-  },
-  {
-    id: 'tpl-line-art-storyboard',
-    label: '线稿分镜',
-    description: '镜头脚本 → 线稿网格 → 切分 → 审阅门控 → 出图/出片（线稿分镜全流程）',
-    category: 'story',
-    build() {
-      const a = node('shot-script', 0, 0);
+      const a = node('dialogue-sheet', 0, 0);
       const b = node('storyboard-desk', 1, 0, { rows: 3, cols: 3, style: 'line-art' });
-      const c = node('grid-split', 2, 0, { rows: 3, cols: 3 });
+      const c = node('grid-compose', 2, 0, { rows: 3, cols: 3, gridMode: 'split' });
       const d = node('review-gate', 3, 0);
       return {
         blocks: [a, b, c, d],
@@ -395,19 +379,33 @@ export const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
     },
   },
   {
-    id: 'tpl-3d-preview',
-    label: '3D 导演预演',
-    description: '镜头脚本 → 3D 机位摆设 → 审阅 → 相机参数 → 出图（3D 导演台预演全流程）',
+    id: 'tpl-line-art-storyboard',
+    label: '线稿分镜',
+    description: '分镜台 → 宫格 → 审阅',
     category: 'story',
     build() {
-      const a = node('shot-script', 0, 0);
+      const a = node('storyboard-desk', 0, 0, { rows: 3, cols: 3, style: 'line-art' });
+      const b = node('grid-compose', 1, 0, { rows: 3, cols: 3, gridMode: 'split' });
+      const c = node('review-gate', 2, 0);
+      return {
+        blocks: [a, b, c],
+        links: [edge(a.id, b.id), edge(b.id, c.id)],
+      };
+    },
+  },
+  {
+    id: 'tpl-3d-preview',
+    label: '3D 导演预演',
+    description: '分镜台 → 3D 机位 → 审阅 → 出图',
+    category: 'story',
+    build() {
+      const a = node('storyboard-desk', 0, 0);
       const b = node('director-3d', 1, 0);
       const c = node('review-gate', 2, 0);
-      const d = node('prompt-studio', 3, 0, { studioTab: 'camera' });
-      const e = node('picture-gen', 4, 0);
+      const d = node('picture-gen', 3, 0);
       return {
-        blocks: [a, b, c, d, e],
-        links: [edge(a.id, b.id), edge(b.id, c.id), edge(c.id, d.id), edge(d.id, e.id)],
+        blocks: [a, b, c, d],
+        links: [edge(a.id, b.id), edge(b.id, c.id), edge(c.id, d.id)],
       };
     },
   },
@@ -492,9 +490,7 @@ export const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
             sourceHandle: 'exec-picture',
             targetHandle: 'exec-picture',
           },
-          // 图像生成设置 → 导演台（读模型/比例）
           edge(picture.id, directorDesk.id),
-          // 分镜表 → 导演台（语义连接）
           edge(desk.id, directorDesk.id),
           edge(directorDesk.id, review.id),
           edge(review.id, video.id),

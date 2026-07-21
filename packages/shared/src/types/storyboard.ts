@@ -1,3 +1,7 @@
+import type { StoryboardGuideOverlay } from './storyboard-guide';
+
+export type { StoryboardGuideOverlay } from './storyboard-guide';
+
 export type ShotStatus = 'draft' | 'generating' | 'review' | 'approved' | 'failed';
 
 export type ShotType = 'close' | 'medium' | 'wide' | 'extreme-wide' | 'custom';
@@ -129,6 +133,11 @@ export interface StoryboardShot {
   colorGrade?: string | null;
   /** 光影：顶光/侧逆光/霓虹… */
   lighting?: string | null;
+  /**
+   * 分镜导引标注（箭头/色标）。仅预览与出片引导用；
+   * 关键帧像素保持干净；出视频时可用合成导引图加强意图，但成片不得画出箭头。
+   */
+  guideOverlay?: StoryboardGuideOverlay | null;
   /** 声音方向：对白/旁白/SFX/BGM 提示 */
   audioDirection?: string | null;
   /** 专业成图提示词（可自动生成后手改） */

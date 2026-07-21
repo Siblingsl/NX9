@@ -38,10 +38,16 @@ export function ComposerPopover({
     const update = () => {
       if (!anchorRef.current) return;
       const rect = anchorRef.current.getBoundingClientRect();
-      const left = align === 'end' ? rect.right - width : rect.left;
-      const panelH = panelRef.current?.offsetHeight ?? 0;
-      const top = placement === 'above' ? rect.top - panelH - 6 : rect.bottom + 6;
-      setPos({ top: Math.max(8, top), left: Math.max(8, left) });
+      const panelH = panelRef.current?.offsetHeight ?? 220;
+      const panelW = width;
+      let left = align === 'end' ? rect.right - panelW : rect.left;
+      left = Math.min(Math.max(8, left), Math.max(8, window.innerWidth - panelW - 8));
+      let top = placement === 'above' ? rect.top - panelH - 6 : rect.bottom + 6;
+      if (top + panelH > window.innerHeight - 8) {
+        top = Math.max(8, rect.top - panelH - 6);
+      }
+      if (top < 8) top = Math.min(rect.bottom + 6, window.innerHeight - panelH - 8);
+      setPos({ top: Math.max(8, top), left });
     };
     update();
     requestAnimationFrame(update);
@@ -62,13 +68,13 @@ export function ComposerPopover({
     <>
       <button
         type="button"
-        className="fixed inset-0 z-[120] cursor-default"
+        className="fixed inset-0 z-[320] cursor-default"
         aria-label="关闭"
         onClick={onClose}
       />
       <div
         ref={panelRef}
-        className={`nx9-composer-popover fixed z-[121] rounded-xl border border-line/60 bg-white shadow-panel py-1 nodrag nopan ${
+        className={`nx9-composer-popover fixed z-[321] rounded-xl border border-line/60 bg-white shadow-panel py-1 nodrag nopan ${
           tone === 'desk' ? 'is-picture-desk' : ''
         }`}
         style={{
@@ -76,6 +82,8 @@ export function ComposerPopover({
           left: pos?.left ?? 0,
           width,
           visibility: pos ? 'visible' : 'hidden',
+          maxHeight: 'min(320px, calc(100vh - 24px))',
+          overflowY: 'auto',
         }}
         onMouseDown={stop}
         onPointerDown={stop}

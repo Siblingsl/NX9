@@ -6,6 +6,7 @@ import {
 } from '@nx9/shared';
 import { Clapperboard, Film, Play, RotateCcw, ShieldCheck, Square } from 'lucide-react';
 import { BlockShell } from '../shared/BlockShell';
+import { ScreenModal } from '../../components/ui/ScreenModal';
 import { useActivityLog } from '../../stores/activity-log';
 import { useWorkspaceDocument } from '../../stores/workspace-document';
 import { useStoryboardUi } from '../../stores/flow-runtime';
@@ -84,6 +85,7 @@ function DirectorDeskBlock(props: NodeProps) {
   const [phaseHint, setPhaseHint] = useState<string>('');
   const [liveProgress, setLiveProgress] = useState({ done: 0, total: 0, failed: 0 });
   const [showAdvanced, setShowAdvanced] = useState(false);
+  const [studioOpen, setStudioOpen] = useState(false);
   const abortRef = useRef(false);
   const failedCountRef = useRef(0);
 
@@ -469,9 +471,24 @@ function DirectorDeskBlock(props: NodeProps) {
       ? Math.round((liveProgress.done / liveProgress.total) * 100)
       : progressPct;
 
-  return (
-    <BlockShell {...props}>
-      <div className="dd dd-card nodrag nopan">
+  const openStudio = useCallback(() => setStudioOpen(true), []);
+  const closeStudio = useCallback(() => setStudioOpen(false), []);
+
+  const summaryLine = useMemo(() => {
+    if (running) {
+      return liveProgress.total > 0
+        ? `出图中 ${liveProgress.done}/${liveProgress.total}`
+        : '出图中…';
+    }
+    if (stats.total === 0) return '先完成剧本拆分 / 分镜台';
+    if (stats.missing + stats.failed > 0) {
+      return `${stats.missing + stats.failed} 镜待出 · 已出 ${stats.withFrame}`;
+    }
+    return `本集 ${stats.total} 镜关键帧已齐`;
+  }, [running, liveProgress, stats]);
+
+  const deskBody = (
+    <>
         <div className="dd-progress">
           <div className="dd-stat">
             <b>{stats.total}</b>
@@ -838,8 +855,100 @@ function DirectorDeskBlock(props: NodeProps) {
             {primaryLabel}
           </button>
         </div>
-      </div>
-    </BlockShell>
+    </>
+  );
+
+  return (
+    <>
+      <BlockShell {...props}>
+        <div className="dd nodrag nopan">
+          <button
+            type="button"
+            className="dd-summary-card"
+            onClick={openStudio}
+            onDoubleClick={openStudio}
+          >
+            <div className={`dd-summary-card__hero ${stats.total === 0 ? 'is-empty' : ''}`}>
+              <div>
+                <span className="dd-summary-card__eyebrow">导演台</span>
+                <strong>关键帧批生产</strong>
+                <p>{summaryLine}</p>
+              </div>
+              <div className="dd-summary-card__metric">
+                {stats.withFrame}
+                <small>/{stats.total || '—'}</small>
+              </div>
+            </div>
+            {stats.total > 0 && (
+              <>
+                <div className="dd-summary-card__stats">
+                  <span>
+                    <b>{stats.missing}</b>未出
+                  </span>
+                  <span>
+                    <b>{stats.failed}</b>失败
+                  </span>
+                  <span>
+                    <b>{stats.with3d}</b>有3D
+                  </span>
+                  <span>
+                    <b>{progressPct}%</b>进度
+                  </span>
+                </div>
+                <div className="dd-summary-card__chips">
+                  {forceCharacterRef ? <span>角色参考</span> : null}
+                  {forceSceneRef ? <span>场景参考</span> : null}
+                  {styleLock ? <span>风格锁</span> : null}
+                  {prefer3dRef ? <span>优先3D</span> : null}
+                  {running ? <span>出图中</span> : null}
+                </div>
+              </>
+            )}
+            <div className="dd-summary-card__trail">点击进入导演台</div>
+          </button>
+
+          {batchError ? <p className="dd-card__hint is-warn">{batchError}</p> : null}
+
+          <div className="dd-card__actions">
+            {!running && stats.total > 0 ? (
+              <button
+                type="button"
+                className="dd-btn is-ghost"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  void runBatch(filter === 'selected' ? 'selected' : 'filter');
+                }}
+              >
+                <Play size={12} />
+                批出
+              </button>
+            ) : null}
+            <button
+              type="button"
+              className="dd-btn is-primary"
+              onClick={(e) => {
+                e.stopPropagation();
+                openStudio();
+              }}
+            >
+              开台
+            </button>
+          </div>
+        </div>
+      </BlockShell>
+
+      <ScreenModal
+        open={studioOpen}
+        onClose={closeStudio}
+        title="导演台 · 关键帧批生产"
+        subtitle="队列筛选 · 批出 · 审阅 · 送视频"
+        width={980}
+        variant="default"
+        className="dd-modal"
+      >
+        <div className="dd dd-studio">{deskBody}</div>
+      </ScreenModal>
+    </>
   );
 }
 

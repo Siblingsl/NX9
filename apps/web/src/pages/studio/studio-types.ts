@@ -44,7 +44,7 @@ export const STUDIO_STEPS: StudioStepDef[] = [
     index: 3,
     label: '分镜预览',
     short: '预览图',
-    hint: '生成故事板分镜预览图（关键帧静帧，非成片）',
+    hint: '生成分镜预览图（每镜关键帧静帧，标注起止秒；非成片）',
     doneHint: '本集镜头均有预览图',
   },
   {

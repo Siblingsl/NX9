@@ -23,6 +23,9 @@ import {
   VIDEO_SIZE_PRESETS,
   resolveVideoGenParams,
   buildStudioVideoPrompt,
+  filterStoryboardGuideOverlay,
+  resolveStoryboardGuideOverlay,
+  buildVideoGuidePromptSuffix,
 } from '@nx9/shared';
 import { BlockShell } from '../shared/BlockShell';
 import { CharacterBadge, CharacterSelect } from '../shared/CharacterSelect';
@@ -31,8 +34,13 @@ import { useUpstreamPrompt } from '../shared/use-upstream-prompt';
 import { useActivityLog } from '../../stores/activity-log';
 import { MentionEditor } from '../../engine/stage-deck/chrome/MentionEditor';
 import { useWorkspaceDocument } from '../../stores/workspace-document';
+import {
+  enabledGuideKinds,
+  readStoryboardGuidePrefs,
+} from '../../stores/storyboard-guide-prefs';
 import { api } from '../../api/client';
 import { pollClipTask } from '../../engine/picture-gen-runner';
+import { composeStoryboardGuideFrameDataUrl } from '../../engine/storyboard-guide-compose';
 import GenSettingsPills from '../shared/GenSettingsPills';
 
 function ClipGenBlock(props: NodeProps) {
@@ -153,10 +161,29 @@ function ClipGenBlock(props: NodeProps) {
         const publicItems = BUILTIN_BACKLOT_TEMPLATES.map((tpl) => templateToAsset(tpl as any, 'public', true));
         prompt = enrichPromptWithAssetMentions(prompt, privateItems, publicItems);
       }
+      let refImageUrl = imageUrl;
+      if (linkedShot && imageUrl) {
+        const guidePrefs = readStoryboardGuidePrefs();
+        if (guidePrefs.useForVideo) {
+          const guide = filterStoryboardGuideOverlay(
+            resolveStoryboardGuideOverlay(linkedShot),
+            { enabled: true, kinds: enabledGuideKinds(guidePrefs) },
+          );
+          prompt = `${prompt}\n\n${buildVideoGuidePromptSuffix(guide)}`.trim();
+          if (guide.arrows.length || guide.marks.length) {
+            try {
+              const composed = await composeStoryboardGuideFrameDataUrl(imageUrl, guide);
+              if (composed) refImageUrl = composed;
+            } catch {
+              /* keep clean frame */
+            }
+          }
+        }
+      }
       const res = await api.proxyVideo({
         prompt,
         model,
-        imageUrl,
+        imageUrl: refImageUrl,
         duration: videoParams.durationSec,
         aspect_ratio: videoParams.aspect,
         size: videoParams.size,

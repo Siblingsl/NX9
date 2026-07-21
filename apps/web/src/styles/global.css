@@ -67,7 +67,8 @@ body {
 
 .nx9-socket {
   opacity: var(--nx9-socket-opacity, 0.55);
-  transition: opacity 150ms ease, transform 150ms ease;
+  /* 勿 transition/改写 transform：RF Handle 依赖 translate 定位 */
+  transition: opacity 150ms ease;
 }
 
 .nx9-socket:hover,

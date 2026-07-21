@@ -110,13 +110,17 @@ export function CanvasStageShell({
   const [toolsOpen, setToolsOpen] = useState(false);
   const [lane, setLane] = useState<LaneId>('generate');
   const [query, setQuery] = useState('');
-  const canvasTheme = useWorkspaceDocument((s) => s.canvasAppearance.theme ?? 'dark');
+  const canvasAppearance = useWorkspaceDocument((s) => s.canvasAppearance);
+  const canvasTheme = canvasAppearance.theme ?? 'dark';
 
   const items = useMemo(() => blocksForLane(lane, query), [lane, query]);
   const activeTitle = projects.find((p) => p.id === activeProjectId)?.title;
 
   return (
-    <div className={`canvas-stage ${canvasTheme === 'dark' ? 'nx9-theme-dark' : 'nx9-theme-light'}`}>
+    <div
+      className={`canvas-stage ${canvasTheme === 'dark' ? 'nx9-theme-dark' : 'nx9-theme-light'}`}
+      data-socket-style={canvasAppearance.socketStyle ?? 'dot'}
+    >
       <div className="canvas-stage__viewport">{children}</div>
       <div className="canvas-stage__vignette" aria-hidden />
 

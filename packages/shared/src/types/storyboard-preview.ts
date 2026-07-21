@@ -103,6 +103,13 @@ export interface StoryboardPreviewPayload {
   lastConsistencyReport?: StoryboardPreviewConsistencyReport | null;
   /** 出图参数 — 由分镜预览统一调度并同步至图像生成节点 */
   pictureSettings: StoryboardPreviewPictureSettings;
+  /**
+   * 已出图分镜合成的宫格大图 URL（关键帧「宫格」主视图直接展示）。
+   * 仅包含有 imageUrl 的帧；无图时为 null。
+   */
+  contactSheetUrl?: string | null;
+  /** 合成时参与的帧签名（imageUrl 列表），变化后需重合成 */
+  contactSheetSignature?: string | null;
   /** 可加载至 3D 导演台的全景环境。 */
   panorama720?: StoryboardPreviewPanorama720 | null;
   /** 不同分集/场景独立保存，panorama720 是当前所选场景投影。 */
@@ -158,7 +165,7 @@ export function emptyStoryboardPreview(): StoryboardPreviewPayload {
   return {
     version: 1,
     viewMode: 'grid',
-    gridColumns: 3,
+    gridColumns: 4,
     frames: [],
     computedFrameCount: 0,
     totalDurationSec: 0,
@@ -166,6 +173,8 @@ export function emptyStoryboardPreview(): StoryboardPreviewPayload {
     selectedFrameId: null,
     lastConsistencyReport: null,
     pictureSettings: { ...DEFAULT_STORYBOARD_PREVIEW_PICTURE_SETTINGS },
+    contactSheetUrl: null,
+    contactSheetSignature: null,
     panorama720: null,
     panorama720ByScope: {},
   };
@@ -243,16 +252,21 @@ export function buildStoryboardPreviewFrames(
     const endSec = cursor + shot.durationSec;
     cursor = endSec;
     const locked = shot.keyframeStatus === 'approved';
+    const desc = (shot.descriptionZh || shot.promptEn || '').replace(/\s+/g, ' ').trim();
+    const label =
+      shot.sceneName?.trim()
+      || (shot.sceneCode ? `场 ${shot.sceneCode}` : '')
+      || (desc ? (desc.length > 16 ? `${desc.slice(0, 16)}…` : desc) : `分镜 ${i + 1}`);
     return {
       id: `spf-${shot.id}`,
       order: i + 1,
-      label: `Shot${String(i + 1).padStart(2, '0')}`,
+      label,
       startSec,
       endSec,
       sourceShotId: shot.id,
       sceneCode: shot.sceneCode ?? null,
       sceneId: shot.sceneId ?? null,
-      promptSummary: shot.descriptionZh || shot.promptEn || '',
+      promptSummary: desc,
       characterIds: shot.characterIds ?? [],
       characterNames: shot.characterNames ?? [],
       imageUrl: shot.firstFrameAssetId ?? null,
@@ -271,7 +285,7 @@ export function buildStoryboardPreviewFramesFromBreakdown(
 ): StoryboardPreviewFrame[] {
   let cursor = 0;
   return shots.map((shot, i) => {
-    const duration = Math.max(1, shot.durationSec || 5);
+    const duration = Math.max(1, shot.durationSec || 3);
     const startSec = cursor;
     const endSec = cursor + duration;
     cursor = endSec;

@@ -460,6 +460,9 @@
   grid-template-columns: repeat(auto-fill, minmax(168px, 1fr));
   gap: 12px;
 }
+.studio-desk__shot-grid--preview {
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+}
 
 .studio-desk__shot {
   text-align: left;
@@ -506,6 +509,19 @@
   background: rgba(255, 252, 247, 0.92);
   color: var(--sd-ink);
 }
+.studio-desk__shot-time {
+  position: absolute;
+  left: 8px;
+  bottom: 8px;
+  font-size: 10px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: rgba(20, 16, 10, 0.78);
+  color: #f6e7c8;
+  letter-spacing: 0.01em;
+}
 .studio-desk__shot-status {
   position: absolute;
   top: 8px;
@@ -521,10 +537,20 @@
   padding: 10px 11px 12px;
 }
 .studio-desk__shot-body strong {
-  display: block;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
   font-size: 12px;
   font-weight: 650;
   margin-bottom: 4px;
+}
+.studio-desk__shot-body strong em {
+  font-style: normal;
+  font-size: 11px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--sd-brand);
 }
 .studio-desk__shot-body p {
   margin: 0;

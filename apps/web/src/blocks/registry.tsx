@@ -9,25 +9,20 @@ function lazyBlock(loader: () => Promise<{ default: ComponentType<NodeProps> }>)
 
 /** 精简后活跃节点加载器（已删除 kind 由 migrate 改写后不会再 spawn） */
 const blockLoaders: Record<string, () => Promise<{ default: ComponentType<NodeProps> }>> = {
-  prompt: () => import('./core/PromptBlock').then((m) => ({ default: m.default })),
   'picture-gen': () => import('./core/PictureGenBlock').then((m) => ({ default: m.default })),
   'clip-gen': () => import('./core/ClipGenBlock').then((m) => ({ default: m.default })),
-  'chat-model': () => import('./core/ChatModelBlock').then((m) => ({ default: m.default })),
   'sound-gen': () => import('./core/SoundGenBlock').then((m) => ({ default: m.default })),
-  'director-desk': () => import('./core/DirectorDeskBlock').then((m) => ({ default: m.default })),
   'clip-editor': () => import('./core/ClipEditorBlock').then((m) => ({ default: m.default })),
+  'director-desk': () => import('./core/DirectorDeskBlock').then((m) => ({ default: m.default })),
 
   'storyboard-desk': () =>
     import('./craft/StoryboardDeskBlock').then((m) => ({ default: m.default })),
   'asset-gate': () => import('./craft/AssetGateBlock').then((m) => ({ default: m.default })),
-  'prompt-studio': () => import('./craft/PromptStudioBlock').then((m) => ({ default: m.default })),
-  'style-lab': () => import('./craft/StyleLabBlock').then((m) => ({ default: m.default })),
 
   'asset-import': () => import('./input/AssetImportBlock').then((m) => ({ default: m.default })),
+  'link-parser': () => import('./utility/LinkParserBlock').then((m) => ({ default: m.default })),
 
   'dialogue-sheet': () => import('./nx9/DialogueSheetBlock').then((m) => ({ default: m.default })),
-  'character-sheet': () => import('./nx9/CharacterSheetBlock').then((m) => ({ default: m.default })),
-  'scene-card': () => import('./nx9/SceneCardBlock').then((m) => ({ default: m.default })),
   'reference-board': () => import('./nx9/ReferenceBoardBlock').then((m) => ({ default: m.default })),
   'continuity-check': () => import('./nx9/ContinuityCheckBlock').then((m) => ({ default: m.default })),
   'caption-asr': () => import('./nx9/CaptionAsrBlock').then((m) => ({ default: m.default })),
@@ -36,18 +31,10 @@ const blockLoaders: Record<string, () => Promise<{ default: ComponentType<NodePr
   'review-gate': () => import('./nx9/ReviewGateBlock').then((m) => ({ default: m.default })),
 
   'director-3d': () => import('./spatial/Director3dBlock').then((m) => ({ default: m.default })),
-  'mesh-import': () => import('./spatial/MeshImportBlock').then((m) => ({ default: m.default })),
-  'mesh-viewer': () => import('./spatial/MeshViewerBlock').then((m) => ({ default: m.default })),
 
   'local-enhance': () => import('./utility/LocalEnhanceBlock').then((m) => ({ default: m.default })),
-  'bg-remove': () => import('./utility/BgRemoveBlock').then((m) => ({ default: m.default })),
-  'frame-endpoints': () => import('./utility/FrameEndpointsBlock').then((m) => ({ default: m.default })),
-  'grid-split': () => import('./utility/GridSplitBlock').then((m) => ({ default: m.default })),
   'grid-compose': () => import('./utility/GridComposeBlock').then((m) => ({ default: m.default })),
   iterator: () => import('./utility/IteratorBlock').then((m) => ({ default: m.default })),
-  'text-chunker': () => import('./utility/TextChunkerBlock').then((m) => ({ default: m.default })),
-
-  memo: () => import('./core/MemoBlock').then((m) => ({ default: m.default })),
 };
 
 const GenericBlock = lazyBlock(() => import('./shared/GenericBlock'));

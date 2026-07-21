@@ -395,7 +395,7 @@ export function useStudioDesk() {
     const shot: StoryboardShot = {
       id: `shot-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
       index: list.length + 1,
-      durationSec: 4,
+      durationSec: 3,
       shotType: 'medium',
       descriptionZh: '',
       promptEn: '',

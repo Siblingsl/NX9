@@ -4,7 +4,9 @@ import {
   canConfirmStoryboardPreview,
   KEYFRAME_SCORE_THRESHOLD,
   lookupBlock,
+  STORYBOARD_GUIDE_KINDS,
   storyboardPreviewSummary,
+  type StoryboardGuideKind,
   type StoryboardPreviewGridColumns,
   type StoryboardPreviewViewMode,
 } from '@nx9/shared';
@@ -13,23 +15,39 @@ import { normalizeDirectorProject } from '@nx9/director3d';
 import { useDeckUi } from '../../../stores/deck-ui';
 import { useActivityLog } from '../../../../../stores/activity-log';
 import { useDirector3dUi } from '../../../../../stores/director3d-ui';
-import { useStoryboardPreviewState } from './useStoryboardPreviewState';
+import { useStoryboardGuidePrefs } from '../../../../../stores/storyboard-guide-prefs';
+import {
+  buildContactSheetSignature,
+  useStoryboardPreviewState,
+} from './useStoryboardPreviewState';
 import { StoryboardPreviewGrid } from './StoryboardPreviewGrid';
+import { StoryboardContactSheet } from './StoryboardContactSheet';
 import { StoryboardPreviewTimeline } from './StoryboardPreviewTimeline';
 import { StoryboardPreviewFrameEditor } from './StoryboardPreviewFrameEditor';
 import { StoryboardPreviewGenSettings } from './StoryboardPreviewGenSettings';
 import { StoryboardPreviewDirector3dPanel } from './StoryboardPreviewDirector3dPanel';
 import { useWorkspaceDocument } from '../../../../../stores/workspace-document';
 import { prepareDirectorProjectForShot } from '../../../../director3d-character-sync';
+import '../../../../../styles/storyboard-board.css';
+import '../../../../../styles/keyframe-preview.css';
+
+const GUIDE_LEGEND_SHORT: { kind: StoryboardGuideKind; label: string }[] = [
+  { kind: 'action', label: '红=动作' },
+  { kind: 'camera', label: '蓝=机位' },
+  { kind: 'light', label: '橙=照明' },
+  { kind: 'compose', label: '绿=构图' },
+  { kind: 'emotion', label: '紫=情绪/台词' },
+  { kind: 'label', label: '黑=镜头说明' },
+];
 
 function stop(e: React.SyntheticEvent) {
   e.stopPropagation();
 }
 
 const VIEW_MODES: { id: StoryboardPreviewViewMode; label: string }[] = [
-  { id: 'grid', label: 'Grid' },
-  { id: 'timeline', label: 'Timeline' },
-  { id: 'storyboard', label: 'Scene' },
+  { id: 'grid', label: '宫格' },
+  { id: 'timeline', label: '时间轴' },
+  { id: 'storyboard', label: '分场' },
 ];
 
 const GRID_COLS: StoryboardPreviewGridColumns[] = [2, 3, 4];
@@ -53,14 +71,29 @@ export function StoryboardPreviewWorkspace({
   const { getNode, updateNodeData } = useReactFlow();
   const openDirector3d = useDirector3dUi((state) => state.openForBlock);
   const setDirector3dHostBridge = useDirector3dUi((state) => state.setHostBridge);
+  const guideShowOverlay = useStoryboardGuidePrefs((s) => s.showOverlay);
+  const guideUseForVideo = useStoryboardGuidePrefs((s) => s.useForVideo);
+  const guideKindsMap = useStoryboardGuidePrefs((s) => s.kinds);
+  const setGuideShowOverlay = useStoryboardGuidePrefs((s) => s.setShowOverlay);
+  const setGuideUseForVideo = useStoryboardGuidePrefs((s) => s.setUseForVideo);
+  const toggleGuideKind = useStoryboardGuidePrefs((s) => s.toggleKind);
   const actions = useStoryboardPreviewState(blockId);
   const characters = useWorkspaceDocument((state) => state.characters.characters);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [batchStyle, setBatchStyle] = useState('');
   const [generating, setGenerating] = useState(false);
   const [directorPanelOpen, setDirectorPanelOpen] = useState(false);
+  const [batchOpen, setBatchOpen] = useState(false);
   const [panoramaPrompt, setPanoramaPrompt] = useState('');
   const [generatingPanorama, setGeneratingPanorama] = useState(false);
+  const [composingSheet, setComposingSheet] = useState(false);
+  /** 宫格模式：合成大图（默认）| 分格编辑 */
+  const [gridEditMode, setGridEditMode] = useState(false);
+
+  const guideKinds = useMemo(
+    () => STORYBOARD_GUIDE_KINDS.filter((k) => guideKindsMap[k] !== false),
+    [guideKindsMap],
+  );
 
   const node = getNode(blockId);
   const data = (node?.data ?? {}) as Record<string, unknown>;
@@ -86,14 +119,24 @@ export function StoryboardPreviewWorkspace({
 
   useEffect(() => {
     const hasUpstream = Boolean(actions.upstreamBreakdown?.episodes?.some((ep) => ep.shots.length > 0));
-    if (payload.frames.length === 0 && (actions.shotCount > 0 || hasUpstream)) {
+    const hasSource =
+      actions.shotCount > 0 || hasUpstream || actions.localBreakdownShotCount > 0;
+    if (payload.frames.length === 0 && hasSource) {
       actions.syncFromStoryboard();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- init once when shots available
-  }, [blockId, actions.shotCount, actions.upstreamBreakdown, payload.frames.length]);
+  }, [
+    blockId,
+    actions.shotCount,
+    actions.localBreakdownShotCount,
+    actions.upstreamBreakdown,
+    payload.frames.length,
+  ]);
 
   useEffect(() => {
-    if (actions.shotCount > 0) actions.syncFromStoryboard();
+    if (actions.shotCount > 0 || actions.localBreakdownShotCount > 0) {
+      actions.syncFromStoryboard();
+    }
     // activeEpisodeId 是唯一切集触发器；syncFromStoryboard 本身保持稳定。
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [actions.activeEpisodeId]);
@@ -241,9 +284,17 @@ export function StoryboardPreviewWorkspace({
     updateNodeData,
   ]);
 
+  const shotById = useMemo(
+    () => new Map(actions.shots.map((shot) => [shot.id, shot])),
+    [actions.shots],
+  );
+
   const gridProps = {
+    shotById,
     selectedFrameId: payload.selectedFrameId,
     selectedIds,
+    showGuide: guideShowOverlay,
+    guideKinds,
     onSelect: actions.selectFrame,
     onToggleSelect: toggleSelect,
     onToggleLock: actions.toggleLock,
@@ -253,360 +304,515 @@ export function StoryboardPreviewWorkspace({
     onReorder: actions.reorderFrame,
   };
 
-  const report = payload.lastConsistencyReport;
+  const report =
+    payload.frames.length > 0 && payload.lastConsistencyReport
+      ? payload.lastConsistencyReport
+      : null;
   const lowCount = report?.suggestRegenerateFrameIds?.length
     ?? payload.frames.filter((f) => f.suggestRegenerate).length;
+  const scoreLow = report ? (report.overallScore ?? 0) < KEYFRAME_SCORE_THRESHOLD : false;
+  const hasFrames = payload.frames.length > 0;
+  const missingCount = Math.max(0, summary.total - summary.success);
+  const readyImageCount = payload.frames.filter((f) => Boolean(f.imageUrl)).length;
+  const contactSig = useMemo(
+    () => buildContactSheetSignature(payload.frames, payload.gridColumns),
+    [payload.frames, payload.gridColumns],
+  );
+
+  /** 大图模式不保留单镜选中，避免切回关键帧时误开编辑器 */
+  useEffect(() => {
+    if (payload.viewMode === 'grid' && !gridEditMode && payload.selectedFrameId) {
+      actions.selectFrame(null);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- 进入大图时清选中
+  }, [payload.viewMode, gridEditMode]);
+
+  /** 后台合成可下载的宫格大图（不阻塞主视图） */
+  useEffect(() => {
+    if (!hasFrames) return;
+    if (readyImageCount === 0) {
+      if (payload.contactSheetUrl) {
+        actions.patchPayload({ contactSheetUrl: null, contactSheetSignature: null });
+      }
+      return;
+    }
+    if (payload.contactSheetSignature === contactSig && payload.contactSheetUrl) return;
+    let cancelled = false;
+    setComposingSheet(true);
+    void actions.composeContactSheet(false).finally(() => {
+      if (!cancelled) setComposingSheet(false);
+    });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- 仅签名/出图数变化时重合成
+  }, [contactSig, readyImageCount, hasFrames]);
+
+  const handleRegenLow = useCallback(() => {
+    const ids = report?.suggestRegenerateFrameIds
+      ?? payload.frames.filter((f) => f.suggestRegenerate).map((f) => f.id);
+    setSelectedIds(new Set(ids));
+    void (async () => {
+      setGenerating(true);
+      for (const id of ids) {
+        const frame = payload.frames.find((f) => f.id === id);
+        if (frame && !frame.locked) await actions.regenerateFrame(id);
+      }
+      setGenerating(false);
+      appendLog(`已对 ${ids.length} 张低分关键帧触发重生成`);
+    })();
+  }, [actions, appendLog, payload.frames, report?.suggestRegenerateFrameIds]);
+
+  /** 大图模式不自动进编辑器；点格会切到分格再编辑 */
+  const allowFrameEditor = Boolean(selectedFrame) && (gridEditMode || payload.viewMode !== 'grid');
+
+  const stageBody = directorPanelOpen ? (
+    <StoryboardPreviewDirector3dPanel
+      frames={payload.frames}
+      selectedFrameId={payload.selectedFrameId}
+      panorama={payload.panorama720}
+      panoramaPrompt={panoramaPrompt}
+      directorData={(director3dNode?.data ?? {}) as Record<string, unknown>}
+      pictureConnected={Boolean(pictureNode)}
+      directorConnected={Boolean(director3dNode)}
+      generatingPanorama={generatingPanorama}
+      onSelectFrame={actions.selectFrame}
+      onPanoramaPromptChange={setPanoramaPrompt}
+      onGeneratePanorama={() => void handleGeneratePanorama()}
+      onLoadPanorama={() => {
+        if (payload.panorama720?.imageUrl) {
+          loadPanoramaIntoDirector(payload.panorama720.imageUrl);
+        }
+      }}
+      onOpenDirector3d={handleOpenDirector3d}
+    />
+  ) : allowFrameEditor && selectedFrame ? (
+    <StoryboardPreviewFrameEditor
+      frame={selectedFrame}
+      onClose={() => actions.selectFrame(null)}
+      onUpdate={(patch) => actions.updateFrame(selectedFrame.id, patch)}
+      onRegenerate={() => void actions.regenerateFrame(selectedFrame.id)}
+      onOpenDirector3d={handleOpenDirector3d}
+      director3dConnected={Boolean(director3dNode)}
+    />
+  ) : !hasFrames ? (
+    <div className="kp__empty">
+      <h3>尚无关键帧</h3>
+      <p>
+        {!pictureNode
+          ? '请先在分镜台节点顶部能力口连接「图像生成」，再同步镜头并出图。'
+          : actions.localBreakdownShotCount > 0 || actions.shotCount > 0
+            ? '镜头已就绪，点击同步载入宫格，再一键生成预览图。箭头导引仅叠在预览上，不会画进首帧像素。'
+            : '从故事板 / 剧本拆分同步镜头后，一键生成全部预览图。'}
+      </p>
+      <div className="kp__empty-acts">
+        <button type="button" className="kp__btn" onMouseDown={stop} onClick={actions.syncFromStoryboard}>
+          同步镜头
+        </button>
+        <button
+          type="button"
+          className="kp__btn is-solid"
+          disabled={generating || !pictureNode}
+          onMouseDown={stop}
+          onClick={() => void handleGenerateAll()}
+        >
+          <Play size={11} fill="currentColor" />
+          生成全部预览图
+        </button>
+      </div>
+    </div>
+  ) : payload.viewMode === 'storyboard' ? (
+    <div className="p-3 space-y-4">
+      {[...framesByScene.entries()].map(([scene, frames]) => (
+        <div key={scene}>
+          <p className="kp__scene-label">Scene · {scene}</p>
+          <StoryboardPreviewGrid frames={frames} columns={payload.gridColumns} {...gridProps} />
+        </div>
+      ))}
+    </div>
+  ) : payload.viewMode === 'timeline' ? (
+    <StoryboardPreviewGrid
+      frames={[...payload.frames].sort((a, b) => a.startSec - b.startSec)}
+      columns={Math.min(4, Math.max(2, payload.gridColumns)) as StoryboardPreviewGridColumns}
+      {...gridProps}
+    />
+  ) : gridEditMode ? (
+    <StoryboardPreviewGrid frames={payload.frames} columns={payload.gridColumns} {...gridProps} />
+  ) : (
+    <StoryboardContactSheet
+      frames={payload.frames}
+      columns={payload.gridColumns}
+      shotById={shotById}
+      showGuide={guideShowOverlay}
+      guideKinds={guideKinds}
+      composedUrl={payload.contactSheetUrl}
+      composing={composingSheet}
+      onSelectFrame={(id) => {
+        setGridEditMode(true);
+        actions.selectFrame(id);
+      }}
+    />
+  );
 
   return (
     <div
-      className={`flex flex-col w-full nodrag ${
-        embedded
-          ? 'h-[min(560px,62vh)] min-h-[360px] px-0 py-0'
-          : 'h-[min(480px,55vh)] min-h-[320px] px-3 py-2'
-      }`}
+      className={`kp nodrag ${embedded ? 'is-embedded' : ''}`}
       onMouseDown={stop}
       onPointerDown={stop}
       onWheel={(e) => e.stopPropagation()}
     >
-      <div className="flex items-center gap-2 shrink-0 h-8 px-1">
-        {!embedded && (
-          <GripVertical size={13} className="text-ink/20 nx9-prompt-bar-drag-handle cursor-grab" />
-        )}
-        <p className="flex-1 text-[13px] font-medium text-ink truncate">
-          {embedded ? '关键帧预览' : (meta?.label ?? '分镜预览')}
-          <span className="ml-2 text-[10px] font-normal text-ink/40">
-            Video Proof · 出图 / 评分 / 批审
-          </span>
-        </p>
-        <span
-          className={`text-[9px] px-1.5 py-0.5 rounded ${
-            pictureNode ? 'bg-ok/10 text-ok' : 'bg-warn/10 text-warn'
-          }`}
-        >
-          {pictureNode ? '已连接图像生成' : '未连接图像生成'}
-        </span>
-        {director3dNode && (
-          <span className="text-[9px] px-1.5 py-0.5 rounded bg-violet-500/10 text-violet-700">
-            已连接 3D 导演台
-          </span>
-        )}
-        {(unboundCharacterShotCount > 0 || unboundSceneShotCount > 0) && (
-          <span
-            className="text-[9px] px-1.5 py-0.5 rounded bg-warn/10 text-warn"
-            title="在角色库/场景库补齐同名资产后，回到分镜网格点击同步重新绑定"
-          >
-            资产待绑定 {unboundCharacterShotCount + unboundSceneShotCount}
-          </span>
-        )}
-        <span className="text-[10px] text-ink/45 tabular-nums">
-          {summary.success}/{summary.total} · 🔒 {summary.locked}
-        </span>
-        {!embedded && (
-          <button type="button" onClick={handleCollapse} className="p-1 rounded-lg text-ink/35 hover:text-ink">
-            <ChevronDown size={15} />
-          </button>
-        )}
-      </div>
-
-      {report && (
-        <div
-          className={`shrink-0 mx-1 mb-1.5 rounded-lg border px-2.5 py-1.5 text-[10px] ${
-            (report.overallScore ?? 0) < KEYFRAME_SCORE_THRESHOLD
-              ? 'border-warn/40 bg-warn/10 text-warn'
-              : 'border-ok/30 bg-ok/10 text-ok'
-          }`}
-        >
-          <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5">
-            <span className="font-semibold">
-              综合 {report.overallScore}/100
-              {(report.overallScore ?? 0) < KEYFRAME_SCORE_THRESHOLD ? ' · 建议重生成低分镜' : ' · 达标'}
-            </span>
-            {report.dimensions.map((d) => (
-              <span key={d.id} className="text-ink/55">
-                {d.label} {d.score}
-              </span>
-            ))}
-            {lowCount > 0 && (
-              <span className="text-warn font-medium">
-                {lowCount} 镜 &lt; {KEYFRAME_SCORE_THRESHOLD} 分
-              </span>
+      <div className="kp__top">
+        <div className="kp__identity">
+          <div className="flex items-center gap-2 min-w-0">
+            {!embedded && (
+              <GripVertical size={13} className="text-ink/25 nx9-prompt-bar-drag-handle cursor-grab shrink-0" />
+            )}
+            <p className="kp__title truncate">
+              {embedded ? '关键帧预览' : (meta?.label ?? '分镜预览')}
+            </p>
+            {!embedded && (
+              <button type="button" onClick={handleCollapse} className="kp__btn is-ghost" style={{ padding: 4 }}>
+                <ChevronDown size={15} />
+              </button>
             )}
           </div>
+          <p className="kp__sub">Video Proof · 出图 / 导引 / 评分 · 提交批审</p>
         </div>
-      )}
 
-      <div className="flex-1 min-h-0 mt-1.5 rounded-xl border border-line/35 bg-white shadow-[0_1px_8px_rgba(15,15,15,0.03)] flex flex-col overflow-hidden">
-        {pictureNode && (
-          <StoryboardPreviewGenSettings
-            settings={payload.pictureSettings}
-            onChange={actions.updatePictureSettings}
-          />
-        )}
-        <StoryboardPreviewTimeline
-          frames={payload.frames}
-          totalDurationSec={payload.totalDurationSec}
-          selectedFrameId={payload.selectedFrameId}
-          onSelect={actions.selectFrame}
-        />
-
-        <div className="shrink-0 flex flex-wrap items-center gap-2 px-3 py-1.5 border-b border-line/20">
-          <div className="flex rounded-lg bg-surface/80 p-0.5 border border-line/50">
-            {VIEW_MODES.map((m) => (
-              <button
-                key={m.id}
-                type="button"
-                onMouseDown={stop}
-                onClick={() => actions.setViewMode(m.id)}
-                className={`px-2 py-0.5 rounded-md text-[10px] nodrag ${
-                  payload.viewMode === m.id ? 'bg-white text-brand shadow-sm font-medium' : 'text-ink/45'
-                }`}
-              >
-                {m.label}
-              </button>
-            ))}
-          </div>
-          {payload.viewMode === 'grid' && (
-            <div className="flex gap-1 ml-1">
-              {GRID_COLS.map((c) => (
-                <button
-                  key={c}
-                  type="button"
-                  onMouseDown={stop}
-                  onClick={() => actions.setGridColumns(c)}
-                  className={`px-1.5 py-0.5 rounded text-[9px] border nodrag ${
-                    payload.gridColumns === c
-                      ? 'border-brand/40 bg-brand/10 text-brand'
-                      : 'border-line text-ink/40'
-                  }`}
-                >
-                  {c}列
-                </button>
-              ))}
-            </div>
+        <div className="kp__chips">
+          <span className="kp__chip is-accent">
+            {summary.success}/{summary.total || 0} 已出
+          </span>
+          {missingCount > 0 && <span className="kp__chip is-warn">缺 {missingCount}</span>}
+          {summary.locked > 0 && <span className="kp__chip">锁 {summary.locked}</span>}
+          <span className={`kp__chip ${pictureNode ? 'is-ok' : 'is-warn'}`}>
+            {pictureNode ? '图像已连' : '未连图像'}
+          </span>
+          {director3dNode && <span className="kp__chip">3D 已连</span>}
+          {(unboundCharacterShotCount > 0 || unboundSceneShotCount > 0) && (
+            <span
+              className="kp__chip is-warn"
+              title="在角色库/场景库补齐同名资产后，回到分镜网格同步重新绑定"
+            >
+              资产待绑 {unboundCharacterShotCount + unboundSceneShotCount}
+            </span>
           )}
-          <div className="flex-1" />
+          {report && (
+            <span className={`kp__chip ${scoreLow ? 'is-warn' : 'is-ok'}`}>
+              评分 {report.overallScore}
+            </span>
+          )}
+        </div>
+
+        <div className="kp__primary">
           <button
             type="button"
+            className="kp__btn is-primary"
+            disabled={generating || !pictureNode || status === 'running'}
             onMouseDown={stop}
-            disabled={status === 'running'}
+            onClick={() => void handleGenerateAll()}
+          >
+            <Play size={11} fill="currentColor" />
+            {hasFrames && missingCount > 0 ? `补生成 · ${missingCount}` : '生成全部'}
+          </button>
+          <button
+            type="button"
+            className="kp__btn"
+            disabled={status === 'running' || !hasFrames}
+            onMouseDown={stop}
             onClick={() => void actions.checkConsistency('full')}
-            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-medium bg-brand/10 text-brand disabled:opacity-40"
-            title={`角色+场景+其它一致性 · 低于 ${KEYFRAME_SCORE_THRESHOLD} 分建议重生成`}
+            title={`角色+场景+其它 · 低于 ${KEYFRAME_SCORE_THRESHOLD} 建议重生成`}
           >
-            <Sparkles size={11} />
-            关键帧评分
-          </button>
-          <button
-            type="button"
-            onMouseDown={stop}
-            onClick={() => void actions.checkConsistency('character')}
-            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] text-ink/50 hover:text-brand"
-          >
-            角色
-          </button>
-          <button
-            type="button"
-            onMouseDown={stop}
-            onClick={() => void actions.checkConsistency('scene')}
-            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] text-ink/50 hover:text-brand"
-          >
-            场景
-          </button>
-          <button
-            type="button"
-            onMouseDown={stop}
-            onClick={() => void actions.checkConsistency('other')}
-            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] text-ink/50 hover:text-brand"
-          >
-            其它
+            <Sparkles size={12} />
+            评分
           </button>
           {lowCount > 0 && (
             <button
               type="button"
+              className="kp__btn is-warn"
               disabled={generating}
               onMouseDown={stop}
-              onClick={() => {
-                const ids = report?.suggestRegenerateFrameIds
-                  ?? payload.frames.filter((f) => f.suggestRegenerate).map((f) => f.id);
-                setSelectedIds(new Set(ids));
-                void (async () => {
-                  setGenerating(true);
-                  for (const id of ids) {
-                    const frame = payload.frames.find((f) => f.id === id);
-                    if (frame && !frame.locked) await actions.regenerateFrame(id);
-                  }
-                  setGenerating(false);
-                  appendLog(`已对 ${ids.length} 张低分关键帧触发重生成`);
-                })();
-              }}
-              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-medium bg-warn/15 text-warn disabled:opacity-40"
+              onClick={handleRegenLow}
             >
-              重生成低分镜
+              重生低分 · {lowCount}
             </button>
           )}
+          {!embedded && (
+            <button
+              type="button"
+              className="kp__btn is-solid"
+              disabled={!canConfirm || status === 'running' || generating}
+              onMouseDown={stop}
+              onClick={actions.confirmAll}
+            >
+              提交批审
+            </button>
+          )}
+        </div>
+      </div>
+
+      {report && (
+        <div className={`kp__score ${scoreLow ? 'is-low' : 'is-ok'}`}>
+          <span className="kp__score-main">
+            综合 {report.overallScore}/100
+            {scoreLow ? ` · 建议重生成低分镜` : ' · 达标'}
+          </span>
+          {report.dimensions.map((d) => (
+            <span key={d.id} className="kp__score-dim">
+              {d.label} {d.score}
+            </span>
+          ))}
+        </div>
+      )}
+
+      <div className="kp__toolbar">
+        <div className="kp__seg">
+          {VIEW_MODES.map((m) => (
+            <button
+              key={m.id}
+              type="button"
+              onMouseDown={stop}
+              className={payload.viewMode === m.id ? 'is-on' : ''}
+              onClick={() => actions.setViewMode(m.id)}
+            >
+              {m.label}
+            </button>
+          ))}
+        </div>
+        {(payload.viewMode === 'grid' || payload.viewMode === 'storyboard') && (
+          <div className="kp__cols">
+            {GRID_COLS.map((c) => (
+              <button
+                key={c}
+                type="button"
+                onMouseDown={stop}
+                className={payload.gridColumns === c ? 'is-on' : ''}
+                onClick={() => actions.setGridColumns(c)}
+              >
+                {c}列
+              </button>
+            ))}
+          </div>
+        )}
+        {payload.viewMode === 'grid' && (
+          <div className="kp__seg">
+            <button
+              type="button"
+              onMouseDown={stop}
+              className={!gridEditMode ? 'is-on' : ''}
+              title="已出图合成一张宫格大图"
+              onClick={() => setGridEditMode(false)}
+            >
+              大图
+            </button>
+            <button
+              type="button"
+              onMouseDown={stop}
+              className={gridEditMode ? 'is-on' : ''}
+              title="分格编辑单镜"
+              onClick={() => setGridEditMode(true)}
+            >
+              分格
+            </button>
+          </div>
+        )}
+
+        <div className="kp__toolbar-spacer" />
+
+        <div className="kp__toolbar-acts">
           <button
             type="button"
+            className={`kp__btn ${directorPanelOpen ? 'is-on' : ''}`}
             onMouseDown={stop}
-            onClick={() => setDirectorPanelOpen((open) => !open)}
-            className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] ${
-              directorPanelOpen
-                ? 'bg-violet-500/10 text-violet-700 font-medium'
-                : 'text-ink/50 hover:text-violet-700'
-            }`}
+            onClick={() => setDirectorPanelOpen((v) => !v)}
           >
-            <Box size={11} />
-            3D 导演
+            <Box size={12} />
+            3D
+          </button>
+          <button
+            type="button"
+            className={`kp__btn ${batchOpen ? 'is-on' : ''}`}
+            onMouseDown={stop}
+            onClick={() => setBatchOpen((v) => !v)}
+          >
+            批量
+            {selectedIds.size > 0 ? ` · ${selectedIds.size}` : ''}
+          </button>
+          <button type="button" className="kp__link" onMouseDown={stop} onClick={actions.syncFromStoryboard}>
+            同步
           </button>
         </div>
+      </div>
 
-        <div className="shrink-0 flex flex-wrap items-center gap-1.5 px-3 py-1 border-b border-line/15 bg-surface/15">
-          <button type="button" onMouseDown={stop} onClick={selectAll} className="text-[10px] text-ink/45 hover:text-brand">
+      {batchOpen && (
+        <div className="kp__toolbar" style={{ borderRadius: 0, borderTop: 'none', paddingTop: 6, paddingBottom: 6 }}>
+          <button type="button" className="kp__link" onMouseDown={stop} onClick={selectAll}>
             全选
           </button>
-          <button type="button" onMouseDown={stop} onClick={clearSelection} className="text-[10px] text-ink/45 hover:text-brand">
+          <button type="button" className="kp__link" onMouseDown={stop} onClick={clearSelection}>
             取消
           </button>
-          <span className="text-[9px] text-ink/30">|</span>
+          <span className="kp__sep" />
           <button
             type="button"
+            className="kp__link"
             disabled={generating}
             onMouseDown={stop}
             onClick={() => void handleBatchRegenerate()}
-            className="text-[10px] text-ink/45 hover:text-brand disabled:opacity-40"
           >
             批量重生
           </button>
           <button
             type="button"
+            className="kp__link"
             disabled={generating}
             onMouseDown={stop}
             onClick={() => actions.batchLock([...selectedIds], true)}
-            className="text-[10px] text-ink/45 hover:text-brand disabled:opacity-40"
           >
-            批量锁定
+            锁定
           </button>
           <button
             type="button"
+            className="kp__link is-danger"
             onMouseDown={stop}
             onClick={() => actions.batchDelete([...selectedIds])}
-            className="text-[10px] text-ink/45 hover:text-warn"
           >
-            批量删除
+            删除
           </button>
+          <span className="kp__sep" />
           <input
             type="text"
+            className="kp__style-input"
             value={batchStyle}
             onChange={(e) => setBatchStyle(e.target.value)}
             onMouseDown={stop}
             placeholder="批量风格"
-            className="w-20 text-[10px] rounded border border-line/50 px-1.5 py-0.5"
           />
           <button
             type="button"
+            className="kp__link"
             onMouseDown={stop}
             onClick={() => {
               if (!batchStyle.trim() || selectedIds.size === 0) return;
               actions.batchStyleReplace([...selectedIds], batchStyle.trim());
             }}
-            className="text-[10px] text-ink/45 hover:text-brand"
           >
             应用风格
           </button>
-          <div className="flex-1" />
+          <span className="kp__sep" />
           <button
             type="button"
-            disabled={generating || !pictureNode}
+            className="kp__link"
             onMouseDown={stop}
-            onClick={() => void handleGenerateAll()}
-            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-brand/10 text-brand text-[10px] font-medium disabled:opacity-40"
+            onClick={() => void actions.checkConsistency('character')}
           >
-            <Play size={10} fill="currentColor" />
-            生成全部预览图
+            角色分
           </button>
           <button
             type="button"
+            className="kp__link"
             onMouseDown={stop}
-            onClick={actions.syncFromStoryboard}
-            className="px-2 py-0.5 rounded-md text-[10px] text-ink/50 hover:text-brand"
+            onClick={() => void actions.checkConsistency('scene')}
           >
-            同步上游
+            场景分
+          </button>
+          <button
+            type="button"
+            className="kp__link"
+            onMouseDown={stop}
+            onClick={() => void actions.checkConsistency('other')}
+          >
+            其它分
           </button>
         </div>
+      )}
 
-        <div className="flex-1 min-h-0 overflow-y-auto nowheel overscroll-contain">
-          {directorPanelOpen ? (
-            <StoryboardPreviewDirector3dPanel
+      {pictureNode && (
+        <div className="kp__gen">
+          <StoryboardPreviewGenSettings
+            settings={payload.pictureSettings}
+            onChange={actions.updatePictureSettings}
+          />
+        </div>
+      )}
+
+      <div
+        className="kp__guide"
+        title="箭头仅作导引；关键帧像素干净；出视频用引导图但成片不画箭头"
+      >
+        <button
+          type="button"
+          onMouseDown={stop}
+          onClick={() => setGuideShowOverlay(!guideShowOverlay)}
+          className={`sb-guide-toggle ${guideShowOverlay ? 'is-on' : ''}`}
+        >
+          导引 {guideShowOverlay ? '开' : '关'}
+        </button>
+        <button
+          type="button"
+          onMouseDown={stop}
+          onClick={() => setGuideUseForVideo(!guideUseForVideo)}
+          className={`sb-guide-toggle ${guideUseForVideo ? 'is-on' : ''}`}
+          title={
+            guideUseForVideo
+              ? '出视频时合成带箭头引导图（成片仍不画箭头）'
+              : '出视频仅用干净首帧'
+          }
+        >
+          视频引导 {guideUseForVideo ? '开' : '关'}
+        </button>
+        <span className="sb-guide-legend-sep" aria-hidden>
+          |
+        </span>
+        {GUIDE_LEGEND_SHORT.map((item) => {
+          const on = guideKindsMap[item.kind] !== false;
+          return (
+            <button
+              key={item.kind}
+              type="button"
+              data-k={item.kind}
+              disabled={!guideShowOverlay && !guideUseForVideo}
+              onMouseDown={stop}
+              onClick={() => toggleGuideKind(item.kind)}
+              className={`sb-guide-kind ${on ? 'is-on' : 'is-off'}`}
+            >
+              {item.label}
+            </button>
+          );
+        })}
+      </div>
+
+      <div className="kp__stage sb-board">
+        {payload.viewMode === 'timeline' && hasFrames && !selectedFrame && !directorPanelOpen && (
+          <div className="kp__timeline">
+            <StoryboardPreviewTimeline
               frames={payload.frames}
+              totalDurationSec={payload.totalDurationSec}
               selectedFrameId={payload.selectedFrameId}
-              panorama={payload.panorama720}
-              panoramaPrompt={panoramaPrompt}
-              directorData={(director3dNode?.data ?? {}) as Record<string, unknown>}
-              pictureConnected={Boolean(pictureNode)}
-              directorConnected={Boolean(director3dNode)}
-              generatingPanorama={generatingPanorama}
-              onSelectFrame={actions.selectFrame}
-              onPanoramaPromptChange={setPanoramaPrompt}
-              onGeneratePanorama={() => void handleGeneratePanorama()}
-              onLoadPanorama={() => {
-                if (payload.panorama720?.imageUrl) {
-                  loadPanoramaIntoDirector(payload.panorama720.imageUrl);
-                }
-              }}
-              onOpenDirector3d={handleOpenDirector3d}
+              onSelect={actions.selectFrame}
             />
-          ) : selectedFrame ? (
-            <StoryboardPreviewFrameEditor
-              frame={selectedFrame}
-              onClose={() => actions.selectFrame(null)}
-              onUpdate={(patch) => actions.updateFrame(selectedFrame.id, patch)}
-              onRegenerate={() => void actions.regenerateFrame(selectedFrame.id)}
-              onOpenDirector3d={handleOpenDirector3d}
-              director3dConnected={Boolean(director3dNode)}
-            />
-          ) : payload.viewMode === 'storyboard' ? (
-            <div className="p-3 space-y-3">
-              {[...framesByScene.entries()].map(([scene, frames]) => (
-                <div key={scene}>
-                  <p className="text-[10px] font-medium text-ink/55 mb-1.5">Scene · {scene}</p>
-                  <StoryboardPreviewGrid frames={frames} columns={payload.gridColumns} {...gridProps} />
-                </div>
-              ))}
-            </div>
-          ) : payload.viewMode === 'timeline' ? (
-            <StoryboardPreviewGrid
-              frames={[...payload.frames].sort((a, b) => a.startSec - b.startSec)}
-              columns={Math.min(4, Math.max(2, payload.gridColumns)) as StoryboardPreviewGridColumns}
-              {...gridProps}
-            />
-          ) : (
-            <StoryboardPreviewGrid frames={payload.frames} columns={payload.gridColumns} {...gridProps} />
-          )}
-        </div>
-
-        {payload.lastConsistencyReport && (
-          <div className="shrink-0 px-3 py-1 border-t border-line/20 bg-white/70 text-[10px] text-ink/45">
-            一致性 {payload.lastConsistencyReport.overallScore}/100
-            {payload.lastConsistencyReport.dimensions[0]?.issues.length
-              ? ` · ${payload.lastConsistencyReport.dimensions[0].issues[0].message}`
-              : ' · 暂无明显问题'}
           </div>
         )}
+        <div className="kp__stage-scroll nowheel">{stageBody}</div>
+      </div>
 
-        <div className="shrink-0 flex items-center gap-2 px-3 py-2 border-t border-line/30 bg-surface/20">
-          <p className="text-[10px] text-ink/40">
-            {payload.frames.length} 张 · 总时长 {payload.totalDurationSec.toFixed(0)}s
-            {pictureNode ? ' · 出图由图像生成节点执行' : ' · 请连接图像生成节点'}
-          </p>
-          <div className="flex-1" />
+      <div className="kp__foot">
+        <p className="kp__foot-meta">
+          {payload.frames.length} 镜 · {payload.totalDurationSec.toFixed(0)}s
+          {pictureNode ? ' · 出图经图像生成节点' : ' · 请连接图像生成'}
+          {selectedIds.size > 0 ? ` · 已选 ${selectedIds.size}` : ''}
+        </p>
+        {embedded && (
           <button
             type="button"
+            className="kp__btn is-solid"
             disabled={!canConfirm || status === 'running' || generating}
+            onMouseDown={stop}
             onClick={actions.confirmAll}
-            className="px-3 py-1.5 rounded-lg bg-brand text-white text-[11px] font-medium hover:bg-brand/90 disabled:opacity-40"
           >
             提交分镜批审
           </button>
-        </div>
+        )}
       </div>
     </div>
   );

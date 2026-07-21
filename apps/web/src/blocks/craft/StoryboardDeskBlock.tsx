@@ -1,5 +1,5 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Clock, Copy, ImagePlus, Loader2, Pencil, Sparkles, Upload } from 'lucide-react';
+import { Clock, ImagePlus, Loader2, Pencil, Sparkles } from 'lucide-react';
 import { type NodeProps, useReactFlow } from '@xyflow/react';
 import {
   type AssetLibraryKind,
@@ -164,41 +164,6 @@ function createShotEditDraft(shot: ScriptBreakdownShot): ShotEditDraft {
   };
 }
 
-function joinParts(parts: string[], sep = '\n'): string {
-  return parts.map((p) => p.trim()).filter(Boolean).join(sep);
-}
-
-/** 与剧本拆分一致：分析列 */
-function shotAnalysis(shot: ScriptBreakdownShot): string {
-  const notes = shot.continuityNotes?.filter(Boolean).join('；');
-  return joinParts([
-    shot.purpose ? `目的：${shot.purpose}` : '',
-    shot.visual ? `画面：${shot.visual}` : '',
-    shot.action ? `动作：${shot.action}` : '',
-    notes ? `连贯：${notes}` : '',
-  ]) || '—';
-}
-
-/** 与剧本拆分一致：视听语言列 */
-function shotAudiovisual(shot: ScriptBreakdownShot): string {
-  const narrative = shot.audiovisualLanguage?.trim();
-  if (narrative && narrative.length >= 8) return narrative;
-  const move = shot.cameraMove && shot.cameraMove !== '固定' ? `${shot.cameraMove}镜` : '镜头';
-  const size = shot.shotSize ? `以${shot.shotSize}景别` : '';
-  const angle = shot.cameraAngle ? `、${shot.cameraAngle}` : '';
-  const body = shot.visual || shot.action || shot.sound || shot.narration;
-  if (body) {
-    return `${move}${size}${angle}贴近情境，${body.replace(/\s+/g, ' ').trim().slice(0, 120)}`;
-  }
-  return joinParts([
-    shot.shotSize ? `景别 ${shot.shotSize}` : '',
-    shot.cameraMove ? `运镜 ${shot.cameraMove}` : '',
-    shot.cameraAngle ? `机位 ${shot.cameraAngle}` : '',
-    shot.cameraLens ? `镜头 ${shot.cameraLens}` : '',
-    shot.sound ? `声效 ${shot.sound}` : '',
-  ], ' · ') || '—';
-}
-
 function shotDialogueLine(shot: ScriptBreakdownShot): string {
   return (
     shot.dialogue?.[0]?.text
@@ -213,30 +178,47 @@ function shotDialogueLine(shot: ScriptBreakdownShot): string {
 const SHOT_SIZES = ['ECU', 'CU', 'MS', 'FS', 'WS', 'OTS'] as const;
 const CAMERA_MOVES = ['固定', '推', '拉', '摇', '移', '跟', '手持'] as const;
 
-/** 分镜表「画面」格：预览 + 上传 / 生成 / 复制提示词 */
-function ShotFrameCell({
+/** 分镜表主视图：故事板宫格卡片 */
+function ShotStoryCell({
   shot,
+  selected,
   storyboardUrl,
   generating,
+  onSelect,
   onUpload,
   onGenerate,
   onGenerateLineArt,
-  onCopyPrompt,
-  onCopySketchPrompt,
+  onEdit,
 }: {
   shot: ScriptBreakdownShot;
+  selected?: boolean;
   storyboardUrl?: string | null;
   generating?: boolean;
+  onSelect: () => void;
   onUpload: (url: string) => void;
   onGenerate: () => void;
   onGenerateLineArt: () => void;
-  onCopyPrompt: () => void;
-  onCopySketchPrompt: () => void;
+  onEdit: () => void;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
   const url = shot.previewImageUrl || shot.referenceImageUrl || storyboardUrl || null;
   const busy = uploading || generating;
+  const line = shotDialogueLine(shot);
+  const tech = [shot.shotSize, shot.cameraMove, shot.cameraAngle, shot.cameraLens]
+    .filter(Boolean)
+    .join(' · ');
+  const sub = [
+    shot.scene?.trim(),
+    shot.characters?.length ? shot.characters.join('、') : '',
+  ]
+    .filter(Boolean)
+    .join(' · ');
+  const badge = busy
+    ? { cls: 'is-run', text: uploading ? '上传中' : '生成中' }
+    : url
+      ? { cls: 'is-ok', text: '已出图' }
+      : { cls: 'is-miss', text: '缺图' };
 
   const handleFile = useCallback(
     async (file: File) => {
@@ -253,10 +235,8 @@ function ShotFrameCell({
   );
 
   return (
-    <div
-      className="sg-frame-cell nodrag nopan"
-      onClick={(e) => e.stopPropagation()}
-      onPointerDown={(e) => e.stopPropagation()}
+    <article
+      className={`sg-story-cell${selected ? ' is-on' : ''}${busy ? ' is-run' : ''}`}
     >
       <input
         ref={inputRef}
@@ -268,80 +248,71 @@ function ShotFrameCell({
           if (f) void handleFile(f);
         }}
       />
-      <button
-        type="button"
-        className={`sg-frame-cell__preview ${url ? 'has-img' : ''}`}
-        onClick={() => inputRef.current?.click()}
-        disabled={busy}
-        title={url ? '点击更换画面' : '点击上传画面'}
-      >
-        {busy ? (
-          <span className="sg-frame-cell__empty">
-            <Loader2 size={14} className="animate-spin" />
-            <span>{uploading ? '上传中' : '生成中'}</span>
-          </span>
-        ) : url ? (
-          <img src={url} alt="" />
-        ) : (
-          <span className="sg-frame-cell__empty">
-            <ImagePlus size={14} />
-            <span>画面</span>
-          </span>
-        )}
+      <button type="button" className="sg-story-cell__hit" onClick={onSelect}>
+        <div
+          className="sg-story-cell__media"
+          onClick={(e) => {
+            e.stopPropagation();
+            if (!busy) inputRef.current?.click();
+          }}
+        >
+          {busy ? (
+            <span className="sg-story-cell__empty">
+              <Loader2 size={16} className="animate-spin" />
+              <span>{uploading ? '上传中' : '生成中'}</span>
+            </span>
+          ) : url ? (
+            <img src={url} alt="" />
+          ) : (
+            <span className="sg-story-cell__empty">
+              <ImagePlus size={16} />
+              <span>点击上传</span>
+            </span>
+          )}
+          <span className={`sg-story-badge ${badge.cls}`}>{badge.text}</span>
+        </div>
+        <div className="sg-story-cell__meta">
+          <strong>
+            <span>{shot.title?.trim() || shot.sceneCode || `镜 ${shot.index}`}</span>
+            <em>{shot.sceneCode || `S${shot.index}`}</em>
+          </strong>
+          {tech ? <span className="sg-story-cell__tech">{tech}</span> : null}
+          <p title={line}>{line}</p>
+          {sub ? <span className="sg-story-cell__sub" title={sub}>{sub}</span> : null}
+        </div>
       </button>
-      <div className="sg-frame-cell__acts">
+      <div className="sg-story-cell__acts">
         <button
           type="button"
-          className="sg-frame-cell__btn"
-          title="上传图片"
-          disabled={busy}
-          onClick={() => inputRef.current?.click()}
-        >
-          <Upload size={11} />
-          <span>上传</span>
-        </button>
-        <button
-          type="button"
-          className="sg-frame-cell__btn"
-          title="用连接的图像生成节点出关键帧"
-          disabled={busy}
-          onClick={onGenerate}
-        >
-          <Sparkles size={11} />
-          <span>关键帧</span>
-        </button>
-        <button
-          type="button"
-          className="sg-frame-cell__btn"
-          title="生成黑白线稿构图（确认站位/景深后再出关键帧）"
+          className="sg-story-cell__act"
+          title="生成线稿构图"
           disabled={busy}
           onClick={onGenerateLineArt}
         >
           <Pencil size={11} />
-          <span>线稿</span>
+          线稿
         </button>
         <button
           type="button"
-          className="sg-frame-cell__btn"
-          title="复制图片生成提示词"
-          disabled={!shot.imagePrompt?.trim()}
-          onClick={onCopyPrompt}
+          className="sg-story-cell__act"
+          title="生成关键帧成图"
+          disabled={busy}
+          onClick={onGenerate}
         >
-          <Copy size={11} />
-          <span>图词</span>
+          <Sparkles size={11} />
+          关键帧
         </button>
         <button
           type="button"
-          className="sg-frame-cell__btn"
-          title="复制线稿提示词"
-          disabled={!shot.sketchPrompt?.trim() && !shot.imagePrompt?.trim() && !shot.scriptText?.trim()}
-          onClick={onCopySketchPrompt}
+          className="sg-story-cell__act"
+          title="编辑镜头字段"
+          onClick={onEdit}
         >
-          <Copy size={11} />
-          <span>线词</span>
+          <Pencil size={11} />
+          编辑
         </button>
       </div>
-    </div>
+    </article>
   );
 }
 
@@ -632,7 +603,13 @@ function StoryboardDeskBlock(props: NodeProps) {
           ? { ...emptyStoryboardPreview(), ...raw, pictureSettings: resolveStoryboardPreviewPictureSettings(raw) }
           : emptyStoryboardPreview();
         let frames = current.frames;
-        const idx = frames.findIndex((f) => f.sourceShotId === shotId || f.id === shotId || f.id === `frame-${shotId}`);
+        const idx = frames.findIndex(
+          (f) =>
+            f.sourceShotId === shotId
+            || f.id === shotId
+            || f.id === `frame-${shotId}`
+            || f.id === `spf-${shotId}`,
+        );
         const shot = flattenScriptBreakdownShots(nextBreakdown).find((s) => s.id === shotId);
         const framePatch = {
           imageUrl,
@@ -649,7 +626,7 @@ function StoryboardDeskBlock(props: NodeProps) {
           );
         } else if (shot) {
           const frame: StoryboardPreviewFrame = {
-            id: `frame-${shotId}`,
+            id: `spf-${shotId}`,
             order: frames.length + 1,
             label: shot.sceneCode || `Shot${shot.index}`,
             startSec: 0,
@@ -666,8 +643,6 @@ function StoryboardDeskBlock(props: NodeProps) {
           frames = [...frames, frame];
         }
         return {
-          ...node,
-          data: {
             ...data,
             scriptBreakdown: nextBreakdown,
             storyboardPreview: {
@@ -676,8 +651,7 @@ function StoryboardDeskBlock(props: NodeProps) {
               confirmed: false,
             },
             previewUrls: frames.map((f) => f.imageUrl).filter(Boolean),
-          },
-        };
+          };
       });
     },
     [getNodes, payload, props.id, updateNodeData, updateShot],
@@ -699,7 +673,7 @@ function StoryboardDeskBlock(props: NodeProps) {
 
       setGeneratingShotId(shot.id);
       const frame: StoryboardPreviewFrame = {
-        id: `frame-${shot.id}`,
+        id: `spf-${shot.id}`,
         order: 1,
         label: shot.sceneCode || `Shot${shot.index}`,
         startSec: 0,
@@ -845,14 +819,11 @@ function StoryboardDeskBlock(props: NodeProps) {
               ];
             }
             return {
-              ...node,
-              data: {
                 ...data,
                 scriptBreakdown: nextBreakdown,
                 storyboardPreview: { ...current, frames, confirmed: false },
                 previewUrls: frames.map((f) => f.imageUrl).filter(Boolean),
-              },
-            };
+              };
           });
         }
         appendLog(`分镜线稿已生成 · ${shot.sceneCode || shot.id}`);
@@ -865,31 +836,6 @@ function StoryboardDeskBlock(props: NodeProps) {
     },
     [appendLog, batchRunning, getEdges, getNodes, payload, props.id, resolveSketchPrompt, setShotFrameUrl, updateNodeData, updateShot],
   );
-
-  const copyShotSketchPrompt = useCallback(
-    async (shot: ScriptBreakdownShot) => {
-      const textValue = resolveSketchPrompt(shot);
-      if (!textValue) {
-        appendLog('该镜暂无线稿提示词可复制');
-        return;
-      }
-      try {
-        await navigator.clipboard.writeText(textValue);
-        toastSuccess('已复制线稿提示词');
-        appendLog(`已复制线稿提示词 · ${shot.sceneCode || shot.id}`);
-      } catch {
-        const ta = document.createElement('textarea');
-        ta.value = textValue;
-        document.body.appendChild(ta);
-        ta.select();
-        document.execCommand('copy');
-        document.body.removeChild(ta);
-        toastSuccess('已复制线稿提示词');
-      }
-    },
-    [appendLog, resolveSketchPrompt],
-  );
-
 
   const generateBatchLineArt = useCallback(
     async (scope: 'visible' | 'all' = 'visible') => {
@@ -1002,14 +948,11 @@ function StoryboardDeskBlock(props: NodeProps) {
                 ];
               }
               return {
-                ...node,
-                data: {
                   ...data,
                   scriptBreakdown: nextBreakdown,
                   storyboardPreview: { ...current, frames, confirmed: false },
                   previewUrls: frames.map((f) => f.imageUrl).filter(Boolean),
-                },
-              };
+                };
             });
           }
           ok += 1;
@@ -1084,7 +1027,7 @@ function StoryboardDeskBlock(props: NodeProps) {
             continue;
           }
           const frame: StoryboardPreviewFrame = {
-            id: `frame-${liveShot.id}`,
+            id: `spf-${liveShot.id}`,
             order: i + 1,
             label: liveShot.sceneCode || `Shot${liveShot.index}`,
             startSec: 0,
@@ -1130,31 +1073,6 @@ function StoryboardDeskBlock(props: NodeProps) {
       shots,
       visibleShots,
     ],
-  );
-
-  const copyShotImagePrompt = useCallback(
-    async (shot: ScriptBreakdownShot) => {
-      const text = shot.imagePrompt?.trim();
-      if (!text) {
-        appendLog('该镜暂无图片提示词可复制');
-        return;
-      }
-      try {
-        await navigator.clipboard.writeText(text);
-        toastSuccess('已复制图片生成提示词');
-        appendLog(`已复制图片提示词 · ${shot.sceneCode || shot.id}`);
-      } catch {
-        // fallback
-        const ta = document.createElement('textarea');
-        ta.value = text;
-        document.body.appendChild(ta);
-        ta.select();
-        document.execCommand('copy');
-        document.body.removeChild(ta);
-        toastSuccess('已复制图片生成提示词');
-      }
-    },
-    [appendLog],
   );
 
   const previewPayload = (props.data as Record<string, unknown>)?.storyboardPreview as
@@ -1497,114 +1415,32 @@ function StoryboardDeskBlock(props: NodeProps) {
                   {visibleShots.length === 0 ? (
                     <div className="sg-empty">本集暂无镜头 · 请从剧本拆分同步</div>
                   ) : (
-                    <div className="sg-sheet-scroll">
-                      <table className="sg-sheet sg-sheet--full">
-                        <thead>
-                          <tr>
-                            <th className="col-code">镜号</th>
-                            <th className="col-frame">画面</th>
-                            <th className="col-size">景别</th>
-                            <th className="col-move">运镜</th>
-                            <th className="col-angle">机位</th>
-                            <th className="col-lens">镜头</th>
-                            <th className="col-scene">场景</th>
-                            <th className="col-cast">角色</th>
-                            <th className="col-line">内容 / 对白</th>
-                            <th className="col-analysis">分析</th>
-                            <th className="col-av">视听语言</th>
-                            <th className="col-img">画面图片提示词</th>
-                            <th className="col-vid">画面视频提示词</th>
-                            <th className="col-sk">线稿提示词</th>
-                            <th className="col-neg">排除</th>
-                            <th className="col-dur">秒</th>
-                            <th className="col-act">操作</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {visibleShots.map((shot) => {
-                            const line = shotDialogueLine(shot);
-                            const analysis = shotAnalysis(shot);
-                            const av = shotAudiovisual(shot);
-                            const img = shot.imagePrompt?.trim() || '—';
-                            const vid = shot.videoPrompt?.trim() || '—';
-                            const sk = shot.sketchPrompt?.trim() || '—';
-                            const neg = shot.negativePrompt?.trim() || '—';
-                            const on = selectedId === shot.id || editingShotId === shot.id;
-                            return (
-                              <tr
-                                key={shot.id}
-                                className={on ? 'is-on' : ''}
-                                onClick={() => setSelectedId(shot.id)}
-                              >
-                                <td className="col-code sticky-col">
-                                  {shot.sceneCode || `S${shot.index}`}
-                                </td>
-                                <td className="col-frame">
-                                  <ShotFrameCell
-                                    shot={shot}
-                                    storyboardUrl={storyboardUrlByShotId.get(shot.id)}
-                                    generating={generatingShotId === shot.id || (batchRunning && generatingShotId === shot.id)}
-                                    onUpload={(url) => {
-                                      setShotFrameUrl(shot.id, url);
-                                      appendLog(`分镜画面已上传 · ${shot.sceneCode || shot.id}`);
-                                    }}
-                                    onGenerate={() => void generateShotFrame(shot)}
-                                    onGenerateLineArt={() => void generateShotLineArt(shot)}
-                                    onCopyPrompt={() => void copyShotImagePrompt(shot)}
-                                    onCopySketchPrompt={() => void copyShotSketchPrompt(shot)}
-                                  />
-                                </td>
-                                <td className="col-size">{shot.shotSize || '—'}</td>
-                                <td className="col-move">{shot.cameraMove || '—'}</td>
-                                <td className="col-angle">{shot.cameraAngle || '—'}</td>
-                                <td className="col-lens">{shot.cameraLens || '—'}</td>
-                                <td className="col-scene" title={shot.scene}>
-                                  {compact(shot.scene || '—', 16)}
-                                </td>
-                                <td className="col-cast" title={shot.characters?.join('、')}>
-                                  {shot.characters?.length
-                                    ? compact(shot.characters.join('、'), 14)
-                                    : '—'}
-                                </td>
-                                <td className="col-line">
-                                  <div className="sg-cell" title={line}>{line}</div>
-                                </td>
-                                <td className="col-analysis">
-                                  <div className="sg-cell" title={analysis}>{analysis}</div>
-                                </td>
-                                <td className="col-av">
-                                  <div className="sg-cell" title={av}>{av}</div>
-                                </td>
-                                <td className="col-img">
-                                  <div className="sg-cell sg-cell--prompt" title={img}>{img}</div>
-                                </td>
-                                <td className="col-vid">
-                                  <div className="sg-cell sg-cell--prompt" title={vid}>{vid}</div>
-                                </td>
-                                <td className="col-sk">
-                                  <div className="sg-cell sg-cell--prompt" title={sk}>{sk}</div>
-                                </td>
-                                <td className="col-neg">
-                                  <div className="sg-cell" title={neg}>{neg === '—' ? '—' : compact(neg, 24)}</div>
-                                </td>
-                                <td className="col-dur">{shot.durationSec ?? '—'}</td>
-                                <td className="col-act">
-                                  <button
-                                    type="button"
-                                    className="sg-btn sg-btn--soft sg-btn--sm"
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      openEdit(shot.id);
-                                    }}
-                                  >
-                                    <Pencil size={11} /> 编辑
-                                  </button>
-                                </td>
-                              </tr>
-                            );
-                          })}
-                        </tbody>
-                      </table>
+                    <div className="sg-story-scroll">
+                      <p className="sg-story-hint">
+                        点画面可上传 · 底栏线稿 / 关键帧 / 编辑 · 详细字段点「编辑」
+                      </p>
+                      <div className="sg-story-grid">
+                        {visibleShots.map((shot) => (
+                          <ShotStoryCell
+                            key={shot.id}
+                            shot={shot}
+                            selected={selectedId === shot.id || editingShotId === shot.id}
+                            storyboardUrl={storyboardUrlByShotId.get(shot.id)}
+                            generating={
+                              generatingShotId === shot.id
+                              || (batchRunning && generatingShotId === shot.id)
+                            }
+                            onSelect={() => setSelectedId(shot.id)}
+                            onUpload={(url) => {
+                              setShotFrameUrl(shot.id, url);
+                              appendLog(`分镜画面已上传 · ${shot.sceneCode || shot.id}`);
+                            }}
+                            onGenerate={() => void generateShotFrame(shot)}
+                            onGenerateLineArt={() => void generateShotLineArt(shot)}
+                            onEdit={() => openEdit(shot.id)}
+                          />
+                        ))}
+                      </div>
                     </div>
                   )}
                 </>

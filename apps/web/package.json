@@ -11,9 +11,9 @@
     "test:e2e": "playwright test"
   },
   "dependencies": {
-    "@nx9/director3d": "*",
-    "@nx9/remotion-compositions": "*",
-    "@nx9/shared": "*",
+    "@nx9/director3d": "workspace:*",
+    "@nx9/remotion-compositions": "workspace:*",
+    "@nx9/shared": "workspace:*",
     "@remotion/player": "^4.0.0",
     "@xyflow/react": "^12.10.0",
     "jszip": "^3.10.1",

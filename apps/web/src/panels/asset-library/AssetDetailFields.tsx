@@ -7,6 +7,7 @@ import {
   CAC_SHOT_SIZES,
   CAC_VOICE_EMOTIONS,
   CAC_VOICE_GENDERS,
+  MAX_ENV_REFERENCE_IMAGES,
   SCENE_SHEET_PROMPT_TEMPLATE,
   buildCostumeSheetGenerationPrompt,
   COSTUME_SHEET_PROMPT_TEMPLATE,
@@ -20,6 +21,7 @@ import {
   getVoiceCreative,
   type AssetLibraryKind,
 } from '@nx9/shared';
+import { X } from 'lucide-react';
 import { DetailSection, Field, TextInput, TextArea, PromptPanel, MediaSlot, ChipList, VariantGrid } from './detail-primitives';
 import { ImageLightbox } from '../../components/ui/ImageLightbox';
 
@@ -138,7 +140,7 @@ export function CharacterDetailFields({
               placeholder="角色名 / @引用名"
             />
             <p className="mt-1 text-[10px] text-ink/45">
-              角色库只维护一致性资产；图片生成请连接「图像生成」节点。
+              角色库是设定主入口；图片生成请在画布使用「图像生成」节点。
             </p>
             <div className="mt-2 flex flex-wrap gap-1">
               <span className={`rounded-full px-2 py-0.5 text-[10px] ${anchorCount >= 4 ? 'bg-ok/10 text-ok' : 'bg-warn/10 text-warn'}`}>
@@ -409,23 +411,27 @@ export function SceneDetailFields({
   onRefreshPrompts,
   onUploadRef,
   onUploadSheet,
+  onRemoveRef,
 }: {
   item: BacklotWorkspaceItem;
   onChange: (next: BacklotWorkspaceItem) => void;
   onRefreshPrompts: () => void;
   onUploadRef: UploadHandler;
   onUploadSheet: UploadHandler;
+  /** 删除多参考图中的某一张（自场景节点迁入） */
+  onRemoveRef?: (index: number) => void;
 }) {
   const ext = getSceneCreative(item);
   const patch = (p: Partial<BacklotWorkspaceItem>) => onChange({ ...item, ...p });
   const patchExt = (p: Partial<typeof ext>) => onChange({ ...item, creative: { ...ext, ...p } });
   const promptVersion = ext.prompts?.scene?.version ?? 1;
-  const locked = Boolean((ext as { locked?: boolean }).locked);
+  const locked = Boolean(ext.locked);
+  const refs = ext.referenceUrls ?? [];
   const health = [
     item.label?.trim(),
     (ext.description || item.promptZh)?.trim(),
     (ext.lighting || ext.timeOfDay || ext.weather)?.trim(),
-    ext.referenceUrls?.[0] || ext.sheetUrl,
+    refs[0] || ext.sheetUrl,
   ].filter(Boolean).length;
 
   return (
@@ -433,8 +439,8 @@ export function SceneDetailFields({
       <div className="rounded-2xl border border-line bg-white p-3">
         <div className="flex items-start gap-3">
           <div className="h-14 w-20 overflow-hidden rounded-xl border border-line bg-surface">
-            {(ext.referenceUrls?.[0] || ext.sheetUrl) ? (
-              <img src={(ext.referenceUrls?.[0] || ext.sheetUrl) ?? ''} alt="" className="h-full w-full object-cover" />
+            {(refs[0] || ext.sheetUrl) ? (
+              <img src={(refs[0] || ext.sheetUrl) ?? ''} alt="" className="h-full w-full object-cover" />
             ) : null}
           </div>
           <div className="min-w-0 flex-1">
@@ -444,10 +450,13 @@ export function SceneDetailFields({
               className="w-full border-b border-line pb-1 text-sm font-semibold focus:outline-none"
               placeholder="场景名 / @引用名"
             />
-            <p className="mt-1 text-[10px] text-ink/45">场景库只维护空间一致性；图片生成请连接「图像生成」节点。</p>
+            <p className="mt-1 text-[10px] text-ink/45">
+              场景设定主入口在素材库；保存后同步到环境圣经，供分镜 / 出图 / Playbook 使用。
+            </p>
             <div className="mt-2 flex flex-wrap gap-1">
               <span className={`rounded-full px-2 py-0.5 text-[10px] ${health >= 4 ? 'bg-ok/10 text-ok' : 'bg-warn/10 text-warn'}`}>健康度 {health}/4</span>
               <span className={`rounded-full px-2 py-0.5 text-[10px] ${locked ? 'bg-brand/10 text-brand' : 'bg-surface text-ink/45'}`}>{locked ? '已锁定' : '未锁定'}</span>
+              <span className="rounded-full bg-surface px-2 py-0.5 text-[10px] text-ink/45">参考 {refs.length}/{MAX_ENV_REFERENCE_IMAGES}</span>
               <span className="rounded-full bg-surface px-2 py-0.5 text-[10px] text-ink/45">Prompt v{promptVersion}</span>
             </div>
           </div>
@@ -455,18 +464,26 @@ export function SceneDetailFields({
       </div>
 
       <DetailSection title="核心一致性">
+        <div className="grid grid-cols-2 gap-2">
+          <Field label="场景码（与分镜 sceneCode 对齐）">
+            <TextInput value={ext.sceneCode ?? ''} onChange={(v) => patchExt({ sceneCode: v })} placeholder="S01 / INT-CAFE…" />
+          </Field>
+          <Field label="时代/世界观">
+            <TextInput value={ext.worldView ?? ext.timeOfDay ?? ''} onChange={(v) => patchExt({ worldView: v, timeOfDay: v })} placeholder="现代都市 / 民国…" />
+          </Field>
+        </div>
         <Field label="空间锚点（防场景漂移）">
           <TextArea value={ext.description ?? item.promptZh ?? ''} onChange={(v) => patchExt({ description: v })} rows={3} placeholder="建筑结构、空间布局、材质、固定标识物…" />
         </Field>
         <div className="grid grid-cols-2 gap-2">
-          <Field label="时代/世界观">
-            <TextInput value={ext.worldView ?? ''} onChange={(v) => patchExt({ worldView: v })} />
-          </Field>
           <Field label="时间/天气">
-            <TextInput value={[ext.timeOfDay, ext.weather].filter(Boolean).join(' · ')} onChange={(v) => {
-              const [timeOfDay, weather] = v.split(/[·,，]/).map((s) => s.trim());
-              patchExt({ timeOfDay, weather });
-            }} />
+            <TextInput
+              value={[ext.timeOfDay, ext.weather].filter(Boolean).join(' · ')}
+              onChange={(v) => {
+                const [timeOfDay, weather] = v.split(/[·,，]/).map((s) => s.trim());
+                patchExt({ timeOfDay, weather });
+              }}
+            />
           </Field>
           <Field label="光照">
             <TextInput value={ext.lighting ?? ''} onChange={(v) => patchExt({ lighting: v })} />
@@ -474,34 +491,69 @@ export function SceneDetailFields({
           <Field label="色彩">
             <TextInput value={ext.colorTone ?? ''} onChange={(v) => patchExt({ colorTone: v })} />
           </Field>
+          <Field label="标签">
+            <TextInput value={(ext.tags ?? []).join('、')} onChange={(v) => patchExt({ tags: v.split(/[,，、]/).map((s) => s.trim()).filter(Boolean) })} />
+          </Field>
         </div>
-        <Field label="标签 / 固定道具">
-          <TextInput value={(ext.tags ?? []).join('、')} onChange={(v) => patchExt({ tags: v.split(/[,，、]/).map((s) => s.trim()).filter(Boolean) })} />
+        <Field label="固定道具 / 结构锚点">
+          <TextInput
+            value={(ext.props ?? []).join('、')}
+            onChange={(v) => patchExt({ props: v.split(/[,，、]/).map((s) => s.trim()).filter(Boolean) })}
+            placeholder="吧台、霓虹招牌、木质桌…"
+          />
         </Field>
         <Field label="场景 Prompt（注入图像/视频生成）">
           <TextArea value={item.promptEn || ext.prompts?.scene?.text || ''} onChange={(v) => patch({ promptEn: v })} rows={4} mono />
         </Field>
-        <Field label="Negative / 禁改项">
+        <Field label="Negative / 禁改项（防场景漂移）">
           <TextArea
-            value={ext.prompts?.negative?.text ?? (ext as { forbiddenDrift?: string }).forbiddenDrift ?? ''}
-            onChange={(v) => patchExt({ prompts: { ...ext.prompts, negative: { version: 1, text: v, updatedAt: Date.now() } } })}
+            value={ext.prompts?.negative?.text ?? ext.forbiddenDrift ?? ''}
+            onChange={(v) => patchExt({
+              forbiddenDrift: v,
+              prompts: { ...ext.prompts, negative: { version: 1, text: v, updatedAt: Date.now() } },
+            })}
             rows={2}
             mono
+            placeholder="Never change scene anchors: …"
           />
         </Field>
       </DetailSection>
 
-      <DetailSection title="参考资产">
+      <DetailSection title={`参考资产（最多 ${MAX_ENV_REFERENCE_IMAGES} 张）`}>
         <p className="text-[10px] text-ink/45">
-          设定板 Prompt 基于服装 bible + 生产级 sheet 模板；生成后写入「服装设定板」。
+          多参考图写入环境圣经 `referenceUrls`，出图 / 导演台可取首图做 img2img。设定总览图单独存 sheet。
         </p>
         <div className="grid grid-cols-3 gap-2">
-          <MediaSlot label="参考图" url={ext.referenceUrls?.[0]} accept="image/*" onUpload={onUploadRef} />
+          {refs.length < MAX_ENV_REFERENCE_IMAGES ? (
+            <MediaSlot label="添加参考图" url={undefined} accept="image/*" onUpload={onUploadRef} />
+          ) : null}
           <MediaSlot label="场景设定图" url={ext.sheetUrl} accept="image/*" onUpload={onUploadSheet} />
-          <MediaSlot label="补充参考" url={ext.referenceUrls?.[1]} accept="image/*" onUpload={onUploadRef} />
         </div>
+        {refs.length > 0 ? (
+          <div className="mt-2 grid grid-cols-3 gap-2">
+            {refs.map((url, idx) => (
+              <div key={`${url}-${idx}`} className="group relative overflow-hidden rounded-xl border border-line bg-surface">
+                <img src={url} alt="" className="aspect-square w-full object-cover" />
+                <span className="absolute bottom-1 left-1 rounded bg-ink/55 px-1.5 py-0.5 text-[9px] text-white">
+                  参考 {idx + 1}
+                </span>
+                {onRemoveRef ? (
+                  <button
+                    type="button"
+                    title="移除参考图"
+                    onClick={() => onRemoveRef(idx)}
+                    className="absolute right-1 top-1 grid h-5 w-5 place-items-center rounded-full bg-ink/60 text-white opacity-0 transition group-hover:opacity-100"
+                  >
+                    <X size={10} />
+                  </button>
+                ) : null}
+              </div>
+            ))}
+          </div>
+        ) : null}
+        <p className="text-[10px] text-ink/35">{SCENE_SHEET_PROMPT_TEMPLATE.slice(0, 100)}…</p>
         <label className="flex items-center gap-2 text-[10px] text-ink/55">
-          <input type="checkbox" checked={locked} onChange={(e) => patchExt({ locked: e.target.checked } as Partial<typeof ext>)} />
+          <input type="checkbox" checked={locked} onChange={(e) => patchExt({ locked: e.target.checked })} />
           锁定场景资产：被引用时禁止静默替换参考图/空间锚点/Prompt
         </label>
       </DetailSection>
@@ -510,63 +562,18 @@ export function SceneDetailFields({
         <PromptPanel
           label="场景一致性 Prompt"
           value={ext.prompts?.scene?.text ?? item.promptEn ?? ''}
-          negative={ext.prompts?.negative?.text}
+          negative={ext.prompts?.negative?.text ?? ext.forbiddenDrift}
           onChange={(v) => patchExt({ prompts: { ...ext.prompts, scene: { version: 1, text: v, updatedAt: Date.now() } } })}
-          onChangeNegative={(v) => patchExt({ prompts: { ...ext.prompts, negative: { version: 1, text: v, updatedAt: Date.now() } } })}
+          onChangeNegative={(v) => patchExt({
+            forbiddenDrift: v,
+            prompts: { ...ext.prompts, negative: { version: 1, text: v, updatedAt: Date.now() } },
+          })}
           onRegenerate={onRefreshPrompts}
           onCopy={() => copyText(ext.prompts?.scene?.text ?? item.promptEn ?? '')}
         />
       </DetailSection>
 
-      <p className="text-[10px] text-brand/70">
-        引用 <code className="rounded bg-surface px-1">{formatAssetMention('scene', item.label)}</code>；生成时由图像/视频节点读取该资产。
-      </p>
-    </div>
-  );
-
-  return (
-    <div className="space-y-1 max-w-2xl">
-      <input
-        value={item.label}
-        onChange={(e) => patch({ label: e.target.value })}
-        className="w-full font-semibold text-sm border-b border-line pb-1 focus:outline-none"
-      />
-      <DetailSection title="场景信息">
-        <Field label="描述">
-          <TextArea value={ext.description ?? item.promptZh ?? ''} onChange={(v) => patchExt({ description: v })} rows={3} />
-        </Field>
-        <Field label="标签（逗号分隔）">
-          <TextInput
-            value={(ext.tags ?? []).join(', ')}
-            onChange={(v) => patchExt({ tags: v.split(/[,，]/).map((s) => s.trim()).filter(Boolean) })}
-          />
-        </Field>
-        <Field label="世界观">
-          <TextInput value={ext.worldView ?? ''} onChange={(v) => patchExt({ worldView: v })} />
-        </Field>
-        <div className="grid grid-cols-2 gap-2">
-          <Field label="时间">
-            <TextInput value={ext.timeOfDay ?? ''} onChange={(v) => patchExt({ timeOfDay: v })} />
-          </Field>
-          <Field label="天气">
-            <TextInput value={ext.weather ?? ''} onChange={(v) => patchExt({ weather: v })} />
-          </Field>
-          <Field label="光照">
-            <TextInput value={ext.lighting ?? ''} onChange={(v) => patchExt({ lighting: v })} />
-          </Field>
-          <Field label="色调">
-            <TextInput value={ext.colorTone ?? ''} onChange={(v) => patchExt({ colorTone: v })} />
-          </Field>
-        </div>
-      </DetailSection>
-      <DetailSection title="参考图 & 设定图">
-        <div className="grid grid-cols-2 gap-2">
-          <MediaSlot label="参考图" url={ext.referenceUrls?.[0]} accept="image/*" onUpload={onUploadRef} />
-          <MediaSlot label="Scene Sheet（总体设定图）" url={ext.sheetUrl} accept="image/*" onUpload={onUploadSheet} />
-        </div>
-        <p className="text-[10px] text-ink/35">{SCENE_SHEET_PROMPT_TEMPLATE.slice(0, 100)}…</p>
-      </DetailSection>
-      <DetailSection title="创作推荐">
+      <DetailSection title="创作推荐（可选）">
         {(
           [
             ['recommendedCharacters', '推荐角色'],
@@ -579,34 +586,17 @@ export function SceneDetailFields({
         ).map(([key, label]) => (
           <Field key={key} label={label}>
             <TextInput
-              value={(ext[key] ?? []).join(', ')}
+              value={(ext[key] ?? []).join('、')}
               onChange={(v) =>
-                patchExt({ [key]: v.split(/[,，]/).map((s) => s.trim()).filter(Boolean) } as Partial<typeof ext>)
+                patchExt({ [key]: v.split(/[,，、]/).map((s) => s.trim()).filter(Boolean) } as Partial<typeof ext>)
               }
             />
           </Field>
         ))}
       </DetailSection>
-      <DetailSection title="Prompt">
-        <Field label="英文 Prompt">
-          <TextArea value={item.promptEn} onChange={(v) => patch({ promptEn: v })} rows={3} mono />
-        </Field>
-        <PromptPanel
-          label="Scene Bible Prompt"
-          value={ext.prompts?.scene?.text ?? ''}
-          negative={ext.prompts?.negative?.text}
-          onChange={(v) =>
-            patchExt({ prompts: { ...ext.prompts, scene: { version: 1, text: v, updatedAt: Date.now() } } })
-          }
-          onChangeNegative={(v) =>
-            patchExt({ prompts: { ...ext.prompts, negative: { version: 1, text: v, updatedAt: Date.now() } } })
-          }
-          onRegenerate={onRefreshPrompts}
-          onCopy={() => copyText(ext.prompts?.scene?.text ?? '')}
-        />
-      </DetailSection>
+
       <p className="text-[10px] text-brand/70">
-        引用 <code className="bg-surface px-1 rounded">{formatAssetMention('scene', item.label)}</code>
+        引用 <code className="rounded bg-surface px-1">{formatAssetMention('scene', item.label)}</code>；生成时由图像/视频节点读取该资产。
       </p>
     </div>
   );

@@ -33,10 +33,17 @@ NX9/
 
 ## 开发
 
+需安装 [pnpm](https://pnpm.io/installation)（推荐通过 Corepack 启用）：
+
+```bash
+corepack enable
+corepack prepare pnpm@10.32.0 --activate
+```
+
 ```bash
 cd F:\code\project\NX9
-npm install
-npm run dev
+pnpm install
+pnpm run dev
 ```
 
 - 前端: http://127.0.0.1:5173
@@ -54,10 +61,10 @@ Get-NetTCPConnection -LocalPort 3001,5173 -ErrorAction SilentlyContinue |
 **构建报错 `BLOCK_GROUPS is not exported`**：先构建 shared 包：
 
 ```bash
-npm run build -w @nx9/shared
+pnpm --filter @nx9/shared build
 ```
 
-`npm run dev` 已自动在启动前构建 shared。
+`pnpm run dev` 已自动在启动前构建 shared。
 
 ## 技术栈（NX9 自研）
 

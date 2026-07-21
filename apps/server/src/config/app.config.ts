@@ -4,7 +4,7 @@ export const APP_VERSION = '0.1.0';
 export const HOST = process.env.NX9_HOST ?? '127.0.0.1';
 export const PORT = Number(process.env.NX9_PORT ?? 3001);
 
-/** Monorepo root — cwd is apps/server when started via npm workspace */
+/** Monorepo root — cwd is apps/server when started via pnpm workspace */
 const ROOT = join(process.cwd(), '..', '..');
 
 export const PATHS = {

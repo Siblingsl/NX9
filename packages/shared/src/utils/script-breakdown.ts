@@ -109,7 +109,7 @@ function makeShot(
     sceneId: `${episodeId}-scene-${shotIndex}`,
     sceneCode,
     title,
-    durationSec: 5,
+    durationSec: 3,
     characters,
     scene,
     scriptText: text,

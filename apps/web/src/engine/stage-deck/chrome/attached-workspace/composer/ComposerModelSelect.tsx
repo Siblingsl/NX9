@@ -34,10 +34,15 @@ export function ComposerModelSelect({
         onMouseDown={stop}
         onClick={() => setOpen((v) => !v)}
         title={value}
-        className="inline-flex items-center gap-0.5 px-2 py-1 rounded-lg text-[11px] text-ink/60 hover:text-ink hover:bg-surface/80 transition-colors max-w-[220px]"
+        className={
+          tone === 'desk'
+            ? 'kp__btn max-w-[220px]'
+            : 'inline-flex items-center gap-0.5 px-2 py-1 rounded-lg text-[11px] text-ink/60 hover:text-ink hover:bg-surface/80 transition-colors max-w-[220px]'
+        }
+        style={tone === 'desk' ? { padding: '4px 8px', fontSize: 10 } : undefined}
       >
         <span className="truncate">{shortLabel}</span>
-        <ChevronDown size={11} className="text-ink/30 shrink-0" />
+        <ChevronDown size={11} className={tone === 'desk' ? 'shrink-0 opacity-50' : 'text-ink/30 shrink-0'} />
       </button>
       <ComposerPopover
         open={open}

@@ -3,16 +3,13 @@
   "private": true,
   "version": "0.1.0",
   "description": "NX9 — AI node workflow studio (Web-first, Electron-ready)",
-  "workspaces": [
-    "packages/*",
-    "apps/*"
-  ],
+  "packageManager": "pnpm@10.32.0",
   "scripts": {
-    "dev": "npm run build -w @nx9/shared && concurrently -n server,web -c magenta,cyan \"npm run dev -w @nx9/server\" \"npm run dev -w @nx9/web\"",
-    "dev:server": "npm run dev -w @nx9/server",
-    "dev:web": "npm run dev -w @nx9/web",
-    "build": "npm run build -w @nx9/shared && npm run build -w @nx9/server && npm run build -w @nx9/web",
-    "typecheck": "npm run typecheck -w @nx9/shared && npm run typecheck -w @nx9/server && npm run typecheck -w @nx9/web",
+    "dev": "pnpm --filter @nx9/shared build && concurrently -n server,web -c magenta,cyan \"pnpm --filter @nx9/server dev\" \"pnpm --filter @nx9/web dev\"",
+    "dev:server": "pnpm --filter @nx9/server dev",
+    "dev:web": "pnpm --filter @nx9/web dev",
+    "build": "pnpm --filter @nx9/shared build && pnpm --filter @nx9/server build && pnpm --filter @nx9/web build",
+    "typecheck": "pnpm --filter @nx9/shared typecheck && pnpm --filter @nx9/server typecheck && pnpm --filter @nx9/web typecheck",
     "luxtts:install": "powershell -ExecutionPolicy Bypass -File services/luxtts/install.ps1",
     "luxtts:start": "powershell -ExecutionPolicy Bypass -File services/luxtts/start.ps1"
   },
@@ -21,6 +18,17 @@
     "typescript": "^5.7.0"
   },
   "engines": {
-    "node": ">=18"
+    "node": ">=18",
+    "pnpm": ">=10"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "@prisma/client",
+      "@prisma/engines",
+      "esbuild",
+      "prisma",
+      "puppeteer",
+      "sharp"
+    ]
   }
 }

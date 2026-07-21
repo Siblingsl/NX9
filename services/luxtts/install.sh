@@ -9,4 +9,4 @@ pip install --upgrade pip
 pip install -r requirements.txt
 pip install "git+https://github.com/ysharma3501/LuxTTS.git"
 
-echo "Done. Start with: npm run luxtts:start"
+echo "Done. Start with: pnpm run luxtts:start"

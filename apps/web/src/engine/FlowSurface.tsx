@@ -23,12 +23,13 @@ import {
   type Edge,
   type Node,
   type OnConnect,
+  type OnConnectStart,
   type Viewport,
   type OnConnectEnd,
   type OnNodeDrag,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import { PERF, validateLink, WORKFLOW_TEMPLATES, lookupBlock, canExecuteNode, resolveNodeInteraction, isPromptBarKind, syncAssetImportNodeFields, isStoryboardExecLink } from '@nx9/shared';
+import { PERF, validateLink, WORKFLOW_TEMPLATES, lookupBlock, canExecuteNode, resolveNodeInteraction, isPromptBarKind, syncAssetImportNodeFields, isStoryboardExecLink, isDirector3dDeskLink } from '@nx9/shared';
 import { blockTypes, preloadBlockTypes } from '../blocks/registry';
 import { api } from '../api/client';
 import { useFlowHistory, type FlowSnapshot } from '../hooks/use-flow-history';
@@ -51,12 +52,10 @@ import {
   setPasteAnchorScreen,
 } from './flow-clipboard';
 import { applyNodeAlignment, type NodeAlignAction } from './node-align';
-import { type FlowEdgeTypeId, normalizeFlowEdgeType } from './flow-edge-types';
 import { EdgeContextMenu, PaneContextMenu, SelectionContextMenu } from './FlowContextMenu';
 import { exactDropPosition, findOpenPosition, relocateNodeGroup } from './spawn-placement';
 import { fromPayload as parseFlowPayload, toPayload as buildFlowPayload } from './flow-payload';
 import { channelEdgeTypes } from './stage-deck/canvas/ChannelEdge';
-import { LaneBackground } from './stage-deck/canvas/LaneBackground';
 import { LensMenu } from './stage-deck/canvas/LensMenu';
 import { useStageDeckNodeTypes } from './stage-deck/canvas/stage-deck-node-types';
 import { CommandPalette, useCommandPaletteHotkey } from './stage-deck/chrome/CommandPalette';
@@ -103,13 +102,13 @@ import { auditCorePipeline, repairCorePipeline } from './core-pipeline-graph';
 const CANVAS_GRID = {
   light: {
     background: '#E8E4DB',
-    dots: { gap: 24, size: 1.3, color: 'rgba(42,36,28,0.12)' },
-    lines: { gap: 36, size: 1.15, color: 'rgba(42,36,28,0.1)' },
+    dots: { gap: 18, size: 2.4, color: 'rgba(42,36,28,0.42)' },
+    lines: { gap: 36, size: 1.15, color: 'rgba(42,36,28,0.18)' },
   },
   dark: {
     background: '#0C0E12',
-    dots: { gap: 28, size: 1.35, color: 'rgba(255,255,255,0.13)' },
-    lines: { gap: 40, size: 1.2, color: 'rgba(255,255,255,0.085)' },
+    dots: { gap: 28, size: 2.8, color: 'rgba(255,255,255,0.55)' },
+    lines: { gap: 36, size: 1.2, color: 'rgba(255,255,255,0.2)' },
   },
 } as const;
 
@@ -180,6 +179,7 @@ const FlowSurfaceInner = memo(function FlowSurfaceInner({
   const [ready, setReady] = useState(false);
   const [recipePickerDismissed, setRecipePickerDismissed] = useState(false);
   const [dragging, setDragging] = useState(false);
+  const [connecting, setConnecting] = useState(false);
   const [selectedBlockId, setSelectedBlockId] = useState<string | null>(null);
   const selectedBlockIdRef = useRef<string | null>(null);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; ids: string[] } | null>(null);
@@ -977,7 +977,7 @@ const FlowSurfaceInner = memo(function FlowSurfaceInner({
           setDeckSelection(null, null);
         } else {
           const node = selected[0];
-          const kind = node.type ?? 'prompt';
+          const kind = node.type ?? 'picture-gen';
           setDeckSelection(id, kind);
         }
       }
@@ -986,17 +986,17 @@ const FlowSurfaceInner = memo(function FlowSurfaceInner({
       const linkedShot = storyboard.shots.find(
         (s) => s.linkedBlockId === id || s.id === (node.data?.linkedShotId as string),
       );
+      // 导演台自有工作台，选中时不打开旧故事板侧栏
+      if (node.type === 'director-desk' || node.type === 'storyboard-desk') {
+        const shotId =
+          (node.data?.linkedShotId as string | undefined) || linkedShot?.id;
+        if (shotId) selectShot(shotId);
+        return;
+      }
       if (linkedShot) {
         selectShot(linkedShot.id);
         setStoryboardOpen(true);
         requestScrollToShot(linkedShot.id);
-      } else if (node.type === 'director-desk') {
-        const shotId = node.data?.linkedShotId as string | undefined;
-        if (shotId) {
-          selectShot(shotId);
-          setStoryboardOpen(true);
-          requestScrollToShot(shotId);
-        }
       }
     },
     [
@@ -1163,36 +1163,6 @@ const FlowSurfaceInner = memo(function FlowSurfaceInner({
       appendLog(`已删除 ${removeIds.size} 条连接线`);
     },
     [push, setEdges, appendLog],
-  );
-
-  const handleChangeEdgeType = useCallback(
-    (edgeId: string, edgeType: FlowEdgeTypeId) => {
-      const current = edgesRef.current.find((e) => e.id === edgeId);
-      if (!current) return;
-      const nextType = edgeType === 'default' ? undefined : edgeType;
-      const currentPath =
-        current.type === 'channel'
-          ? (current.data?.pathType as string | undefined) ?? 'default'
-          : current.type ?? 'default';
-      if (currentPath === (nextType ?? 'default')) return;
-      pushFlowSnapshot(nodesRef.current, edgesRef.current);
-      setEdges((prev) =>
-        prev.map((e) => {
-          if (e.id !== edgeId) return e;
-          if (isStageDeck) {
-            return {
-              ...e,
-              type: 'channel',
-              data: { ...e.data, pathType: edgeType },
-              selected: true,
-            };
-          }
-          return { ...e, type: nextType, selected: true };
-        }),
-      );
-      appendLog(`连接线类型已切换`);
-    },
-    [push, setEdges, appendLog, isStageDeck],
   );
 
   const handleAlignSelection = useCallback(
@@ -1475,12 +1445,18 @@ const FlowSurfaceInner = memo(function FlowSurfaceInner({
       const execLink = Boolean(
         source &&
           target &&
-          isStoryboardExecLink(
+          (isStoryboardExecLink(
             source.type ?? '',
             target.type ?? '',
             conn.sourceHandle,
             conn.targetHandle,
-          ),
+          ) ||
+            isDirector3dDeskLink(
+              source.type ?? '',
+              target.type ?? '',
+              conn.sourceHandle,
+              conn.targetHandle,
+            )),
       );
       setEdges((eds) =>
         addEdge(
@@ -1491,7 +1467,6 @@ const FlowSurfaceInner = memo(function FlowSurfaceInner({
               ? {
                   type: 'channel',
                   data: {
-                    pathType: execLink ? 'straight' : 'default',
                     execLink,
                   },
                 }
@@ -1565,8 +1540,13 @@ const FlowSurfaceInner = memo(function FlowSurfaceInner({
     setSmartGuides([]);
   }, []);
 
+  const onConnectStart: OnConnectStart = useCallback(() => {
+    setConnecting(true);
+  }, []);
+
   const onConnectEnd: OnConnectEnd = useCallback(
     (event, connectionState) => {
+      setConnecting(false);
       if (!isStageDeck || connectionState.isValid) return;
       const fromNode = connectionState.fromNode;
       if (!fromNode?.id || !fromNode.type) return;
@@ -1600,6 +1580,7 @@ const FlowSurfaceInner = memo(function FlowSurfaceInner({
     'w-full h-full',
     effectiveIntensive ? 'intensive' : '',
     dragging ? 'is-dragging' : '',
+    connecting ? 'is-connecting' : '',
   ]
     .filter(Boolean)
     .join(' ');
@@ -1632,7 +1613,7 @@ const FlowSurfaceInner = memo(function FlowSurfaceInner({
               target: id,
               sourceHandle: wire.sourceHandle ?? undefined,
               type: 'channel',
-              data: { pathType: 'default' },
+              data: {},
             },
             eds,
           ),
@@ -1764,7 +1745,7 @@ const FlowSurfaceInner = memo(function FlowSurfaceInner({
         return;
       }
       if (isStageDeck && isSurfaceEnabled('canvasFirst')) {
-        const kind = node.type ?? 'prompt';
+        const kind = node.type ?? 'picture-gen';
         if (isPromptBarKind(kind)) {
           setDeckSelection(node.id, kind);
           useDeckUi.getState().focusPromptBar();
@@ -1808,6 +1789,8 @@ const FlowSurfaceInner = memo(function FlowSurfaceInner({
     <div
       className={`relative h-full w-full ${flowClass} ${canvasAppearance.theme === 'dark' ? 'nx9-theme-dark' : 'nx9-theme-light'}`}
       style={{ background: canvasGrid.background }}
+      data-socket-style={canvasAppearance.socketStyle ?? 'dot'}
+      data-connecting={connecting ? '1' : undefined}
       onDragOver={onDragOver}
       onDrop={onDrop}
       onDoubleClick={onPaneDoubleClick}
@@ -1886,7 +1869,8 @@ const FlowSurfaceInner = memo(function FlowSurfaceInner({
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
         onConnect={onConnect}
-        onConnectEnd={isStageDeck ? onConnectEnd : undefined}
+        onConnectStart={onConnectStart}
+        onConnectEnd={onConnectEnd}
         isValidConnection={isValidConnection}
         nodeTypes={nodeTypes}
         edgeTypes={edgeTypes}
@@ -1948,7 +1932,6 @@ const FlowSurfaceInner = memo(function FlowSurfaceInner({
             }}
           />
         )}
-        {isStageDeck && <LaneBackground />}
         {isStageDeck && <SmartGuides guides={smartGuides} />}
         {!effectiveIntensive && <MiniMap pannable zoomable className="!bottom-4 !right-4" />}
         <Controls showInteractive={false} className="!bottom-4 !left-4" />
@@ -1962,7 +1945,6 @@ const FlowSurfaceInner = memo(function FlowSurfaceInner({
               getEdges={() => edgesRef.current}
               getNodePositions={getNodeCenterPositions}
               onCutEdges={(ids) => handleDeleteEdges(ids)}
-              onChangeEdgeType={(edgeId, edgeType) => handleChangeEdgeType(edgeId, edgeType)}
               onDeleteEdge={(edgeId) => handleDeleteEdges([edgeId])}
             />
         )}
@@ -2070,9 +2052,7 @@ const FlowSurfaceInner = memo(function FlowSurfaceInner({
           x={edgeMenu.x}
           y={edgeMenu.y}
           edgeId={edgeMenu.edgeId}
-          edgeType={normalizeFlowEdgeType(edges.find((e) => e.id === edgeMenu.edgeId)?.type)}
           onClose={closeMenus}
-          onChangeType={(type) => handleChangeEdgeType(edgeMenu.edgeId, type)}
           onDelete={() => handleDeleteEdges([edgeMenu.edgeId])}
         />
       )}

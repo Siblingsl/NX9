@@ -5,10 +5,12 @@ import { compileScenePrompt, MAX_ENV_REFERENCE_IMAGES } from '@nx9/shared';
 import { api } from '../../../../api/client';
 import { useWorkspaceDocument } from '../../../../stores/workspace-document';
 import { useActivityLog } from '../../../../stores/activity-log';
-import { useFlowRuntime } from '../../../../stores/flow-runtime';
 import { useToast } from '../../../../stores/toast';
+import { useAssetLibraryModalUi } from '../../../../stores/asset-library-modal-ui';
+import { useWorkspaceCatalog } from '../../../../stores/workspace-catalog';
 import ImageUploadSlot from '../../../../blocks/shared/ImageUploadSlot';
 import { EntityCard } from '../../../../components/EntityCard';
+import { sceneCandidateToWorkspaceItem } from '../../../script-asset-candidates';
 
 function handleAgentError(e: unknown, label: string): string {
   const raw = String(e);
@@ -29,9 +31,11 @@ export function EnvironmentBiblePanel() {
 
   const scenes = useWorkspaceDocument((s) => s.scriptPlan?.scenes);
   const setEnvironments = useWorkspaceDocument((s) => s.setEnvironments);
+  const upsertBacklotWorkspace = useWorkspaceDocument((s) => s.upsertBacklotWorkspace);
   const advancePlaybookStep = useWorkspaceDocument((s) => s.advancePlaybookStep);
   const appendLog = useActivityLog((s) => s.append);
-  const spawnBlockForShot = useFlowRuntime((s) => s.runtime?.spawnBlockForShot);
+  const openAt = useAssetLibraryModalUi((s) => s.openAt);
+  const activeProjectId = useWorkspaceCatalog((s) => s.activeId);
 
   const handleExtract = useCallback(async () => {
     if (!scenes || scenes.length === 0) {
@@ -54,25 +58,44 @@ export function EnvironmentBiblePanel() {
   const handleSave = useCallback(() => {
     const payload: EnvironmentLibraryPayload = { version: 1, environments };
     setEnvironments(payload);
-    advancePlaybookStep();
-    appendLog(`环境卡已保存 · ${environments.length} 条`);
-  }, [environments, setEnvironments, advancePlaybookStep, appendLog]);
-
-  const handleSpawnSceneCard = useCallback((env: EnvironmentProfile) => {
-    if (!spawnBlockForShot) {
-      appendLog('Canvas 运行时未就绪');
-      return;
+    const items = useWorkspaceDocument.getState().backlotWorkspace.items;
+    for (const env of environments) {
+      const existing = items.find((item) => {
+        if (item.kind !== 'scene') return false;
+        const creative = (item.creative ?? {}) as { environmentId?: string };
+        return (
+          creative.environmentId === env.id
+          || item.id === `scene-${env.id}`
+          || item.label === env.name
+        );
+      });
+      upsertBacklotWorkspace(sceneCandidateToWorkspaceItem(env, existing));
     }
-    spawnBlockForShot(env.sceneCode ?? env.id, 'scene-card', {
-      sceneName: env.name,
-      description: env.descriptionZh,
-      era: env.era ?? '',
-      lighting: env.lighting ?? '',
-      props: env.props ?? [],
-      referenceUrls: env.referenceUrls ?? (env.referenceImageUrl ? [env.referenceImageUrl] : []),
+    advancePlaybookStep();
+    appendLog(`环境卡已保存 · ${environments.length} 条（已同步素材库场景页）`);
+  }, [environments, setEnvironments, upsertBacklotWorkspace, advancePlaybookStep, appendLog]);
+
+  const handleOpenInLibrary = useCallback((env: EnvironmentProfile) => {
+    const items = useWorkspaceDocument.getState().backlotWorkspace.items;
+    const existing = items.find((item) => {
+      if (item.kind !== 'scene') return false;
+      const creative = (item.creative ?? {}) as { environmentId?: string };
+      return (
+        creative.environmentId === env.id
+        || item.id === `scene-${env.id}`
+        || item.label === env.name
+      );
     });
-    appendLog(`已 spawn scene-card: ${env.name}`);
-  }, [spawnBlockForShot, appendLog]);
+    const item = sceneCandidateToWorkspaceItem(env, existing);
+    upsertBacklotWorkspace(item);
+    openAt({
+      tab: 'scene',
+      itemId: item.id,
+      projectId: activeProjectId ?? undefined,
+      scope: 'private',
+    });
+    appendLog(`已在素材库打开场景：${env.name}`);
+  }, [appendLog, openAt, activeProjectId, upsertBacklotWorkspace]);
 
   const handleUpdateEnv = useCallback((id: string, patch: Partial<EnvironmentProfile>) => {
     setLocalEnvironments((prev) => prev.map((e) => (e.id === id ? { ...e, ...patch } : e)));
@@ -193,11 +216,10 @@ export function EnvironmentBiblePanel() {
                   actions={
                     <button
                       type="button"
-                      onClick={() => handleSpawnSceneCard(env)}
-                      disabled={!spawnBlockForShot}
-                      className="flex-1 rounded-xl bg-brand text-white py-1.5 text-[11px] disabled:opacity-50"
+                      onClick={() => handleOpenInLibrary(env)}
+                      className="flex-1 rounded-xl bg-brand text-white py-1.5 text-[11px]"
                     >
-                      spawn scene-card 到画布
+                      在素材库编辑
                     </button>
                   }
                 />

@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "npm run build && nest start --watch",
+    "dev": "pnpm run build && nest start --watch",
     "build": "prisma generate && nest build",
     "build:nest": "nest build",
     "start": "node dist/main.js",
@@ -18,7 +18,7 @@
     "@nestjs/core": "^11.0.0",
     "@nestjs/platform-express": "^11.0.0",
     "@nestjs/serve-static": "^5.0.0",
-    "@nx9/shared": "*",
+    "@nx9/shared": "workspace:*",
     "@prisma/client": "^6.0.0",
     "class-transformer": "^0.5.1",
     "class-validator": "^0.14.1",
@@ -26,11 +26,8 @@
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1",
     "sharp": "^0.34.5",
-    "@hyperframes/producer": "^0.1.0",
-    "@hyperframes/core": "^0.1.0"
-  },
-  "optionalDependencies": {
-    "@hyperframes/remotion-adapter": "^0.1.0"
+    "@hyperframes/producer": "^0.7.64",
+    "@hyperframes/core": "^0.7.64"
   },
   "devDependencies": {
     "@nestjs/cli": "^11.0.0",

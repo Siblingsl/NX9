@@ -12,5 +12,5 @@ pip install -r requirements.txt
 pip install "git+https://github.com/ysharma3501/LuxTTS.git"
 
 Write-Host ""
-Write-Host "Done. Start with: npm run luxtts:start"
+Write-Host "Done. Start with: pnpm run luxtts:start"
 Write-Host "Or: .\.venv\Scripts\python.exe server.py"

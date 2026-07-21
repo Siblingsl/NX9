@@ -11,7 +11,7 @@ export const FIXTURE_ENV_MULTI_REF = {
 };
 
 export const FIXTURE_PIPELINE_13_NODE_KINDS = [
-  'shot-script', 'text-chunker', 'story-grid', 'character-sheet', 'scene-card',
+  'shot-script', 'text-chunker', 'story-grid', 'asset-import', 'asset-import',
   'director-3d', 'picture-gen', 'review-gate', 'motion-story', 'continuity-check',
   'clip-editor', 'review-gate', 'export-pack',
 ];

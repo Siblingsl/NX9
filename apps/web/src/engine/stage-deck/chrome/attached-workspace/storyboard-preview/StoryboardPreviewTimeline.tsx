@@ -23,14 +23,16 @@ export function StoryboardPreviewTimeline({
     (t) => t <= maxSec,
   );
 
+  if (sorted.length === 0) return null;
+
   return (
-    <div className="shrink-0 px-3 pt-2 pb-1 border-b border-line/25 nodrag nopan" onMouseDown={stop}>
-      <div className="flex items-end gap-2 mb-1">
+    <div className="kp-tl nodrag nopan" onMouseDown={stop}>
+      <div className="kp-tl__ticks">
         {ticks.map((sec) => (
           <button
             key={sec}
             type="button"
-            className="text-[9px] text-ink/35 hover:text-brand tabular-nums"
+            className="kp-tl__tick"
             onClick={() => {
               const hit = sorted.find((f) => sec >= f.startSec && sec < f.endSec);
               if (hit) onSelect(hit.id);
@@ -40,7 +42,7 @@ export function StoryboardPreviewTimeline({
           </button>
         ))}
       </div>
-      <div className="relative h-12 rounded-lg bg-surface/50 overflow-hidden">
+      <div className="kp-tl__track">
         {sorted.map((frame) => {
           const left = (frame.startSec / maxSec) * 100;
           const width = Math.max(4, ((frame.endSec - frame.startSec) / maxSec) * 100);
@@ -48,19 +50,15 @@ export function StoryboardPreviewTimeline({
             <button
               key={frame.id}
               type="button"
-              title={`${frame.label} · ${frame.startSec}~${frame.endSec}s`}
+              title={`${frame.label} · ${frame.startSec}–${frame.endSec}s`}
               onClick={() => onSelect(frame.id)}
-              className={`absolute top-1 bottom-1 rounded-md border overflow-hidden transition-all ${
-                selectedFrameId === frame.id
-                  ? 'border-brand ring-1 ring-brand/30 z-10'
-                  : 'border-line/50 hover:border-brand/40'
-              }`}
+              className={`kp-tl__clip ${selectedFrameId === frame.id ? 'is-on' : ''}`}
               style={{ left: `${left}%`, width: `${width}%` }}
             >
               {frame.imageUrl ? (
-                <img src={frame.imageUrl} alt="" className="w-full h-full object-cover opacity-90" />
+                <img src={frame.imageUrl} alt="" />
               ) : (
-                <span className="block w-full h-full bg-ink/5" />
+                <span className="kp-tl__clip-empty" />
               )}
             </button>
           );

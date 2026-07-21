@@ -243,7 +243,7 @@ export function normalizeProductionEpisode(args: {
       const dialogue = normalizeDialogue(row.dialogue);
       const durationSec = Math.max(
         args.config.minShotDurationSec,
-        Math.min(args.config.maxShotDurationSec, Math.round(Number(row.durationSec) || 5)),
+        Math.min(args.config.maxShotDurationSec, Math.round(Number(row.durationSec) || 3)),
       );
       const scriptText = String(row.scriptText ?? row.action ?? row.descriptionZh ?? row.visual ?? row.title ?? '').trim();
       const characters = stringArray(row.characters ?? row.characterNames);
@@ -422,7 +422,7 @@ export class AgentService {
     const system = [
       '你是短剧分镜编剧。将用户提供的小说/章节改写为分镜脚本行。',
       '遵循：保留核心情节与角色关系；将叙述转为可视化画面描写；用对白推动情节；不写镜头语言（景别/运镜由系统决定）。',
-      '每行一个镜头，时长 3-8 秒。',
+      '每行一个镜头，时长优先 2-3 秒，一般不超过 4 秒。',
       '仅输出 JSON 对象：{"rows":[{"action":"画面/动作描述","dialogue":"对白，无则空串","durationSec":数字(2-30),"shotType":"ECU|CU|MS|FS|WS|OTS"}]}。',
       '至少生成 3 行。不要输出任何解释文字。',
     ].join('\n');
@@ -507,8 +507,8 @@ export class AgentService {
     const system = [
       '你是分镜表生成器。将用户提供的文本转换为分镜表。',
       '输出 JSON 数组，每行一个镜头。',
-      '格式: [{"id":"唯一ID","group":"S01","shotSize":"CU|MS|FS|WS","cameraMove":"推|拉|摇|移|固定","durationSec":3-8,"descriptionZh":"画面描述","dialogue":"对白","sfx":"音效","videoDesc":"视频动态描述","associateAssetIds":[]}]',
-      '每个镜头 durationSec 3-8 秒，单组 ≤15 秒。',
+      '格式: [{"id":"唯一ID","group":"S01","shotSize":"CU|MS|FS|WS","cameraMove":"推|拉|摇|移|固定","durationSec":2-4,"descriptionZh":"画面描述","dialogue":"对白","sfx":"音效","videoDesc":"视频动态描述","associateAssetIds":[]}]',
+      '每个镜头 durationSec 优先 2-3 秒（默认 3），一般不超过 4 秒；单组 ≤12 秒。',
       '至少生成 5 个镜头。只输出 JSON 数组。',
     ].join('\n');
 

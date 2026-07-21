@@ -6,7 +6,8 @@ import { useWorkspaceDocument } from '../../../../stores/workspace-document';
 import { useActivityLog } from '../../../../stores/activity-log';
 import { useToast } from '../../../../stores/toast';
 import { useFlowCommands } from '../../../../stores/flow-commands';
-import { useContextRailUi } from '../../stores/context-rail-ui';
+import { useAssetLibraryModalUi } from '../../../../stores/asset-library-modal-ui';
+import { useWorkspaceCatalog } from '../../../../stores/workspace-catalog';
 
 function handleAgentError(e: unknown, label: string): string {
   const raw = String(e);
@@ -23,6 +24,8 @@ export function CharacterBibleStepPanel() {
   const upsertCharacter = useWorkspaceDocument((s) => s.upsertCharacter);
   const advancePlaybookStep = useWorkspaceDocument((s) => s.advancePlaybookStep);
   const appendLog = useActivityLog((s) => s.append);
+  const openAt = useAssetLibraryModalUi((s) => s.openAt);
+  const activeProjectId = useWorkspaceCatalog((s) => s.activeId);
   const [extracting, setExtracting] = useState(false);
   const [extracted, setExtracted] = useState<CharacterProfile[]>([]);
 
@@ -178,11 +181,17 @@ export function CharacterBibleStepPanel() {
                   <button
                     type="button"
                     onClick={() => {
-                      useContextRailUi.getState().requestTab('library', { librarySub: 'templates' });
+                      openAt({
+                        tab: 'character',
+                        itemId: char.id,
+                        projectId: activeProjectId ?? undefined,
+                        scope: 'private',
+                      });
+                      appendLog(`已打开素材库角色：${char.name}`);
                     }}
                     className="text-[10px] text-brand/70 hover:text-brand"
                   >
-                    打开 character-sheet
+                    打开素材库
                   </button>
                 </div>
               </div>

@@ -28,42 +28,44 @@ export function StoryboardPreviewFrameEditor({
   const canRegen = canRegenerateFrame(frame);
 
   return (
-    <div className="p-3 space-y-2 nodrag nopan" onMouseDown={stop}>
-      <div className="flex items-center gap-2">
-        <p className="text-[12px] font-medium text-ink">
+    <div className="kp__panel nodrag nopan" onMouseDown={stop}>
+      <div className="kp__panel-head">
+        <p className="kp__panel-title">
           编辑 {frame.label}
-          {frame.locked && <span className="ml-2 text-[10px] text-violet-600">🔒 已锁定</span>}
+          {frame.locked && <span className="kp__panel-badge" style={{ marginLeft: 8 }}>已锁定</span>}
         </p>
-        <button type="button" onClick={onClose} className="ml-auto p-1 rounded text-ink/35 hover:text-ink">
+        <button type="button" onClick={onClose} className="kp__btn is-ghost" style={{ marginLeft: 'auto', padding: 4 }}>
           <X size={14} />
         </button>
       </div>
 
-      <div className="flex gap-3">
-        <div className="w-28 shrink-0 aspect-video rounded-lg overflow-hidden border border-line/50 bg-surface/40">
+      <div className="kp__editor">
+        <div className="kp__media is-shot">
           {frame.imageUrl ? (
-            <img src={frame.imageUrl} alt="" className="w-full h-full object-cover" />
+            <img src={frame.imageUrl} alt="" />
           ) : (
-            <div className="w-full h-full flex items-center justify-center text-[9px] text-ink/30">预览</div>
+            <div className="kp__media-empty">预览</div>
           )}
         </div>
-        <div className="flex-1 min-w-0 space-y-2">
+        <div className="kp__editor-main">
           <AssetMentionInput
             as="textarea"
             value={frame.promptSummary}
             onChange={(next) => onUpdate({ promptSummary: next, userModified: true })}
             placeholder="修改 Prompt… 输入 @ 引用角色、场景、镜头"
             kinds={['character', 'scene', 'shot', 'emotion']}
-            className="w-full h-20 border border-line/50 rounded-lg px-2.5 py-2 text-[12px] resize-none focus:outline-none focus:border-brand/40"
+            className="kp__field-area"
+            rows={3}
           />
-          <div className="flex flex-wrap gap-2">
+          <div className="kp__row">
             <input
               type="text"
               value={frame.stylePreset ?? ''}
               onChange={(e) => onUpdate({ stylePreset: e.target.value || null })}
               onMouseDown={stop}
               placeholder="风格 preset"
-              className="flex-1 min-w-[120px] text-[10px] rounded-md border border-line/50 px-2 py-1"
+              className="kp__field-input"
+              style={{ flex: 1, minWidth: 120 }}
             />
             <input
               type="text"
@@ -71,23 +73,26 @@ export function StoryboardPreviewFrameEditor({
               onChange={(e) => onUpdate({ referenceImageUrl: e.target.value || null })}
               onMouseDown={stop}
               placeholder="参考图 URL"
-              className="flex-1 min-w-[120px] text-[10px] rounded-md border border-line/50 px-2 py-1"
+              className="kp__field-input"
+              style={{ flex: 1, minWidth: 120 }}
             />
           </div>
           {frame.director3dGuide && (
-            <div className="rounded-lg border border-violet-500/20 bg-violet-500/5 px-2 py-1.5">
-              <p className="text-[10px] font-medium text-violet-700">已绑定 3D 机位参考</p>
-              {frame.director3dGuide.cameraPrompt && (
-                <p className="mt-0.5 text-[9px] text-ink/45 line-clamp-2">
-                  {frame.director3dGuide.cameraPrompt}
-                </p>
-              )}
+            <div className="kp__card is-violet">
+              <div className="kp__card-body" style={{ padding: '8px 10px' }}>
+                <p className="kp__panel-title" style={{ fontSize: 10 }}>已绑定 3D 机位参考</p>
+                {frame.director3dGuide.cameraPrompt && (
+                  <p className="kp__hint" style={{ marginTop: 4 }}>
+                    {frame.director3dGuide.cameraPrompt}
+                  </p>
+                )}
+              </div>
             </div>
           )}
         </div>
       </div>
 
-      <div className="flex justify-end gap-2 pt-1">
+      <div className="kp__editor-actions">
         <button
           type="button"
           disabled={!director3dConnected || frame.locked}
@@ -99,7 +104,7 @@ export function StoryboardPreviewFrameEditor({
                 : '在 3D 导演台中设计此帧机位'
               : '请先连接 3D 导演台节点'
           }
-          className="inline-flex items-center gap-1 px-3 py-1 rounded-lg border border-violet-500/25 text-violet-700 text-[11px] disabled:opacity-40"
+          className="kp__btn"
         >
           <Box size={12} />
           3D 构图
@@ -108,7 +113,7 @@ export function StoryboardPreviewFrameEditor({
           type="button"
           disabled={!canRegen}
           onClick={onRegenerate}
-          className="px-3 py-1 rounded-lg bg-brand text-white text-[11px] disabled:opacity-40"
+          className="kp__btn is-solid"
         >
           仅重新生成此张
         </button>

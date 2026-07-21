@@ -25,8 +25,8 @@ export function normalizeScriptBreakdownConfig(
     Array.isArray(value)
       ? value.map(String).map((item) => item.trim()).filter(Boolean).slice(0, 12)
       : [];
-  const minShot = Math.max(1, Math.min(15, Math.round(Number(raw.minShotDurationSec) || 3)));
-  const maxShot = Math.max(minShot, Math.min(30, Math.round(Number(raw.maxShotDurationSec) || 8)));
+  const minShot = Math.max(1, Math.min(15, Math.round(Number(raw.minShotDurationSec) || 2)));
+  const maxShot = Math.max(minShot, Math.min(30, Math.round(Number(raw.maxShotDurationSec) || 4)));
   return {
     ...raw,
     episodeCount: Math.max(1, Math.min(50, Math.round(Number(raw.episodeCount) || 1))),
@@ -236,7 +236,7 @@ export function buildEpisodeBreakdownUserPrompt(args: {
       '输出 JSON 对象，严格结构：',
       '{"episode":{"title":"标题","logline":"梗概"},"scenes":[{',
       '"code":"1-1","title":"场景标题","location":"明确地点","timeOfDay":"日/夜/黄昏等","interiorExterior":"INT|EXT|INT/EXT","summary":"场景目的",',
-      '"shots":[{"title":"镜头标题","durationSec":5,"shotSize":"ECU|CU|MS|FS|WS|OTS","cameraMove":"固定|推|拉|摇|移|跟|手持",',
+      '"shots":[{"title":"镜头标题","durationSec":3,"shotSize":"ECU|CU|MS|FS|WS|OTS","cameraMove":"固定|推|拉|摇|移|跟|手持",',
       '"purpose":"镜头目的：表现孤独/制造悬念/展示关系/推动剧情等","cameraAngle":"平视|俯拍|仰拍|侧拍","cameraLens":"广角|标准镜头|长焦",',
       '"characters":["稳定角色名"],"scriptText":"对应剧情与可视动作","visual":"电影级关键帧画面描述：环境、人物位置、光线、动作、情绪、构图","action":"动作设计：开始动作、变化、结束动作",',
       '"dialogue":[{"speaker":"角色名","text":"对白","emotion":"情绪"}],"narration":"旁白，可为空","sound":"环境声音与音乐设计",',

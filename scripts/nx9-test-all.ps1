@@ -43,13 +43,13 @@ Write-Host "Git: $GitCommit ($DirtyFlag) · Node: $NodeVer" -ForegroundColor Mag
 Push-Location $RootDir
 
 # ST-0 静态门禁
-Step 'ST-0-shared-build'  { npm run build -w @nx9/shared }
-Step 'ST-0-web-typecheck' { npm run typecheck -w @nx9/web }
-Step 'ST-0-server-build'  { Push-Location apps\server; npm run build:nest; Pop-Location }
+Step 'ST-0-shared-build'  { pnpm --filter @nx9/shared build }
+Step 'ST-0-web-typecheck' { pnpm --filter @nx9/web typecheck }
+Step 'ST-0-server-build'  { Push-Location apps\server; pnpm run build:nest; Pop-Location }
 
 # ST-2 服务端 vitest 全量
-Step 'ST-2-vitest-all'    { Push-Location apps\server; npm run test; Pop-Location }
-Step 'ST-2-vitest-wf'     { Push-Location apps\server; npm run test -- test-wf.test.ts; Pop-Location }
+Step 'ST-2-vitest-all'    { Push-Location apps\server; pnpm run test; Pop-Location }
+Step 'ST-2-vitest-wf'     { Push-Location apps\server; pnpm run test -- test-wf.test.ts; Pop-Location }
 
 Pop-Location
 
@@ -78,7 +78,7 @@ $ReportContent = @"
 "@
 
 foreach ($r in $global:StepResults) {
-  $ReportContent += "| $($r.Step) | $($r.Step) | npm run ... | $($r.Expected) | $($r.Actual) | $($r.Elapsed) | $($r.Result) |`n"
+  $ReportContent += "| $($r.Step) | $($r.Step) | pnpm run ... | $($r.Expected) | $($r.Actual) | $($r.Elapsed) | $($r.Result) |`n"
 }
 
 $Unlocked = @()

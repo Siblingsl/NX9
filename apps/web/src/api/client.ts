@@ -257,11 +257,19 @@ export const api = {
       body: JSON.stringify(body),
     }),
 
-  gridCompose: (body: { imageUrls: string[]; rows: number; cols: number }) =>
-    request<{ ok: boolean; url: string }>('/api/grid/compose', {
-      method: 'POST',
-      body: JSON.stringify(body),
-    }),
+  gridCompose: (body: {
+    imageUrls: string[];
+    rows: number;
+    cols: number;
+    labels?: string[];
+  }) =>
+    request<{ ok: boolean; url: string; rows?: number; cols?: number; count?: number }>(
+      '/api/grid/compose',
+      {
+        method: 'POST',
+        body: JSON.stringify(body),
+      },
+    ),
 
   gridGenerate: (body: { prompt: string; rows?: number; cols?: number; style?: 'cinematic' | 'line-art' }) =>
     request<{ ok: boolean; url: string; message?: string; style?: string }>('/api/grid/generate', {
