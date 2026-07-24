@@ -6,8 +6,6 @@ import { BlockShell } from '../shared/BlockShell';
 import { useWorkspaceDocument } from '../../stores/workspace-document';
 import { useActivityLog } from '../../stores/activity-log';
 import { useFlowCommands } from '../../stores/flow-commands';
-import { useStoryboardUi } from '../../stores/flow-runtime';
-import { useContextRailUi } from '../../engine/stage-deck/stores/context-rail-ui';
 import { api } from '../../api/client';
 
 export interface ShotScriptRow {
@@ -80,8 +78,6 @@ function ShotScriptBlock(props: NodeProps) {
   const addShots = useWorkspaceDocument((s) => s.addShots);
   const shotCount = useWorkspaceDocument((s) => s.storyboard.shots.length);
   const requestSpawn = useFlowCommands((s) => s.requestSpawn);
-  const setStoryboardOpen = useStoryboardUi((s) => s.setOpen);
-  const requestRailTab = useContextRailUi((s) => s.requestTab);
   const [novelText, setNovelText] = useState((props.data?.novelText as string) ?? '');
   const [aiBusy, setAiBusy] = useState(false);
   const [aiError, setAiError] = useState<string | null>(null);
@@ -148,10 +144,9 @@ function ShotScriptBlock(props: NodeProps) {
 
   const startProduction = useCallback(() => {
     pushToStoryboard();
+    requestSpawn('storyboard-desk');
     requestSpawn('director-desk');
-    setStoryboardOpen(true);
-    requestRailTab('storyboard');
-  }, [pushToStoryboard, requestSpawn, setStoryboardOpen, requestRailTab]);
+  }, [pushToStoryboard, requestSpawn]);
 
   return (
     <BlockShell {...props}>

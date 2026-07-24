@@ -153,7 +153,7 @@ export function PictureProActionMenu({
             })}
           </div>
 
-          <div className="grid grid-cols-2 gap-x-3 gap-y-3 max-h-[320px] overflow-y-auto nx9-scroll pr-0.5">
+          <div className="grid grid-cols-2 gap-x-3 gap-y-3 max-h-[230px] overflow-y-auto nx9-scroll pr-0.5">
             {grouped.map(({ cat, actions }) => (
               <div key={cat.id} className="min-w-0">
                 <p className="px-1.5 mb-1 text-[10px] font-medium text-ink/40 tracking-wide">

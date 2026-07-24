@@ -179,7 +179,7 @@
 
 .dd-item {
   display: grid;
-  grid-template-columns: 16px 36px 1fr auto;
+  grid-template-columns: 16px 36px 1fr auto auto;
   gap: 6px;
   align-items: center;
   padding: 5px 8px;
@@ -270,6 +270,24 @@
 .dd-badge.is-miss {
   color: var(--dd-accent);
   border-color: var(--dd-accent-line);
+}
+
+.dd-item__filmstrip {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border: none;
+  background: transparent;
+  color: var(--dd-accent);
+  cursor: pointer;
+  border-radius: 4px;
+  flex-shrink: 0;
+  padding: 0;
+}
+.dd-item__filmstrip:hover {
+  background: var(--dd-accent-soft);
 }
 
 /* 预览 */
@@ -533,4 +551,160 @@
   overflow: auto;
   padding: 12px 14px 16px !important;
   background: #141618 !important;
+}
+
+/* ── DD-P1-02 预览模式切换 ── */
+.dd-preview-tabs {
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 8px;
+  background: var(--desk-panel);
+  border: 1px solid var(--dd-line);
+  margin-bottom: 4px;
+}
+
+.dd-preview-tabs__tab {
+  flex: 1;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 4px 8px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--dd-faint);
+  cursor: pointer;
+  text-align: center;
+  transition: background 0.12s, color 0.12s;
+}
+
+.dd-preview-tabs__tab:hover {
+  color: var(--dd-ink);
+  background: color-mix(in srgb, var(--dd-accent) 8%, transparent);
+}
+
+.dd-preview-tabs__tab.is-on {
+  background: var(--dd-accent);
+  color: var(--desk-btn-primary-ink);
+}
+
+/* 对比模式双列 */
+.dd-preview.is-compare {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+  aspect-ratio: auto;
+  min-height: 140px;
+}
+
+.dd-preview__frame {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  border-radius: 8px;
+  background: var(--desk-media-bg);
+  border: 1px solid var(--dd-line);
+  min-height: 120px;
+}
+
+.dd-preview__frame img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.dd-preview__frame-label {
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  font-size: 8px;
+  font-weight: 700;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.65);
+  color: rgba(255, 255, 255, 0.85);
+  line-height: 1.4;
+  letter-spacing: 0.04em;
+}
+
+/* ── DD-P1-05 3D 沉浸子态 ── */
+.nx9-screen-modal__panel.dd-modal.is-immersed {
+  width: min(1400px, calc(100vw - 16px)) !important;
+  max-width: min(1400px, calc(100vw - 16px)) !important;
+  max-height: min(94vh, 900px);
+}
+
+.nx9-screen-modal__panel.dd-modal.is-immersed .dd2-tabs {
+  display: none;
+}
+
+.nx9-screen-modal__panel.dd-modal.is-immersed .nx9-screen-modal__body {
+  padding: 0 !important;
+  max-height: none;
+  overflow: hidden;
+}
+
+.nx9-screen-modal__panel.dd-modal.is-immersed details {
+  display: none;
+}
+
+.dd2-stage {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.dd2-stage.is-immersed {
+  height: 100%;
+  min-height: 70vh;
+}
+
+.dd2-stage.is-immersed > div:last-child {
+  flex: 1;
+  min-height: 0;
+}
+
+.dd2-stage__header {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding: 4px 6px;
+  flex-shrink: 0;
+}
+
+.dd2-stage__immersion-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  flex-shrink: 0;
+  background: rgba(0, 0, 0, 0.3);
+  z-index: 1;
+}
+
+.dd2-stage__return-btn {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(243, 240, 234, 0.8);
+  cursor: pointer;
+}
+
+.dd2-stage__return-btn:hover {
+  background: rgba(255, 255, 255, 0.12);
+  color: #f3f0ea;
+}
+
+.dd2-stage__immersion-title {
+  font-size: 10px;
+  font-weight: 500;
+  color: rgba(243, 240, 234, 0.4);
+  letter-spacing: 0.06em;
 }

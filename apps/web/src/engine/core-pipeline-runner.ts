@@ -47,13 +47,11 @@ export function ensureCorePipelineNodes(): void {
   const kinds = new Set(nodes.map((n) => n.type));
   const spawn = useFlowCommands.getState().requestSpawn;
   for (const kind of [
-    'dialogue-sheet',
+    'script-desk',
     'asset-gate',
     'storyboard-desk',
     'picture-gen',
-    'director-3d',
     'director-desk',
-    'review-gate',
     'clip-gen',
     'export-pack',
   ] as const) {
@@ -268,15 +266,22 @@ async function pollVideoUntilDone(taskId: string): Promise<string | undefined> {
 /**
  * 为已批审且缺视频的镜头逐镜出视频，写回 videoAssetId。
  * 使用 firstFrame 作为参考图 + videoPrompt/prompt。
+ * @param shotIds 限定镜头；视频生成工作区必须传入本节点上游镜，避免吃整集
+ * @param clipGenBlockId 使用该节点的模型/画幅参数，保证多 clip-gen 彼此独立
  */
 export async function batchGenerateVideosFromShots(
   shotIds?: string[],
   force = false,
+  clipGenBlockId?: string,
 ): Promise<{ ok: number; fail: number }> {
   const doc = useWorkspaceDocument.getState();
-  const shots = activeEpisodeShots(doc.storyboard);
+  const episodeShots = activeEpisodeShots(doc.storyboard);
+  const requested = shotIds?.length ? new Set(shotIds) : null;
+  const shots = requested
+    ? doc.storyboard.shots.filter((s) => requested.has(s.id)).sort((a, b) => a.index - b.index)
+    : episodeShots;
   if (shots.length === 0) {
-    log('分镜列表为空');
+    log(requested ? '上游镜头列表为空' : '分镜列表为空');
     return { ok: 0, fail: 0 };
   }
 
@@ -285,10 +290,8 @@ export async function batchGenerateVideosFromShots(
     log(`还有 ${unapproved.length} 镜未批审关键帧，请先完成批审`);
   }
 
-  const requested = shotIds?.length ? new Set(shotIds) : null;
   const targets = shots.filter(
     (s) =>
-      (!requested || requested.has(s.id)) &&
       s.firstFrameAssetId &&
       s.keyframeStatus === 'approved' &&
       (force || !s.videoAssetId),
@@ -308,9 +311,26 @@ export async function batchGenerateVideosFromShots(
   let fail = 0;
   const runtime = useFlowRuntime.getState().runtime;
   const nodes = runtime?.getNodes() ?? [];
-  const clipData = (nodes.find((node) => node.type === 'clip-gen')?.data ?? {}) as Record<string, unknown>;
-  const preview = nodes.find((node) => node.type === 'storyboard-preview');
-  const previewPayload = (preview?.data?.storyboardPreview ?? null) as StoryboardPreviewPayload | null;
+  const edges = runtime?.getEdges() ?? [];
+  const clipNode = clipGenBlockId
+    ? nodes.find((node) => node.id === clipGenBlockId)
+    : nodes.find((node) => node.type === 'clip-gen');
+  const clipData = (clipNode?.data ?? {}) as Record<string, unknown>;
+  const previewNode =
+    (clipGenBlockId
+      ? edges
+          .filter((edge) => edge.target === clipGenBlockId)
+          .map((edge) => nodes.find((node) => node.id === edge.source))
+          .find(
+            (node) =>
+              node &&
+              (node.type === 'storyboard-desk' ||
+                node.type === 'storyboard-preview' ||
+                node.type === 'director-desk'),
+          )
+      : undefined) ??
+    nodes.find((node) => node.type === 'storyboard-desk' || node.type === 'storyboard-preview');
+  const previewPayload = (previewNode?.data?.storyboardPreview ?? null) as StoryboardPreviewPayload | null;
   const videoParams = resolveVideoGenParams({
     resolution: clipData.resolution as string | undefined,
     orientation: clipData.orientation as string | undefined,
@@ -429,12 +449,17 @@ export async function batchGenerateVideosFromShots(
   const videoCancelled = useExecutionQueue.getState().phase === 'cancelled';
   queue.reportProgress({ done: ok + fail, total: targets.length, currentBlockId: null });
   queue.finish();
-  const clipNode = runtime?.getNodes().find((node) => node.type === 'clip-gen');
-  if (clipNode) {
-    const completed = activeEpisodeShots(useWorkspaceDocument.getState().storyboard)
+  const resultClipNode = clipGenBlockId
+    ? runtime?.getNodes().find((node) => node.id === clipGenBlockId)
+    : runtime?.getNodes().find((node) => node.type === 'clip-gen');
+  if (resultClipNode) {
+    const completed = (requested
+      ? useWorkspaceDocument.getState().storyboard.shots.filter((shot) => requested.has(shot.id))
+      : activeEpisodeShots(useWorkspaceDocument.getState().storyboard)
+    )
       .map((shot) => shot.videoAssetId)
       .filter((url): url is string => Boolean(url));
-    runtime?.updateNodeData(clipNode.id, {
+    runtime?.updateNodeData(resultClipNode.id, {
       status: videoCancelled ? 'idle' : fail > 0 ? 'error' : 'success',
       videoUrls: completed,
       videoUrl: completed[0],

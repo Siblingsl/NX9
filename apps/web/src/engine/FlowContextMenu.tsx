@@ -409,11 +409,11 @@ export function SelectionContextMenu({
             type="button"
             className="nx9-context-menu__item"
             disabled={storyboardActionCount === 0}
-            title="打开故事板并定位关联镜头"
+            title="定位关联镜头（分镜台）"
             onClick={() => { onFocusStoryboard(); onClose(); }}
           >
             <Clapperboard size={13} />
-            <span>发送到故事板</span>
+            <span>定位关联镜头</span>
           </button>
         )}
 

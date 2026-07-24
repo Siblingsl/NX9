@@ -39,8 +39,8 @@ export const PRODUCT_SURFACE = {
   productionWall: false,
   expertWorkflowToggle: false,
   playbookWizard: true,
-  /** 全屏故事板面板（制作台入口打开，非右侧抽屉） */
-  storyboard: true,
+  /** 旧全屏故事板面板已拆除；分镜编辑走画布「分镜台」 */
+  storyboard: false,
 
   // —— 禁止右侧抽屉相关 ——
   scriptStudio: false,

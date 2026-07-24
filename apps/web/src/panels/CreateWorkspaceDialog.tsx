@@ -73,7 +73,7 @@ export function CreateWorkspaceDialog({
           <div className="nx9-create-project__notice flex items-start gap-3 rounded-xl p-4">
             <FolderLock size={20} className="shrink-0 mt-0.5" />
             <p className="text-xs leading-relaxed">
-              创建制作项目。推荐载入核心流程：剧本拆分 → 分镜 → 出图批审 → 视频 → 导出。
+              创建制作项目。推荐载入核心流程：编剧台 → 分镜 → 出图批审 → 视频 → 导出。
             </p>
           </div>
 
@@ -104,7 +104,7 @@ export function CreateWorkspaceDialog({
                 载入核心制作流程
               </span>
               <span className="block text-[11px] mt-0.5 leading-relaxed opacity-60">
-                自动放置剧本拆分、分镜网格、出图、批审、视频与导出节点，并可在右侧「编剧」开始粘贴剧本。
+                自动放置编剧台、分镜台、出图、批审、视频与导出节点，并可从画布「编剧台」粘贴成稿。
               </span>
             </span>
           </label>

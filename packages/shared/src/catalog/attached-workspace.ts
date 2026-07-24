@@ -100,7 +100,7 @@ export const ATTACHED_WORKSPACE_REGISTRY: Record<string, AttachedWorkspaceSpec> 
     showRun: true,
     showPreview: true,
     phase: 'P1',
-    note: '分镜台：分镜表编辑 + 关键帧预览出图 + 顶部 exec-picture + 一致性评分',
+    note: '分镜台：成稿拆镜 · 镜表 · 构图确认（线稿/试出）· 交导演台；ScreenModal 主路径',
   },
   'motion-story': {
     kind: 'motion-story',
@@ -256,7 +256,7 @@ export const ATTACHED_WORKSPACE_REGISTRY: Record<string, AttachedWorkspaceSpec> 
     showRun: true,
     showPreview: true,
     phase: 'P1',
-    note: '关键帧批生产：画布摘要卡 + ScreenModal 队列/批出/审阅',
+    note: '导演台：批出 / 3D / 送出，自有 ScreenModal',
   },
   'thumbnail-maker': {
     kind: 'thumbnail-maker',
@@ -293,18 +293,29 @@ export const ATTACHED_WORKSPACE_REGISTRY: Record<string, AttachedWorkspaceSpec> 
     showPreview: false,
     phase: 'P3',
   },
-  'dialogue-sheet': {
-    kind: 'dialogue-sheet',
+  'script-desk': {
+    kind: 'script-desk',
     functionalClass: 'resource-editor',
     workspaceType: 'table',
-    /** 自有 ScreenModal 分镜台，不走底部 Attached Workspace */
+    /** 自有 ScreenModal 编剧台，不走底部 Attached Workspace */
     attachToNode: false,
-    /** 必须 false：否则 StageDeck 用 CanvasNodeShell 盖掉暗色分镜表节点 UI */
+    /** 必须 false：否则 StageDeck 用 CanvasNodeShell 盖掉摘要卡 UI */
     compactCanvas: false,
     showRun: false,
     showPreview: false,
     phase: 'P3',
-    note: '剧本拆分：画布暗色迷你表 + ScreenModal 导演/文本/分镜表',
+    note: '编剧台：画布摘要卡 + ScreenModal Agent/上传成稿 + Bible draft',
+  },
+  'dialogue-sheet': {
+    kind: 'dialogue-sheet',
+    functionalClass: 'resource-editor',
+    workspaceType: 'table',
+    attachToNode: false,
+    compactCanvas: false,
+    showRun: false,
+    showPreview: false,
+    phase: 'P3',
+    note: '已迁移为 script-desk（编剧台）',
   },
   'voice-cast': {
     kind: 'voice-cast',
@@ -322,13 +333,15 @@ export const ATTACHED_WORKSPACE_REGISTRY: Record<string, AttachedWorkspaceSpec> 
   'clip-editor': {
     kind: 'clip-editor',
     functionalClass: 'media-editor',
-    workspaceType: 'timeline',
-    attachToNode: true,
-    compactCanvas: true,
+    /** 自有 ScreenModal 智能剪辑台，不走底部 Attached Workspace */
+    workspaceType: 'none',
+    attachToNode: false,
+    /** 必须 false：否则 StageDeck 用 CanvasNodeShell 盖掉摘要卡 UI */
+    compactCanvas: false,
     showRun: false,
     showPreview: true,
-    phase: 'P3',
-    note: '禁止压成 Prompt',
+    phase: 'P1',
+    note: '智能剪辑：画布摘要卡 + ScreenModal（编排 / 时间线 / 渲染）',
   },
   'director-3d': {
     kind: 'director-3d',
@@ -350,6 +363,18 @@ export const ATTACHED_WORKSPACE_REGISTRY: Record<string, AttachedWorkspaceSpec> 
     showRun: false,
     showPreview: true,
     phase: 'P3',
+  },
+  /** 画布钉图：无底部工作区，纯展示 + 可输出图像 */
+  'media-pin': {
+    kind: 'media-pin',
+    functionalClass: 'media-editor',
+    workspaceType: 'none',
+    attachToNode: false,
+    compactCanvas: false,
+    showRun: false,
+    showPreview: true,
+    phase: 'P2',
+    note: 'internal-only；由工作区拖出创建，不进能力区',
   },
   'preview-sink': {
     kind: 'preview-sink',
@@ -669,19 +694,9 @@ export const ATTACHED_WORKSPACE_REGISTRY: Record<string, AttachedWorkspaceSpec> 
     showPreview: false,
     phase: 'P2',
   },
-  'review-gate': {
-    kind: 'review-gate',
-    functionalClass: 'pipeline-control',
-    workspaceType: 'report',
-    attachToNode: true,
-    compactCanvas: true,
-    showRun: false,
-    showPreview: false,
-    phase: 'P2',
-    note: '无结果时用 control',
-  },
 
   // ── §7.7 流程控制类 → Control / None ──
+  // （审阅关卡已拆除，批审改由导演台承接）
   'iterator': {
     kind: 'iterator',
     functionalClass: 'pipeline-control',

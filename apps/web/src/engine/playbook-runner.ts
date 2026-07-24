@@ -3,7 +3,7 @@ import { resolveNextStep } from '@nx9/shared';
 import { useContextRailUi } from './stage-deck/stores/context-rail-ui';
 import { useViewMode } from './stage-deck/stores/view-mode';
 import { useFlowCommands } from '../stores/flow-commands';
-import { useFlowRuntime, useStoryboardUi, useRemotionUi } from '../stores/flow-runtime';
+import { useFlowRuntime, useRemotionUi } from '../stores/flow-runtime';
 import { useWorkspaceDocument } from '../stores/workspace-document';
 import { useDirector3dUi } from '../stores/director3d-ui';
 import { spawnCameraBlocksForShots } from './camera-block-spawn';
@@ -29,10 +29,13 @@ export function executeStepAction(action: PlaybookStepAction, ctx: PlaybookReadi
     }
     case 'open_panel':
       switch (action.panel) {
-        case 'storyboard-full':
-          useStoryboardUi.getState().setOpen(true);
-          useStoryboardUi.getState().setView('grid');
+        case 'storyboard-full': {
+          const runtime = useFlowRuntime.getState().runtime;
+          const desk = runtime?.getNodes().find((n) => n.type === 'storyboard-desk');
+          if (desk) runtime?.focusBlock(desk.id);
+          else useFlowCommands.getState().requestSpawn('storyboard-desk');
           break;
+        }
         case 'episode-studio':
           useRemotionUi.getState().setOpen(true);
           break;

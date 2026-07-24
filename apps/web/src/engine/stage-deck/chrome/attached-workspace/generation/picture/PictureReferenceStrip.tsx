@@ -1,7 +1,6 @@
 import { useCallback, useRef, useState } from 'react';
 import { ImagePlus, X } from 'lucide-react';
 import { api } from '../../../../../../api/client';
-import { useUpstreamMedia } from '../use-upstream-media';
 import {
   modeAllowsMultiRef,
   modeNeedsPrimaryRef,
@@ -89,29 +88,26 @@ function UploadSlot({
 }
 
 export interface PictureReferenceStripProps {
-  blockId: string;
   mode: PictureGenMode;
   referenceImageUrl?: string;
   styleImageUrl?: string;
   referenceImageUrls?: string[];
-  excludedRefUrls?: string[];
   onPatch: (patch: Record<string, unknown>) => void;
 }
 
+/** 仅手动上传参考槽；上游图由 PictureUpstreamStrip 独立展示，避免混区 */
 export function PictureReferenceStrip({
-  blockId,
   mode,
   referenceImageUrl,
   styleImageUrl,
   referenceImageUrls = [],
-  excludedRefUrls = [],
   onPatch,
 }: PictureReferenceStripProps) {
-  const { pictures } = useUpstreamMedia(blockId);
   const showPrimary = modeNeedsPrimaryRef(mode);
   const showStyle = modeNeedsStyleRef(mode);
   const showMulti = modeAllowsMultiRef(mode);
-  const filteredUpstream = pictures.filter((u) => !excludedRefUrls.includes(u));
+
+  if (!showPrimary && !showStyle && !showMulti) return null;
 
   const setPrimary = (url: string | undefined) => {
     onPatch({ referenceImageUrl: url });
@@ -129,23 +125,14 @@ export function PictureReferenceStrip({
     onPatch({ referenceImageUrls: next.filter(Boolean) });
   };
 
-  const toggleExclude = (url: string) => {
-    if (excludedRefUrls.includes(url)) {
-      onPatch({ excludedRefUrls: excludedRefUrls.filter((u) => u !== url) });
-    } else {
-      onPatch({ excludedRefUrls: [...excludedRefUrls, url] });
-    }
-  };
-
-  const useUpstreamAsPrimary = (url: string) => {
-    setPrimary(url);
-  };
-
   return (
     <div
-      className="shrink-0 flex flex-col gap-2 px-3 pt-2.5 pb-2 border-b border-line/25 nodrag nopan"
+      className="mx-3 mt-1.5 rounded-xl border border-line/30 bg-surface/25 px-2.5 py-2 nodrag nopan"
       onMouseDown={stop}
     >
+      <div className="flex items-center gap-1.5 mb-1.5">
+        <span className="text-[9px] font-medium text-ink/55 tracking-wide">手动参考</span>
+      </div>
       <div className="flex items-center gap-3 overflow-x-auto nx9-scroll pb-0.5">
         {showPrimary && (
           <UploadSlot
@@ -167,55 +154,6 @@ export function PictureReferenceStrip({
               onChange={(url) => setMultiAt(i, url)}
             />
           ))}
-        {!showPrimary && !showStyle && !showMulti && filteredUpstream.length === 0 && (
-          <p className="text-[10px] text-ink/40 py-2">连接上游图像或切换到图生图模式以添加参考</p>
-        )}
-
-        {filteredUpstream.map((url, i) => {
-          const active = referenceImageUrl === url;
-          return (
-            <button
-              key={`${url}-${i}`}
-              type="button"
-              onMouseDown={stop}
-              onClick={() => useUpstreamAsPrimary(url)}
-              className={`relative w-14 h-14 rounded-xl overflow-hidden border shrink-0 transition-all ${
-                active
-                  ? 'border-brand/50 ring-1 ring-brand/25'
-                  : 'border-line/45 hover:border-brand/30'
-              }`}
-              title="点击设为主体参考"
-            >
-              <img src={url} alt="" className="w-full h-full object-cover" />
-              <span className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-ink/70 to-transparent text-white text-[8px] text-center py-0.5">
-                上游
-              </span>
-              <button
-                type="button"
-                onMouseDown={stop}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  toggleExclude(url);
-                }}
-                className="absolute top-0.5 right-0.5 p-0.5 rounded-full bg-ink/50 text-white opacity-0 hover:opacity-100 focus:opacity-100"
-                title="排除此上游图"
-              >
-                <X size={9} />
-              </button>
-            </button>
-          );
-        })}
-
-        {excludedRefUrls.length > 0 && (
-          <button
-            type="button"
-            onMouseDown={stop}
-            onClick={() => onPatch({ excludedRefUrls: [] })}
-            className="text-[9px] text-ink/40 hover:text-brand shrink-0 px-1"
-          >
-            恢复已排除 ({excludedRefUrls.length})
-          </button>
-        )}
       </div>
     </div>
   );

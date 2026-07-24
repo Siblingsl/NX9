@@ -1,0 +1,26 @@
+﻿
+/* ── 功能6：desk 卡片升级 ── */
+.cg-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: -2px -2px 0;
+}
+.cg-card__toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 0 0 4px;
+}
+.cg-card__status {
+  font-size: 10px;
+  font-weight: 650;
+  letter-spacing: 0.04em;
+  color: var(--desk-faint, #999);
+}
+.cg-card__counts {
+  font-size: 10px;
+  color: var(--desk-faint, #999);
+  white-space: nowrap;
+}

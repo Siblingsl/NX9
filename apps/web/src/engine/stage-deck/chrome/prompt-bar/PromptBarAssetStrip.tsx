@@ -246,7 +246,10 @@ export function PromptBarAssetStrip({
         position={pickerPosition}
         kinds={kinds}
         activeKind={pickKind}
-        onActiveKindChange={setPickKind}
+        onActiveKindChange={(kind) => {
+          if (kind === 'generated' || kind === 'upstream') return;
+          setPickKind(kind);
+        }}
         onPick={pickItem}
         panelRef={pickerPanelRef}
       />

@@ -8,7 +8,7 @@ import {
 } from '@nx9/shared';
 import { Search } from 'lucide-react';
 import { useFlowCommands } from '../../../stores/flow-commands';
-import { useFlowRuntime, useStoryboardUi } from '../../../stores/flow-runtime';
+import { useFlowRuntime } from '../../../stores/flow-runtime';
 import { useViewMode } from '../stores/view-mode';
 import { useContextRailUi } from '../stores/context-rail-ui';
 import { useWorkspaceDocument } from '../../../stores/workspace-document';
@@ -95,8 +95,6 @@ export function CommandPalette({ open, onClose, onAlign }: CommandPaletteProps) 
   const requestLoadTemplate = useFlowCommands((s) => s.requestLoadTemplate);
   const runtime = useFlowRuntime((s) => s.runtime);
   const setMode = useViewMode((s) => s.setMode);
-  const setStoryboardOpen = useStoryboardUi((s) => s.setOpen);
-  const setStoryboardView = useStoryboardUi((s) => s.setView);
   const requestRailTab = useContextRailUi((s) => s.requestTab);
 
   const commands = useMemo<CommandItem[]>(() => {
@@ -183,25 +181,11 @@ export function CommandPalette({ open, onClose, onAlign }: CommandPaletteProps) 
         run: () => setMode('review'),
       },
       {
-        id: 'open-storyboard',
-        label: '打开 · 故事板',
-        keywords: ['storyboard', '分镜', '镜头'],
+        id: 'open-storyboard-desk',
+        label: '添加 · 分镜台',
+        keywords: ['storyboard', '分镜', '镜头', 'desk'],
         section: 'action',
-        run: () => {
-          setStoryboardOpen(true);
-          requestRailTab('storyboard');
-        },
-      },
-      {
-        id: 'open-storyboard-grid',
-        label: '打开 · 故事板网格批审',
-        keywords: ['storyboard', 'grid', '批审', 'review', '九宫格'],
-        section: 'action',
-        run: () => {
-          setStoryboardOpen(true);
-          setStoryboardView('grid');
-          requestRailTab('storyboard');
-        },
+        run: () => requestSpawn('storyboard-desk'),
       },
       {
         id: 'open-sketch-pad',
@@ -237,12 +221,6 @@ export function CommandPalette({ open, onClose, onAlign }: CommandPaletteProps) 
       (item) => {
         if (item.section === 'playbook' && !isSurfaceEnabled('playbookWizard')) return false;
         if (item.section === 'recipe' && !isSurfaceEnabled('workflowTemplates')) return false;
-        if (
-          (item.id === 'open-storyboard' || item.id === 'open-storyboard-grid') &&
-          !isSurfaceEnabled('storyboard')
-        ) {
-          return false;
-        }
         if (item.id === 'open-workflow-rail' && !isSurfaceEnabled('libraryRail')) return false;
         if (item.id === 'run-batch' && !isSurfaceEnabled('batchRun')) return false;
         return true;
@@ -254,8 +232,6 @@ export function CommandPalette({ open, onClose, onAlign }: CommandPaletteProps) 
     runtime,
     setMode,
     onAlign,
-    setStoryboardOpen,
-    setStoryboardView,
     requestRailTab,
   ]);
 

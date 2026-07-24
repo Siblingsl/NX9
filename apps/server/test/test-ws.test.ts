@@ -15,12 +15,12 @@ describe('TEST-WS — Workspace fixtures & contracts', () => {
     expect(FIXTURE_WS_IMPORT.links).toHaveLength(2);
 
     const blockTypes = FIXTURE_WS_IMPORT.blocks.map((b: any) => b.type);
-    expect(blockTypes).toContain('prompt');
     expect(blockTypes).toContain('picture-gen');
     expect(blockTypes).toContain('clip-gen');
     expect(blockTypes).toContain('sound-gen');
-    expect(blockTypes).toContain('shot-script');
-    expect(blockTypes).toContain('review-gate');
+    // shot-script migrates to storyboard-desk
+    expect(blockTypes.some((t: string) => t === 'shot-script' || t === 'storyboard-desk')).toBe(true);
+    expect(blockTypes).toContain('director-desk');
 
     expect(FIXTURE_WS_IMPORT.storyboard).toBeDefined();
     expect(FIXTURE_WS_IMPORT.voice.profiles).toHaveLength(1);

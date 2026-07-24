@@ -173,8 +173,16 @@ export function enrichPromptWithAssetMentions(
     const item = pool.find(
       (i) => i.kind === m.kind && i.label.trim().toLowerCase() === m.label.trim().toLowerCase(),
     );
-    if (!item?.prompt?.trim()) continue;
-    parts.push(`[${ASSET_KIND_MENTION_PREFIX[item.kind]} ${item.label}]: ${item.prompt.trim()}`);
+    if (!item) continue;
+    const ctx = item.prompt?.trim()
+      ? item.description?.trim()
+        ? `${item.prompt.trim()}\n锁定描述：${item.description.trim()}`
+        : item.prompt.trim()
+      : item.description?.trim()
+        ? `锁定描述：${item.description.trim()}`
+        : '';
+    if (!ctx) continue;
+    parts.push(`[${ASSET_KIND_MENTION_PREFIX[item.kind]} ${item.label}]: ${ctx}`);
   }
   const trimmed = basePrompt.trim();
   if (parts.length === 0) return trimmed;

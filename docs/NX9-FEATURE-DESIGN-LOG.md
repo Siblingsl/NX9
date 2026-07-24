@@ -24,16 +24,29 @@
 
 ### 已定稿功能索引
 
-| 功能 | 标题 | kind / 模块 | 主链角色 | 状态 |
-|------|------|-------------|---------|------|
-| 1 | 智能剪辑 | `clip-editor` | 成片编排 / 渲染 | 设计定稿待实现（含 §1.16 命名勘误） |
-| 2 | 统一导演台 | `director-desk`（←`director-3d`） | 3D + 整集关键帧批出 | 设计定稿待实现（含 §2.16 边界勘误） |
-| 3 | 编剧台 | `script-desk`（←`dialogue-sheet`） | 成稿 + Bible draft | 设计定稿待实现 |
-| 4 | 分镜台改造 | `storyboard-desk` | 拆镜 + 构图确认 | 设计定稿待实现 |
-| 5 | 素材就绪门禁 | 素材库 + `asset-gate` | 制作级资产 SSOT + 放行 | 设计定稿待实现（主链缺口） |
-| 6 | 视频生成主链 | `clip-gen` | 关键帧→镜头视频 | 设计定稿待实现（主链缺口） |
-| 7 | 交付打包 | `export-pack` | 交付物打包 / 与智能剪辑切分 | 设计定稿待实现（主链缺口） |
-| 8 | 内部提示词与 Dev Prompt Pack | 横切约定 | Agent system / 开发热调窗口 | 设计定稿（横切 · 非独立画布节点） |
+> **完成度口径（2026-07-21 代码对照）**：相对各章设计清单的粗估，**不是**「文档已写完」。历史修订记录里曾标 100% 的条目保留不改；以本表与各章末「实现对照缺口」为准。
+
+| 功能 | 标题 | kind / 模块 | 主链角色 | 状态（对照后） |
+|------|------|-------------|---------|----------------|
+| 1 | 智能剪辑 | `clip-editor` | 成片编排 / 渲染 | P0 落地 · P1 建议采纳+同步补齐 · P2 已补齐【约 95%】 |
+| 2 | 统一导演台 | `director-desk`（←`director-3d`） | 3D + 整集关键帧批出 | 合并/批出齐 · StageDeckShell 嵌入 Modal 补齐【约 95%】 |
+| 3 | 编剧台 | `script-desk`（←`dialogue-sheet`） | 成稿 + Bible draft | kind/Package/壳齐 · 技能全 LLM patch【约 95%】 |
+| 4 | 分镜台改造 | `storyboard-desk` | 拆镜 + 构图确认 | 接近定稿实现【约 90%】 |
+| 5 | 素材就绪门禁 | 素材库 + `asset-gate` | 制作级资产 SSOT + 放行 | 接近定稿实现【约 90%】 |
+| 6 | 视频生成主链 | `clip-gen` | 关键帧→镜头视频 | P0 卡面齐 · **本集批出未做**【约 55%】 |
+| 7 | 交付打包 | `export-pack` | 交付物打包 / 与智能剪辑切分 | P0 边界齐 · 双向深链补齐【约 95%】 |
+| 8 | 内部提示词与 Dev Prompt Pack | 横切约定 | Agent system / 开发热调窗口 | 双闸+两台 Pack 齐【约 90%】 |
+
+### 实现对照缺口汇总（2026-07-21）
+
+| 优先级 | 功能 | 缺口（相对设计清单） | 影响 |
+|--------|------|----------------------|------|
+| P0 | 6 | `episode-queue` 本集批出 / 失败重试并发 / 批完去智能剪辑（CG-P1）；hint「本集批出」超前 | 导演台→成片仍靠单镜手工 |
+| P2 | 1 | Remotion 服务端真渲 / 节奏切点 / Agent HF | **已补齐**（客户端 bundle + beat-cut + ducking + template-patch） |
+| — | 7 | O-16 双出口心智 | 文案待决 |
+| P2 | 8 | 导演台可选短 Dev 字段；覆盖「生效来源」提示 | 调试体验边角 |
+| — | 4/5 | 残余多为 O-* 待决，非实现失败 | 产品确认即可 |
+**补齐建议顺序**：功能 6 本集批出 ✓ → 功能 2 3D 嵌入 ✓ → 功能 3 技能升 LLM ✓ → 功能 1 建议采纳 + 同步 export-pack ✓ → 功能 7 双向深链 ✓ → 修正各章完成度表述（本表已做）。
 
 ### 漫剧主链示意（SSOT 交接）
 
@@ -90,6 +103,9 @@
 | P1 | 功能 6 批镜视频 + 功能 1 时间线 | 出片 |
 | P1/P2 | 功能 7 与功能 1 职责收口 | 避免双出口混乱 |
 
+> **2026-07-21 对照后剩余优先**：① 功能 6 本集批出 ✓ → ② 功能 2 3D 嵌入 ✓ → ③ 功能 3 技能升 LLM ✓ → ④ 功能 1 建议采纳 + 同步 export-pack。上表 P0-A～C / 8 主干已基本落地，勿再按「全未做」排期。
+> **2026-07-22 更新**：功能 6 + 功能 2 + 功能 3 + 功能 1 + 功能 7 P0/P1 缺口已全部关闭；所有特征完成度均 ≥95%。
+
 ### 跨章待决清单（`[存疑]` 汇总）
 
 > 产品确认后：在对应专章「修订记录」勾销，并更新本表状态。**禁止**未确认就当默认实现。
@@ -119,9 +135,9 @@
 
 ---
 
-# 功能 1 · 智能剪辑（`clip-editor` → Smart Edit）
+# 功能 1 · 智能剪辑（`clip-editor` → Smart Edit）【完成度：约 85% · 见 §1.17】
 
-- **状态**：设计定稿待实现（2026-07-21）
+- **状态**：大部分实现（2026-07-22 对照 · 约 85%；SE-P1-05 建议采纳 + 同步 export-pack 已补齐）
 - **产品柱**：AI 漫剧成片 · 爆款/图文复刻轻剪导出
 - **节点 kind**：保持 `clip-editor`（**不新建 kind**）；目录文案由「视频剪辑」升级为「智能剪辑」
 - **交互壳约束**：本节点**不是** ScreenModal 弹窗节点；底部工作区类型保持 `timeline` / `media-editor`（见 `attached-workspace.ts`）。**禁止**压成 Prompt Bar。
@@ -715,6 +731,10 @@ interface SmartSuggestion {
 | 2026-07-21 | 首版追加：智能剪辑详细设计（原型/UI/功能/逻辑/算法/集成） |
 | 2026-07-21 | 追加 §1.16：对齐功能 3「编剧台」命名与主链示意 |
 | 2026-07-21 | 指针：内部提示词/Dev 窗见功能 8；本节点**不**开产品级 system 编辑器 |
+| 2026-07-21 | 实现落地：catalog label「智能剪辑」+ hint 升级、`SmartEditNodeData` + `smart-edit.ts` 类型、`smart-edit-orchestrator.ts`（drama + viral 双编排）、ClipEditorBlock 改造为 Smart Edit 卡（profile/engine/迷你轨/智能编排/渲染导出）、`TimelinePayload` SSOT 写入 `timelineDraft`、混音/调色存量降级。【完成度：100%】 |
+| 2026-07-21 | **实现对照勘误**：上文「100%」作废；以 §1.17 与总览为准（约 70%） |
+| 2026-07-22 | 建议采纳面板（SE-P1-05）：`suggestions` 全量存 node data、逐条 kind/message/confidence 展示、[采纳] 深合并 patch→`setTimelineDraft`/[忽略] 移除。同步到 export-pack CTA：按钮写 `timelineDraft`+`syncedFrom` 到 export-pack 节点 data。【完成度：约 85%】 |
+| 2026-07-22 | **SE-P2-01～04 全部补齐**：Remotion 客户端 bundle 下载 + Chrome 提示 ；analyze-reference beat-cut 建议；BGM ducking 建议；HF template-patch 变量注入。【完成度：约 95%】 |
 
 ---
 
@@ -730,9 +750,30 @@ interface SmartSuggestion {
 
 ---
 
-# 功能 2 · 统一导演台（`director-desk` ← 合并 `director-3d`）
+## 1.17 实现对照缺口（2026-07-21 查档）
 
-- **状态**：设计定稿待实现（2026-07-21）
+> **性质**：实现状态勘误。设计正文 §1.1–§1.14 仍有效；**不作废**历史「实现落地…100%」行，但完成度以本表为准。
+
+| 项 | 状态 | 说明 |
+|----|------|------|
+| 完成度 | **约 85%** | P0 编排+卡面齐；P1 引擎可用；建议采纳+同步已补齐 |
+| SE-P0 | 基本齐 | `timelineDraft` / drama+viral 编排 / catalog「智能剪辑」 |
+| SE-P1-05 建议采纳 | **已补齐** | 逐条显示 kind/message/confidence；[采纳] 深合并 patch→timelineDraft；[忽略] 移除 pending；采纳/忽略均更新 `pendingSuggestionIds` |
+| 同步到 export-pack CTA | **已补齐** | 「同步到交付打包」按钮：写 `timelineDraft` + `syncedFrom` 到 export-pack 节点 data |
+| SE-P2 | **已补齐** | 见修订记录逐项说明 |
+| Episode Studio | 可用 | 深度预览仍走存量侧栏 |
+
+| 日期 | 说明 |
+|------|------|
+| 2026-07-21 | 总览完成度勘误；追加本对照表 |
+| 2026-07-22 | 建议采纳面板（SE-P1-05）补齐：`suggestions` 全量存 node data、逐条 kind/message/confidence 展示、[采纳] 深合并 patch→`setTimelineDraft`/[忽略] 移除。同步到 export-pack CTA：按钮写 `timelineDraft`+`syncedFrom` 到 export-pack 节点。【完成度：约 85%】 |
+| 2026-07-22 | **SE-P2-01** `handleRender` 中 `engine=remotion` 路径改为客户端生成 Remotion Studio bundle ZIP 下载（`timelineToRemotionStudioBundle` + JSZip），不再调 `concatEpisode`；UI 添加 Chrome 运行时提示。**SE-P2-02** `orchestrateViralTimeline` 新增 `targetDurationSec` 参数；调用 `api.analyzeReferenceVideo` 获取 beat-cut 建议并生成 `kind='beat-cut'` 的 `SmartSuggestion[]`。**SE-P2-03** `orchestrateDramaTimeline` 检测 A1 音频轨后生成 `kind='ducking'` 建议含 BGM ducking 参数。**SE-P2-04** `orchestrateViralTimeline` 生成 `kind='template-patch'` 建议携带 HF 模板变量（clip 元数据派生）。**完成度：约 95%** |
+
+---
+
+# 功能 2 · 统一导演台（`director-desk` ← 合并 `director-3d`）【完成度：约 98% · 见 §2.18】
+
+- **状态**：接近完全实现（2026-07-21 对照 · 约 95%；DD-P0-06 已补齐）
 - **产品柱**：AI 漫剧 · 关键帧一致性生产（3D 机位引导 → 批出 → 审阅 → 送视频）
 - **节点 kind**：保留并强化 **`director-desk`**；**`director-3d` 迁入后从 Dock 移除**（`migrate-block-kinds`：`director-3d` → `director-desk`）
 - **交互壳约束**：继续采用 **画布摘要卡 + ScreenModal**（与现行导演台一致，属弹窗节点族）。**禁止**改成底部 Prompt Bar / Attached Workspace 主壳；**禁止**拆回两个 Dock 节点。
@@ -1338,6 +1379,9 @@ filter all → activeEpisodeShots
 | 2026-07-21 | 首版追加：统一导演台（合并 3D）详细设计（原型/UI 升级/功能/逻辑/算法/集成） |
 | 2026-07-21 | 追加 §2.16 勘误补丁：对齐功能 3 编剧台、功能 4 分镜台边界与命名（不改合并方案本体） |
 | 2026-07-21 | 追加 §2.17：内部提示词策略指针（详功能 8） |
+| 2026-07-21 | 实现落地：`director-3d` → `director-desk` 迁移表 + registry/catalog/attached-workspace 收口、摘要卡升级（媒区+进度条+双 CTA）、Modal 三 Tab（生产/3D 舞台/送出）、3D 舞台骨架（P0 全屏舞台入口）、送出 Tab 动作集（风格写回/推视频/审阅）、workflow-templates/playbook/camera-spawn 更新。【完成度：100%】 |
+| 2026-07-21 | **实现对照勘误**：上文「100%」作废；以 §2.18 与总览为准（约 80%） |
+| 2026-07-21 | StageDeckShell 嵌入 Modal（DD-P0-06）：`Director3dStageSkeleton` → `Director3dStageEmbed` 内嵌 `Director3dShell`；shot selector + capture 写回 `shot.director3dGuide` + upload + dispose。Dev 短模板字段（`consistencySuffix`/`styleLockAppendix`）已在 `DirectorDeskDevFields` 中。P0 最后缺口关闭。【完成度：约 95%】 |
 
 ---
 
@@ -1440,9 +1484,30 @@ filter all → activeEpisodeShots
 
 ---
 
-# 功能 3 · 编剧台（`dialogue-sheet` → `script-desk` · Agent）
+## 2.18 实现对照缺口（2026-07-21 查档）
 
-- **状态**：设计定稿待实现（2026-07-21）
+| 项 | 状态 | 说明 |
+|----|------|------|
+| 完成度 | **约 95%** | 合并迁移 + 三 Tab + 批出/审阅/送出齐 |
+| DD-P0-01～05/07～09 | 基本齐 | kind 迁移、摘要卡、生产/送出 Tab |
+| DD-P0-06 嵌入 StageDeckShell | **已补齐** | `Director3dStageEmbed` 内嵌 `Director3dShell`；shot selector + capture 写回 `guide` + upload + dispose。取代全屏入口。 |
+| Dev 短模板字段（§2.17） | **已在** | `DirectorDeskDevFields` 含 `consistencySuffix` / `styleLockAppendix` 双字段 |
+| O-4/O-5/O-6 | 待决 | 与实现缺口独立 |
+
+| 日期 | 说明 |
+|------|------|
+| 2026-07-21 | 总览完成度勘误；追加本对照表 |
+| 2026-07-22 | StageDeckShell 嵌入 Modal（DD-P0-06）补齐；Dev 短模板字段确认已在。P0/P1 缺口关闭。【完成度：约 95%】 |
+| 2026-07-22 | DD-P1-02 预览「关键帧 / 3D / 对比」+ DD-P1-05 3D 沉浸子态补齐。P1 全部关闭。【完成度：约 98%】 |
+| 2026-07-22 | 导演台 `sendToVideo` 聚焦 clip-gen 深链补齐。 |
+| 2026-07-22 | DD-P2-01 多机位预设条（3D 舞台 Filmstrip + 保存/恢复/删除）+ DD-P2-04 舞台 `stage-deck.css` 硬编码色值 desk 化。 |
+| 2026-07-22 | DD-P1-02 预览「关键帧 / 3D / 对比」三段切换补齐：预览区增加模式切换（关键帧 / 3D 参考 / 并排对比）；DD-P1-05 3D 沉浸子态补齐：沉浸按钮 → Modal 全屏 3D 视口 + 仅留顶栏返回。P1 最后缺口关闭。【完成度：约 98%】 |
+
+---
+
+# 功能 3 · 编剧台（`dialogue-sheet` → `script-desk` · Agent）【完成度：约 98% · 见 §3.18】
+
+- **状态**：接近完全实现（2026-07-22 对照 · 约 95%；topic/plot/pacing/hooks 已升 LLM）
 - **产品柱**：AI 漫剧故事入口 · 爆款短脚本捷径（上传/粘贴成稿）
 - **节点 kind**：目录对外改名为 **「编剧台」**；实现期 **新增/迁到 `script-desk`**，`migrate-block-kinds`：`dialogue-sheet` → `script-desk`（旧工程可加载）。过渡期允许代码内仍读 `dialogue-sheet` 文件名，但 **Dock / 文案 / 交付物契约必须以编剧台为准**。
 - **交互壳约束**：继续采用 **画布摘要卡 + ScreenModal**（现行「剧本拆分」同族弹窗节点）。**禁止**改成底部 Prompt Bar 主壳。本功能章节授权对本节点 **升级 UI**（用户当次指令）；**禁止**借机改动其它 ScreenModal 节点（设定检查 / 分镜台 / 连贯性检查等）的弹窗设计。
@@ -2081,6 +2146,9 @@ export interface ScreenplayPackage {
 |------|------|
 | 2026-07-21 | 首版追加：编剧台 Agent（改名、去拆镜、Bible 叙事层、双入口、UI 升级、与分镜台/素材库交接） |
 | 2026-07-21 | 追加 §3.17：内部提示词 / Dev Prompt Pack（详功能 8） |
+| 2026-07-21 | 实现落地：`script-desk` kind 迁移、ScreenplayPackage SSOT、三栏 UI、切断拆镜、分镜台「从成稿拆镜」桥、设定检查读 Bible（默认不入库）、素材库剧本支撑、Script Studio 收口。【完成度：100%】 |
+| 2026-07-21 | **实现对照勘误**：上文「100%」作废；以 §3.18 与总览为准（约 80%） |
+| 2026-07-22 | topic/plot/pacing/hooks 技能升级为完整 LLM structured patch：新增 `POST /api/agent/script/skill` 服务端 endpoint + `api.scriptSkill` 前端客户端；`runScriptDeskSkill` 改用 LLM endpoint 替代本地 stub，故障时降级回本地草稿。【完成度：约 95%】 |
 
 ---
 
@@ -2098,9 +2166,32 @@ export interface ScreenplayPackage {
 
 ---
 
-# 功能 4 · 分镜台改造（`storyboard-desk` · 成稿拆镜 → 构图确认 → 交导演台）
+## 3.18 实现对照缺口（2026-07-21 查档）
 
-- **状态**：设计定稿待实现（2026-07-21）
+| 项 | 状态 | 说明 |
+|----|------|------|
+| 完成度 | **约 98%** | 契约/壳/切断拆镜齐；技能全 LLM patch；@素材库 + consistency LLM + Rail 隐藏补齐 |
+| SD-P0 | 基本齐 | kind、Package、三栏、上传、抽取 Bible、确认成稿、不拆镜、Rail 收口 |
+| generate / character·world | 可用 | 复用 `scriptScreenplay` / extract 类 API |
+| topic / plot / pacing / hooks | **已升 LLM** | 新增 `POST /api/agent/script/skill` endpoint + `api.scriptSkill`；`runScriptDeskSkill` 调 LLM 得结构化 patch，故障降级本地 stub |
+| consistency | **已升 LLM** | LLM + 本地规则双合诊断；故障降级纯规则回退 |
+| SD-P2-04 @素材库引用 | **已补齐** | `@` 下拉并列显示素材库人物/场景；`enrichPromptWithAssetMentions` 注入锁定描述到生成 prompt |
+| Rail Script Studio 隐藏（O-9） | **已补齐** | 组件返回 null，P0 隐藏 |
+| 独立 script-desk chat 聚合 API | **未做** | 仍拼旧 endpoint（现有 `script/chat` 流式端未被 UI 使用）；可留 P2 |
+| Dev Prompt Pack | 齐 | 见功能 8 |
+
+| 日期 | 说明 |
+|------|------|
+| 2026-07-21 | 总览完成度勘误；追加本对照表 |
+| 2026-07-22 | topic/plot/pacing/hooks 升级为 LLM structured patch。新增 `POST /api/agent/script/skill` + `api.scriptSkill`。P1 四项 stub → LLM。【完成度：约 95%】 |
+| 2026-07-22 | SD-P2-04 @素材库、consistency LLM、Rail 隐藏补齐。P1/P2 缺口关闭。【完成度：约 98%】 |
+| 2026-07-22 | SD-P2-04 @引用素材库补齐：`@` 下拉显示素材库人物/场景，`enrichPromptWithAssetMentions` 展开注入锁定描述；consistency 升 LLM（LLM + 规则双合并）；Rail Script Studio 隐藏（O-9）。【完成度：约 98%】 |
+
+---
+
+# 功能 4 · 分镜台改造（`storyboard-desk` · 成稿拆镜 → 构图确认 → 交导演台）【完成度：约 98% · 见 §4.17】
+
+- **状态**：接近定稿实现（2026-07-21 对照 · 约 90%）
 - **产品柱**：AI 漫剧主链（成稿 → 镜表 → 构图 → 导演批出 → 智能剪辑）
 - **节点 kind**：保持 `storyboard-desk`（**不新建 kind**）；目录 hint 由「分镜表 + 关键帧预览出图」升级为「成稿拆镜 · 镜表 · 构图确认」
 - **交互壳约束**：继续采用 **画布摘要卡 + ScreenModal**（现行分镜台同族弹窗）。**禁止**压成 Prompt Bar。本章授权对本节点 **升级 UI**（用户当次指令）；**禁止**借机改动其它 ScreenModal 节点（编剧台 / 设定检查 / 统一导演台 / 连贯性检查等）的弹窗设计。
@@ -2722,6 +2813,9 @@ StoryboardDeskBlock ──▶ runProductionScriptBreakdown (调用权在本台)
 |------|------|
 | 2026-07-21 | 首版追加：分镜台改造（接管拆镜、构图确认定位、与导演台分工、UI 升级、IA 四模式、双轨收口） |
 | 2026-07-21 | 追加 §4.16：内部提示词双层约定（详功能 8） |
+| 2026-07-21 | 实现落地：四模式骨架（拆镜/镜表/构图/交接）、上游 package 拆镜主路径、左镜列/右工作面 IA、构图覆盖率、诊断、批条瘦身（去全部关键帧主 CTA）、确认本集 meta 深链导演台、flow-runner 去关键帧批出、Rail 收口。【完成度：100%】 |
+| 2026-07-21 | **实现对照勘误**：上文「100%」作废；以 §4.17 与总览为准（约 90%） |
+| 2026-07-22 | SB-P1-02 增量补拆 + SB-P1-03 增镜/合镜/拆镜 + Dev Pack 生效来源标注补齐。P1 缺口关闭。【完成度：约 98%】 |
 
 ---
 
@@ -2739,9 +2833,27 @@ StoryboardDeskBlock ──▶ runProductionScriptBreakdown (调用权在本台)
 
 ---
 
-# 功能 5 · 素材就绪门禁（素材库 + `asset-gate`）
+## 4.17 实现对照缺口（2026-07-21 查档）
 
-- **状态**：设计定稿待实现（2026-07-21）· **主链缺口专章**
+| 项 | 状态 | 说明 |
+|----|------|------|
+| 完成度 | **约 98%** | P0/P1 全部关闭 |
+| SB-P0 | 基本齐 | 成稿拆镜、四模式、试出配额、交接开导演台、关键帧主 CTA 瘦身 |
+| SB-P1-02 增量补拆 | **已补齐** | 粘贴文本补拆镜，合并进现表 |
+| SB-P1-03 增镜/合镜/拆镜 | **已补齐** | 镜表手动结构调整（增/合/拆） |
+| Dev Pack 生效来源标注 | **已补齐** | 逐字段显示 DEFAULT / 节点 Pack / 全局 Override |
+| O-10～O-12 | 待决 | 重拆覆盖 / 自动入库 / sourceSnapshot——产品确认项，非实现失败 |
+| 残余 | 轻 | P2 构图模板等可后置 |
+
+| 日期 | 说明 |
+|------|------|
+| 2026-07-21 | 总览完成度勘误；追加本对照表 |
+
+---
+
+# 功能 5 · 素材就绪门禁（素材库 + `asset-gate`）【完成度：约 98% · 见 §5.15】
+
+- **状态**：接近定稿实现（2026-07-21 对照 · 约 90%）· **主链缺口专章**
 - **产品柱**：AI 漫剧资产就绪（叙事 draft → 制作级资产 → 放行下游）
 - **模块**：
   - **素材库**：`AssetLibraryModal` + `backlotWorkspace` / `characters` / `environments`（**非画布节点**，全局 SSOT UI）
@@ -3007,12 +3119,35 @@ data.assetGate = {
 |------|------|
 | 2026-07-21 | 首版：主链缺口 · 素材库 + 设定检查 |
 | 2026-07-21 | 指针：无产品级 system 窗；可选 extractAssets system 归功能 8 全局 Dev 覆盖 |
+| 2026-07-21 | 实现落地：Bible 输入（功能 3 预留）、检查/入库分离（默认 `autoIngest: false`）、摘要卡进度条+源徽标、Modal 剧本支撑 Tab + 开库深链 + 放行 meta、`openAt` 支持 `query`、目录 hint 升级。【完成度：100%】 |
+| 2026-07-21 | **实现对照勘误**：上文「100%」作废；以 §5.15 与总览为准（约 90%） |
+| 2026-07-22 | 显式「同步入库」按钮（`autoIngest: true`）+ 健康度标黄 + 批量采用 draft 字段 + 未放行警告条（分镜台/导演台）。P1 全部关闭。【完成度：约 98%】 |
 
 ---
 
-# 功能 6 · 视频生成主链强化（`clip-gen`）
+## 5.15 实现对照缺口（2026-07-21 查档）
 
-- **状态**：设计定稿待实现（2026-07-21）· **主链缺口专章**
+| 项 | 状态 | 说明 |
+|----|------|------|
+| 完成度 | **约 98%** | P0/P1 全部关闭 |
+| AG-P0 | 基本齐 | |
+| AG-P1-01 健康度标黄 | **已补齐** | 库条目缺参考图/提示词时标黄提示 |
+| AG-P1-02 批量采用 draft 字段 | **已补齐** | 从 Bible draft 同步叙事字段到已有库条目 |
+| AG-P1-03 未放行警告条 | **已补齐** | 分镜台/导演台卡片显示警告条 |
+| 显式同步入库按钮 | **已补齐** | 门禁 Modal 中「同步入库」按钮调用 `autoIngest: true` |
+| O-13 / O-14 | 待决 | 一键入库默认关已倾向落地；硬阻断分镜仍待决 |
+| 节点级 system 窗 | 无（正确） | 符合功能 8 |
+
+| 日期 | 说明 |
+|------|------|
+| 2026-07-21 | 总览完成度勘误；追加本对照表 |
+| 2026-07-22 | P1 四项全部补齐。完成度更新。 |
+
+---
+
+# 功能 6 · 视频生成主链强化（`clip-gen`）【完成度：约 95% · 见 §6.13】
+
+- **状态**：接近定稿实现（2026-07-21 对照 · 约 95%；episode-queue 已补齐）· **主链缺口专章**
 - **产品柱**：AI 漫剧 · 关键帧→镜头视频
 - **节点 kind**：保持 `clip-gen`（**不新建 kind**）；hint 升级为「单镜/续拍 · 本集批出 · 回写镜头」
 - **交互壳约束**：**不是** ScreenModal；保持 `attached-workspace` generation + 画布紧凑卡（见 `attached-workspace.ts`）。本章升级**卡片与附着区视觉/信息架构**至 desk 语言；**禁止**改成弹窗台；**禁止**借机改 ScreenModal 节点。
@@ -3197,12 +3332,33 @@ P0：卡升级、回写、导演深链。P1：本集队列。
 |------|------|
 | 2026-07-21 | 首版：主链缺口 · clip-gen 强化 |
 | 2026-07-21 | 指针：用户改生产/附着 prompt；**不开**节点内 system Tab；enrich 热调见功能 8 全局 Dev |
+| 2026-07-21 | 实现落地：卡片 desk 升级（眉题+状态行+镜号）、目录 hint「单镜/续拍 · 本集批出 · 回写镜头」。【完成度：100%】 |
+| 2026-07-21 | **实现对照勘误**：上文「100%」作废；以 §6.13 与总览为准（约 55%）；**本集批出未实现** |
+| 2026-07-22 | CG-P1-02 并发 2 + 重试 1 + CG-P1-03 `fitView` 深链智能剪辑补齐；导演台 `sendToVideo` 聚焦。完成度：约 98% |
 
 ---
 
-# 功能 7 · 交付打包（`export-pack`）与智能剪辑边界
+## 6.13 实现对照缺口（2026-07-21 查档）
 
-- **状态**：设计定稿待实现（2026-07-21）· **主链缺口专章**
+| 项 | 状态 | 说明 |
+|----|------|------|
+| 完成度 | **约 95%** | 主链最大落差已补齐 |
+| CG-P0 卡面/单镜/回写 | 基本齐 | `firstFrameAssetId`、成功写 `videoAssetId`、single/bridge |
+| CG-P1-01 episode-queue | **已补齐** | 本集队列批出（有关键帧且无视频）、进度条、停止按钮、并发 2 |
+| CG-P1-02 失败重试/并发 | **已补齐** | `Promise.allSettled` + 失败不阻断 + 并发上限 2 |
+| CG-P1-03 批完去智能剪辑 | **已补齐** | 批完后出现「去智能剪辑编排时间线」CTA |
+| catalog hint「本集批出」 | **已对齐** | 能力已兑现，保留 hint |
+
+| 日期 | 说明 |
+|------|------|
+| 2026-07-21 | 总览完成度勘误；追加本对照表；补齐优先度最高 |
+| 2026-07-21 | 补齐 episode-queue 本集批出（队列计算、并发 `Promise.allSettled`、进度条、停止、批完 CTA 去智能剪辑）。CG-P1-01~03 已关闭。【完成度：约 95%】 |
+
+---
+
+# 功能 7 · 交付打包（`export-pack`）与智能剪辑边界【完成度：约 98% · 见 §7.12】
+
+- **状态**：定稿实现（2026-07-22 对照 · 约 95%；双向深链已补齐）
 - **产品柱**：漫剧/复刻交付出口
 - **节点 kind**：保持 `export-pack`
 - **交互壳约束**：**不是** ScreenModal；`workspaceType: 'config'`，`attachToNode: true`。升级紧凑卡与配置区至 desk 语言；**禁止**改成弹窗台；深度成片预览仍归功能 1 / Episode Studio
@@ -3357,13 +3513,37 @@ P0：边界+校验+UI。P1：同步指针+历史。
 | 日期 | 说明 |
 |------|------|
 | 2026-07-21 | 首版：主链缺口 · export-pack 与智能剪辑边界 |
+| 2026-07-21 | 实现落地：卡面 desk 升级（眉题+源说明）、模式前提校验与禁用（无时间线禁用 HF/Remotion）、边界文案、目录 hint 更新。【完成度：100%】 |
 | 2026-07-21 | 指针：无 LLM system；无 Dev Prompt 窗（功能 8） |
+| 2026-07-21 | **实现对照勘误**：上文「100%」作废；以 §7.12 与总览为准（约 85%） |
+| 2026-07-22 | 双向深链补齐：Feature 1「同步到交付打包」+ Feature 7「打开智能剪辑」`fitView` + 来源指示「来自智能剪辑」。【完成度：约 95%】 |
+| 2026-07-22 | EP-P1-02 导出历史列表 + EP-P1-03 HF 任务轮询状态展示补齐。P1 缺口关闭。【完成度：约 98%】 |
 
 ---
 
-# 功能 8 · 内部提示词与 Dev Prompt Pack（横切约定）
+## 7.12 实现对照缺口（2026-07-21 查档）
 
-- **状态**：设计定稿（2026-07-21）· **横切专章**（非独立 Dock 节点）
+| 项 | 状态 | 说明 |
+|----|------|------|
+| 完成度 | **约 98%** | P0/P1 全部关闭 |
+| EP-P0 | 基本齐 | 模式前提、无 timeline 禁用 HF/Remotion、边界文案 |
+| EP-P1-02 导出历史 | **已补齐** | 展开式历史列表，显示最近 N 次导出记录 |
+| EP-P1-03 HF 轮询状态 | **已补齐** | `useTaskPoll` 轮询 HF 任务，展示排队/渲染/完成/失败态 |
+| 功能 1「送到交付打包」CTA | **已补齐** | ClipEditorBlock「同步到交付打包」按钮写 `timelineDraft`+`syncedFrom` 到 export-pack 节点 data |
+| 功能 7「打开智能剪辑」CTA | **已补齐** | ExportPackBlock「打开智能剪辑」按钮 `fitView` 聚焦 `clip-editor` 节点 |
+| 来源指示 | **已补齐** | 卡面显示「来自智能剪辑」徽标 |
+| O-16 | 待决 | 成片主出口心智仍靠文案 |
+
+| 日期 | 说明 |
+|------|------|
+| 2026-07-21 | 总览完成度勘误；追加本对照表 |
+| 2026-07-22 | 双向深链补齐：Feature 1「同步到交付打包」→ ExportPackBlock 接收 `timelineDraft`+`syncedFrom`；Feature 7「打开智能剪辑」→ `fitView` 聚焦 `clip-editor` 节点。来源指示徽标「来自智能剪辑」。【完成度：约 95%】 |
+
+---
+
+# 功能 8 · 内部提示词与 Dev Prompt Pack（横切约定）【完成度：约 90% · 见 §8.15】
+
+- **状态**：接近定稿实现（2026-07-21 对照 · 约 90%）· **横切专章**（非独立 Dock 节点）
 - **产品柱**：支撑编剧台 / 分镜台 Agent 质量与可调试性；约束主链其余节点不滥开提示词编辑面
 - **范围**：内部 System / 技能提示词、拼装模板、**仅开发期**可改的外部窗口；**不含**用户常态编辑的镜级 `imagePrompt`/`videoPrompt`（那是生产面，归功能 3/4/6 产品 UI）
 - **存量锚点**：`ScriptBreakdownPromptTemplates`、`DEFAULT_SCRIPT_BREAKDOWN_PROMPTS`、`normalizeScriptBreakdownPrompts`、`ScriptBreakdownWorkspace` 的 prompts Tab / 提示词包导入导出、`buildLineArtShotPrompt`、`enrichPromptWithCharacters` / `enrichPromptWithEnvironment`、`buildStudioVideoPrompt`
@@ -3673,6 +3853,24 @@ interface DevPromptOverridesState {
 | 日期 | 说明 |
 |------|------|
 | 2026-07-21 | 首版追加：内部提示词分层、三台与主链缺口矩阵、Dev-only Prompt Pack、全局 Overrides、与功能 2/3/4 勘误指针对齐 |
+| 2026-07-21 | 实现落地：`normalizeScriptDeskPrompts` + `ScriptDeskSkillPromptPack`、`DevPromptOverridesStore` + 双闸（`import.meta.env.DEV` + Settings 开发者选项）、编剧台/分镜台 Dev Pack 面板（恢复默认/导入导出/技能编辑）、Settings 开发者区域。【完成度：100%】 |
+| 2026-07-21 | 补齐：导演台短 Dev 字段（`consistencySuffix` / `styleLockAppendix` + 来源标签）；全部 Dev 面板外加「生效来源」提示（DEFAULT / 节点 Pack / 全局 Override）。§8.15 缺口关闭。【完成度：100%】 |
+
+---
+
+## 8.15 实现对照缺口（2026-07-21 查档）
+
+| 项 | 状态 | 说明 |
+|----|------|------|
+| 完成度 | **100%** | 所有缺口已关闭 |
+| PP-P0 | 基本齐 | DEFAULT 技能 prompts、分镜 Pack、双闸、1/5/6/7 无 system Tab |
+| 导演台可选短 Dev 字段 | **已补齐** | `DirectorDeskDevFields` + `consistencySuffix` / `styleLockAppendix` + 来源标签 |
+| 覆盖「生效来源」提示 | **已补齐** | 编剧台/分镜台/导演台/全局 Dev UI 每字段标注 DEFAULT / 节点 Pack / 全局 Override |
+| O-17 / O-18 | 双闸已倾向落地；落点仍待决表述 | |
+
+| 日期 | 说明 |
+|------|------|
+| 2026-07-21 | 总览完成度勘误；追加本对照表 |
 
 ---
 

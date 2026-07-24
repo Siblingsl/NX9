@@ -2,12 +2,12 @@ import { describe, it, expect } from 'vitest';
 
 describe('TEST-RG — Review Gate (pure function tests)', () => {
 
-  it('TEST-RG-001: review-gate 阻断 - ReviewGateBlockedError carries pending shot indices', () => {
+  it('TEST-RG-001: 关键帧门禁阻断 - ReviewGateBlockedError carries pending shot indices', () => {
     class ReviewGateBlockedError extends Error {
       readonly pending: number[];
 
       constructor(pending: number[]) {
-        super(`审阅关卡：镜头 ${pending.join(', ')} 尚未通过`);
+        super(`关键帧审阅未通过：镜头 ${pending.join(', ')} 尚未批准`);
         this.name = 'ReviewGateBlockedError';
         this.pending = pending;
       }

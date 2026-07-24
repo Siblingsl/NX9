@@ -2,6 +2,7 @@ import type { Edge, Node, Viewport } from '@xyflow/react';
 import {
   migrateV2ToV3,
   migrateBlockKinds,
+  stripReviewGateFromGraph,
   normalizeWorkspacePayload,
   type WorkspacePayload,
   type WorkspacePayloadV3,
@@ -82,8 +83,18 @@ export function fromPayload(
     width: b.width,
     height: b.height,
   }));
-  const { nodes } = migrateBlockKinds(rawNodes);
-  const edges: Edge[] = (v3.links ?? []).map((l) => {
+  const rawLinks = (v3.links ?? []).map((l) => ({
+    id: l.id,
+    source: l.source,
+    target: l.target,
+    sourceHandle: l.sourceHandle ?? undefined,
+    targetHandle: l.targetHandle ?? undefined,
+    edgeType: l.edgeType,
+  }));
+  const stripped = stripReviewGateFromGraph(rawNodes, rawLinks);
+  const migrated = migrateBlockKinds(stripped.nodes);
+  const nodes: Node[] = migrated.nodes as Node[];
+  const edges: Edge[] = stripped.links.map((l: (typeof stripped.links)[number]) => {
     const pathType = l.edgeType && l.edgeType !== 'default' ? l.edgeType : undefined;
     return {
       id: l.id,

@@ -141,6 +141,7 @@ export const RUNNABLE_BLOCKS = new Set([
   'motion-story',
   'shot-script',
   'reference-board',
+  'script-desk',
   'dialogue-sheet',
   'asset-gate',
   'voice-cast',
@@ -159,7 +160,6 @@ export const RUNNABLE_BLOCKS = new Set([
   'audio-mix',
   'color-grade',
   'beat-sync',
-  'review-gate',
   'variant-fork',
   'prompt-diff',
   'blocking-stage',
@@ -204,7 +204,7 @@ export class ReviewGateBlockedError extends Error {
   readonly pending: number[];
 
   constructor(pending: number[]) {
-    super(`审阅关卡：镜头 ${pending.join(', ')} 尚未通过`);
+    super(`关键帧审阅未通过：镜头 ${pending.join(', ')} 尚未批准`);
     this.name = 'ReviewGateBlockedError';
     this.pending = pending;
   }
@@ -259,25 +259,78 @@ async function executeBlock(
     return;
   }
 
-  if (kind === 'dialogue-sheet') {
-    const source = ((d.sourceText as string) || prompt).trim();
-    if (!source) throw new Error('剧本拆分缺少文本');
-    const { runProductionScriptBreakdown } = await import('./script-breakdown-runner');
-    await runProductionScriptBreakdown({
-      blockId: block.id,
-      sourceText: source,
-      config: d.scriptBreakdownConfig as Partial<import('@nx9/shared').ScriptBreakdownConfig> | undefined,
-      prompts: d.scriptBreakdownPrompts as Partial<import('@nx9/shared').ScriptBreakdownPromptTemplates> | undefined,
+  if (kind === 'script-desk' || kind === 'dialogue-sheet') {
+    const {
+      readScriptDeskPackage,
+      extractBibleFromPackage,
+      ingestScreenplayText,
+      persistScriptDeskPackage,
+      packageSummaryLine,
+    } = await import('./script-desk-runner');
+    const {
+      isScreenplayPackage,
+      screenplayFullText,
+    } = await import('@nx9/shared');
+    let pkg = isScreenplayPackage(d.package)
+      ? d.package as import('@nx9/shared').ScreenplayPackage
+      : readScriptDeskPackage(d);
+    const source = screenplayFullText(pkg).trim() || ((d.sourceText as string) || prompt).trim();
+    if (!source) throw new Error('编剧台缺少成稿文本');
+    if (!screenplayFullText(pkg).trim()) {
+      pkg = ingestScreenplayText(pkg, source, 'pasted');
+    }
+    // 主路径：抽取 Bible；不再调用 productionScriptBreakdown
+    pkg = await extractBibleFromPackage(pkg);
+    persistScriptDeskPackage(updateNodeData, block.id, pkg, {
+      status: 'success',
+      content: packageSummaryLine(pkg),
+      output: screenplayFullText(pkg),
+      legacyScriptBreakdown:
+        d.legacyScriptBreakdown
+        ?? (d.scriptBreakdown as import('@nx9/shared').ScriptBreakdownPayload | undefined),
     });
     return;
   }
 
   if (kind === 'asset-gate') {
+    const screenplayPkg =
+      upstream.screenplayPackages?.[0]
+      ?? (d.package as import('@nx9/shared').ScreenplayPackage | undefined);
+    const {
+      syncBibleAssets,
+      syncBreakdownAssets,
+    } = await import('./asset-gate-runner');
+    const { isScreenplayPackage } = await import('@nx9/shared');
+    if (isScreenplayPackage(screenplayPkg)) {
+      const result = syncBibleAssets(block.id, screenplayPkg, { autoIngest: false });
+      updateNodeData(block.id, {
+        status: 'success',
+        package: screenplayPkg,
+        assetGate: {
+          missingCharacters: result.missingCharacters,
+          missingScenes: result.missingScenes,
+          requiredCharacters: result.requiredCharacters,
+          requiredScenes: result.requiredScenes,
+          syncedCharacters: result.syncedCharacters,
+          syncedScenes: result.syncedScenes,
+          checkedAt: new Date().toISOString(),
+          source: 'bible',
+        },
+        content: `设定检查完成 · 角色 ${result.requiredCharacters.length} / 场景 ${result.requiredScenes.length}`,
+        output: result.requiredCharacters.join('、'),
+        meta: {
+          requiredCharacters: result.requiredCharacters.length,
+          requiredScenes: result.requiredScenes.length,
+          missingCharacters: result.missingCharacters.length,
+          missingScenes: result.missingScenes.length,
+        },
+      });
+      return;
+    }
     const payload =
       upstream.scriptBreakdowns?.[0] ??
       (d.scriptBreakdown as import('@nx9/shared').ScriptBreakdownPayload | undefined);
-    if (!payload) throw new Error('设定检查缺少剧本拆分数据');
-    const { syncBreakdownAssets } = await import('./asset-gate-runner');
+    if (!payload) throw new Error('设定检查缺少编剧台 Bible / 成稿数据');
     const result = syncBreakdownAssets(block.id, payload);
     updateNodeData(block.id, {
       status: 'success',
@@ -288,6 +341,7 @@ async function executeBlock(
         syncedCharacters: result.syncedCharacters,
         syncedScenes: result.syncedScenes,
         checkedAt: new Date().toISOString(),
+        source: 'breakdown',
       },
       content: `设定检查完成 · 角色 ${result.requiredCharacters.length} / 场景 ${result.requiredScenes.length}`,
       output: payload.episodes.flatMap((episode) => episode.shots.map((shot) => shot.imagePrompt)).join('\n\n'),
@@ -302,122 +356,37 @@ async function executeBlock(
   }
 
   if (kind === 'storyboard-desk' || kind === 'storyboard-preview' || kind === 'story-grid') {
+    // P0：若有 confirmed package 且无本地表 → 拆镜；不默认全量关键帧批出
+    const screenplayPkg = upstream.screenplayPackages?.[0];
+    const localBreakdown = d.scriptBreakdown as import('@nx9/shared').ScriptBreakdownPayload | undefined;
+    const { isScreenplayPackage } = await import('@nx9/shared');
+    const { applyDeskBreakdown } = await import('./storyboard-desk-runner');
+    if (isScreenplayPackage(screenplayPkg) && screenplayPkg!.status === 'confirmed' && !localBreakdown) {
+      const { runBreakdownFromPackage, assembleScreenplaySourceText } = await import('./storyboard-desk-runner');
+      const sourceText = assembleScreenplaySourceText(screenplayPkg!);
+      if (sourceText.trim()) {
+        await runBreakdownFromPackage({
+          blockId: block.id,
+          pkg: screenplayPkg!,
+          updateNodeData,
+          getLiveBreakdown: () => (d.scriptBreakdown as import('@nx9/shared').ScriptBreakdownPayload | undefined),
+        });
+        return;
+      }
+    }
+    // Fallback: 有旧上游镜表则导入
     const rawPayload =
       upstream.scriptBreakdowns?.[0] ??
       (d.scriptBreakdown as import('@nx9/shared').ScriptBreakdownPayload | undefined);
-    if (rawPayload) syncBreakdownToStoryboard(rawPayload);
-    const activeEpisodeId = useWorkspaceDocument.getState().storyboard.activeEpisodeId;
-    const activeBreakdownEpisode = activeEpisodeId
-      ? rawPayload?.episodes.find((episode) => episode.id === activeEpisodeId)
-      : undefined;
-    const payload = rawPayload && activeBreakdownEpisode
-      ? { ...rawPayload, episodes: [activeBreakdownEpisode] }
-      : rawPayload;
-    const current =
-      (d.storyboardPreview as import('@nx9/shared').StoryboardPreviewPayload | undefined) ??
-      emptyStoryboardPreview();
-    const breakdownShots = flattenScriptBreakdownShots(payload);
-    const scopedStoryboardShots = activeEpisodeShots(useWorkspaceDocument.getState().storyboard);
-    const frames = scopedStoryboardShots.length > 0
-      ? buildStoryboardPreviewFrames(scopedStoryboardShots)
-      : breakdownShots.length > 0
-        ? buildStoryboardPreviewFramesFromBreakdown(breakdownShots)
-        : current.frames;
-    const totalDurationSec = frames.reduce((sum, f) => sum + Math.max(0, f.endSec - f.startSec), 0);
-
-    const pictureNode =
-      ctx?.nodes && ctx?.edges
-        ? (await import('./storyboard-preview-runner')).findConnectedPictureGenNode(
-            block.id,
-            ctx.nodes,
-            ctx.edges,
-          )
-        : undefined;
-    const pictureData = (pictureNode?.data ?? {}) as Record<string, unknown>;
-
-    let nextFrames = [...frames];
-    if (pictureNode) {
-      const { generateStoryboardFrameImage } = await import('./storyboard-preview-runner');
-      const { writeBackBreakdownPreviewImage } = await import('@nx9/shared');
-      let nextBreakdown = payload;
-
-      for (let i = 0; i < nextFrames.length; i++) {
-        const frame = nextFrames[i];
-        if (frame.locked || frame.status === 'success' || frame.status === 'locked') continue;
-        nextFrames[i] = { ...frame, status: 'generating' };
-        updateNodeData(block.id, {
-          storyboardPreview: {
-            ...current,
-            frames: nextFrames,
-            computedFrameCount: nextFrames.length,
-            totalDurationSec,
-            confirmed: false,
-          },
-        });
-
-        try {
-          const imageUrl = await generateStoryboardFrameImage(
-            frame,
-            pictureData,
-            resolveStoryboardPreviewPictureSettings(current),
-          );
-          nextFrames[i] = { ...frame, imageUrl, status: 'success', errorMessage: null };
-          nextBreakdown = writeBackBreakdownPreviewImage(nextBreakdown, frame.sourceShotId, imageUrl) ?? nextBreakdown;
-          if (frame.sourceShotId) {
-            useWorkspaceDocument.getState().updateShot(frame.sourceShotId, {
-              firstFrameAssetId: imageUrl,
-              keyframeStatus: 'review',
-              status: 'review',
-            });
-          }
-          updateNodeData(pictureNode.id, {
-            status: 'success',
-            previewUrl: imageUrl,
-            previewUrls: [imageUrl],
-            batchCount: 1,
-            linkedFrameId: frame.id,
-            frameJob: { frameId: frame.id, source: block.id },
-            lastResult: { count: 1, urls: [imageUrl], frameId: frame.id },
-          });
-        } catch (e) {
-          nextFrames[i] = { ...frame, status: 'error', errorMessage: String(e) };
-        }
-      }
-
-      const successCount = nextFrames.filter((f) => f.status === 'success' || f.status === 'locked').length;
-      updateNodeData(block.id, {
-        status: successCount === nextFrames.length && nextFrames.length > 0 ? 'success' : 'idle',
-        scriptBreakdown: nextBreakdown,
-        storyboardPreview: {
-          ...current,
-          frames: nextFrames,
-          computedFrameCount: nextFrames.length,
-          totalDurationSec,
-          confirmed: false,
-          confirmedAt: null,
-        },
-        previewUrls: nextFrames.map((f) => f.imageUrl).filter(Boolean),
-        batchCount: nextFrames.length,
-        content: `Storyboard Preview · ${nextFrames.length} Images · ${successCount}/${nextFrames.length}`,
+    if (rawPayload) {
+      syncBreakdownToStoryboard(rawPayload);
+      applyDeskBreakdown(block.id, rawPayload, updateNodeData, {
+        content: `${rawPayload.title} · ${rawPayload.episodes.length} 集 · ${flattenScriptBreakdownShots(rawPayload).length} 镜`,
       });
+      updateNodeData(block.id, { status: 'success' });
       return;
     }
-
-    updateNodeData(block.id, {
-      status: frames.length ? 'idle' : 'idle',
-      scriptBreakdown: payload,
-      storyboardPreview: {
-        ...current,
-        frames,
-        computedFrameCount: frames.length,
-        totalDurationSec,
-        confirmed: false,
-        confirmedAt: null,
-      },
-      previewUrls: frames.map((f) => f.imageUrl).filter(Boolean),
-      batchCount: frames.length,
-      content: `Storyboard Preview · ${frames.length} Images · 请连接图像生成节点`,
-    });
+    updateNodeData(block.id, { status: 'success', content: '分镜台：等待编剧台 confirmed package 拆镜' });
     return;
   }
 
@@ -614,6 +583,34 @@ async function executeBlock(
 
   if (kind === 'clip-gen') {
     const videoMode = (d.videoMode as string) ?? 'single';
+    // 仅当导演台写入参考 / 显式要求门禁时拦截；独立图生视频不受影响
+    const fromDirector =
+      (Array.isArray(d.directorDeskRefs) && d.directorDeskRefs.length > 0) ||
+      d.requireKeyframeGate === true;
+    if (d.bypassKeyframeGate !== true && fromDirector) {
+      const linkedIds = (d.linkedShotIds as string[] | undefined) ?? [];
+      const singleId = d.linkedShotId as string | undefined;
+      const scopeIds =
+        linkedIds.length > 0 ? linkedIds : singleId ? [singleId] : null;
+      const episodeShots = activeEpisodeShots(useWorkspaceDocument.getState().storyboard);
+      const shots = scopeIds
+        ? episodeShots.filter((s) => scopeIds.includes(s.id))
+        : episodeShots;
+      if (shots.length > 0) {
+        const pending = shots
+          .filter((s) => s.keyframeStatus !== 'approved' && s.status !== 'approved')
+          .map((s) => s.index)
+          .sort((a, b) => a - b);
+        if (pending.length > 0) {
+          updateNodeData(block.id, {
+            status: 'blocked',
+            pendingShots: pending,
+            meta: { pending, gate: 'keyframe', from: 'director-desk' },
+          });
+          throw new ReviewGateBlockedError(pending);
+        }
+      }
+    }
     const charCtx = characterContextForBlock(block, upstream.pictures);
     const breakdown = upstream.scriptBreakdowns?.[0];
     const breakdownShots = flattenScriptBreakdownShots(breakdown);
@@ -1050,7 +1047,8 @@ async function executeBlock(
   }
 
   if (kind === 'clip-editor') {
-    const editorMode = (d.editorMode as string) ?? 'concat';
+    const editorMode = (d.editorMode as string) ?? '';
+    // Legacy audio/grade paths - only used if explicitly set
     if (editorMode === 'audio') {
       const tracks = upstream.sounds ?? [];
       if (tracks.length < 2) throw new Error('至少需要 2 条音频');
@@ -1082,17 +1080,43 @@ async function executeBlock(
       });
       return;
     }
-    const clips = [...upstream.clips, ...((d.extraClips as string[]) ?? [])].filter(Boolean);
-    if (clips.length === 0) throw new Error('缺少视频片段');
-    const transition = (d.transition as string) ?? 'none';
-    const res = await api.concatClips(clips, (d.title as string) || '画布剪辑', transition === 'none' ? undefined : transition);
-    if (!res.ok || !res.url) throw new Error(res.message ?? '剪辑失败');
-    updateNodeData(block.id, {
-      status: 'success',
-      videoUrl: res.url,
-      outputUrl: res.url,
-      clipCount: clips.length,
-    });
+    // Smart edit path: orchestrate if no timelineDraft, then render
+    const timelineDraft = useWorkspaceDocument.getState().timelineDraft;
+    if (!timelineDraft) {
+      const { orchestrateDramaTimeline, orchestrateViralTimeline } = await import('./smart-edit-orchestrator');
+      const profile = (d.profile as string) ?? 'drama';
+      if (profile === 'drama') {
+        const result = await orchestrateDramaTimeline({ approvedOnly: true });
+        if (result.timeline) {
+          useWorkspaceDocument.getState().setTimelineDraft(result.timeline);
+        }
+      } else if (upstream.clips.length > 0) {
+        const result = await orchestrateViralTimeline({ clips: upstream.clips });
+        if (result.timeline) {
+          useWorkspaceDocument.getState().setTimelineDraft(result.timeline);
+        }
+      }
+    }
+    // After orchestration, render via the appropriate engine
+    const freshTimeline = useWorkspaceDocument.getState().timelineDraft;
+    if (!freshTimeline) throw new Error('编排未生成时间线');
+    const engine = (d.engine as string) ?? 'auto';
+    const resolvedEngine = engine === 'auto'
+      ? ((d.profile as string) === 'viral' ? 'hyperframes' as const : 'remotion' as const)
+      : engine as 'ffmpeg' | 'remotion' | 'hyperframes';
+    if (resolvedEngine === 'ffmpeg') {
+      const clips = [...upstream.clips].filter(Boolean);
+      if (clips.length === 0) throw new Error('缺少视频片段');
+      const res = await api.concatClips(clips, (d.title as string) || '智能剪辑', undefined);
+      if (!res.ok || !res.url) throw new Error(res.message ?? 'FFmpeg 剪辑失败');
+      updateNodeData(block.id, { status: 'success', videoUrl: res.url, outputUrl: res.url });
+    } else if (resolvedEngine === 'hyperframes') {
+      const res = await api.renderHyperframes({ timeline: freshTimeline, templateId: 'nx9-vertical-episode' });
+      updateNodeData(block.id, { status: 'running', taskId: res.taskId, outputUrl: undefined });
+    } else {
+      // Remotion: client-side bundle
+      updateNodeData(block.id, { status: 'success', outputUrl: undefined, message: 'Remotion 渲染请打开工作室' });
+    }
     return;
   }
 
@@ -1576,30 +1600,6 @@ async function executeBlock(
       meta: { bpm, durationSec, cutPoints, beatIntervalSec: interval },
       clips: upstream.clips?.length ? upstream.clips : undefined,
       content: `BPM ${bpm} · ${cutPoints.length} cuts`,
-    });
-    return;
-  }
-
-  if (kind === 'review-gate') {
-    const shots = activeEpisodeShots(useWorkspaceDocument.getState().storyboard);
-    if (shots.length === 0) throw new Error('故事板无镜头');
-    const gateMode = d.gateMode === 'video' ? 'video' : 'keyframe';
-    const res = await api.checkReviewGate(shots, gateMode);
-    if (!res.ok) {
-      updateNodeData(block.id, {
-        status: 'blocked',
-        gatePassed: false,
-        pendingShots: res.pending,
-        meta: { pending: res.pending, gateMode },
-      });
-      throw new ReviewGateBlockedError(res.pending);
-    }
-    updateNodeData(block.id, {
-      status: 'success',
-      gatePassed: true,
-      pendingShots: [],
-      meta: { gatePassed: true, gateMode },
-      upstream,
     });
     return;
   }

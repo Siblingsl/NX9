@@ -24,9 +24,14 @@ import { api } from '../../../../../../api/client';
 import { useUpstreamMedia } from '../use-upstream-media';
 import { useAttachedNodeData } from '../use-attached-node-data';
 import { useLocalNodePrompt } from '../use-local-node-prompt';
+import {
+  buildLocalMediaItems,
+  insertLocalMediaMentionAtSelection,
+  resolveLocalMediaMentionUrls,
+} from '../../../asset-mention/local-media-mention';
 import { PictureParamChips } from './PictureParamChips';
-import { PictureReferenceStrip } from './PictureReferenceStrip';
 import { PictureResultGallery } from './PictureResultGallery';
+import { PictureUpstreamStrip } from './PictureUpstreamStrip';
 import { PictureProActionMenu } from './PictureProActionMenu';
 import {
   buildPictureProActionPatch,
@@ -34,14 +39,10 @@ import {
   lookupPictureProAction,
   type PictureProActionDef,
 } from './picture-pro-actions';
-import {
-  modeNeedsPrimaryRef,
-  readPictureGenMode,
-  showPictureReferenceStrip,
-} from './picture-gen-modes';
+import { readPictureGenMode } from './picture-gen-modes';
 
 const EMPTY_HISTORY: { id: string; blockId: string; text: string; savedAt: number }[] = [];
-const PICTURE_MENTION_KINDS: AssetLibraryKind[] = ['character', 'scene'];
+const PICTURE_MENTION_KINDS: AssetLibraryKind[] = ['character', 'scene', 'costume'];
 
 function stop(e: React.SyntheticEvent) {
   e.stopPropagation();
@@ -63,11 +64,10 @@ export function PictureWorkspace({ blockId, kind, onCollapse }: PictureWorkspace
   const promptEntries = usePromptHistory((s) => s.entries);
   const pushHistory = usePromptHistory((s) => s.push);
   const { updateNodeData } = useReactFlow();
-  const { hasMedia, pictures: upstreamPictures } = useUpstreamMedia(blockId);
+  const { pictures: upstreamPictures } = useUpstreamMedia(blockId);
   const handleAiAction = useWorkspaceAiLog();
   const [selectedResult, setSelectedResult] = useState(0);
   const [refBusy, setRefBusy] = useState(false);
-  const [showRefPanel, setShowRefPanel] = useState(false);
 
   const meta = lookupBlock(kind);
   const data = useAttachedNodeData(blockId);
@@ -105,10 +105,6 @@ export function PictureWorkspace({ blockId, kind, onCollapse }: PictureWorkspace
   const customW = (data.width as number) ?? 1024;
   const customH = (data.height as number) ?? 1024;
   const snapToStep = (data.snapToStep as boolean) ?? true;
-  const needsRef =
-    modeNeedsPrimaryRef(pictureGenMode) ||
-    Boolean(proAction?.needsReference) ||
-    pictureGenMode === 'upscale-hd';
 
   const previewUrls = useMemo(() => {
     const urls = (data.previewUrls as string[] | undefined) ?? [];
@@ -125,13 +121,6 @@ export function PictureWorkspace({ blockId, kind, onCollapse }: PictureWorkspace
     height: aspectRatio === 'custom' ? customH : undefined,
     snapToStep,
   });
-
-  // 有参考或需要参考时展示参考条
-  const showReference =
-    showRefPanel ||
-    showPictureReferenceStrip(pictureGenMode, hasMedia, needsRef) ||
-    Boolean(data.referenceImageUrl) ||
-    Boolean((data.referenceImageUrls as string[] | undefined)?.length);
 
   useEffect(() => {
     setSelectedResult(0);
@@ -158,10 +147,27 @@ export function PictureWorkspace({ blockId, kind, onCollapse }: PictureWorkspace
       }
       // 空 prompt 时用动作 hint 作 placeholder 引导；不强制覆盖已有正文
       handlePatch(patch);
-      setShowRefPanel(Boolean(action.needsReference));
       appendLog(`图像专业工具 · ${action.label}`);
     },
     [appendLog, handlePatch, model],
+  );
+
+  const handleDeleteGenerated = useCallback(
+    (index: number) => {
+      const next = previewUrls.filter((_, i) => i !== index);
+      handlePatch({
+        previewUrls: next,
+        previewUrl: next[0] ?? undefined,
+      });
+      setSelectedResult((prev) => {
+        if (next.length === 0) return 0;
+        if (prev > index) return prev - 1;
+        if (prev >= next.length) return next.length - 1;
+        return prev;
+      });
+      appendLog(`已删除生成图 ${index + 1}`);
+    },
+    [appendLog, handlePatch, previewUrls],
   );
 
   const handleUploadRef = useCallback(
@@ -175,12 +181,34 @@ export function PictureWorkspace({ blockId, kind, onCollapse }: PictureWorkspace
             pictureGenMode === 'text-to-image' ? 'image-to-image' : pictureGenMode,
           useImageReference: true,
         });
-        setShowRefPanel(true);
       } finally {
         setRefBusy(false);
       }
     },
     [handlePatch, pictureGenMode],
+  );
+
+  /** 在提示词光标处插入 @上游/@生成 */
+  const insertLocalMediaAtCursor = useCallback(
+    (kind: 'generated' | 'upstream', index0: number) => {
+      const ta = promptContainerRef.current?.querySelector('textarea');
+      const start = ta?.selectionStart ?? draft.length;
+      const end = ta?.selectionEnd ?? start;
+      const label = `图${index0 + 1}`;
+      const { value: next, cursor: nextCursor } = insertLocalMediaMentionAtSelection(
+        draft,
+        start,
+        kind,
+        label,
+        end,
+      );
+      onChange(next);
+      requestAnimationFrame(() => {
+        ta?.focus();
+        ta?.setSelectionRange(nextCursor, nextCursor);
+      });
+    },
+    [draft, onChange],
   );
 
   const handleRun = useCallback(async () => {
@@ -246,38 +274,44 @@ export function PictureWorkspace({ blockId, kind, onCollapse }: PictureWorkspace
     onCollapse?.();
   }, [collapsePromptBar, onCollapse, flushNow]);
 
+  const excludedRefUrls = (data.excludedRefUrls as string[]) ?? [];
+  const localMedia = useMemo(
+    () => buildLocalMediaItems(previewUrls, upstreamPictures),
+    [previewUrls, upstreamPictures],
+  );
+  const mentionedUpstreamUrls = useMemo(
+    () => resolveLocalMediaMentionUrls(draft, previewUrls, upstreamPictures).filter((u) =>
+      upstreamPictures.includes(u),
+    ),
+    [draft, previewUrls, upstreamPictures],
+  );
+
   const placeholder = proAction?.defaultPromptHint
     ? proAction.defaultPromptHint
     : pictureGenMode === 'style-ref'
-      ? '描述主体内容… 风格由参考图控制 · 输入 @ 引用角色/场景'
+      ? '描述主体内容… 风格由参考图控制 · 输入 @ 或点击上游图插入引用'
       : pictureGenMode === 'multi-ref'
-        ? '描述如何融合多张参考… 输入 @ 引用角色、场景'
+        ? '描述如何融合多张参考… 输入 @ 或点击上游/生成图插入'
         : pictureGenMode === 'image-to-image'
-          ? '描述想改成什么样… 输入 @ 引用角色、场景'
+          ? '描述想改成什么样… 输入 @ 或点击上游图插入引用'
           : pictureGenMode === 'upscale-hd'
             ? '可选：补充增强方向…'
-            : '描述你想生成的图像… 输入 @ 引用角色、场景';
+            : '描述你想生成的图像… 输入 @ 引用角色/场景，或点击上游图插入';
 
   const toolbarLeft = (
     <div className="flex items-center gap-1 flex-wrap min-w-0" onMouseDown={stop}>
-      {/* + 参考 — 对齐 LibTV */}
+      {/* + 参考文件（静默写入 referenceImageUrl，不再展示手动参考区） */}
       <button
         type="button"
         onMouseDown={stop}
         disabled={refBusy}
-        onClick={() => {
-          if (data.referenceImageUrl || showReference) {
-            setShowRefPanel((v) => !v);
-          } else {
-            refInputRef.current?.click();
-          }
-        }}
+        onClick={() => refInputRef.current?.click()}
         className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] transition-colors ${
-          showReference || data.referenceImageUrl
+          data.referenceImageUrl
             ? 'bg-brand/10 text-brand'
             : 'text-ink/55 hover:text-ink hover:bg-surface/90'
         }`}
-        title="添加参考图"
+        title="上传参考图文件"
       >
         <ImagePlus size={12} />
         参考
@@ -306,10 +340,6 @@ export function PictureWorkspace({ blockId, kind, onCollapse }: PictureWorkspace
           e.target.value = '';
         }}
       />
-
-      <span className="w-px h-3.5 bg-line/50" />
-
-      <PictureProActionMenu activeId={proActionId} onSelect={handleSelectProAction} />
 
       <span className="w-px h-3.5 bg-line/50" />
 
@@ -438,20 +468,57 @@ export function PictureWorkspace({ blockId, kind, onCollapse }: PictureWorkspace
     </div>
   );
 
+  const hasGenerated = previewUrls.length > 0;
+  const hasUpstream = upstreamPictures.length > 0 || excludedRefUrls.length > 0;
+  const showMediaRow = hasGenerated || hasUpstream;
+
   const topSlot = (
     <>
-      <PictureResultGallery
-        urls={previewUrls}
-        selectedIndex={Math.min(selectedResult, Math.max(0, previewUrls.length - 1))}
-        onSelect={setSelectedResult}
-        emptyHint={
-          proAction
-            ? `「${proAction.label}」结果将显示在这里`
-            : '上传参考或描述画面后点生成'
-        }
-      />
+      {/* 一排两列：左生成结果 · 右上游传入；单侧有内容则全宽；都无则不展示 */}
+      {showMediaRow && (
+        <div
+          className="mx-3 mt-2 flex items-start gap-3 pb-2 border-b border-line/20"
+          onMouseDown={stop}
+        >
+          {hasGenerated && (
+            <div className={hasUpstream ? 'min-w-0 flex-1' : 'min-w-0 w-full'}>
+              <PictureResultGallery
+                urls={previewUrls}
+                selectedIndex={Math.min(selectedResult, Math.max(0, previewUrls.length - 1))}
+                onSelect={setSelectedResult}
+                onDelete={handleDeleteGenerated}
+                sourceBlockId={blockId}
+              />
+            </div>
+          )}
+          {hasGenerated && hasUpstream && (
+            <div className="w-px self-stretch bg-line/25 shrink-0" aria-hidden />
+          )}
+          {hasUpstream && (
+            <div className={hasGenerated ? 'min-w-0 flex-1' : 'min-w-0 w-full'}>
+              <PictureUpstreamStrip
+                urls={upstreamPictures}
+                mentionedUrls={mentionedUpstreamUrls}
+                excludedUrls={excludedRefUrls}
+                sourceBlockId={blockId}
+                onSelect={(_url, index) => insertLocalMediaAtCursor('upstream', index)}
+                onExclude={(url) => {
+                  if (excludedRefUrls.includes(url)) {
+                    handlePatch({
+                      excludedRefUrls: excludedRefUrls.filter((u) => u !== url),
+                    });
+                  } else {
+                    handlePatch({ excludedRefUrls: [...excludedRefUrls, url] });
+                  }
+                }}
+                onRestoreExcluded={() => handlePatch({ excludedRefUrls: [] })}
+              />
+            </div>
+          )}
+        </div>
+      )}
 
-      {/* 专业动作芯片 — 类似 LibTV 调度故事板标签 */}
+      {/* 专业动作芯片 */}
       {proAction && (
         <div className="mx-3 mt-1.5 flex items-center gap-2">
           <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-violet-500/10 text-violet-700 text-[10px] font-medium border border-violet-500/20">
@@ -482,19 +549,7 @@ export function PictureWorkspace({ blockId, kind, onCollapse }: PictureWorkspace
         </div>
       )}
 
-      {showReference && (
-        <PictureReferenceStrip
-          blockId={blockId}
-          mode={pictureGenMode === 'upscale-hd' ? 'image-to-image' : pictureGenMode}
-          referenceImageUrl={data.referenceImageUrl as string | undefined}
-          styleImageUrl={data.styleImageUrl as string | undefined}
-          referenceImageUrls={(data.referenceImageUrls as string[]) ?? []}
-          excludedRefUrls={(data.excludedRefUrls as string[]) ?? []}
-          onPatch={handlePatch}
-        />
-      )}
-
-      {!showReference && !proAction && upstreamPictures.length === 0 && previewUrls.length === 0 && (
+      {!proAction && upstreamPictures.length === 0 && previewUrls.length === 0 && (
         <div className="mx-3 mt-1.5 flex flex-wrap items-center gap-2 text-[10px] text-ink/40">
           <span>快捷：</span>
           <button
@@ -592,6 +647,8 @@ export function PictureWorkspace({ blockId, kind, onCollapse }: PictureWorkspace
         onBlur={onBlur}
         placeholder={placeholder}
         kinds={PICTURE_MENTION_KINDS}
+        localMedia={localMedia}
+        highlightMentions
         className={COMPOSER_PROMPT_TEXTAREA_CLASS}
       />
     </ComposerWorkspaceShell>

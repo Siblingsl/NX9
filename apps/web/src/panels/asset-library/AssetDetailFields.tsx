@@ -24,6 +24,7 @@ import {
 import { X } from 'lucide-react';
 import { DetailSection, Field, TextInput, TextArea, PromptPanel, MediaSlot, ChipList, VariantGrid } from './detail-primitives';
 import { ImageLightbox } from '../../components/ui/ImageLightbox';
+import { ScreenplaySupportPanel } from './ScreenplaySupportPanel';
 
 type UploadHandler = (file: File) => void | Promise<void>;
 
@@ -113,6 +114,7 @@ export function CharacterDetailFields({
 
   return (
     <div className="max-w-2xl space-y-3">
+      <ScreenplaySupportPanel kind="character" name={c.name} />
       <div className="rounded-2xl border border-line bg-white p-3">
         <div className="flex items-start gap-3">
           <div className="h-16 w-12 overflow-hidden rounded-xl border border-line bg-surface">
@@ -436,6 +438,7 @@ export function SceneDetailFields({
 
   return (
     <div className="max-w-2xl space-y-3">
+      <ScreenplaySupportPanel kind="scene" name={item.label} />
       <div className="rounded-2xl border border-line bg-white p-3">
         <div className="flex items-start gap-3">
           <div className="h-14 w-20 overflow-hidden rounded-xl border border-line bg-surface">

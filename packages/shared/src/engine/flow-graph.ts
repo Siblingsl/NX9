@@ -1,6 +1,8 @@
 import type { FlowBlock, FlowLink } from '../types/workspace';
 import type { PromptBatchItem, PromptBatchJob, PromptDispatchMeta } from '../types/prompt-batch';
 import type { ScriptBreakdownPayload } from '../types/script-breakdown';
+import type { ScreenplayPackage } from '../types/screenplay-package';
+import { isScreenplayPackage, screenplayFullText } from '../types/screenplay-package';
 import { promptItemsToBatch } from '../types/prompt-batch';
 import { resolveAssetImportItems } from '../utils/asset-import';
 
@@ -13,8 +15,57 @@ export interface UpstreamOutputs {
   promptBatch?: PromptBatchJob[];
   /** 提示词节点的分发策略 */
   promptDispatch?: PromptDispatchMeta;
-  /** 剧本拆分后的集数/分镜结构 */
+  /** 分镜台镜表（或迁移期遗留） */
   scriptBreakdowns?: ScriptBreakdownPayload[];
+  /** 编剧台成稿包 */
+  screenplayPackages?: ScreenplayPackage[];
+  /** 上游节点显式关联的镜头 id（分镜预览帧 / linkedShot* / queue） */
+  shotIds?: string[];
+}
+
+function pushUniqueShotId(target: string[], id: string | null | undefined) {
+  if (!id || target.includes(id)) return;
+  target.push(id);
+}
+
+/** 从节点 data 收集显式镜头 id（不读工程级故事板） */
+export function collectLinkedShotIdsFromData(d: Record<string, unknown>): string[] {
+  const ids: string[] = [];
+  const linkedShotIds = d.linkedShotIds;
+  if (Array.isArray(linkedShotIds)) {
+    for (const id of linkedShotIds) {
+      if (typeof id === 'string') pushUniqueShotId(ids, id);
+    }
+  }
+  if (typeof d.linkedShotId === 'string') pushUniqueShotId(ids, d.linkedShotId);
+  const queue = d.queue;
+  if (Array.isArray(queue)) {
+    for (const item of queue) {
+      if (item && typeof item === 'object' && typeof (item as { shotId?: unknown }).shotId === 'string') {
+        pushUniqueShotId(ids, (item as { shotId: string }).shotId);
+      }
+    }
+  }
+  const preview = d.storyboardPreview as
+    | {
+        frames?: Array<{ sourceShotId?: string; relatedShotIds?: string[] }>;
+      }
+    | undefined;
+  if (preview?.frames) {
+    for (const frame of preview.frames) {
+      pushUniqueShotId(ids, frame.sourceShotId);
+      if (Array.isArray(frame.relatedShotIds)) {
+        for (const id of frame.relatedShotIds) pushUniqueShotId(ids, id);
+      }
+    }
+  }
+  return ids;
+}
+
+function mergeShotIds(out: UpstreamOutputs, ids: string[]) {
+  if (ids.length === 0) return;
+  out.shotIds = [...(out.shotIds ?? [])];
+  for (const id of ids) pushUniqueShotId(out.shotIds, id);
 }
 
 /** Kahn topological sort — returns block ids in execution order. */
@@ -80,6 +131,7 @@ export function gatherUpstream(
     if (!block) continue;
     const d = block.data ?? {};
     const kind = block.type;
+    mergeShotIds(out, collectLinkedShotIdsFromData(d));
 
     if (kind === 'prompt') {
       const items = (d.promptItems as PromptBatchItem[]) ?? [];
@@ -111,12 +163,46 @@ export function gatherUpstream(
       const text = (d.content as string) || (d.output as string) || (d.lastReply as string);
       if (text?.trim()) out.prompts.push(text.trim());
     }
-    if (kind === 'dialogue-sheet' || kind === 'asset-gate' || kind === 'story-grid') {
+    if (kind === 'script-desk' || kind === 'dialogue-sheet') {
+      const pkg = d.package as ScreenplayPackage | undefined;
+      if (isScreenplayPackage(pkg)) {
+        out.screenplayPackages = [...(out.screenplayPackages ?? []), pkg];
+        const full = screenplayFullText(pkg).trim();
+        if (full) out.prompts.push(full);
+      }
+      const legacy =
+        (d.legacyScriptBreakdown as ScriptBreakdownPayload | undefined)
+        ?? (d.scriptBreakdown as ScriptBreakdownPayload | undefined);
+      if (legacy?.version === 1) {
+        out.scriptBreakdowns = [...(out.scriptBreakdowns ?? []), legacy];
+      }
+      continue;
+    }
+    if (kind === 'asset-gate' || kind === 'story-grid' || kind === 'storyboard-desk') {
       const payload = d.scriptBreakdown as ScriptBreakdownPayload | undefined;
       if (payload?.version === 1) {
         out.scriptBreakdowns = [...(out.scriptBreakdowns ?? []), payload];
         const prompts = payload.episodes.flatMap((ep) => ep.shots.map((shot) => shot.imagePrompt));
         out.prompts.push(...prompts.filter(Boolean));
+      }
+      const pkg = d.package as ScreenplayPackage | undefined;
+      if (isScreenplayPackage(pkg)) {
+        out.screenplayPackages = [...(out.screenplayPackages ?? []), pkg];
+      }
+      if (kind === 'storyboard-desk' || kind === 'story-grid') {
+        const preview = d.storyboardPreview as import('../types/storyboard-preview').StoryboardPreviewPayload | undefined;
+        if (preview?.version === 1) {
+          const frames = preview.confirmed
+            ? preview.frames.filter(
+                (f) => f.imageUrl && (f.status === 'success' || f.status === 'locked'),
+              )
+            : preview.frames.filter((f) => f.imageUrl);
+          for (const frame of frames) {
+            if (frame.imageUrl) out.pictures.push(frame.imageUrl);
+            if (frame.promptSummary) out.prompts.push(frame.promptSummary);
+          }
+        }
+        mergeShotIds(out, collectLinkedShotIdsFromData(d));
       }
       continue;
     }
@@ -141,6 +227,7 @@ export function gatherUpstream(
         );
         out.prompts.push(...videoPrompts);
       }
+      mergeShotIds(out, collectLinkedShotIdsFromData(d));
       continue;
     }
     if (kind === 'picture-gen') {
@@ -150,6 +237,14 @@ export function gatherUpstream(
         const url = (d.previewUrl as string) || (d.assetUrl as string) || (d.filledUrl as string);
         if (url) out.pictures.push(url);
       }
+      continue;
+    }
+    if (kind === 'media-pin') {
+      const url =
+        (d.pinUrl as string) ||
+        (d.previewUrl as string) ||
+        (d.assetUrl as string);
+      if (url) out.pictures.push(url);
       continue;
     }
     if (kind === 'asset-import' || kind === 'render-slot') {
@@ -199,6 +294,13 @@ export function gatherUpstream(
       if (url) out.pictures.push(url);
       const clip = d.videoUrl as string;
       if (clip) out.clips.push(clip);
+      const deskRefs = d.directorDeskRefs;
+      if (Array.isArray(deskRefs)) {
+        for (const ref of deskRefs) {
+          if (typeof ref === 'string' && ref) out.pictures.push(ref);
+        }
+      }
+      mergeShotIds(out, collectLinkedShotIdsFromData(d));
     }
     if (kind === 'director-3d') {
       const url = (d.lastCaptureUrl as string) || (d.previewUrl as string);
@@ -280,7 +382,7 @@ export function gatherUpstream(
       const url = (d.videoUrl as string) || (d.outputUrl as string);
       if (url) out.clips.push(url);
     }
-    if (kind === 'passthrough' || kind === 'review-gate') {
+    if (kind === 'passthrough') {
       const up = d.upstream as UpstreamOutputs | undefined;
       if (up) {
         out.prompts.push(...(up.prompts ?? []));

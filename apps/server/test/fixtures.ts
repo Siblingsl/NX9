@@ -50,10 +50,10 @@ export const FIXTURE_WS_IMPORT = {
       },
     },
     {
-      id: 'blk-review-gate-001',
-      type: 'review-gate',
+      id: 'blk-director-desk-001',
+      type: 'director-desk',
       position: { x: 400, y: 450 },
-      data: { blockIndex: 6, status: 'idle' },
+      data: { blockIndex: 6, status: 'idle', studioTab: 'deliver' },
     },
   ],
   links: [

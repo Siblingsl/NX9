@@ -21,5 +21,5 @@ export function spawnCameraBlocksForShots(
     return;
   }
 
-  useFlowCommands.getState().requestSpawn('director-3d');
+  useFlowCommands.getState().requestSpawn('director-desk');
 }

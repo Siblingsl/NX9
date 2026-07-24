@@ -1,7 +1,9 @@
 import { Injectable, StreamableFile } from '@nestjs/common';
-import { BadRequestException, ServiceUnavailableException } from '@nestjs/common';
+import { BadRequestException, InternalServerErrorException, ServiceUnavailableException } from '@nestjs/common';
 import { GatewayService } from '../gateway/gateway.service';
+import * as zlib from 'zlib';
 import type {
+  ScreenplayPackage,
   StorySkeleton,
   AdaptationStrategy,
   StoryboardTableRow,
@@ -973,5 +975,188 @@ export class AgentService {
       videoStatus: 'draft',
     }));
     return { ok: true, shots };
+  }
+
+  async scriptSkill(
+    body: { skillId: string; userInstruction?: string; package: Record<string, unknown> },
+    userId?: string,
+  ): Promise<{ ok: true; patch: Record<string, unknown>; explanation: string }> {
+    const system = this.scriptSkillSystem(body.skillId, body.package);
+    const userParts = [
+      body.userInstruction ? `用户指令：${body.userInstruction}` : '',
+      `当前剧本包：${JSON.stringify(body.package, null, 2).slice(0, 4000)}`,
+    ].filter(Boolean).join('\n\n');
+    const res = (await this.gateway.proxyLlm({
+      model: 'gpt-4o-mini',
+      response_format: { type: 'json_object' },
+      messages: [
+        { role: 'system', content: system },
+        { role: 'user', content: userParts },
+      ],
+    }, userId)) as { choices?: { message?: { content?: string } }[] };
+    const content = res.choices?.[0]?.message?.content ?? '';
+    if (!content) throw new ServiceUnavailableException('LLM 未返回内容');
+    const parsed = JSON.parse(content) as Record<string, unknown>;
+    return {
+      ok: true,
+      patch: (parsed.patch ?? parsed) as Record<string, unknown>,
+      explanation: String(parsed.explanation ?? parsed.assistantText ?? '已生成补丁，请确认后应用。'),
+    };
+  }
+
+  async scriptExport(pkg: ScreenplayPackage): Promise<StreamableFile> {
+    const episodesMd = pkg.screenplay.episodes.map((ep) => {
+      const title = ep.title.trim() || `第${ep.index}集`;
+      const body = ep.bodyMd.trim();
+      if (!body) return `## ${title}\n\n（无内容）`;
+      if (body.startsWith(title)) return body;
+      return `## ${title}\n\n${body}`;
+    }).join('\n\n---\n\n');
+
+    const md = [
+      `# ${pkg.brief.title || '未命名剧本'}`,
+      pkg.brief.logline ? `> ${pkg.brief.logline}` : '',
+      pkg.brief.plotOutline ? `\n## 故事大纲\n\n${pkg.brief.plotOutline}` : '',
+      pkg.brief.hooks?.length ? `\n## 爆点\n\n${pkg.brief.hooks.map((h, i) => `${i + 1}. ${h}`).join('\n')}` : '',
+      '',
+      '## 剧本正文',
+      episodesMd,
+    ].filter(Boolean).join('\n');
+
+    const bibleJson = JSON.stringify(pkg.bible, null, 2);
+    const briefJson = JSON.stringify(pkg.brief, null, 2);
+
+    const zipBuf = await this.createZip({
+      '剧本.md': md,
+      'bible.json': bibleJson,
+      'brief.json': briefJson,
+    });
+
+    return new StreamableFile(zipBuf, {
+      type: 'application/zip',
+      disposition: `attachment; filename="screenplay-package.zip"`,
+    });
+  }
+
+  private crc32(buf: Buffer): number {
+    let crc = 0xffffffff;
+    for (let i = 0; i < buf.length; i++) {
+      crc ^= buf[i];
+      for (let j = 0; j < 8; j++) {
+        crc = (crc >>> 1) ^ (crc & 1 ? 0xedb88320 : 0);
+      }
+    }
+    return (crc ^ 0xffffffff) >>> 0;
+  }
+
+  private async createZip(files: Record<string, string>): Promise<Buffer> {
+    const { promisify } = await import('util');
+    const deflateRaw = promisify(zlib.deflateRaw);
+
+    interface FileEntry {
+      name: string;
+      crc: number;
+      compSize: number;
+      uncompSize: number;
+      localOffset: number;
+    }
+    const entries: FileEntry[] = [];
+    const chunks: Buffer[] = [];
+    let offset = 0;
+
+    for (const [name, content] of Object.entries(files)) {
+      const buf = Buffer.from(content, 'utf-8');
+      const crc = this.crc32(buf);
+      const compressed = await deflateRaw(buf);
+      const nameBuf = Buffer.from(name, 'utf-8');
+
+      const local = Buffer.alloc(30 + nameBuf.length);
+      local.writeUInt32LE(0x04034b50, 0);
+      local.writeUInt16LE(20, 4);
+      local.writeUInt16LE(0, 6);
+      local.writeUInt16LE(8, 8);
+      local.writeUInt16LE(0, 10);
+      local.writeUInt16LE(0, 12);
+      local.writeUInt32LE(crc, 14);
+      local.writeUInt32LE(compressed.length, 18);
+      local.writeUInt32LE(buf.length, 22);
+      local.writeUInt16LE(nameBuf.length, 26);
+      local.writeUInt16LE(0, 28);
+      nameBuf.copy(local, 30);
+
+      entries.push({ name, crc, compSize: compressed.length, uncompSize: buf.length, localOffset: offset });
+      chunks.push(local, compressed);
+      offset += local.length + compressed.length;
+    }
+
+    const centralStart = offset;
+    for (const e of entries) {
+      const nameBuf = Buffer.from(e.name, 'utf-8');
+      const entry = Buffer.alloc(46 + nameBuf.length);
+      entry.writeUInt32LE(0x02014b50, 0);
+      entry.writeUInt16LE(20, 4);
+      entry.writeUInt16LE(20, 6);
+      entry.writeUInt16LE(0, 8);
+      entry.writeUInt16LE(8, 10);
+      entry.writeUInt16LE(0, 12);
+      entry.writeUInt16LE(0, 14);
+      entry.writeUInt32LE(e.crc, 16);
+      entry.writeUInt32LE(e.compSize, 20);
+      entry.writeUInt32LE(e.uncompSize, 24);
+      entry.writeUInt16LE(nameBuf.length, 28);
+      entry.writeUInt16LE(0, 30);
+      entry.writeUInt16LE(0, 32);
+      entry.writeUInt16LE(0, 34);
+      entry.writeUInt16LE(0, 36);
+      entry.writeUInt32LE(0, 38);
+      entry.writeUInt32LE(e.localOffset, 42);
+      nameBuf.copy(entry, 46);
+      chunks.push(entry);
+    }
+
+    const centralSize = chunks.slice(entries.length * 2).reduce((s, b) => s + b.length, 0);
+    const eocd = Buffer.alloc(22);
+    eocd.writeUInt32LE(0x06054b50, 0);
+    eocd.writeUInt16LE(0, 4);
+    eocd.writeUInt16LE(0, 6);
+    eocd.writeUInt16LE(entries.length, 8);
+    eocd.writeUInt16LE(entries.length, 10);
+    eocd.writeUInt32LE(centralSize, 12);
+    eocd.writeUInt32LE(centralStart, 16);
+    eocd.writeUInt16LE(0, 20);
+    chunks.push(eocd);
+
+    return Buffer.concat(chunks);
+  }
+
+  private scriptSkillSystem(skillId: string, pkg: Record<string, unknown>): string {
+    const title = String((pkg?.brief as Record<string, unknown> | undefined)?.title ?? '').trim();
+    const maps: Record<string, string> = {
+      topic: `你是选题策划专家。分析当前剧本包（标题：${title}）和用户指令，输出 JSON：
+{
+  "patch": { "brief": { "topic": "选题方向", "logline": "一句话梗概", "targetPlatforms": ["平台"] } },
+  "explanation": "说明"
+}
+要求：topic 有深度、logline 精炼。不要输出镜头表。`,
+      plot: `你是剧情构建专家。分析当前剧本包和用户指令，输出 JSON：
+{
+  "patch": { "brief": { "plotOutline": "情节大纲", "episodeCount": 集数 } },
+  "explanation": "说明"
+}
+要求：plotOutline 有起承转合。不要输出镜头表。`,
+      pacing: `你是节奏构建专家。分析当前剧本包，输出 JSON：
+{
+  "patch": { "brief": { "pacing": "balanced|slow|fast", "targetEpisodeDurationSec": 90 } },
+  "explanation": "说明推荐的节奏及理由"
+}
+不要输出镜头表。`,
+      hooks: `你是爆点构建专家。分析当前剧本包和用户指令，输出 JSON：
+{
+  "patch": { "brief": { "hooks": ["爆点1", "爆点2"] } },
+  "explanation": "说明每个钩子的作用"
+}
+要求：hooks 有冲击力、具体、可落成画面。不要输出镜头表。`,
+    };
+    return maps[skillId] ?? '输出 JSON：{ "patch": {}, "explanation": "" }';
   }
 }

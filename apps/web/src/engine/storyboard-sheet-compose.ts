@@ -323,6 +323,147 @@ export async function composeStoryboardSheetPng(
   });
 }
 
+/** 分镜台：从拆镜表 + 线稿/试出帧拼故事板大图单元格（优先线稿构图图） */
+export function deskSheetCellsFromBreakdownShots(
+  shots: Array<{
+    id: string;
+    index: number;
+    durationSec: number;
+    sceneCode?: string;
+    title?: string;
+    scene?: string;
+    visual?: string;
+    action?: string;
+    scriptText?: string;
+    audiovisualLanguage?: string;
+    sketchPrompt?: string;
+    shotSize?: string;
+    cameraMove?: string;
+    cameraAngle?: string;
+    cameraLens?: string;
+    dialogue?: Array<{ speaker?: string; text?: string }>;
+    narration?: string;
+    previewImageUrl?: string | null;
+    referenceImageUrl?: string | null;
+  }>,
+  opts?: {
+    preview?: { frames?: Array<{
+      id?: string;
+      sourceShotId?: string;
+      imageUrl?: string | null;
+      stylePreset?: string | null;
+      order?: number;
+    }> } | null;
+    storyboardUrlByShotId?: Map<string, string | undefined>;
+    workspaceShotById?: Map<string, Pick<
+      StoryboardShot,
+      | 'firstFrameAssetId'
+      | 'subtitleText'
+      | 'lighting'
+      | 'colorGrade'
+      | 'audioDirection'
+      | 'guideOverlay'
+      | 'notes'
+      | 'descriptionZh'
+      | 'promptEn'
+      | 'sceneName'
+      | 'cameraMove'
+      | 'shotType'
+    >>;
+  },
+): StoryboardSheetCell[] {
+  const frames = opts?.preview?.frames ?? [];
+  const urlByShot = opts?.storyboardUrlByShotId;
+  const wsById = opts?.workspaceShotById;
+  const guidePrefs = readStoryboardGuidePrefs();
+
+  return [...shots]
+    .sort((a, b) => a.index - b.index)
+    .map((shot, i, sorted) => {
+      const frameLine = frames.find(
+        (f) =>
+          (f.sourceShotId === shot.id || f.id === shot.id || f.id === `frame-line-${shot.id}`)
+          && f.stylePreset === 'line-art'
+          && f.imageUrl?.trim(),
+      );
+      const frameAny = frames
+        .filter((f) => f.sourceShotId === shot.id || f.id === shot.id)
+        .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
+        .find((f) => f.imageUrl?.trim());
+      const ws = wsById?.get(shot.id);
+      const imageUrl =
+        shot.previewImageUrl?.trim()
+        || frameLine?.imageUrl?.trim()
+        || frameAny?.imageUrl?.trim()
+        || shot.referenceImageUrl?.trim()
+        || urlByShot?.get(shot.id)?.trim()
+        || ws?.firstFrameAssetId?.trim()
+        || null;
+
+      const dialogueRaw =
+        shot.dialogue?.map((d) => {
+          const t = d.text?.trim();
+          if (!t) return '';
+          return d.speaker?.trim() ? `${d.speaker.trim()}：${t}` : t;
+        }).filter(Boolean).join(' ')
+        || shot.narration?.trim()
+        || ws?.subtitleText?.trim()
+        || '';
+
+      const body =
+        shot.audiovisualLanguage?.trim()
+        || shot.visual?.trim()
+        || shot.action?.trim()
+        || shot.scriptText?.trim()
+        || ws?.descriptionZh?.trim()
+        || ws?.notes?.trim()
+        || shot.sketchPrompt?.trim()
+        || '';
+
+      const title =
+        [shot.sceneCode, shot.scene || shot.title].filter(Boolean).join(' ')
+        || shot.title?.trim()
+        || `分镜 ${i + 1}`;
+
+      const chips: Array<{ text: string; color: string }> = [];
+      if (shot.shotSize?.trim()) chips.push({ text: shot.shotSize.trim(), color: STORYBOARD_GUIDE_COLORS.camera });
+      if (shot.cameraMove?.trim()) chips.push({ text: shot.cameraMove.trim(), color: STORYBOARD_GUIDE_COLORS.camera });
+      if (shot.cameraAngle?.trim()) chips.push({ text: shot.cameraAngle.trim(), color: STORYBOARD_GUIDE_COLORS.camera });
+      if (shot.cameraLens?.trim()) chips.push({ text: shot.cameraLens.trim(), color: STORYBOARD_GUIDE_COLORS.camera });
+      if (ws?.lighting?.trim()) chips.push({ text: ws.lighting.trim(), color: STORYBOARD_GUIDE_COLORS.light });
+      if (ws?.colorGrade?.trim()) chips.push({ text: ws.colorGrade.trim(), color: STORYBOARD_GUIDE_COLORS.light });
+      if (ws?.audioDirection?.trim()) chips.push({ text: ws.audioDirection.trim(), color: STORYBOARD_GUIDE_COLORS.emotion });
+
+      const guide = ws
+        ? filterStoryboardGuideOverlay(resolveStoryboardGuideOverlay(ws), {
+            enabled: guidePrefs.showOnExport,
+            kinds: enabledGuideKinds(guidePrefs),
+          })
+        : null;
+
+      let startSec = 0;
+      for (let j = 0; j < i; j++) startSec += Math.max(0.5, sorted[j]?.durationSec || 5);
+
+      return {
+        imageUrl,
+        index: i + 1,
+        title: title.replace(/\s+/g, ' ').trim(),
+        caption: body || '（暂无分镜说明）',
+        dialogue: dialogueRaw || null,
+        chips,
+        guide,
+        startSec,
+        endSec: startSec + Math.max(0.5, shot.durationSec || 5),
+      };
+    });
+}
+
+export function buildDeskContactSheetSignature(cells: StoryboardSheetCell[]): string {
+  return cells
+    .map((c) => `${c.index}:${c.imageUrl ?? ''}:${c.title}:${c.caption.slice(0, 40)}`)
+    .join('|');
+}
+
 export function timelineCellsFromShots(
   shots: Array<
     Pick<

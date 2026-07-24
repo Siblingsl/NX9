@@ -110,6 +110,60 @@ export {
   storyboardShotsFromScriptBreakdown,
   bindStoryboardShotAssets,
 } from './types/script-breakdown';
+export type {
+  ScreenplayPackageStatus,
+  ScreenplayBrief,
+  ScreenplayEpisode,
+  ScreenplayCharacterDraft,
+  ScreenplaySceneDraft,
+  ScreenplayWorldDraft,
+  ScreenplayBible,
+  ScreenplayDiagnostic,
+  ScreenplayPackage,
+  ScriptDeskSkillPromptPack,
+  ScriptDeskSkillId,
+  ScriptDeskAgentMessage,
+  ScriptDeskAgentSession,
+  ScriptDeskNodeData,
+} from './types/screenplay-package';
+export {
+  emptyScreenplayPackage,
+  isScreenplayPackage,
+  screenplayFullText,
+  screenplayWordCount,
+  resolveScreenplayStatus,
+  touchScreenplayPackage,
+  confirmScreenplayPackage,
+  unconfirmIfEdited,
+  buildScreenplayMeta,
+  episodesFromIngestText,
+  ingestTextToPackage,
+  mergeCharacterDrafts,
+  mergeSceneDrafts,
+  characterDraftFromPartial,
+  sceneDraftFromPartial,
+  bibleDraftsFromExtract,
+  bibleDraftsFromBreakdown,
+  migrateDialogueSheetDataToPackage,
+  applyPackagePatch,
+  extractScreenplayExcerpts,
+  buildNarrativeConsistencyDiagnostics,
+  DEFAULT_SCRIPT_DESK_SKILL_PROMPTS,
+  normalizeScriptDeskPrompts,
+} from './types/screenplay-package';
+export type {
+  SmartEditNodeData,
+  SmartEditProfile,
+  SmartEditEngine,
+  SmartSuggestion,
+} from './types/smart-edit';
+export {
+  resolveEngine,
+  engineLabel,
+  profileLabel,
+  buildViralClip,
+  buildA1Clip,
+} from './types/smart-edit';
 export { buildScriptBreakdownFromText } from './utils/script-breakdown';
 export {
   normalizeScriptBreakdownConfig,
@@ -261,6 +315,7 @@ export {
   topologicalLayers,
   gatherUpstream,
   mergeUpstreamPrompt,
+  collectLinkedShotIdsFromData,
 } from './engine/flow-graph';
 export type { UpstreamOutputs } from './engine/flow-graph';
 
@@ -293,7 +348,23 @@ export type { BlockCategory, BlockDefinition, SocketKind, SocketProfile } from '
 
 export type { SkillSummary, SkillDetail } from './types/skills';
 
-export { BLOCK_CATALOG, BLOCK_GROUPS, lookupBlock, isBlockSpawnable, isDockVisible, getSpawnableBlocks, getDockBlocks } from './catalog/block-catalog';
+export {
+  BLOCK_CATALOG,
+  BLOCK_GROUPS,
+  INTERNAL_BLOCKS,
+  lookupBlock,
+  isBlockSpawnable,
+  isDockVisible,
+  getSpawnableBlocks,
+  getDockBlocks,
+} from './catalog/block-catalog';
+export {
+  buildMediaPinNodeData,
+  parseMediaPinPayload,
+  type MediaPinPayload,
+  type MediaPinSource,
+  type MediaPinNodeData,
+} from './utils/media-pin';
 
 export {
   ATTACHED_WORKSPACE_REGISTRY,
@@ -330,9 +401,11 @@ export {
   DEPRECATED_BLOCK_KINDS,
   migrateBlockKind,
   migrateBlockKinds,
+  stripReviewGateFromGraph,
   getBlockKindMigrationTarget,
   isDeprecatedBlockKind,
   type MigratableNode,
+  type MigratableLink,
 } from './catalog/migrate-block-kinds';
 
 export {

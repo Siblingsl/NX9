@@ -2,17 +2,15 @@ import type { Edge, Node } from '@xyflow/react';
 import { WORKFLOW_TEMPLATES } from '@nx9/shared';
 
 /**
- * 核心成片节点（含导演台批出关键帧）
- * 剧本 → 设定检查 → 分镜台 ← 出图/3D → 导演台 → 审阅 → 视频 → 导出
+ * 核心成片节点（含导演台批出关键帧与台内审阅）
+ * 剧本 → 设定检查 → 分镜台 ← 出图/3D → 导演台 → 视频 → 导出
  */
 export const CORE_PIPELINE_KINDS = [
-  'dialogue-sheet',
+  'script-desk',
   'asset-gate',
   'storyboard-desk',
   'picture-gen',
-  'director-3d',
   'director-desk',
-  'review-gate',
   'clip-gen',
   'export-pack',
 ] as const;
@@ -62,14 +60,13 @@ export function auditCorePipeline(nodes: Node[], edges: Edge[]): CorePipelineAud
   const presentCount = CORE_PIPELINE_KINDS.filter((kind) => byKind.has(kind)).length;
   const missingKinds = CORE_PIPELINE_KINDS.filter((kind) => !byKind.has(kind));
   const requiredLinks: CoreLinkSpec[] = [
-    { source: 'dialogue-sheet', target: 'asset-gate', targetHandle: 'asset-gate' },
+    { source: 'script-desk', target: 'asset-gate', targetHandle: 'asset-gate' },
     { source: 'asset-gate', target: 'storyboard-desk', sourceHandle: 'asset-gate' },
     { source: 'picture-gen', target: 'storyboard-desk', sourceHandle: 'exec-picture', targetHandle: 'exec-picture' },
-    { source: 'director-3d', target: 'storyboard-desk', sourceHandle: 'exec-picture', targetHandle: 'exec-picture' },
+    { source: 'director-desk', target: 'storyboard-desk', sourceHandle: 'exec-picture', targetHandle: 'exec-picture' },
     { source: 'picture-gen', target: 'director-desk' },
     { source: 'storyboard-desk', target: 'director-desk' },
-    { source: 'director-desk', target: 'review-gate' },
-    { source: 'review-gate', target: 'clip-gen' },
+    { source: 'director-desk', target: 'clip-gen' },
     { source: 'clip-gen', target: 'export-pack' },
   ];
   const missingLinkCount = requiredLinks.filter(
@@ -80,10 +77,8 @@ export function auditCorePipeline(nodes: Node[], edges: Edge[]): CorePipelineAud
     byKind.get('storyboard-desk')?.id
     ?? byKind.get('storyboard-preview')?.id
     ?? byKind.get('story-grid')?.id;
-  // 分镜台直连视频 = 绕过导演台与审阅
-  const hasBypass =
-    linkExists(edges, deskId, byKind.get('clip-gen')?.id)
-    || linkExists(edges, deskId, byKind.get('review-gate')?.id);
+  // 分镜台直连视频 = 绕过导演台审阅
+  const hasBypass = linkExists(edges, deskId, byKind.get('clip-gen')?.id);
   return {
     resemblesCore: presentCount >= 4 && Boolean(deskId),
     valid: missingKinds.length === 0 && missingLinkCount === 0 && !hasBypass,
@@ -110,13 +105,11 @@ export function repairCorePipeline(
     ?? byKind.get('story-grid')?.position
     ?? { x: 700, y: 340 };
   const offsets: Record<CoreKind, { x: number; y: number }> = {
-    'dialogue-sheet': { x: -700, y: 0 },
+    'script-desk': { x: -700, y: 0 },
     'asset-gate': { x: -450, y: 0 },
     'storyboard-desk': { x: 0, y: 0 },
     'picture-gen': { x: -150, y: -240 },
-    'director-3d': { x: 150, y: -240 },
     'director-desk': { x: 320, y: 0 },
-    'review-gate': { x: 560, y: 0 },
     'clip-gen': { x: 820, y: 0 },
     'export-pack': { x: 1080, y: 0 },
   };
@@ -147,12 +140,10 @@ export function repairCorePipeline(
     ?? byKind.get('storyboard-preview')?.id
     ?? byKind.get('story-grid')?.id;
   const videoId = byKind.get('clip-gen')?.id;
-  const reviewId = byKind.get('review-gate')?.id;
   let removedBypassCount = 0;
   const nextEdges = edges.filter((edge) => {
     const bypassVideo = edge.source === deskId && edge.target === videoId;
-    const bypassReview = edge.source === deskId && edge.target === reviewId;
-    if (bypassVideo || bypassReview) {
+    if (bypassVideo) {
       removedBypassCount++;
       return false;
     }
@@ -160,14 +151,13 @@ export function repairCorePipeline(
   });
 
   const definitions: CoreLinkSpec[] = [
-    { source: 'dialogue-sheet', target: 'asset-gate', targetHandle: 'asset-gate' },
+    { source: 'script-desk', target: 'asset-gate', targetHandle: 'asset-gate' },
     { source: 'asset-gate', target: 'storyboard-desk', sourceHandle: 'asset-gate' },
     { source: 'picture-gen', target: 'storyboard-desk', sourceHandle: 'exec-picture', targetHandle: 'exec-picture' },
-    { source: 'director-3d', target: 'storyboard-desk', sourceHandle: 'exec-picture', targetHandle: 'exec-picture' },
+    { source: 'director-desk', target: 'storyboard-desk', sourceHandle: 'exec-picture', targetHandle: 'exec-picture' },
     { source: 'picture-gen', target: 'director-desk' },
     { source: 'storyboard-desk', target: 'director-desk' },
-    { source: 'director-desk', target: 'review-gate' },
-    { source: 'review-gate', target: 'clip-gen' },
+    { source: 'director-desk', target: 'clip-gen' },
     { source: 'clip-gen', target: 'export-pack' },
   ];
   let addedLinkCount = 0;

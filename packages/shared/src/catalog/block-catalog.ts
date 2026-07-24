@@ -5,8 +5,8 @@ import type { BlockDefinition, BlockCategory } from '../types/block';
  * 历史 kind 不在此表；加载时由 migrate-block-kinds 改写。
  *
  * Dock 默认可见 ≈ 16；concealed = 高级/命令面板可搜。
- * ScreenModal 弹窗节点（dialogue-sheet / asset-gate /
- * storyboard-desk / continuity-check）仅登记，不改其 UI。
+ * ScreenModal 弹窗节点（script-desk / asset-gate /
+ * storyboard-desk / continuity-check）仅登记；编剧台 UI 由功能 3 升级。
  * 角色/场景设定主入口为素材库，不再提供画布节点。
  */
 export const BLOCK_CATALOG: BlockDefinition[] = [
@@ -42,15 +42,15 @@ export const BLOCK_CATALOG: BlockDefinition[] = [
     kind: 'clip-gen',
     label: '视频生成',
     category: 'generate',
-    hint: '单镜图生视频 · Bridge 续拍 · 关联关键帧出片',
+    hint: '单镜/续拍 · 本集批出 · 回写镜头',
     glyph: 'Video',
     accent: '#A13D63',
   },
   {
     kind: 'clip-editor',
-    label: '视频剪辑',
+    label: '智能剪辑',
     category: 'generate',
-    hint: '拼接转场 · 混音 · 调色',
+    hint: '智能编排时间线 · Remotion/HF/FFmpeg 成片',
     glyph: 'Scissors',
     accent: '#A13D63',
   },
@@ -66,7 +66,7 @@ export const BLOCK_CATALOG: BlockDefinition[] = [
     kind: 'director-desk',
     label: '导演台',
     category: 'generate',
-    hint: '关键帧批出 · 失败重试 · 角色/场景/风格锁 · 优先3D · 可送视频生成',
+    hint: '3D 机位 · 关键帧批出 · 风格锁 · 审阅 · 送视频',
     glyph: 'Clapperboard',
     accent: '#A13D63',
     nx9Native: true,
@@ -74,10 +74,10 @@ export const BLOCK_CATALOG: BlockDefinition[] = [
 
   // ── 创作主路径（含 ScreenModal 弹窗，UI 冻结） ──
   {
-    kind: 'dialogue-sheet',
-    label: '剧本拆分',
+    kind: 'script-desk',
+    label: '编剧台',
     category: 'craft',
-    hint: '小说/剧本 → 集 · 镜 · 角色 · 场景',
+    hint: 'Agent 共创 / 上传成稿 · Bible draft · 确认交接',
     glyph: 'MessageSquareText',
     accent: '#D97706',
     nx9Native: true,
@@ -86,7 +86,7 @@ export const BLOCK_CATALOG: BlockDefinition[] = [
     kind: 'asset-gate',
     label: '设定检查',
     category: 'craft',
-    hint: '新角色/场景入库门禁',
+    hint: 'Bible/镜需求对照 · 缺口补齐 · 放行',
     glyph: 'GitBranch',
     accent: '#D97706',
     nx9Native: true,
@@ -95,7 +95,7 @@ export const BLOCK_CATALOG: BlockDefinition[] = [
     kind: 'storyboard-desk',
     label: '分镜台',
     category: 'craft',
-    hint: '分镜表 + 关键帧预览出图',
+    hint: '成稿拆镜 · 镜表编辑 · 构图确认',
     glyph: 'Clapperboard',
     accent: '#A13D63',
     nx9Native: true,
@@ -129,17 +129,7 @@ export const BLOCK_CATALOG: BlockDefinition[] = [
     concealed: true,
   },
 
-  // ── 空间（高级） ──
-  {
-    kind: 'director-3d',
-    label: '3D 导演台',
-    category: 'spatial',
-    hint: '摆位 · 机位 · 灯光 · 截图写回 · 含 3D 导入预览',
-    glyph: 'Box',
-    accent: '#C4A574',
-    nx9Native: true,
-    concealed: true,
-  },
+  // ── 空间（高级）— director-3d 已合并到 director-desk，目录已下架 ──
 
   // ── 后期 / 交付 ──
   {
@@ -183,22 +173,13 @@ export const BLOCK_CATALOG: BlockDefinition[] = [
     kind: 'export-pack',
     label: '交付打包',
     category: 'utility',
-    hint: '成片 / 静帧 / 音频导出',
+    hint: '交付 ZIP / 成片 / 工程包',
     glyph: 'PackageOpen',
     accent: '#D97706',
     nx9Native: true,
   },
 
-  // ── 流程 ──
-  {
-    kind: 'review-gate',
-    label: '审阅关卡',
-    category: 'support',
-    hint: '批审通过后放行下游',
-    glyph: 'ShieldCheck',
-    accent: '#222222',
-    nx9Native: true,
-  },
+  // ── 流程：审阅关卡已并入导演台（见 BLOCK_KIND_MIGRATIONS）──
 ];
 
 export function isBlockSpawnable(block: BlockDefinition): boolean {
@@ -232,6 +213,24 @@ export const BLOCK_GROUPS: Record<BlockCategory, { title: string; items: BlockDe
   spatial: { title: '空间', items: spawnableInCategory('spatial') },
 };
 
+/**
+ * 仅程序化 spawn（拖出/内部创建），不进 Dock / 命令面板 / getSpawnableBlocks。
+ * 与「隐藏旧节点」无关：这是新设计的画布钉图能力。
+ */
+export const INTERNAL_BLOCKS: BlockDefinition[] = [
+  {
+    kind: 'media-pin',
+    label: '画布钉图',
+    category: 'utility',
+    hint: '从生成结果或上游拖出的单图钉板 · 可连下游',
+    glyph: 'Pin',
+    accent: '#c4a574',
+  },
+];
+
 export function lookupBlock(kind: string): BlockDefinition | undefined {
-  return BLOCK_CATALOG.find((b) => b.kind === kind);
+  return (
+    BLOCK_CATALOG.find((b) => b.kind === kind) ??
+    INTERNAL_BLOCKS.find((b) => b.kind === kind)
+  );
 }

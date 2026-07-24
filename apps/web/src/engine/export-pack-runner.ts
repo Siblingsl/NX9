@@ -7,6 +7,7 @@ export interface ExportPackInput {
   mode: 'zip' | 'ffmpeg-episode' | 'hyperframes-episode' | 'remotion-bundle';
   prefix: string;
   audioUrl?: string;
+  multiEpisode?: boolean;
   pictures: string[];
   clips: string[];
   sounds: string[];
@@ -40,11 +41,11 @@ export async function runExportPack(input: ExportPackInput): Promise<ExportPackR
     const res = await api.concatEpisode({
       shots: input.shots,
       requireApproved: true,
-      title: input.prefix,
+      title: input.multiEpisode ? `${input.prefix}-multi-ep` : input.prefix,
       audioUrl: input.audioUrl?.trim() || undefined,
     });
     if (!res.ok) return { ok: false, message: res.message ?? res.status, url: undefined };
-    return { ok: true, url: res.url };
+    return { ok: true, url: res.url, exportCount: 1 };
   }
 
   if (input.mode === 'hyperframes-episode') {
@@ -90,7 +91,12 @@ export async function runExportPack(input: ExportPackInput): Promise<ExportPackR
     zip.file(name, await fetchBlob(url));
     manifest.push({ kind: 'sound', path: name, url });
   }
-  zip.file('manifest.json', JSON.stringify({ exportedAt: new Date().toISOString(), items: manifest }, null, 2));
+  const manifestObj = { exportedAt: new Date().toISOString(), items: manifest };
+  zip.file('manifest.json', JSON.stringify(manifestObj, null, 2));
+  // EP-P2-02: CSV 清单
+  const csvHeader = 'kind,filename,url';
+  const csvRows = manifest.map((m) => `"${m.kind}","${m.path}","${m.url}"`);
+  zip.file('manifest.csv', [csvHeader, ...csvRows].join('\n'));
   if (input.prompts.length) {
     zip.file('prompts.txt', input.prompts.join('\n\n---\n\n'));
   }

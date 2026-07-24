@@ -77,7 +77,7 @@ export function ReportWorkspace({ blockId, kind, onCollapse }: ReportWorkspacePr
   const [regeneratingShotId, setRegeneratingShotId] = useState<string | null>(null);
   const [editingShotId, setEditingShotId] = useState<string | null>(null);
   const [rejectionDrafts, setRejectionDrafts] = useState<Record<string, string>>({});
-  const isReviewGate = kind === 'review-gate';
+  const isReviewGate = false; // 审阅关卡已拆除；批审改由导演台承接
 
   const counts = useMemo(() => {
     if (!isReviewGate) return { missing: 0, pending: 0, approved: 0 };

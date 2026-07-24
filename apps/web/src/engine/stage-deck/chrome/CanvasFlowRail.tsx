@@ -10,6 +10,7 @@ import {
 } from '@nx9/shared';
 import { useWorkspaceDocument } from '../../../stores/workspace-document';
 import { useFlowRuntime } from '../../../stores/flow-runtime';
+import { useFlowCommands } from '../../../stores/flow-commands';
 import { useContextRailUi } from '../stores/context-rail-ui';
 import { useAssetLibraryModalUi } from '../../../stores/asset-library-modal-ui';
 import { useWorkspaceCatalog } from '../../../stores/workspace-catalog';
@@ -163,9 +164,13 @@ export function CanvasFlowRail() {
     if (action.type === 'open_rail') {
       requestRailTab(action.tab, action.sub ? { librarySub: action.sub as any } : undefined);
     } else if (action.type === 'open_panel') {
-      import('../../../stores/flow-runtime').then(({ useStoryboardUi }) => {
-        useStoryboardUi.getState().setOpen(true);
-      });
+      const nodes = runtime.getNodes();
+      const desk = nodes.find((n) => n.type === 'storyboard-desk');
+      if (desk) {
+        runtime.focusBlock(desk.id);
+      } else {
+        useFlowCommands.getState().requestSpawn('storyboard-desk');
+      }
     } else if (action.type === 'run_cascade') {
       const nodes = runtime.getNodes();
       const target = nodes.find((n) => {
@@ -208,9 +213,13 @@ export function CanvasFlowRail() {
       if (action.type === 'open_rail') {
         requestRailTab(action.tab, action.sub ? { librarySub: action.sub as any } : undefined);
       } else if (action.type === 'open_panel') {
-        import('../../../stores/flow-runtime').then(({ useStoryboardUi }) => {
-          useStoryboardUi.getState().setOpen(true);
-        });
+        const nodes = runtime.getNodes();
+        const desk = nodes.find((n) => n.type === 'storyboard-desk');
+        if (desk) {
+          runtime.focusBlock(desk.id);
+        } else {
+          useFlowCommands.getState().requestSpawn('storyboard-desk');
+        }
       }
       return;
     }

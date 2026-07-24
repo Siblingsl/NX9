@@ -25,6 +25,7 @@ export interface NodeInteractionProfile {
 }
 
 const OUTPUT_KINDS = new Set([
+  'media-pin',
   'preview-sink',
   'mesh-viewer',
   'thumbnail-maker',
@@ -49,9 +50,8 @@ const CONFIG_KINDS = new Set([
   'panorama-sphere',
 ]);
 
-const LOGIC_KINDS = new Set([
+  const LOGIC_KINDS = new Set([
   'variant-fork',
-  'review-gate',
   'recipe-spawn',
   'prompt-diff',
   'asset-watch',

@@ -743,7 +743,7 @@ export function useStoryboardPreviewState(blockId: string) {
       const data = (node.data ?? {}) as Record<string, unknown>;
       const current = readPayload(data);
       if (!canConfirmStoryboardPreview(current)) return {};
-      // 分镜预览只提交批审；批准动作统一由下游 review-gate 完成。
+      // 分镜预览只提交批审；批准动作统一由下游导演台「审阅送出」完成。
       for (const frame of current.frames) {
         if (frame.sourceShotId && frame.imageUrl) {
           useWorkspaceDocument.getState().updateShot(frame.sourceShotId, {

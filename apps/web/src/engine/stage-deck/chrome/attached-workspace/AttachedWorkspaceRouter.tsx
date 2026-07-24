@@ -44,8 +44,9 @@ export function AttachedWorkspaceRouter({ blockId, kind, onCollapse }: AttachedW
     case 'report':
       return <ReportWorkspace blockId={blockId} kind={kind} onCollapse={onCollapse} />;
     case 'table':
-      if (kind === 'dialogue-sheet') {
-        return <ScriptBreakdownWorkspace blockId={blockId} kind={kind} onCollapse={onCollapse} />;
+      if (kind === 'dialogue-sheet' || kind === 'script-desk') {
+        // 编剧台自有 ScreenModal，不走底部 table 壳
+        return null;
       }
       if (kind === 'story-grid') {
         return <StoryGridWorkspace blockId={blockId} kind={kind} onCollapse={onCollapse} />;

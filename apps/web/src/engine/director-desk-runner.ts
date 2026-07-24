@@ -5,6 +5,7 @@
 import type { Edge, Node } from '@xyflow/react';
 import {
   activeEpisodeShots,
+  appendStoryboardReviewEvent,
   enrichPromptWithCharacters,
   enrichPromptWithEnvironment,
   pickReferenceImage,
@@ -16,12 +17,13 @@ import {
 import { useWorkspaceDocument } from '../stores/workspace-document';
 import { resolvePictureGenSettings } from './storyboard-preview-runner';
 import { runPictureGenJob } from './picture-gen-runner';
+import { batchGenerateKeyframesFromShots } from './core-pipeline-runner';
 import {
   collectPendingKeyframeIndices,
   openReviewGateSession,
 } from './stage-deck/utils/review-gate-session';
 
-export type DirectorDeskQueueFilter = 'missing' | 'failed' | 'selected' | 'all';
+export type DirectorDeskQueueFilter = 'missing' | 'failed' | 'selected' | '3donly' | 'all';
 
 /** 单镜生命周期（写入结果，便于 UI / 日志） */
 export type DirectorShotPhase =
@@ -129,31 +131,8 @@ export function findDirectorClipGenNode(
       if (n) return n;
     }
   }
-  return nodes.find((n) => n.type === 'clip-gen');
-}
-
-export function findDirectorReviewGateNode(
-  deskBlockId: string,
-  nodes: Node[],
-  edges: Edge[],
-): Node | undefined {
-  for (const edge of edges) {
-    if (edge.source === deskBlockId) {
-      const n = nodes.find((x) => x.id === edge.target && x.type === 'review-gate');
-      if (n) return n;
-    }
-    if (edge.target === deskBlockId) {
-      const n = nodes.find((x) => x.id === edge.source && x.type === 'review-gate');
-      if (n) return n;
-    }
-  }
-  // 优先 keyframe 模式
-  const keyframe = nodes.find(
-    (n) =>
-      n.type === 'review-gate' &&
-      ((n.data as Record<string, unknown> | undefined)?.gateMode ?? 'keyframe') !== 'video',
-  );
-  return keyframe ?? nodes.find((n) => n.type === 'review-gate');
+  // 只认连线；不回落到任意 clip-gen，保证各视频节点独立
+  return undefined;
 }
 
 /**
@@ -183,12 +162,10 @@ export function syncStyleToPictureGen(args: {
     patch.seed = args.styleSeed;
   }
   if (args.stylePrompt?.trim()) {
-    // picture-gen 工作区可读的风格补充
     patch.stylePrompt = args.stylePrompt.trim();
     const existing = String(
       (picture.data as Record<string, unknown> | undefined)?.content ?? '',
     ).trim();
-    // 不覆盖用户正文，只写独立字段；若 content 为空可轻量提示
     if (!existing) {
       patch.content = args.stylePrompt.trim();
     }
@@ -205,68 +182,46 @@ export function syncStyleToPictureGen(args: {
 }
 
 /**
- * 批出成功后：刷新审阅关卡节点 + 打开审片会话
+ * 批出成功后：打开审片会话（宫格批审）；门禁以镜头 keyframeStatus 为准
  */
 export function openReviewAfterDirectorBatch(args: {
   deskBlockId: string;
   nodes: Node[];
   edges: Edge[];
   updateNodeData: (id: string, patch: Record<string, unknown>) => void;
-  /** 本次成功出帧的 shot id */
+  /** 本次成功出帧的 shot id（保留参数，兼容调用方） */
   succeededShotIds?: string[];
   openSession?: boolean;
 }): {
-  reviewGateId?: string;
   pendingIndices: number[];
   opened: boolean;
+  gatePassed: boolean;
 } {
-  let pendingIndices = collectPendingKeyframeIndices();
-
-  // 若本次成功镜在 manual 模式下，确保其 index 在 pending 中
-  if (args.succeededShotIds?.length) {
-    const shots = useWorkspaceDocument.getState().storyboard.shots;
-    const byId = new Map(shots.map((s) => [s.id, s]));
-    for (const id of args.succeededShotIds) {
-      const s = byId.get(id);
-      if (!s?.firstFrameAssetId) continue;
-      if (s.keyframeStatus === 'approved' || s.status === 'approved') continue;
-      if (!pendingIndices.includes(s.index)) pendingIndices.push(s.index);
-    }
-    pendingIndices = [...new Set(pendingIndices)].sort((a, b) => a - b);
-  }
-
-  const gate = findDirectorReviewGateNode(args.deskBlockId, args.nodes, args.edges);
-  if (gate) {
-    args.updateNodeData(gate.id, {
-      gateMode: 'keyframe',
-      gatePassed: pendingIndices.length === 0,
-      pendingShots: pendingIndices,
-      status: pendingIndices.length === 0 ? 'success' : 'blocked',
-      meta: {
-        pending: pendingIndices,
-        gateMode: 'keyframe',
-        fromDirectorDesk: args.deskBlockId,
-        at: new Date().toISOString(),
-      },
-    });
-  }
+  void args.nodes;
+  void args.edges;
+  void args.updateNodeData;
+  void args.succeededShotIds;
+  const synced = summarizePendingKeyframeGate();
 
   let opened = false;
-  if (args.openSession !== false && pendingIndices.length > 0) {
+  if (args.openSession !== false) {
     openReviewGateSession({
-      pendingIndices,
+      pendingIndices: synced.pendingIndices.length
+        ? synced.pendingIndices
+        : collectPendingKeyframeIndices(),
       stage: 'keyframe',
       source: 'director-desk',
     });
     opened = true;
-  } else if (args.openSession !== false && pendingIndices.length === 0) {
-    // 全部已通过：仍切到故事板网格，方便查看
-    openReviewGateSession({ pendingIndices: [], stage: 'keyframe', source: 'director-desk' });
-    opened = true;
   }
 
-  return { reviewGateId: gate?.id, pendingIndices, opened };
+  return {
+    pendingIndices: synced.pendingIndices,
+    opened,
+    gatePassed: synced.gatePassed,
+  };
 }
+
 
 export function shotKeyframePrompt(shot: StoryboardShot): string {
   return (
@@ -318,6 +273,129 @@ export function summarizeDirectorQueue(shots: StoryboardShot[]) {
   };
 }
 
+/** 关键帧批审统计（与审阅关卡 keyframe 门禁口径一致） */
+export function summarizeDirectorKeyframeReview(shots: StoryboardShot[]) {
+  let missing = 0;
+  let pending = 0;
+  let approved = 0;
+  let failed = 0;
+  for (const s of shots) {
+    if (!s.firstFrameAssetId) missing += 1;
+    else if (isShotKeyframeApproved(s)) approved += 1;
+    else if (isShotKeyframeFailed(s)) failed += 1;
+    else pending += 1;
+  }
+  return { total: shots.length, missing, pending, approved, failed };
+}
+
+/**
+ * 关键帧门禁是否放行：本集每镜均为 approved（缺图 / 待审 / 打回均不算通过）。
+ * 与服务端 `validateReviewGate(..., 'keyframe')` 对齐。
+ */
+export function isDirectorKeyframeGatePassed(shots: StoryboardShot[]): boolean {
+  return shots.length > 0 && shots.every((s) => isShotKeyframeApproved(s));
+}
+
+/** 当前集关键帧待审 index + 是否放行（替代原审阅关卡节点同步） */
+export function summarizePendingKeyframeGate(): {
+  pendingIndices: number[];
+  gatePassed: boolean;
+} {
+  const shots = activeEpisodeShots(useWorkspaceDocument.getState().storyboard);
+  const pending = shots
+    .filter((s) => !isShotKeyframeApproved(s))
+    .map((s) => s.index)
+    .sort((a, b) => a - b);
+  return {
+    pendingIndices: pending,
+    gatePassed: shots.length > 0 && pending.length === 0,
+  };
+}
+
+/** @deprecated 审阅关卡已拆除；保留别名以免外部调用方瞬时断裂 */
+export function syncDirectorReviewGateFromShots(_args?: {
+  deskBlockId?: string;
+  nodes?: Node[];
+  edges?: Edge[];
+  updateNodeData?: (id: string, patch: Record<string, unknown>) => void;
+}): { reviewGateId?: string; pendingIndices: number[]; gatePassed: boolean } {
+  const synced = summarizePendingKeyframeGate();
+  return { pendingIndices: synced.pendingIndices, gatePassed: synced.gatePassed };
+}
+
+export function approveDirectorKeyframe(shotId: string): boolean {
+  const doc = useWorkspaceDocument.getState();
+  const shot = doc.storyboard.shots.find((s) => s.id === shotId);
+  if (!shot?.firstFrameAssetId) return false;
+  const event = {
+    id: `review-${shot.id}-${Date.now()}`,
+    stage: 'keyframe' as const,
+    decision: 'approved' as const,
+    createdAt: new Date().toISOString(),
+  };
+  doc.updateShot(shot.id, {
+    status: 'approved',
+    keyframeStatus: 'approved',
+    keyframeReviewNote: null,
+    reviewHistory: appendStoryboardReviewEvent(shot, event),
+  });
+  return true;
+}
+
+/** 有图且未批准的镜头全部通过；缺图时返回 0（与审阅关卡「全部通过」一致） */
+export function approveAllDirectorKeyframes(): number {
+  const doc = useWorkspaceDocument.getState();
+  const shots = activeEpisodeShots(doc.storyboard);
+  if (shots.some((s) => !s.firstFrameAssetId)) return 0;
+  let n = 0;
+  for (const shot of shots) {
+    if (isShotKeyframeApproved(shot)) continue;
+    if (!shot.firstFrameAssetId) continue;
+    const event = {
+      id: `review-${shot.id}-${Date.now()}-${n}`,
+      stage: 'keyframe' as const,
+      decision: 'approved' as const,
+      createdAt: new Date().toISOString(),
+    };
+    doc.updateShot(shot.id, {
+      keyframeStatus: 'approved',
+      status: 'approved',
+      keyframeReviewNote: null,
+      reviewHistory: appendStoryboardReviewEvent(shot, event),
+    });
+    n += 1;
+  }
+  return n;
+}
+
+export async function rejectDirectorKeyframe(args: {
+  shotId: string;
+  comment: string;
+  regenerate?: boolean;
+}): Promise<{ ok: boolean; regenerated?: boolean }> {
+  const comment = args.comment.trim();
+  if (!comment) return { ok: false };
+  const doc = useWorkspaceDocument.getState();
+  const shot = doc.storyboard.shots.find((s) => s.id === args.shotId);
+  if (!shot) return { ok: false };
+  const event = {
+    id: `review-${shot.id}-${Date.now()}`,
+    stage: 'keyframe' as const,
+    decision: 'rejected' as const,
+    comment,
+    createdAt: new Date().toISOString(),
+  };
+  doc.updateShot(shot.id, {
+    status: 'failed',
+    keyframeStatus: 'failed',
+    keyframeReviewNote: comment,
+    reviewHistory: appendStoryboardReviewEvent(shot, event),
+  });
+  if (!args.regenerate) return { ok: true, regenerated: false };
+  await batchGenerateKeyframesFromShots([shot.id], true);
+  return { ok: true, regenerated: true };
+}
+
 export function resolveDirectorQueueShots(
   allActive: StoryboardShot[],
   opts: {
@@ -337,6 +415,8 @@ export function resolveDirectorQueueShots(
     list = allActive.filter((s) => set.has(s.id));
   } else if (filter === 'failed') {
     list = allActive.filter(isShotKeyframeFailed);
+  } else if (filter === '3donly') {
+    list = allActive.filter((s) => s.director3dGuide?.captureUrl);
   } else if (filter === 'all') {
     list = [...allActive];
   } else {
@@ -763,6 +843,8 @@ export function pushKeyframesToClipGen(args: {
   edges: Edge[];
   updateNodeData: (id: string, patch: Record<string, unknown>) => void;
   shotIds?: string[];
+  /** 强制推送时跳过 clip-gen 关键帧门禁 */
+  bypassKeyframeGate?: boolean;
 }): { clipGenId?: string; shotCount: number; firstShotId?: string } {
   const clip = findDirectorClipGenNode(args.deskBlockId, args.nodes, args.edges);
   if (!clip) return { shotCount: 0 };
@@ -779,6 +861,7 @@ export function pushKeyframesToClipGen(args: {
   const pictures = targets.map((s) => s.firstFrameAssetId!).filter(Boolean);
   args.updateNodeData(clip.id, {
     linkedShotId: first.id,
+    linkedShotIds: targets.map((s) => s.id),
     content:
       first.videoPromptPro ||
       first.videoPromptEn ||
@@ -788,7 +871,36 @@ export function pushKeyframesToClipGen(args: {
     previewUrl: first.firstFrameAssetId,
     directorDeskRefs: pictures,
     message: `已从导演台写入 ${targets.length} 镜关键帧参考`,
+    bypassKeyframeGate: args.bypassKeyframeGate === true,
   });
 
   return { clipGenId: clip.id, shotCount: targets.length, firstShotId: first.id };
+}
+
+/** O-6: 根据镜头描述生成 3D 摆位文本建议（无自动桥，仅供提示） */
+export function suggestCameraPosition(shot: {
+  index?: number;
+  descriptionZh?: string;
+  promptEn?: string;
+  shotSize?: string;
+  cameraMove?: string;
+  cameraAngle?: string;
+  scene?: string;
+  characters?: string[];
+}): { shotIndex: number; suggestedCamera: string; suggestedAngle: string; suggestedDistance: string; notes: string } {
+  const size = shot.shotSize || 'MS';
+  const move = shot.cameraMove || '固定';
+  const angle = shot.cameraAngle || '平拍';
+  const distMap: Record<string, string> = { ECU: '0.3m', CU: '1m', MS: '2m', FS: '3m', WS: '6m' };
+  const angleMap: Record<string, string> = { '平拍': 'eye-level', '俯拍': 'overhead', '仰拍': 'low-angle' };
+  const desc = shot.descriptionZh || shot.promptEn || '';
+  const chars = shot.characters?.join('/') || '主体';
+  const scene = shot.scene || '场景';
+  return {
+    shotIndex: shot.index ?? 0,
+    suggestedCamera: `${scene} · ${move}机位，焦段 ${distMap[size] || '2m'}`,
+    suggestedAngle: angleMap[angle] || 'eye-level',
+    suggestedDistance: distMap[size] || '2m',
+    notes: `角色 ${chars} · ${size}景别 · ${angle}${desc ? ` · ${desc.slice(0, 40)}` : ''}`,
+  };
 }

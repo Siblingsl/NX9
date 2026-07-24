@@ -29,6 +29,9 @@ export function createStageDeckNodeTypes(): Record<string, ComponentType<NodePro
               {null}
             </CardShell>
           );
+        } else if (kind === 'media-pin') {
+          /* 钉图始终用专用卡，不收折成空摘要 */
+          inner = <Block {...props} />;
         } else if (canvasFirst && shouldUseCompactNodeShell(kind)) {
           /* 紧凑舞台卡 + 节点下方底部跟随工作区（非弹窗） */
           inner = <CanvasNodeShell {...props} alias={alias} />;

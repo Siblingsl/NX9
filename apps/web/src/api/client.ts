@@ -647,6 +647,31 @@ export const api = {
       body: JSON.stringify(body),
     }),
 
+  scriptSkill: (body: { skillId: string; userInstruction?: string; package: Record<string, unknown> }) =>
+    request<{ ok: boolean; patch: Record<string, unknown>; explanation: string }>('/api/agent/script/skill', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+
+  scriptDeskChat: (body: { skillId: string; userInstruction?: string; package: Record<string, unknown> }) =>
+    request<{ ok: boolean; patch: Record<string, unknown>; explanation: string }>('/api/agent/script-desk/chat', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+
+  scriptExport: async (pkg: import('@nx9/shared').ScreenplayPackage) => {
+    const res = await fetch('/api/agent/script/export', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...userHeaders(),
+      },
+      body: JSON.stringify({ package: pkg }),
+    });
+    if (!res.ok) throw new Error('导出失败');
+    return res.blob();
+  },
+
   novelEvents: (body: { sourceText: string }) =>
     request<{ ok: boolean; events: { id: string; name: string; description: string; order: number }[] }>('/api/agent/novel-events', {
       method: 'POST',

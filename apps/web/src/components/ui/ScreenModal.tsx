@@ -17,6 +17,8 @@ export interface ScreenModalProps {
   /** stage：全屏画布深色弹窗 */
   variant?: 'default' | 'stage';
   className?: string;
+  /** 标题栏右侧扩展（加法扩展，不影响其它节点） */
+  headerRight?: React.ReactNode;
 }
 
 /**
@@ -33,6 +35,7 @@ export function ScreenModal({
   label,
   variant = 'stage',
   className = '',
+  headerRight,
 }: ScreenModalProps) {
   useEffect(() => {
     if (!open) return;
@@ -85,6 +88,7 @@ export function ScreenModal({
               {title && <h2 className="nx9-screen-modal__title">{title}</h2>}
               {subtitle && <p className="nx9-screen-modal__sub">{subtitle}</p>}
             </div>
+            {headerRight ? <div className="nx9-screen-modal__header-right shrink-0">{headerRight}</div> : null}
             <button
               type="button"
               className="nx9-screen-modal__close"

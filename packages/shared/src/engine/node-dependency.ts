@@ -48,7 +48,7 @@ export const NODE_CONTRACTS: Record<string, NodeContract> = {
     kind: 'export-pack',
     inputs: ['video', 'audio'],
     outputs: ['package'],
-    requiresSteps: ['review-gate'],
+    requiresSteps: ['keyframe-review'],
   },
 };
 

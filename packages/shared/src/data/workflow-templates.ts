@@ -166,12 +166,12 @@ export const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
   },
   {
     id: 'tpl-nx9-review-pipeline',
-    label: '分镜 → 审阅 → 交付',
-    description: '分镜台 → 审阅关卡 → 交付打包',
+    label: '分镜 → 导演批审 → 交付',
+    description: '分镜台 → 导演台（审阅送出）→ 交付打包',
     category: 'story',
     build() {
       const a = node('storyboard-desk', 0, 0);
-      const b = node('review-gate', 1, 0);
+      const b = node('director-desk', 1, 0, { studioTab: 'deliver', queueFilter: 'missing' });
       const c = node('export-pack', 2, 0);
       return {
         blocks: [a, b, c],
@@ -232,7 +232,7 @@ export const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
     description: '场面调度 → 灯光 → 深度通道 → 生图',
     category: 'tool',
     build() {
-      const a = node('director-3d', 0, 0);
+      const a = node('director-desk', 0, 0);
       const b = node('light-rig', 1, 0);
       const c = node('depth-pass', 2, 0);
       const d = node('picture-gen', 3, 0);
@@ -264,7 +264,7 @@ export const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
     description: '剧本拆分 → 分镜台 → 开拍准备',
     category: 'story',
     build() {
-      const a = node('dialogue-sheet', 0, 0);
+      const a = node('script-desk', 0, 0);
       const b = node('storyboard-desk', 1, 0);
       return {
         blocks: [a, b],
@@ -309,7 +309,7 @@ export const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
     description: '对白表 → 多角色配音 → 混音 → 剪辑（完整声音后期链）',
     category: 'story',
     build() {
-      const a = node('dialogue-sheet', 0, 0);
+      const a = node('script-desk', 0, 0);
       const b = node('sound-gen', 1, 0);
       const c = node('audio-mix', 2, 0);
       const d = node('clip-editor', 3, 0);
@@ -341,13 +341,13 @@ export const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
   {
     id: 'tpl-bridge-sequence',
     label: 'Bridge 镜头序列',
-    description: 'Clip → Bridge 续拍 → Clip → 审阅门控',
+    description: 'Clip → Bridge 续拍 → Clip → 导演台批审',
     category: 'video',
     build() {
       const a = node('clip-gen', 0, 0);
       const b = node('bridge-clip', 1, 0);
       const c = node('clip-gen', 2, 0);
-      const d = node('review-gate', 3, 0);
+      const d = node('director-desk', 3, 0, { studioTab: 'deliver' });
       return { blocks: [a, b, c, d], links: [edge(a.id, b.id), edge(b.id, c.id), edge(c.id, d.id)] };
     },
   },
@@ -365,13 +365,13 @@ export const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
   {
     id: 'tpl-toonflow-lite',
     label: 'AI 编剧流水线',
-    description: '剧本拆分 → 分镜台 → 宫格 → 审阅',
+    description: '剧本拆分 → 分镜台 → 宫格 → 导演台',
     category: 'story',
     build() {
-      const a = node('dialogue-sheet', 0, 0);
+      const a = node('script-desk', 0, 0);
       const b = node('storyboard-desk', 1, 0, { rows: 3, cols: 3, style: 'line-art' });
       const c = node('grid-compose', 2, 0, { rows: 3, cols: 3, gridMode: 'split' });
-      const d = node('review-gate', 3, 0);
+      const d = node('director-desk', 3, 0, { studioTab: 'deliver' });
       return {
         blocks: [a, b, c, d],
         links: [edge(a.id, b.id), edge(b.id, c.id), edge(c.id, d.id)],
@@ -381,12 +381,12 @@ export const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
   {
     id: 'tpl-line-art-storyboard',
     label: '线稿分镜',
-    description: '分镜台 → 宫格 → 审阅',
+    description: '分镜台 → 宫格 → 导演台',
     category: 'story',
     build() {
       const a = node('storyboard-desk', 0, 0, { rows: 3, cols: 3, style: 'line-art' });
       const b = node('grid-compose', 1, 0, { rows: 3, cols: 3, gridMode: 'split' });
-      const c = node('review-gate', 2, 0);
+      const c = node('director-desk', 2, 0, { studioTab: 'deliver' });
       return {
         blocks: [a, b, c],
         links: [edge(a.id, b.id), edge(b.id, c.id)],
@@ -396,16 +396,15 @@ export const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
   {
     id: 'tpl-3d-preview',
     label: '3D 导演预演',
-    description: '分镜台 → 3D 机位 → 审阅 → 出图',
+    description: '分镜台 → 导演台 → 出图',
     category: 'story',
     build() {
       const a = node('storyboard-desk', 0, 0);
-      const b = node('director-3d', 1, 0);
-      const c = node('review-gate', 2, 0);
-      const d = node('picture-gen', 3, 0);
+      const b = node('director-desk', 1, 0);
+      const d = node('picture-gen', 2, 0);
       return {
-        blocks: [a, b, c, d],
-        links: [edge(a.id, b.id), edge(b.id, c.id), edge(c.id, d.id)],
+        blocks: [a, b, d],
+        links: [edge(a.id, b.id), edge(b.id, d.id)],
       };
     },
   },
@@ -413,10 +412,10 @@ export const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
     id: 'tpl-core-episode',
     label: '核心成片流水线',
     description:
-      '剧本拆分 → 设定检查 → 分镜台（图像生成 + 3D）→ 导演台批出关键帧 → 关键帧批审 → 视频生成 → 导出',
+      '剧本拆分 → 设定检查 → 分镜台（图像生成 + 3D）→ 导演台批出与审阅 → 视频生成 → 导出',
     category: 'story',
     build() {
-      const script = node('dialogue-sheet', 0, 2, {
+      const script = node('script-desk', 0, 2, {
         playbookStepId: 'script-breakdown',
         playbookStepIndex: 1,
       });
@@ -432,31 +431,26 @@ export const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
         playbookStepId: 'storyboard-desk',
         playbookStepIndex: 3,
       });
-      const director3d = node('director-3d', 3, 0, {
+      const director3d = node('director-desk', 3, 0, {
         playbookStepId: 'storyboard-desk',
         playbookStepIndex: 3,
       });
       const directorDesk = node('director-desk', 3.5, 2, {
-        playbookStepId: 'keyframe-gen',
+        playbookStepId: 'keyframe-review',
         playbookStepIndex: 4,
         queueFilter: 'missing',
         autoOpenReview: true,
         syncStyleToPicture: true,
-      });
-      const review = node('review-gate', 4.5, 2, {
-        playbookStepId: 'keyframe-review',
-        playbookStepIndex: 5,
-        gateMode: 'keyframe',
-        label: '关键帧批审',
+        studioTab: 'deliver',
       });
       const video = node('clip-gen', 5.5, 2, {
         playbookStepId: 'video-gen',
-        playbookStepIndex: 6,
+        playbookStepIndex: 5,
         videoMode: 'single',
       });
       const pack = node('export-pack', 6.5, 2, {
         playbookStepId: 'export',
-        playbookStepIndex: 7,
+        playbookStepIndex: 6,
         exportMode: 'ffmpeg-episode',
       });
       return {
@@ -467,7 +461,6 @@ export const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
           picture,
           director3d,
           directorDesk,
-          review,
           video,
           pack,
         ],
@@ -492,8 +485,7 @@ export const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
           },
           edge(picture.id, directorDesk.id),
           edge(desk.id, directorDesk.id),
-          edge(directorDesk.id, review.id),
-          edge(review.id, video.id),
+          edge(directorDesk.id, video.id),
           edge(video.id, pack.id),
         ],
       };

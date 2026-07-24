@@ -5,7 +5,7 @@ import { FIXTURE_NOVEL_500, FIXTURE_SCENE_SPLIT_3, FIXTURE_ENV_PROFILE } from '.
 
 describe('TEST-PIPE — Core 6-Step Production Pipeline', () => {
 
-  it('TEST-PIPE-000: resolveNextStep 核心 6 步 playbook 第一步是剧本拆分', () => {
+  it('TEST-PIPE-000: resolveNextStep 核心 6 步 playbook 第一步是编剧台拆分步', () => {
     const def = PLAYBOOK_DEFINITIONS.find((p) => p.id === 'pb-ai-comic-3d');
     expect(def).toBeDefined();
     expect(def!.steps.length).toBe(6);
@@ -44,18 +44,17 @@ describe('TEST-PIPE — Core 6-Step Production Pipeline', () => {
     expect(template).toBeDefined();
     const flow = template!.build();
     expect(flow.blocks.map((block) => block.type)).toEqual([
-      'dialogue-sheet',
+      'script-desk',
       'asset-gate',
       'storyboard-desk',
       'picture-gen',
-      'director-3d',
       'director-desk',
-      'review-gate',
+      'director-desk',
       'clip-gen',
       'export-pack',
     ]);
     const desk = flow.blocks.find((block) => block.type === 'storyboard-desk')!;
-    const directorDesk = flow.blocks.find((block) => block.type === 'director-desk')!;
+    const directorDeskBlock = flow.blocks.find((block) => block.type === 'director-desk' && (block.data as Record<string, unknown>).queueFilter === 'missing');
     const gate = flow.blocks.find((block) => block.type === 'asset-gate')!;
     expect(flow.links.some((link) => link.target === gate.id && link.targetHandle === 'asset-gate')).toBe(true);
     expect(flow.links.some((link) => link.source === gate.id && link.sourceHandle === 'asset-gate')).toBe(true);
@@ -64,12 +63,12 @@ describe('TEST-PIPE — Core 6-Step Production Pipeline', () => {
     );
     expect(capabilityLinks).toHaveLength(2);
     expect(capabilityLinks.every((link) => link.sourceHandle === 'exec-picture')).toBe(true);
-    expect(flow.links.some((link) => link.source === desk.id && link.target === directorDesk.id)).toBe(true);
+    expect(flow.links.some((link) => link.source === desk.id && link.target === directorDeskBlock.id)).toBe(true);
     expect(
       flow.links.some(
         (link) =>
-          link.source === directorDesk.id
-          && flow.blocks.find((b) => b.id === link.target)?.type === 'review-gate',
+          link.source === directorDeskBlock.id
+          && flow.blocks.find((b) => b.id === link.target)?.type === 'clip-gen',
       ),
     ).toBe(true);
   });
@@ -401,7 +400,7 @@ describe('TEST-PIPE — Core 6-Step Production Pipeline', () => {
     expect(has_video_assets(ctxNoVideo)).toBe(false);
   });
 
-  it('TEST-PIPE-1201: review-gate 用 videoStatus', () => {
+  it('TEST-PIPE-1201: 成片审阅用 videoStatus', () => {
     const allVideoApproved: PlaybookReadinessContext = {
       storyboard: { shots: [
         { id: 's1', status: 'approved', videoStatus: 'approved' },

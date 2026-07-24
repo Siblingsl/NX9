@@ -1,14 +1,14 @@
-/* NX9 Stage Deck — light chrome + dark viewport (not storyai twin sidebars) */
+/* NX9 Stage Deck — light chrome + dark viewport (desk palette) */
 
 .nx9-stage {
-  --stage-bg: #fafaf8;
-  --stage-panel: #ffffff;
-  --stage-ink: #222222;
-  --stage-muted: #6b7280;
-  --stage-line: #e6e6e6;
-  --stage-brand: #a13d63;
-  --stage-accent: #5e4d8a;
-  --stage-viewport: #12141a;
+  --stage-bg: var(--desk-bg, #fafaf8);
+  --stage-panel: var(--desk-panel, #ffffff);
+  --stage-ink: var(--desk-ink, #222222);
+  --stage-muted: var(--desk-muted, #6b7280);
+  --stage-line: var(--desk-line, #e6e6e6);
+  --stage-brand: var(--desk-accent, #a13d63);
+  --stage-accent: var(--desk-accent, #5e4d8a);
+  --stage-viewport: var(--desk-stage-bg, #12141a);
   display: flex;
   flex-direction: column;
   height: 100%;
@@ -33,7 +33,7 @@
   height: 32px;
   border-radius: 10px;
   background: var(--stage-brand);
-  color: #fff;
+  color: var(--desk-btn-primary-ink, #fff);
   font-weight: 700;
   font-size: 11px;
   display: grid;
@@ -45,7 +45,7 @@
 
 .nx9-stage-pill {
   border: 1px solid var(--stage-line);
-  background: #fff;
+  background: var(--desk-panel, #fff);
   color: var(--stage-ink);
   border-radius: 999px;
   padding: 5px 12px;
@@ -54,8 +54,8 @@
 }
 
 .nx9-stage-pill.is-on {
-  background: rgb(161 61 99 / 0.1);
-  border-color: rgb(161 61 99 / 0.35);
+  background: var(--desk-accent-soft, rgb(161 61 99 / 0.1));
+  border-color: var(--desk-accent-line, rgb(161 61 99 / 0.35));
   color: var(--stage-brand);
   font-weight: 600;
 }
@@ -63,7 +63,7 @@
 .nx9-stage-cta {
   border: none;
   background: var(--stage-brand);
-  color: #fff;
+  color: var(--desk-btn-primary-ink, #fff);
   border-radius: 12px;
   padding: 8px 16px;
   font-size: 12px;
@@ -100,8 +100,8 @@
 }
 
 .nx9-stage-rail-btn.is-on {
-  background: rgb(94 77 138 / 0.12);
-  border-color: rgb(94 77 138 / 0.25);
+  background: var(--desk-accent-soft, rgb(94 77 138 / 0.12));
+  border-color: var(--desk-accent-line, rgb(94 77 138 / 0.25));
   color: var(--stage-accent);
 }
 
@@ -121,7 +121,7 @@
   position: relative;
   border-radius: 16px;
   overflow: hidden;
-  border: 1px solid #2a3040;
+  border: 1px solid var(--desk-line-strong, #2a3040);
   background: var(--stage-viewport);
 }
 
@@ -167,17 +167,17 @@
   gap: 8px;
 }
 
-.nx9-stage-layer:hover { background: #f5f5f3; }
+.nx9-stage-layer:hover { background: var(--desk-bg-2, #f5f5f3); }
 .nx9-stage-layer.is-on {
-  background: rgb(161 61 99 / 0.08);
-  border-color: rgb(161 61 99 / 0.2);
+  background: var(--desk-accent-soft, rgb(161 61 99 / 0.08));
+  border-color: var(--desk-accent-line, rgb(161 61 99 / 0.2));
 }
 
 .nx9-stage-chip {
   font-size: 10px;
   padding: 2px 6px;
   border-radius: 999px;
-  background: #f0f0ee;
+  background: var(--desk-panel, #f0f0ee);
   color: var(--stage-muted);
 }
 
@@ -198,16 +198,16 @@
   border-radius: 10px;
   border: 1px solid rgb(255 255 255 / 0.12);
   background: rgb(0 0 0 / 0.45);
-  color: rgb(255 255 255 / 0.85);
+  color: var(--desk-btn-primary-ink, rgb(255 255 255 / 0.85));
   font-size: 11px;
   font-weight: 700;
   cursor: pointer;
 }
 
 .nx9-stage-transform-btn.is-on {
-  background: rgb(161 61 99 / 0.85);
-  border-color: rgb(161 61 99 / 0.95);
-  color: #fff;
+  background: color-mix(in srgb, var(--desk-accent, #a13d63) 85%, transparent);
+  border-color: color-mix(in srgb, var(--desk-accent, #a13d63) 95%, transparent);
+  color: var(--desk-btn-primary-ink, #fff);
 }
 
 .nx9-stage-aspect-guide {
@@ -220,7 +220,7 @@
 }
 
 .nx9-stage-aspect-frame {
-  border: 2px solid rgb(161 61 99 / 0.65);
+  border: 2px solid var(--desk-accent-line, rgb(161 61 99 / 0.65));
   box-shadow: 0 0 0 9999px rgb(0 0 0 / 0.35);
 }
 
@@ -277,7 +277,7 @@
   padding: 7px 10px;
   border-radius: 10px;
   border: 1px solid var(--stage-line);
-  background: #fff;
+  background: var(--desk-bg-2, #fff);
   font-size: 12px;
 }
 
@@ -285,7 +285,7 @@
 
 .nx9-stage-mini-btn {
   border: 1px solid var(--stage-line);
-  background: #fff;
+  background: var(--desk-panel, #fff);
   border-radius: 8px;
   padding: 5px 10px;
   font-size: 11px;
@@ -293,8 +293,8 @@
 }
 
 .nx9-stage-mini-btn.is-on {
-  background: rgb(94 77 138 / 0.12);
-  border-color: rgb(94 77 138 / 0.3);
+  background: var(--desk-accent-soft, rgb(94 77 138 / 0.12));
+  border-color: var(--desk-accent-line, rgb(94 77 138 / 0.3));
   color: var(--stage-accent);
 }
 
@@ -326,11 +326,11 @@
   object-fit: cover;
   border: 2px solid transparent;
   flex-shrink: 0;
-  background: #111;
+  background: var(--desk-media-bg, #111);
 }
 
 .nx9-stage-frame-thumb.is-latest { border-color: var(--stage-brand); }
 
 .nx9-stage-hint { font-size: 11px; color: var(--stage-muted); line-height: 1.45; }
 
-.nx9-stage-danger { color: #dc2626; }
+.nx9-stage-danger { color: var(--desk-warn, #dc2626); }

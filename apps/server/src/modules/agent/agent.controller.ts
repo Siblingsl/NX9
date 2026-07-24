@@ -1,4 +1,4 @@
-import { Body, Controller, Headers, Post, Res } from '@nestjs/common';
+import { Body, Controller, Headers, Post, Res, StreamableFile } from '@nestjs/common';
 import { Response } from 'express';
 import { AgentService } from './agent.service';
 import { GatewayService } from '../gateway/gateway.service';
@@ -77,9 +77,31 @@ export class AgentController {
     return this.agent.extractEnvironments(body, userId);
   }
 
+  @Post('script/skill')
+  scriptSkill(@Body() body: { skillId: string; userInstruction?: string; package: Record<string, unknown> }, @Headers('x-nx9-user-id') userId?: string) {
+    return this.agent.scriptSkill(body, userId);
+  }
+
   @Post('novel-events')
   novelEvents(@Body() body: { sourceText?: string }, @Headers('x-nx9-user-id') userId?: string) {
     return this.agent.novelEvents(body?.sourceText ?? '', userId);
+  }
+
+  @Post('script/export')
+  scriptExport(@Body() body: { package: import('@nx9/shared').ScreenplayPackage }) {
+    return this.agent.scriptExport(body.package);
+  }
+
+  @Post('script-desk/chat')
+  async scriptDeskChat(
+    @Body() body: {
+      skillId: string;
+      userInstruction?: string;
+      package: Record<string, unknown>;
+    },
+    @Headers('x-nx9-user-id') userId?: string,
+  ) {
+    return this.agent.scriptSkill(body, userId);
   }
 
   @Post('script/chat')

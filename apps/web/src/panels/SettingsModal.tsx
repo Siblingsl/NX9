@@ -25,6 +25,7 @@ import { translate } from '@nx9/shared';
 import { useCredentialVault } from '../stores/credential-vault';
 import { useStageDeckFlag } from '../stores/stage-deck-flag';
 import { useWorkspaceDocument } from '../stores/workspace-document';
+import { useDevPromptOverrides } from '../stores/dev-prompt-overrides';
 import { api } from '../api/client';
 import { getRuntime } from '../platform/runtime-bridge';
 import './settings-modal.css';
@@ -828,6 +829,70 @@ function PrefsSettings({
           description="面向排查问题；日常创作建议关闭。"
         />
       </div>
+
+      {/* ── 开发者选项 — 仅 DEV 可见 ── */}
+      {import.meta.env.DEV === true && <DevSection />}
+    </div>
+  );
+}
+
+function DevSection() {
+  const dev = useDevPromptOverrides();
+  const [importError, setImportError] = useState('');
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  return (
+    <div className="space-y-3 border-t border-line pt-4 mt-4">
+      <div className="nx9-settings__hero">
+        <p className="nx9-settings__hero-title" style={{ color: 'var(--desk-warn)' }}>开发者选项</p>
+        <p className="nx9-settings__hero-desc">
+          仅开发环境可见。Prompt 热调覆盖优先级高于节点级 Pack。
+        </p>
+      </div>
+      <label className="nx9-settings__pref-row" style={{ cursor: 'pointer' }}>
+        <input
+          type="checkbox"
+          checked={dev.enabled}
+          onChange={(e) => dev.setEnabled(e.target.checked)}
+        />
+        <div className="flex-1 min-w-0">
+          <span className="nx9-settings__pref-label">启用 Prompt 热调</span>
+          <p className="nx9-settings__pref-desc">开闸后编剧台/分镜台 Dev Pack 入口可见。</p>
+        </div>
+      </label>
+      {dev.enabled && (
+        <div className="space-y-2 pl-4 border-l-2" style={{ borderColor: 'var(--desk-warn)' }}>
+          <textarea
+            className="w-full border border-line rounded-lg p-2 text-[11px] font-mono bg-surface resize-y"
+            rows={6}
+            placeholder='{"episodeBreakdownSystem":"...","clipGen.enrichSuffix":"..."}'
+            value={dev.exportJson()}
+            onChange={() => {/* read-only preview */}}
+          />
+          <div className="flex flex-wrap gap-2">
+            <button type="button" className="nx9-btn" onClick={dev.clearAll}>清空全部覆盖</button>
+            <button type="button" className="nx9-btn" onClick={() => {
+              const blob = new Blob([dev.exportJson()], { type: 'application/json' });
+              const url = URL.createObjectURL(blob);
+              const a = document.createElement('a'); a.href = url; a.download = 'dev-prompt-overrides.json'; a.click();
+              URL.revokeObjectURL(url);
+            }}>导出 JSON</button>
+            <button type="button" className="nx9-btn" onClick={() => fileRef.current?.click()}>导入 JSON</button>
+            <input ref={fileRef} type="file" accept=".json" hidden onChange={async (e) => {
+              const f = e.target.files?.[0];
+              if (!f) return;
+              const text = await f.text();
+              if (dev.importJson(text)) {
+                setImportError('');
+                e.target.value = '';
+              } else {
+                setImportError('非法 Pack 格式，拒绝导入');
+              }
+            }} />
+          </div>
+          {importError && <p className="text-[11px]" style={{ color: 'var(--desk-warn)' }}>{importError}</p>}
+        </div>
+      )}
     </div>
   );
 }

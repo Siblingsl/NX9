@@ -6,11 +6,20 @@ import {
   guessKindFromMentionQuery,
   insertAssetMentionToken,
 } from './asset-mention-utils';
+import {
+  guessLocalMediaKindFromQuery,
+  insertLocalMediaMentionToken,
+  type LocalMediaMentionItem,
+  type LocalMediaMentionKind,
+} from './local-media-mention';
+
+export type MentionActiveKind = AssetLibraryKind | LocalMediaMentionKind;
 
 export interface UseAssetMentionOptions {
   value: string;
   onChange: (next: string) => void;
   kinds?: AssetLibraryKind[];
+  localMedia?: LocalMediaMentionItem[];
   enabled?: boolean;
 }
 
@@ -18,12 +27,13 @@ export function useAssetMention({
   value,
   onChange,
   kinds,
+  localMedia = [],
   enabled = true,
 }: UseAssetMentionOptions) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
   const [position, setPosition] = useState<{ top: number; left: number } | null>(null);
-  const [activeKind, setActiveKind] = useState<AssetLibraryKind>('character');
+  const [activeKind, setActiveKind] = useState<MentionActiveKind>('character');
   const inputRef = useRef<HTMLInputElement | HTMLTextAreaElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
 
@@ -39,8 +49,10 @@ export function useAssetMention({
         return;
       }
       setQuery(q);
-      const guessed = guessKindFromMentionQuery(q);
-      if (guessed) setActiveKind(guessed);
+      const localGuess = guessLocalMediaKindFromQuery(q);
+      const assetGuess = guessKindFromMentionQuery(q);
+      if (localGuess) setActiveKind(localGuess);
+      else if (assetGuess) setActiveKind(assetGuess);
       const target = el ?? inputRef.current;
       if (target) {
         setPosition(getInputCaretScreenPoint(target, cursor));
@@ -63,6 +75,26 @@ export function useAssetMention({
       const el = inputRef.current;
       const cursor = el?.selectionStart ?? value.length;
       const { value: next, cursor: nextCursor } = insertAssetMentionToken(
+        value,
+        cursor,
+        item.kind,
+        item.label,
+      );
+      onChange(next);
+      setOpen(false);
+      requestAnimationFrame(() => {
+        el?.focus();
+        el?.setSelectionRange(nextCursor, nextCursor);
+      });
+    },
+    [onChange, value],
+  );
+
+  const pickLocalMedia = useCallback(
+    (item: LocalMediaMentionItem) => {
+      const el = inputRef.current;
+      const cursor = el?.selectionStart ?? value.length;
+      const { value: next, cursor: nextCursor } = insertLocalMediaMentionToken(
         value,
         cursor,
         item.kind,
@@ -113,8 +145,10 @@ export function useAssetMention({
     setActiveKind,
     handleValueChange,
     pickItem,
+    pickLocalMedia,
     close,
     syncFromInput,
     kinds,
+    localMedia,
   };
 }

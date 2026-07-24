@@ -62,8 +62,9 @@ export const useStoryboardUi = create<{
   selectedShotId: null,
   tab: 'shots',
   scrollToShotId: null,
-  toggle: () => set((s) => ({ open: !s.open })),
-  setOpen: (open) => set({ open }),
+  /** 旧全屏故事板已拆除；open 恒为 false */
+  toggle: () => set({ open: false }),
+  setOpen: () => set({ open: false }),
   setView: (view) => set({ view }),
   selectShot: (selectedShotId) => set({ selectedShotId }),
   setTab: (tab) => set({ tab }),

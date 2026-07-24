@@ -9,7 +9,6 @@ const SHORTCUTS = [
   { keys: 'Ctrl+点击', action: '追加 / 取消选中模块' },
   { keys: 'Ctrl+左键拖拽空白', action: '滑动框选多个模块' },
   { keys: 'Delete', action: '删除选中模块' },
-  { keys: 'B', action: '开关故事板面板' },
   { keys: '?', action: '快捷键帮助' },
   { keys: '顶栏书本图标', action: '提示词模板库' },
   { keys: '右键空白', action: '快速添加模块 / 粘贴 / 整理' },

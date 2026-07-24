@@ -36,7 +36,7 @@ export function has_source_text(ctx: PlaybookReadinessContext): boolean {
     ctx.scriptPlan?.sourceText?.trim() ||
     (ctx.storyboard as any)?.title?.trim() ||
     ctx.nodes.some((node) =>
-      node.type === 'dialogue-sheet' &&
+      (node.type === 'dialogue-sheet' || node.type === 'script-desk') &&
       (Boolean((node.data?.sourceText as string | undefined)?.trim()) ||
         Boolean(node.data?.scriptBreakdown)),
     )
@@ -104,12 +104,10 @@ export function canvas_node_done(ctx: PlaybookReadinessContext, ...args: string[
 
 export function review_gate_passed(ctx: PlaybookReadinessContext, ...args: string[]): boolean {
   const gateMode = args.length > 0 ? args[0] : undefined;
-  return !ctx.nodes.some(n => {
-    if (n.type !== 'review-gate') return false;
-    if (n.data?.status !== 'blocked') return false;
-    if (gateMode && n.data?.gateMode !== gateMode) return false;
-    return true;
-  });
+  // 审阅关卡节点已拆除：按镜头批准态判定（兼容旧 readinessKey）
+  if (gateMode === 'video') return all_videos_approved(ctx);
+  if (gateMode === 'keyframe') return all_keyframes_approved(ctx);
+  return all_keyframes_approved(ctx) || all_videos_approved(ctx);
 }
 
 export function has_character_refs(ctx: PlaybookReadinessContext): boolean {

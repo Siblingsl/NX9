@@ -308,6 +308,9 @@ export function AssetLibraryModal() {
         enterProject(projectId);
       }
       if (navigateRequest.itemId) setEditId(navigateRequest.itemId);
+      if ((navigateRequest as { query?: string }).query?.trim()) {
+        setQuery((navigateRequest as { query: string }).query.trim());
+      }
     }
     clearNavigateRequest();
   }, [

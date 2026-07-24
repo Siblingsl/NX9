@@ -29,8 +29,9 @@ import {
   type OnNodeDrag,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import { PERF, validateLink, WORKFLOW_TEMPLATES, lookupBlock, canExecuteNode, resolveNodeInteraction, isPromptBarKind, syncAssetImportNodeFields, isStoryboardExecLink, isDirector3dDeskLink } from '@nx9/shared';
+import { PERF, validateLink, WORKFLOW_TEMPLATES, lookupBlock, canExecuteNode, resolveNodeInteraction, isPromptBarKind, syncAssetImportNodeFields, isStoryboardExecLink, isDirector3dDeskLink, buildMediaPinNodeData, parseMediaPinPayload } from '@nx9/shared';
 import { blockTypes, preloadBlockTypes } from '../blocks/registry';
+import { MEDIA_PIN_MIME } from './media-pin-drag';
 import { api } from '../api/client';
 import { useFlowHistory, type FlowSnapshot } from '../hooks/use-flow-history';
 import { debounce, usePerfController } from './perf-controller';
@@ -290,8 +291,6 @@ const FlowSurfaceInner = memo(function FlowSurfaceInner({
   );
   const updateShot = useWorkspaceDocument((s) => s.updateShot);
   const selectShot = useStoryboardUi((s) => s.selectShot);
-  const requestScrollToShot = useStoryboardUi((s) => s.requestScrollToShot);
-  const setStoryboardOpen = useStoryboardUi((s) => s.setOpen);
   const storyboard = useWorkspaceDocument((s) => s.storyboard);
   const voice = useWorkspaceDocument((s) => s.voice);
   const characters = useWorkspaceDocument((s) => s.characters);
@@ -479,10 +478,9 @@ const FlowSurfaceInner = memo(function FlowSurfaceInner({
     if (pending.shotId) {
       updateShot(pending.shotId, { linkedBlockId: id });
       selectShot(pending.shotId);
-      setStoryboardOpen(true);
     }
     appendLog(`添加模块: ${pending.kind}${shot ? ` · 镜头 #${shot.index}` : ''}`);
-  }, [spawnKind, ready, consumeSpawn, nodes, edges, push, setNodes, appendLog, updateShot, selectShot, setStoryboardOpen]);
+  }, [spawnKind, ready, consumeSpawn, nodes, edges, push, setNodes, appendLog, updateShot, selectShot]);
 
   const loadWorkflowTemplate = useCallback(
     async (id: string, mode: 'merge' | 'replace' = 'merge') => {
@@ -819,8 +817,8 @@ const FlowSurfaceInner = memo(function FlowSurfaceInner({
             void reportTask({ status: 'failed', message: p.error });
           }
           if (p.phase === 'blocked') {
-            appendLog(`审阅关卡阻塞 · 待审镜头 ${(p.pendingShots ?? []).join(', ')}`);
-            reportError(p.error ?? '审阅关卡阻塞');
+            appendLog(`关键帧审阅阻塞 · 待审镜头 ${(p.pendingShots ?? []).join(', ')}`);
+            reportError(p.error ?? '关键帧审阅阻塞');
             void reportTask({ status: 'blocked', message: p.error });
             openReviewGateSession(p.pendingShots);
             if (p.currentId) highlightBlock(p.currentId, { keepMode: true });
@@ -877,7 +875,7 @@ const FlowSurfaceInner = memo(function FlowSurfaceInner({
           signal: { get cancelled() { return cancelRunRef.current; } },
           onProgress: (p) => {
             if (p.phase === 'blocked') {
-              appendLog(`Cascade 审阅阻塞 · 待审 ${(p.pendingShots ?? []).join(', ')}`);
+              appendLog(`Cascade 关键帧审阅阻塞 · 待审 ${(p.pendingShots ?? []).join(', ')}`);
               openReviewGateSession(p.pendingShots);
               if (p.currentId) highlightBlock(p.currentId, { keepMode: true });
             }
@@ -919,39 +917,43 @@ const FlowSurfaceInner = memo(function FlowSurfaceInner({
 
   useEffect(() => {
     if (!isStageDeck || !ready) return;
-    const gate = nodes.find(
-      (n) => n.type === 'review-gate' && n.data?.status === 'blocked',
-    );
+    const shots = useWorkspaceDocument.getState().storyboard.shots;
+    const pending = shots
+      .filter(
+        (s) =>
+          Boolean(s.firstFrameAssetId) &&
+          s.keyframeStatus !== 'approved' &&
+          s.status !== 'approved' &&
+          s.keyframeStatus !== 'failed' &&
+          s.status !== 'failed',
+      )
+      .map((s) => s.index);
     const setBanner = useContextRailUi.getState().setBanner;
-    if (gate) {
-      const pending = (gate.data?.pendingShots as number[] | undefined) ?? [];
+    if (pending.length > 0 && useViewMode.getState().mode === 'review') {
       setBanner({ kind: 'blocked', shotIds: pending.map(String) });
     } else if (useContextRailUi.getState().banner?.kind === 'blocked') {
       setBanner(null);
     }
-  }, [nodes, isStageDeck, ready]);
+  }, [nodes, storyboard, isStageDeck, ready]);
 
   useEffect(() => {
     if (!isStageDeck || !ready) return;
-    const gates = nodesRef.current.filter(
-      (n) => n.type === 'review-gate' && n.data?.status === 'blocked',
+    const shots = useWorkspaceDocument.getState().storyboard.shots;
+    const pending = shots.filter(
+      (s) =>
+        Boolean(s.firstFrameAssetId) &&
+        s.keyframeStatus !== 'approved' &&
+        s.status !== 'approved',
     );
-    for (const gate of gates) {
-      const pending = (gate.data?.pendingShots as number[] | undefined) ?? [];
-      if (pending.length === 0) continue;
-      const allApproved = pending.every((idx) => {
-        const shot = useWorkspaceDocument.getState().storyboard.shots.find((s) => s.index === idx);
-        return shot?.status === 'approved';
-      });
-      if (allApproved) {
-        if (!resumedGateRef.current.has(gate.id)) {
-          resumedGateRef.current.add(gate.id);
-          appendLog(`审阅关卡通过 · 自动续跑 Cascade · ${gate.id}`);
-          void runCascade(gate.id);
-        }
-      } else {
-        resumedGateRef.current.delete(gate.id);
-      }
+    const clipGen = nodesRef.current.find((n) => n.type === 'clip-gen');
+    if (!clipGen || pending.length > 0) {
+      resumedGateRef.current.delete(clipGen?.id ?? '');
+      return;
+    }
+    if (clipGen.data?.status === 'blocked' && !resumedGateRef.current.has(clipGen.id)) {
+      resumedGateRef.current.add(clipGen.id);
+      appendLog(`关键帧审阅已通过 · 自动续跑 Cascade · ${clipGen.id}`);
+      void runCascade(clipGen.id);
     }
   }, [storyboard, isStageDeck, ready, runCascade, appendLog]);
 
@@ -983,27 +985,33 @@ const FlowSurfaceInner = memo(function FlowSurfaceInner({
       }
       if (!id) return;
       const node = selected[0];
-      const linkedShot = storyboard.shots.find(
-        (s) => s.linkedBlockId === id || s.id === (node.data?.linkedShotId as string),
-      );
-      // 导演台自有工作台，选中时不打开旧故事板侧栏
-      if (node.type === 'director-desk' || node.type === 'storyboard-desk') {
+      // 旧全屏故事板已拆除：选中节点只同步镜头选中态，不再打开任何故事板页
+      if (
+        node.type === 'director-desk' ||
+        node.type === 'storyboard-desk' ||
+        node.type === 'clip-gen' ||
+        node.type === 'clip-editor' ||
+        node.type === 'script-desk' ||
+        node.type === 'picture-gen'
+      ) {
+        const linkedShot = storyboard.shots.find(
+          (s) => s.linkedBlockId === id || s.id === (node.data?.linkedShotId as string),
+        );
         const shotId =
           (node.data?.linkedShotId as string | undefined) || linkedShot?.id;
         if (shotId) selectShot(shotId);
         return;
       }
+      const linkedShot = storyboard.shots.find(
+        (s) => s.linkedBlockId === id || s.id === (node.data?.linkedShotId as string),
+      );
       if (linkedShot) {
         selectShot(linkedShot.id);
-        setStoryboardOpen(true);
-        requestScrollToShot(linkedShot.id);
       }
     },
     [
       storyboard.shots,
       selectShot,
-      setStoryboardOpen,
-      requestScrollToShot,
       isStageDeck,
       setDeckSelection,
       syncSelectedBlockId,
@@ -1182,7 +1190,6 @@ const FlowSurfaceInner = memo(function FlowSurfaceInner({
   const handleFocusStoryboard = useCallback(
     (ids: string[]) => {
       const selNodes = nodesRef.current.filter((n) => ids.includes(n.id));
-      setStoryboardOpen(true);
       for (const node of selNodes) {
         const shotId = node.data?.linkedShotId as string | undefined;
         const linked = storyboard.shots.find(
@@ -1190,12 +1197,13 @@ const FlowSurfaceInner = memo(function FlowSurfaceInner({
         );
         if (linked) {
           selectShot(linked.id);
+          appendLog(`已选中镜头 #${linked.index + 1}（请用画布「分镜台」编辑）`);
           return;
         }
       }
-      appendLog('打开故事板');
+      appendLog('未找到关联镜头；请用画布「分镜台」管理镜表');
     },
-    [storyboard.shots, selectShot, setStoryboardOpen, appendLog],
+    [storyboard.shots, selectShot, appendLog],
   );
 
   const handleAddBlockAtPane = useCallback((kind: string) => {
@@ -1386,12 +1394,6 @@ const FlowSurfaceInner = memo(function FlowSurfaceInner({
       if ((e.ctrlKey || e.metaKey) && (e.key === 'y' || (e.key === 'z' && e.shiftKey))) {
         e.preventDefault();
         handleRedo();
-      }
-      if (isSurfaceEnabled('storyboard') && e.key === 'b' && !e.ctrlKey && !e.metaKey) {
-        e.preventDefault();
-        void import('../stores/flow-runtime').then(({ useStoryboardUi }) => {
-          useStoryboardUi.getState().toggle();
-        });
       }
       if (isStageDeck && (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'g' && !e.shiftKey) {
         e.preventDefault();
@@ -1649,11 +1651,13 @@ const FlowSurfaceInner = memo(function FlowSurfaceInner({
 
   const onDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
-    e.dataTransfer.dropEffect = 'move';
+    const types = Array.from(e.dataTransfer.types);
+    e.dataTransfer.dropEffect = types.includes(MEDIA_PIN_MIME) ? 'copy' : 'move';
   }, []);
 
   const onDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
+    const mediaPinRaw = e.dataTransfer.getData(MEDIA_PIN_MIME);
     const assetUrl = e.dataTransfer.getData('application/nx9-asset-url');
     const kind = e.dataTransfer.getData('application/nx9-block') || 'asset-import';
     const flowAt = screenToFlowRef.current({ x: e.clientX, y: e.clientY });
@@ -1661,6 +1665,52 @@ const FlowSurfaceInner = memo(function FlowSurfaceInner({
       x: flowAt.x - 110,
       y: flowAt.y - 80,
     });
+    if (mediaPinRaw) {
+      const payload = parseMediaPinPayload(mediaPinRaw);
+      if (!payload) return;
+      const id = `blk-pin-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+      pushFlowSnapshot(nodesRef.current, edgesRef.current);
+      const blockIndex = nextIndexRef.current++;
+      setNodes((nds) => [
+        ...nds.map((n) => ({ ...n, selected: false })),
+        {
+          id,
+          type: 'media-pin',
+          position: dropAt,
+          data: buildMediaPinNodeData(payload, blockIndex) as unknown as Record<string, unknown>,
+          selected: true,
+        },
+      ]);
+      const sourceId = payload.sourceBlockId;
+      if (sourceId && nodesRef.current.some((n) => n.id === sourceId)) {
+        const sourceNode = nodesRef.current.find((n) => n.id === sourceId);
+        const canLink =
+          sourceNode &&
+          validateLink(sourceNode.type ?? '', 'media-pin', sourceNode.data as Record<string, unknown>);
+        if (canLink) {
+          setEdges((eds) =>
+            addEdge(
+              {
+                id: `link-pin-${Date.now()}`,
+                source: sourceId,
+                target: id,
+                sourceHandle: 'picture',
+                targetHandle: 'picture',
+                ...(isStageDeck
+                  ? {
+                      type: 'channel',
+                      data: { execLink: false },
+                    }
+                  : {}),
+              },
+              eds,
+            ),
+          );
+        }
+      }
+      appendLog(`钉到画布：${payload.label}`);
+      return;
+    }
     if (assetUrl) {
       const id = `blk-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
       pushFlowSnapshot(nodesRef.current, edgesRef.current);
@@ -1688,7 +1738,7 @@ const FlowSurfaceInner = memo(function FlowSurfaceInner({
     }
     if (!kind) return;
     useFlowCommands.getState().requestSpawn(kind, dropAt, undefined, true);
-  }, [push, setNodes, appendLog]);
+  }, [pushFlowSnapshot, setNodes, setEdges, appendLog, isStageDeck]);
 
   const selectEdge = useCallback(
     (edgeId: string) => {

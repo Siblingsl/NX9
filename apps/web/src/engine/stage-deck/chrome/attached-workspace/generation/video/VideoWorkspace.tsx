@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { AssetLibraryKind, StoryboardShot } from '@nx9/shared';
 import {
-  activeEpisodeShots,
   adoptStoryboardVideoVersion,
   CLIP_GEN_MODELS,
   lookupBlock,
@@ -18,6 +17,7 @@ import { useActivityLog } from '../../../../../../stores/activity-log';
 import { usePromptHistory } from '../../../../stores/prompt-history';
 import { useAttachedNodeData } from '../use-attached-node-data';
 import { useLocalNodePrompt } from '../use-local-node-prompt';
+import { useUpstreamShots } from '../use-upstream-shots';
 import { VideoGenModeChip } from './VideoGenModeChip';
 import { VideoParamChips } from './VideoParamChips';
 import { VideoFrameStrip } from './VideoFrameStrip';
@@ -61,11 +61,25 @@ export function VideoWorkspace({ blockId, kind, onCollapse }: VideoWorkspaceProp
   const handleAiAction = useWorkspaceAiLog();
 
   const data = useAttachedNodeData(blockId);
-  const storyboard = useWorkspaceDocument((state) => state.storyboard);
-  const shots = useMemo(() => activeEpisodeShots(storyboard), [storyboard]);
+  const { hasUpstream, shots, shotIds } = useUpstreamShots(blockId);
   const updateShot = useWorkspaceDocument((state) => state.updateShot);
   const [retryingShotId, setRetryingShotId] = useState<string | null>(null);
   const [previewVersionIds, setPreviewVersionIds] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    if (!hasUpstream) {
+      if (Array.isArray(data.linkedShotIds) && (data.linkedShotIds as string[]).length > 0) {
+        updateNodeData(blockId, { linkedShotIds: [] });
+      }
+      return;
+    }
+    const prev = Array.isArray(data.linkedShotIds) ? (data.linkedShotIds as string[]) : [];
+    if (prev.length === shotIds.length && prev.every((id, i) => id === shotIds[i])) return;
+    updateNodeData(blockId, {
+      linkedShotIds: shotIds,
+      linkedShotId: shotIds[0] ?? undefined,
+    });
+  }, [hasUpstream, shotIds, blockId, updateNodeData, data.linkedShotIds]);
 
   const history = useMemo(
     () => (promptEntries ?? EMPTY_HISTORY).filter((e) => e.blockId === blockId).slice(0, 20),
@@ -105,9 +119,9 @@ export function VideoWorkspace({ blockId, kind, onCollapse }: VideoWorkspaceProp
     flushNow();
     if (!runtime) return;
     try {
-      if (shots.length > 0) {
-        await batchGenerateVideosFromShots();
-        appendLog(`当前集视频生成完成 · ${shots.length} 镜`);
+      if (hasUpstream && shotIds.length > 0) {
+        await batchGenerateVideosFromShots(shotIds, false, blockId);
+        appendLog(`上游镜头视频生成完成 · ${shotIds.length} 镜`);
         return;
       }
       const { runCascadeFromBlock } = await import('../../../../execution/cascade-runner');
@@ -126,16 +140,16 @@ export function VideoWorkspace({ blockId, kind, onCollapse }: VideoWorkspaceProp
     } catch (e) {
       appendLog(`运行失败: ${String(e)}`);
     }
-  }, [blockId, runtime, meta, kind, appendLog, flushNow, shots.length]);
+  }, [blockId, runtime, meta, kind, appendLog, flushNow, hasUpstream, shotIds]);
 
   const retryShot = useCallback(async (shotId: string) => {
     setRetryingShotId(shotId);
     try {
-      await batchGenerateVideosFromShots([shotId], true);
+      await batchGenerateVideosFromShots([shotId], true, blockId);
     } finally {
       setRetryingShotId(null);
     }
-  }, []);
+  }, [blockId]);
 
   const approveAllVideos = useCallback(() => {
     for (const shot of shots) {
@@ -245,11 +259,11 @@ export function VideoWorkspace({ blockId, kind, onCollapse }: VideoWorkspaceProp
               onReferenceChange={(url) => handlePatch({ referenceFrameUrl: url })}
             />
           )}
-          {shots.length > 0 && (
+          {hasUpstream && shots.length > 0 && (
             <div className="border-b border-line/25 px-3 py-2">
               <div className="mb-1.5 flex items-center gap-2">
                 <p className="text-[10px] font-medium text-ink/65">
-                  当前集 {shots.length} 镜 · 已生成 {shots.filter((shot) => shot.videoAssetId).length}
+                  上游 {shots.length} 镜 · 已生成 {shots.filter((shot) => shot.videoAssetId).length}
                 </p>
                 <button
                   type="button"

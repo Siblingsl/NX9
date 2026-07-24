@@ -12,7 +12,7 @@ import { useWorkspaceCatalog } from '../stores/workspace-catalog';
 import { useCredentialVault } from '../stores/credential-vault';
 import { useActivityLog } from '../stores/activity-log';
 import { useFlowCommands } from '../stores/flow-commands';
-import { useFlowRuntime, useStoryboardUi, useRemotionUi } from '../stores/flow-runtime';
+import { useFlowRuntime, useRemotionUi } from '../stores/flow-runtime';
 import { useExecutionQueue } from '../stores/execution-queue';
 import { useAssetLibraryModalUi } from '../stores/asset-library-modal-ui';
 import { useCreateWorkspaceDialogUi } from '../stores/create-workspace-dialog-ui';
@@ -28,9 +28,6 @@ const StageDeckSurface = lazy(() =>
   import('../engine/stage-deck/StageDeckSurface').then((m) => ({ default: m.StageDeckSurface })),
 );
 
-const StoryboardPanel = lazy(() =>
-  import('../panels/StoryboardPanel').then((m) => ({ default: m.StoryboardPanel })),
-);
 const AssetLibraryModal = lazy(() =>
   import('../panels/AssetLibraryModal').then((m) => ({ default: m.AssetLibraryModal })),
 );
@@ -259,7 +256,6 @@ export default function AppShell() {
               defaultTitle={`项目 ${railItems.length + 1}`}
               defaultBootstrapCore
             />
-            {isCanvas && isSurfaceEnabled('storyboard') && <StoryboardPanel />}
             {isSurfaceEnabled('generationHistory') && (
               <GenerationHistoryPanel open={historyOpen} onClose={() => setHistoryOpen(false)} />
             )}

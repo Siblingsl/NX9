@@ -14,6 +14,7 @@ const blockLoaders: Record<string, () => Promise<{ default: ComponentType<NodePr
   'sound-gen': () => import('./core/SoundGenBlock').then((m) => ({ default: m.default })),
   'clip-editor': () => import('./core/ClipEditorBlock').then((m) => ({ default: m.default })),
   'director-desk': () => import('./core/DirectorDeskBlock').then((m) => ({ default: m.default })),
+  'director-3d': () => import('./core/DirectorDeskBlock').then((m) => ({ default: m.default })),
 
   'storyboard-desk': () =>
     import('./craft/StoryboardDeskBlock').then((m) => ({ default: m.default })),
@@ -21,16 +22,16 @@ const blockLoaders: Record<string, () => Promise<{ default: ComponentType<NodePr
 
   'asset-import': () => import('./input/AssetImportBlock').then((m) => ({ default: m.default })),
   'link-parser': () => import('./utility/LinkParserBlock').then((m) => ({ default: m.default })),
+  /** 内部钉图：不进 BLOCK_CATALOG，仅拖出创建 */
+  'media-pin': () => import('./utility/MediaPinBlock').then((m) => ({ default: m.default })),
 
-  'dialogue-sheet': () => import('./nx9/DialogueSheetBlock').then((m) => ({ default: m.default })),
+  'script-desk': () => import('./nx9/ScriptDeskBlock').then((m) => ({ default: m.default })),
+  'dialogue-sheet': () => import('./nx9/ScriptDeskBlock').then((m) => ({ default: m.default })),
   'reference-board': () => import('./nx9/ReferenceBoardBlock').then((m) => ({ default: m.default })),
   'continuity-check': () => import('./nx9/ContinuityCheckBlock').then((m) => ({ default: m.default })),
   'caption-asr': () => import('./nx9/CaptionAsrBlock').then((m) => ({ default: m.default })),
   'inpaint-edit': () => import('./nx9/InpaintEditBlock').then((m) => ({ default: m.default })),
   'export-pack': () => import('./nx9/ExportPackBlock').then((m) => ({ default: m.default })),
-  'review-gate': () => import('./nx9/ReviewGateBlock').then((m) => ({ default: m.default })),
-
-  'director-3d': () => import('./spatial/Director3dBlock').then((m) => ({ default: m.default })),
 
   'local-enhance': () => import('./utility/LocalEnhanceBlock').then((m) => ({ default: m.default })),
   'grid-compose': () => import('./utility/GridComposeBlock').then((m) => ({ default: m.default })),
@@ -81,11 +82,16 @@ export async function preloadBlockTypes(types: string[]) {
   );
 }
 
-export const blockTypes = Object.fromEntries(
-  BLOCK_CATALOG.map((def) => [
+export const blockTypes = Object.fromEntries([
+  ...BLOCK_CATALOG.map((def) => [
     def.kind,
     withBlockSuspense(
       blockLoaders[def.kind] ? lazyBlock(blockLoaders[def.kind]) : GenericBlock,
     ),
   ]),
-);
+  /** 内部节点：不进能力区，但仍需注册渲染器 */
+  [
+    'media-pin',
+    withBlockSuspense(lazyBlock(blockLoaders['media-pin'])),
+  ],
+]);

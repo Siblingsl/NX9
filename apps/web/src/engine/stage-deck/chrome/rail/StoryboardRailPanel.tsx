@@ -63,6 +63,11 @@ export function StoryboardRailPanel({ selectedBlockId }: StoryboardRailPanelProp
 
   return (
     <div className="space-y-3 text-xs">
+      {/* P0 提示：主编辑在画布分镜台 */}
+      <div className="rounded-xl border border-amber-200/40 bg-amber-50/30 p-2.5 text-[10px] text-ink/60 leading-relaxed">
+        分镜主编辑已迁入画布「分镜台」节点（拆镜 · 镜表编辑 · 构图确认）。Rail 仅导航与摘要查看。
+      </div>
+
       {/* Banner */}
       {banner && (
         <RailBanner

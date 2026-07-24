@@ -83,12 +83,26 @@ export async function runPictureGenExecutor(ctx: BlockExecutorContext): Promise<
     snapToStep,
   });
   const nodeRef = (d.referenceImageUrl as string | undefined)?.trim();
+  const existingGenerated = Array.isArray(d.previewUrls)
+    ? (d.previewUrls as string[]).filter((u) => typeof u === 'string' && u.trim())
+    : d.previewUrl
+      ? [String(d.previewUrl)]
+      : [];
+  const { resolveLocalMediaMentionUrls } = await import(
+    '../stage-deck/chrome/asset-mention/local-media-mention'
+  );
+  const mentionedMediaUrls = resolveLocalMediaMentionUrls(
+    prompt,
+    existingGenerated,
+    upstreamPics,
+  );
   const charRef = enhancedCtx.referenceImageUrl ?? upstreamPics[0];
   const needsRef =
     pictureGenMode === 'image-to-image' ||
     pictureGenMode === 'multi-ref' ||
     pictureGenMode === 'style-ref' ||
-    pictureGenMode === 'upscale-hd';
+    pictureGenMode === 'upscale-hd' ||
+    mentionedMediaUrls.length > 0;
 
   // 专业动作模板（LibTV 对齐）
   const { composePictureProPrompt, lookupPictureProAction } = await import(
@@ -101,7 +115,8 @@ export async function runPictureGenExecutor(ctx: BlockExecutorContext): Promise<
 
   // 高清：直接放大，不走多 job 生成
   if (pictureGenMode === 'upscale-hd') {
-    const refImage = nodeRef || charRef || multiRefs[0] || upstreamPics[0];
+    const refImage =
+      mentionedMediaUrls[0] || nodeRef || charRef || multiRefs[0] || upstreamPics[0];
     if (!refImage) throw new Error('图片高清需要参考图：请上传或连接上游');
     const batchUrls = await runPictureGenJob({
       prompt: 'upscale',
@@ -122,8 +137,27 @@ export async function runPictureGenExecutor(ctx: BlockExecutorContext): Promise<
         finalPrompt = `${finalPrompt}\n\nNegative: ${neg}`;
       }
       lastPrompt = finalPrompt;
+
+      const jobMentioned = resolveLocalMediaMentionUrls(
+        job.prompt,
+        existingGenerated,
+        upstreamPics,
+      );
+      const mentionRefs =
+        jobMentioned.length > 0 ? jobMentioned : mentionedMediaUrls;
+
       let refImage =
-        job.imageUrls?.[0] || nodeRef || charRef || multiRefs[0] || styleImageUrl;
+        job.imageUrls?.[0] ||
+        mentionRefs[0] ||
+        nodeRef ||
+        charRef ||
+        multiRefs[0] ||
+        styleImageUrl;
+
+      const effectiveMultiRefs = [
+        ...multiRefs,
+        ...mentionRefs.filter((u) => u !== refImage && !multiRefs.includes(u)),
+      ];
 
       if (job.imageUrls && job.imageUrls.length >= 2) {
         if (composeAction === 'merge' || composeAction === 'merge-then-generate') {
@@ -143,9 +177,11 @@ export async function runPictureGenExecutor(ctx: BlockExecutorContext): Promise<
       if (
         !job.imageUrls?.length &&
         pictureGenMode === 'multi-ref' &&
-        multiRefs.length + (nodeRef ? 1 : 0) >= 2
+        effectiveMultiRefs.length + (nodeRef || mentionRefs[0] ? 1 : 0) >= 2
       ) {
-        const collageSrc = [nodeRef, ...multiRefs].filter(Boolean) as string[];
+        const collageSrc = [nodeRef || mentionRefs[0], ...effectiveMultiRefs].filter(
+          Boolean,
+        ) as string[];
         try {
           const merged = await api.mergeImages({
             imageUrls: collageSrc.slice(0, 4),
@@ -159,7 +195,11 @@ export async function runPictureGenExecutor(ctx: BlockExecutorContext): Promise<
       }
 
       if (needsRef && !refImage) {
-        throw new Error('当前模式需要参考图：请上传主体参考，或连接上游图片');
+        throw new Error('当前模式需要参考图：请上传主体参考，或连接上游图片，或 @生成/@上游 图片');
+      }
+
+      if (mentionRefs.length > 0) {
+        finalPrompt = `${finalPrompt}\n\n[Local media refs: ${mentionRefs.length}]`;
       }
 
       const batchUrls = await runPictureGenJob({
@@ -167,7 +207,7 @@ export async function runPictureGenExecutor(ctx: BlockExecutorContext): Promise<
         modelId,
         size: resolvedSize.size,
         referenceImageUrl: refImage,
-        referenceImageUrls: multiRefs,
+        referenceImageUrls: effectiveMultiRefs,
         styleImageUrl,
         strength: imageStrength,
         n: imageCount,

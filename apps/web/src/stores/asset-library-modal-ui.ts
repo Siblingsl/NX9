@@ -8,6 +8,7 @@ export interface AssetLibraryNavigateRequest {
   itemId?: string;
   scope?: AssetScope;
   projectId?: string;
+  query?: string;
 }
 
 export const useAssetLibraryModalUi = create<{

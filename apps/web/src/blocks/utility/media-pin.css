@@ -1,0 +1,78 @@
+/* 画布钉图 — 图像主导、轻量钉板，与 stage-card 同色系 */
+
+.nx9-stage-card:has(.nx9-media-pin) {
+  width: 220px;
+  min-width: 220px;
+  max-width: 220px;
+}
+
+.nx9-media-pin {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.nx9-media-pin__frame {
+  position: relative;
+  display: block;
+  width: 100%;
+  aspect-ratio: 1;
+  border: 1px solid var(--desk-card-border, rgba(255, 255, 255, 0.08));
+  border-radius: 10px;
+  overflow: hidden;
+  padding: 0;
+  background: rgba(0, 0, 0, 0.28);
+  cursor: zoom-in;
+}
+
+.nx9-media-pin__img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.nx9-media-pin__empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  font-size: 11px;
+  color: var(--desk-faint, rgba(255, 255, 255, 0.28));
+}
+
+.nx9-media-pin-lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(8, 9, 11, 0.82);
+  padding: 16px;
+}
+
+.nx9-media-pin-lightbox__close {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  width: 32px;
+  height: 32px;
+  border-radius: 999px;
+  border: none;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.nx9-media-pin-lightbox img {
+  max-width: min(92vw, 960px);
+  max-height: 88vh;
+  object-fit: contain;
+  border-radius: 12px;
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.55);
+}
