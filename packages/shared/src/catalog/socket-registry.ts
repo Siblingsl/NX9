@@ -148,7 +148,15 @@ export const SOCKET_LABELS: Record<SocketKind, string> = {
 export function resolveEmits(kind: string, data?: Record<string, unknown>): SocketKind[] {
   if (kind === 'asset-import') {
     const items = resolveAssetImportItems(data);
-    if (items.length === 0) return [];
+    if (items.length === 0) {
+      // 模板预置 mediaKind 时仍露出对应出口，避免空节点看起来「断线」
+      const mediaKind = data?.mediaKind as string | undefined;
+      if (mediaKind === 'picture') return ['picture'];
+      if (mediaKind === 'clip') return ['clip'];
+      if (mediaKind === 'sound') return ['sound'];
+      if (mediaKind === 'mesh') return ['mesh'];
+      return [];
+    }
     const kinds = new Set<SocketKind>();
     for (const item of items) {
       if (item.mediaKind === 'picture') kinds.add('picture');

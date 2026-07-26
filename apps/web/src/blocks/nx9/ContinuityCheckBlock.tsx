@@ -9,7 +9,6 @@ import { autoFixContinuityIssue } from '../../engine/inpaint-repair';
 import { useActivityLog } from '../../stores/activity-log';
 import { useFlowRuntime, useStoryboardUi } from '../../stores/flow-runtime';
 import { useWorkspaceDocument } from '../../stores/workspace-document';
-import { useContextRailUi } from '../../engine/stage-deck/stores/context-rail-ui';
 import '../../styles/stage-bible.css';
 
 function ContinuityCheckBlock(props: NodeProps) {
@@ -19,9 +18,7 @@ function ContinuityCheckBlock(props: NodeProps) {
   const runCascade = runtime?.runCascade;
   const storyboardShots = useWorkspaceDocument((s) => s.storyboard.shots);
   const updateShot = useWorkspaceDocument((s) => s.updateShot);
-  const requestTab = useContextRailUi((s) => s.requestTab);
   const selectShot = useStoryboardUi((s) => s.selectShot);
-  const requestScrollToShot = useStoryboardUi((s) => s.requestScrollToShot);
   const [reportOpen, setReportOpen] = useState(false);
 
   const upstream = props.data?.upstream as {
@@ -97,7 +94,6 @@ function ContinuityCheckBlock(props: NodeProps) {
 
   const handleJumpToShot = useCallback(
     (issue: string) => {
-      requestTab('storyboard');
       const matched =
         storyboardShots.find(
           (s) =>
@@ -107,12 +103,13 @@ function ContinuityCheckBlock(props: NodeProps) {
         ) ?? storyboardShots[0];
       if (matched) {
         selectShot(matched.id);
-        requestScrollToShot(matched.id);
         updateShot(matched.id, {});
-        appendLog(`[连贯性] 跳转镜头 ${matched.sceneCode ?? matched.id}`);
+        const desk = runtime?.getNodes().find((n) => n.type === 'storyboard-desk');
+        if (desk) runtime?.focusBlock?.(desk.id);
+        appendLog(`[连贯性] 跳转镜头 ${matched.sceneCode ?? matched.id} · 请打开分镜台`);
       }
     },
-    [storyboardShots, requestTab, selectShot, requestScrollToShot, updateShot, appendLog],
+    [storyboardShots, selectShot, updateShot, appendLog, runtime],
   );
 
   const handleRegenerate = useCallback(
@@ -128,11 +125,12 @@ function ContinuityCheckBlock(props: NodeProps) {
         await runCascade(matched.linkedBlockId);
         appendLog(`[连贯性] 重生成镜头 ${matched.sceneCode ?? matched.id}`);
       } else {
-        requestTab('storyboard');
-        appendLog(`[连贯性] 无关联节点，已打开分镜面板`);
+        const desk = runtime?.getNodes().find((n) => n.type === 'storyboard-desk');
+        if (desk) runtime?.focusBlock?.(desk.id);
+        appendLog(`[连贯性] 无关联节点，请用画布「分镜台」处理`);
       }
     },
-    [storyboardShots, runCascade, requestTab, appendLog],
+    [storyboardShots, runCascade, appendLog, runtime],
   );
 
   const picN = upstream?.pictures?.length ?? 0;

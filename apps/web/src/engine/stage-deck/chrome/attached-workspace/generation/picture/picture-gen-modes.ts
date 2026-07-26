@@ -73,17 +73,6 @@ export function readPictureGenMode(data: Record<string, unknown>): PictureGenMod
   return 'text-to-image';
 }
 
-export function showPictureReferenceStrip(
-  mode: PictureGenMode,
-  hasUpstream: boolean,
-  force = false,
-): boolean {
-  if (force) return true;
-  if (mode === 'text-to-image') return hasUpstream;
-  if (mode === 'upscale-hd') return true;
-  return mode !== 'panorama-720' || hasUpstream;
-}
-
 export function modeNeedsPrimaryRef(mode: PictureGenMode): boolean {
   return (
     mode === 'image-to-image' ||

@@ -1,6 +1,10 @@
 import { memo, useMemo, type ComponentType } from 'react';
 import type { NodeProps } from '@xyflow/react';
-import { isDeprecatedBlockKind, shouldUseCompactNodeShell } from '@nx9/shared';
+import {
+  isDeprecatedBlockKind,
+  shouldPreserveNativeNodeCard,
+  shouldUseCompactNodeShell,
+} from '@nx9/shared';
 import { blockTypes } from '../../../blocks/registry';
 import { CardShell } from './CardShell';
 import { SceneGroupNode } from './SceneGroup';
@@ -29,8 +33,8 @@ export function createStageDeckNodeTypes(): Record<string, ComponentType<NodePro
               {null}
             </CardShell>
           );
-        } else if (kind === 'media-pin') {
-          /* 钉图始终用专用卡，不收折成空摘要 */
+        } else if (kind === 'media-pin' || shouldPreserveNativeNodeCard(kind)) {
+          /* 自有摘要卡：素材导入 / 智能剪辑 / 三台等，不收成空壳 */
           inner = <Block {...props} />;
         } else if (canvasFirst && shouldUseCompactNodeShell(kind)) {
           /* 紧凑舞台卡 + 节点下方底部跟随工作区（非弹窗） */

@@ -21,6 +21,8 @@ interface WorkspaceCatalogState {
   selectWorkspace: (id: string) => void;
   create: (options?: string | CreateWorkspaceOptions) => Promise<WorkspaceSummary>;
   rename: (id: string, title: string) => Promise<void>;
+  /** 永久删除工作区及其数据 */
+  remove: (id: string) => Promise<void>;
   /** 从主栏关闭工作区标签，不删除工作区与素材数据 */
   closeWorkspace: (id: string) => void;
   privateWorkspaces: () => WorkspaceSummary[];
@@ -134,6 +136,25 @@ export const useWorkspaceCatalog = create<WorkspaceCatalogState>((set, get) => (
   rename: async (id, title) => {
     const updated = await api.renameWorkspace(id, title);
     set({ items: get().items.map((w) => (w.id === id ? { ...w, ...updated } : w)) });
+  },
+
+  remove: async (id) => {
+    await api.deleteWorkspace(id);
+    const { useUserSession } = await import('./user-session');
+    const ownerId = useUserSession.getState().userId ?? undefined;
+    const items = get().items.filter((w) => w.id !== id);
+    const openIds = get().openIds.filter((x) => x !== id);
+    saveOpenIds(ownerId, openIds);
+    const wasActive = get().activeId === id;
+    const nextActive = wasActive
+      ? openIds[0] ?? items.find(isPrivateWorkspace)?.id ?? null
+      : get().activeId;
+    set({
+      items,
+      openIds,
+      activeId: nextActive,
+      reloadToken: wasActive ? get().reloadToken + 1 : get().reloadToken,
+    });
   },
 
   closeWorkspace: async (id) => {

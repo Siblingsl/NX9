@@ -154,10 +154,9 @@ describe('TEST-WF — Playbook orchestration', () => {
       startedAt: '2026-07-14T00:00:00Z',
       currentStepId: 'video-gen',
       completedStepIds: [
-        'script-breakdown',
-        'story-grid',
-        'storyboard-preview',
-        'keyframe-review',
+        'script-desk',
+        'storyboard-desk',
+        'director-desk',
       ],
       skippedStepIds: [],
       failedStepIds: [],
@@ -172,8 +171,8 @@ describe('TEST-WF — Playbook orchestration', () => {
       'episode-2',
       playbook,
     );
-    expect(episodeTwo.currentStepId).toBe('story-grid');
-    expect(episodeTwo.completedStepIds).toEqual(['script-breakdown']);
+    expect(episodeTwo.currentStepId).toBe('storyboard-desk');
+    expect(episodeTwo.completedStepIds).toEqual(['script-desk']);
     expect(episodeTwo.episodeProgress?.['episode-1'].currentStepId).toBe('video-gen');
 
     const restoredEpisodeOne = switchPlaybookEpisode(
@@ -183,7 +182,7 @@ describe('TEST-WF — Playbook orchestration', () => {
       playbook,
     );
     expect(restoredEpisodeOne.currentStepId).toBe('video-gen');
-    expect(restoredEpisodeOne.completedStepIds).toContain('keyframe-review');
+    expect(restoredEpisodeOne.completedStepIds).toContain('director-desk');
     expect(restoredEpisodeOne.workflowStatus).toBe('running');
   });
 
@@ -196,10 +195,10 @@ describe('TEST-WF — Playbook orchestration', () => {
     };
 
     const migrated = hydrateEpisodePlaybookProgress(legacySession, 'episode-1');
-    expect(migrated.currentStepId).toBe('keyframe-review');
+    expect(migrated.currentStepId).toBe('director-desk');
     expect(migrated.episodeProgress?.['episode-1']).toMatchObject({
-      currentStepId: 'keyframe-review',
-      completedStepIds: ['script-breakdown', 'story-grid', 'storyboard-preview'],
+      currentStepId: 'director-desk',
+      completedStepIds: ['script-desk', 'storyboard-desk'],
       workflowStatus: 'idle',
     });
   });

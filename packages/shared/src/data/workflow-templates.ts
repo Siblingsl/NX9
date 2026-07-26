@@ -35,8 +35,18 @@ function node(type: string, col: number, row: number, data: Record<string, unkno
   };
 }
 
-function edge(source: string, target: string): FlowLink {
-  return { id: uid('e'), source, target };
+function edge(
+  source: string,
+  target: string,
+  handles?: { sourceHandle?: string; targetHandle?: string },
+): FlowLink {
+  return {
+    id: uid('e'),
+    source,
+    target,
+    sourceHandle: handles?.sourceHandle,
+    targetHandle: handles?.targetHandle,
+  };
 }
 
 export const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
@@ -334,6 +344,83 @@ export const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
           edge(b.id, c.id),
           edge(c.id, d.id),
           edge(d.id, e.id),
+        ],
+      };
+    },
+  },
+  {
+    id: 'tpl-ecom-image',
+    label: '电商生图',
+    description: '商品素材 → 图像生成 → 导出',
+    category: 'image',
+    build() {
+      const a = node('asset-import', 0, 0, {
+        mediaKind: 'picture',
+        playbookStepId: 'product-assets',
+        playbookStepIndex: 1,
+      });
+      const b = node('picture-gen', 1, 0, {
+        aspectRatio: '1:1',
+        content:
+          '电商主图，干净白底，柔和棚拍光，高清商品细节，突出材质与卖点，商业广告质感',
+        // 短流程走左右数据口，不露底侧能力口（能力口专供分镜台竖直挂载）
+        showExecPorts: false,
+        playbookStepId: 'ecom-picture',
+        playbookStepIndex: 2,
+      });
+      const c = node('export-pack', 2, 0, {
+        playbookStepId: 'export',
+        playbookStepIndex: 3,
+      });
+      return {
+        blocks: [a, b, c],
+        links: [
+          // 左右数据口：避免挂到 picture-gen 底侧 exec-picture 能力口
+          edge(a.id, b.id, { sourceHandle: 'picture', targetHandle: 'prompt' }),
+          edge(b.id, c.id, { sourceHandle: 'picture', targetHandle: 'prompt' }),
+        ],
+      };
+    },
+  },
+  {
+    id: 'tpl-ecom-video',
+    label: '电商生视频',
+    description: '商品素材 → 图生视频/口播 → 智能剪辑 → 导出',
+    category: 'video',
+    build() {
+      const a = node('asset-import', 0, 0, {
+        mediaKind: 'picture',
+        playbookStepId: 'product-assets',
+        playbookStepIndex: 1,
+      });
+      const b = node('picture-gen', 0, 1, {
+        aspectRatio: '9:16',
+        content: '竖屏电商主视觉，干净背景，商品居中，突出卖点',
+        showExecPorts: false,
+        playbookStepId: 'product-assets',
+        playbookStepIndex: 1,
+      });
+      const c = node('clip-gen', 1, 0, {
+        videoMode: 'single',
+        content: '商品旋转展示，突出卖点细节，电商带货短视频节奏',
+        playbookStepId: 'ecom-video',
+        playbookStepIndex: 2,
+      });
+      const d = node('clip-editor', 2, 0, {
+        playbookStepId: 'smart-edit',
+        playbookStepIndex: 3,
+      });
+      const e = node('export-pack', 3, 0, {
+        playbookStepId: 'export',
+        playbookStepIndex: 4,
+      });
+      return {
+        blocks: [a, b, c, d, e],
+        links: [
+          edge(a.id, c.id, { sourceHandle: 'picture', targetHandle: 'prompt' }),
+          edge(b.id, c.id, { sourceHandle: 'picture', targetHandle: 'prompt' }),
+          edge(c.id, d.id, { sourceHandle: 'clip', targetHandle: 'clip' }),
+          edge(d.id, e.id, { sourceHandle: 'clip', targetHandle: 'prompt' }),
         ],
       };
     },

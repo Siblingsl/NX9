@@ -8,7 +8,6 @@ import {
   type SmartSuggestion,
 } from '@nx9/shared';
 import { api } from '../api/client';
-import { useWorkspaceDocument } from '../stores/workspace-document';
 
 interface AnalyzeReferenceResult {
   ok: boolean;
@@ -34,16 +33,38 @@ function makeId() {
   return `sg-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
 }
 
-/** 漫剧编排：从故事板镜头生成时间线 */
+/** 漫剧编排：只使用调用方传入的镜头（节点实例级，不读全局故事板） */
 export async function orchestrateDramaTimeline(opts: {
   title?: string;
   aspect?: string;
   approvedOnly?: boolean;
+  /** 本节点连入的镜头；必填。空数组则生成空时间线。 */
+  shots: Array<{
+    id: string;
+    index: number;
+    status?: string;
+    durationSec?: number;
+    videoAssetId?: string | null;
+    firstFrameAssetId?: string | null;
+    audioAssetId?: string | null;
+    descriptionZh?: string;
+    subtitleText?: string | null;
+  }>;
 }): Promise<OrchestrateResult> {
-  const doc = useWorkspaceDocument.getState();
-  const shots = doc.storyboard.shots
+  const shots = [...opts.shots]
     .filter((s) => (opts.approvedOnly ? s.status === 'approved' : true))
-    .sort((a, b) => a.index - b.index);
+    .sort((a, b) => a.index - b.index)
+    .map((s) => ({
+      id: s.id,
+      index: s.index,
+      status: s.status,
+      durationSec: s.durationSec ?? 4,
+      descriptionZh: s.descriptionZh ?? '',
+      videoAssetId: s.videoAssetId,
+      firstFrameAssetId: s.firstFrameAssetId,
+      audioAssetId: s.audioAssetId,
+      subtitleText: s.subtitleText,
+    }));
 
   const timeline = buildTimelineFromShotsV2(shots, opts.title ?? '漫剧成片', {
     aspect: (opts.aspect ?? '9:16') as '9:16' | '16:9' | '1:1',

@@ -1,7 +1,6 @@
 import JSZip from 'jszip';
 import { api } from '../api/client';
-import { useWorkspaceDocument } from '../stores/workspace-document';
-import type { StoryboardShot } from '@nx9/shared';
+import type { StoryboardShot, TimelinePayload } from '@nx9/shared';
 
 export interface ExportPackInput {
   mode: 'zip' | 'ffmpeg-episode' | 'hyperframes-episode' | 'remotion-bundle';
@@ -13,6 +12,8 @@ export interface ExportPackInput {
   sounds: string[];
   prompts: string[];
   shots: StoryboardShot[];
+  /** 来自本节点或上游智能剪辑的时间线（节点实例级，不读全局） */
+  timeline?: TimelinePayload | null;
 }
 
 export interface ExportPackResult {
@@ -49,16 +50,16 @@ export async function runExportPack(input: ExportPackInput): Promise<ExportPackR
   }
 
   if (input.mode === 'hyperframes-episode') {
-    const timeline = useWorkspaceDocument.getState().timelineDraft;
-    if (!timeline) return { ok: false, message: '无时间线数据' };
+    const timeline = input.timeline ?? null;
+    if (!timeline) return { ok: false, message: '无时间线数据（请先从已连接的智能剪辑同步）' };
     const res = await api.renderHyperframes({ timeline, templateId: 'nx9-vertical-episode' });
     return { ok: true, taskId: res.taskId, message: res.status };
   }
 
   if (input.mode === 'remotion-bundle') {
     const { timelineToRemotionStudioBundle } = await import('@nx9/shared');
-    const timeline = useWorkspaceDocument.getState().timelineDraft;
-    if (!timeline) return { ok: false, message: '无时间线数据' };
+    const timeline = input.timeline ?? null;
+    if (!timeline) return { ok: false, message: '无时间线数据（请先从已连接的智能剪辑同步）' };
     const bundle = timelineToRemotionStudioBundle(timeline);
     const zip = new JSZip();
     for (const file of bundle.files) {

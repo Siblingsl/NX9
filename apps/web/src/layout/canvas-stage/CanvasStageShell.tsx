@@ -8,7 +8,6 @@ import {
 import {
   Clapperboard,
   FolderOpen,
-  History,
   Home,
   Layers,
   Package,
@@ -79,7 +78,6 @@ export interface CanvasStageShellProps {
   onBatchRun: () => void;
   onOpenAssets: () => void;
   onOpenSettings: () => void;
-  onOpenHistory?: () => void;
 }
 
 /**
@@ -105,7 +103,6 @@ export function CanvasStageShell({
   onBatchRun,
   onOpenAssets,
   onOpenSettings,
-  onOpenHistory,
 }: CanvasStageShellProps) {
   const [toolsOpen, setToolsOpen] = useState(false);
   const [lane, setLane] = useState<LaneId>('generate');
@@ -174,11 +171,6 @@ export function CanvasStageShell({
           )}
           {user && (
             <span className="text-[11px] opacity-45 px-1 max-w-[72px] truncate">{user.name}</span>
-          )}
-          {onOpenHistory && (
-            <button type="button" className="cs-btn" onClick={onOpenHistory} title="历史">
-              <History size={14} />
-            </button>
           )}
           <button type="button" className="cs-btn" onClick={onOpenSettings} title="设置">
             <Settings size={14} />

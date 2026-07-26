@@ -5,16 +5,16 @@ import { FIXTURE_NOVEL_500, FIXTURE_SCENE_SPLIT_3, FIXTURE_ENV_PROFILE } from '.
 
 describe('TEST-PIPE — Core 6-Step Production Pipeline', () => {
 
-  it('TEST-PIPE-000: resolveNextStep 核心 6 步 playbook 第一步是编剧台拆分步', () => {
+  it('TEST-PIPE-000: resolveNextStep 核心 6 步 playbook 第一步是编剧台', () => {
     const def = PLAYBOOK_DEFINITIONS.find((p) => p.id === 'pb-ai-comic-3d');
     expect(def).toBeDefined();
     expect(def!.steps.length).toBe(6);
     expect(def!.steps.map((s) => s.id)).toEqual([
-      'script-breakdown',
-      'story-grid',
-      'storyboard-preview',
-      'keyframe-review',
+      'script-desk',
+      'storyboard-desk',
+      'director-desk',
       'video-gen',
+      'smart-edit',
       'export',
     ]);
     expect(def!.bootstrapTemplates[0]?.templateId).toBe('tpl-core-episode');
@@ -22,7 +22,7 @@ describe('TEST-PIPE — Core 6-Step Production Pipeline', () => {
     const session: PlaybookSession = {
       playbookId: 'pb-ai-comic-3d',
       startedAt: new Date().toISOString(),
-      currentStepId: 'script-breakdown',
+      currentStepId: 'script-desk',
       completedStepIds: [],
     };
 
@@ -34,7 +34,7 @@ describe('TEST-PIPE — Core 6-Step Production Pipeline', () => {
     };
 
     const resolved = resolveNextStep(def!, session, ctx);
-    expect(resolved.step.id).toBe('script-breakdown');
+    expect(resolved.step.id).toBe('script-desk');
     expect(resolved.allDone).toBe(false);
   });
 

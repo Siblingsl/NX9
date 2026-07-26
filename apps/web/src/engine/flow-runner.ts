@@ -1080,25 +1080,56 @@ async function executeBlock(
       });
       return;
     }
-    // Smart edit path: orchestrate if no timelineDraft, then render
-    const timelineDraft = useWorkspaceDocument.getState().timelineDraft;
+    // Smart edit path: node-local timeline only (no global workspace draft)
+    const readLocalTimeline = (): import('@nx9/shared').TimelinePayload | null => {
+      const raw = d.timelineDraft;
+      if (!raw) return null;
+      if (typeof raw === 'string') {
+        try {
+          return JSON.parse(raw) as import('@nx9/shared').TimelinePayload;
+        } catch {
+          return null;
+        }
+      }
+      if (typeof raw === 'object') return raw as import('@nx9/shared').TimelinePayload;
+      return null;
+    };
+    let timelineDraft = readLocalTimeline();
     if (!timelineDraft) {
       const { orchestrateDramaTimeline, orchestrateViralTimeline } = await import('./smart-edit-orchestrator');
       const profile = (d.profile as string) ?? 'drama';
       if (profile === 'drama') {
-        const result = await orchestrateDramaTimeline({ approvedOnly: true });
+        const linkedIds = (d.linkedShotIds as string[] | undefined) ?? [];
+        const sb = useWorkspaceDocument.getState().storyboard;
+        const shots =
+          linkedIds.length > 0
+            ? sb.shots.filter((s) => linkedIds.includes(s.id))
+            : [];
+        if (shots.length === 0) {
+          throw new Error('智能剪辑未连接镜头上游，无法漫剧编排');
+        }
+        const result = await orchestrateDramaTimeline({ approvedOnly: true, shots });
         if (result.timeline) {
-          useWorkspaceDocument.getState().setTimelineDraft(result.timeline);
+          timelineDraft = result.timeline;
+          updateNodeData(block.id, {
+            timelineDraft: result.timeline,
+            suggestions: result.suggestions,
+            pendingSuggestionIds: result.suggestions.map((s) => s.id),
+          });
         }
       } else if (upstream.clips.length > 0) {
         const result = await orchestrateViralTimeline({ clips: upstream.clips });
         if (result.timeline) {
-          useWorkspaceDocument.getState().setTimelineDraft(result.timeline);
+          timelineDraft = result.timeline;
+          updateNodeData(block.id, {
+            timelineDraft: result.timeline,
+            suggestions: result.suggestions,
+            pendingSuggestionIds: result.suggestions.map((s) => s.id),
+          });
         }
       }
     }
-    // After orchestration, render via the appropriate engine
-    const freshTimeline = useWorkspaceDocument.getState().timelineDraft;
+    const freshTimeline = timelineDraft;
     if (!freshTimeline) throw new Error('编排未生成时间线');
     const engine = (d.engine as string) ?? 'auto';
     const resolvedEngine = engine === 'auto'

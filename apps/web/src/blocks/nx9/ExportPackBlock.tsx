@@ -26,7 +26,39 @@ function ExportPackBlock(props: NodeProps) {
   const lastExport = props.data?.lastExportAt as string | undefined;
   const episodeUrl = props.data?.episodeUrl as string | undefined;
   const timelineDraft = props.data?.timelineDraft as string | undefined;
-  const hasTimeline = Boolean(timelineDraft);
+
+  const parsedTimeline = useMemo(() => {
+    if (!timelineDraft) return null;
+    try {
+      return JSON.parse(timelineDraft) as import('@nx9/shared').TimelinePayload;
+    } catch {
+      return null;
+    }
+  }, [timelineDraft]);
+
+  /** 若本节点尚无时间线，尝试从直接上游的智能剪辑读取（仅连入的那一个） */
+  const upstreamTimeline = useMemo(() => {
+    if (parsedTimeline) return parsedTimeline;
+    const incoming = edges.filter((e) => e.target === props.id);
+    for (const edge of incoming) {
+      const src = nodes.find((n) => n.id === edge.source);
+      if (src?.type !== 'clip-editor') continue;
+      const raw = src.data?.timelineDraft;
+      if (!raw) continue;
+      if (typeof raw === 'string') {
+        try {
+          return JSON.parse(raw) as import('@nx9/shared').TimelinePayload;
+        } catch {
+          continue;
+        }
+      }
+      if (typeof raw === 'object') return raw as import('@nx9/shared').TimelinePayload;
+    }
+    return null;
+  }, [parsedTimeline, edges, nodes, props.id]);
+
+  const effectiveTimeline = parsedTimeline ?? upstreamTimeline;
+  const hasEffectiveTimeline = Boolean(effectiveTimeline);
   const [audioUrl, setAudioUrl] = useState((props.data?.episodeAudioUrl as string) ?? '');
   const [busy, setBusy] = useState(false);
   const [exportMode, setExportMode] = useState<ExportMode>((props.data?.exportMode as ExportMode) ?? 'ffmpeg-episode');
@@ -66,17 +98,17 @@ function ExportPackBlock(props: NodeProps) {
       case 'zip': return '需连接上游媒资节点';
       case 'ffmpeg-episode': return `使用故事板 ${shots.length} 镜`;
       case 'hyperframes-episode':
-      case 'remotion-bundle': return hasTimeline ? '使用时间线编排' : '需先编排时间线（智能剪辑）';
+      case 'remotion-bundle': return hasEffectiveTimeline ? '使用时间线编排' : '需先编排时间线（智能剪辑）';
       default: return '';
     }
-  }, [exportMode, hasTimeline, shots.length]);
+  }, [exportMode, hasEffectiveTimeline, shots.length]);
 
   const modeDisabled = useMemo(() => {
     if (exportMode === 'zip') return false;
     if (exportMode === 'ffmpeg-episode') return shots.length === 0;
-    if (exportMode === 'hyperframes-episode' || exportMode === 'remotion-bundle') return !hasTimeline;
+    if (exportMode === 'hyperframes-episode' || exportMode === 'remotion-bundle') return !hasEffectiveTimeline;
     return false;
-  }, [exportMode, hasTimeline, shots.length]);
+  }, [exportMode, hasEffectiveTimeline, shots.length]);
 
   const addHistoryEntry = useCallback((entry: { ok: boolean; url?: string; message?: string }) => {
     const history = [...exportHistory.slice(-9), { at: new Date().toISOString(), mode: exportMode, ...entry }];
@@ -96,6 +128,7 @@ function ExportPackBlock(props: NodeProps) {
         sounds: upstream?.sounds ?? [],
         prompts: upstream?.prompts ?? [],
         shots,
+        timeline: effectiveTimeline,
       });
       if (!res.ok) {
         const st = res.message?.includes('blocked') ? 'blocked' : 'error';
@@ -124,17 +157,20 @@ function ExportPackBlock(props: NodeProps) {
       addHistoryEntry({ ok: false, message: msg });
       appendLog(`导出失败: ${msg}`);
     }
-  }, [upstream, prefix, exportMode, multiEpisode, shots, audioUrl, props.id, updateNodeData, appendLog, addHistoryEntry, resetHfPolling]);
+  }, [upstream, prefix, exportMode, multiEpisode, shots, audioUrl, effectiveTimeline, props.id, updateNodeData, appendLog, addHistoryEntry, resetHfPolling]);
 
   const openSmartEdit = useCallback(() => {
-    const clipNode = nodes.find((n) => n.type === 'clip-editor');
+    const incoming = edges.filter((e) => e.target === props.id).map((e) => e.source);
+    const clipNode =
+      nodes.find((n) => n.type === 'clip-editor' && incoming.includes(n.id)) ??
+      nodes.find((n) => n.type === 'clip-editor');
     if (!clipNode) {
       appendLog('画布上无智能剪辑节点');
       return;
     }
     fitView({ nodes: [{ id: clipNode.id }], duration: 300 });
     appendLog('已聚焦智能剪辑节点');
-  }, [nodes, fitView, appendLog]);
+  }, [nodes, edges, fitView, appendLog, props.id]);
 
   const composeEpisode = useCallback(async () => {
     if (shots.length === 0) {
@@ -176,7 +212,7 @@ function ExportPackBlock(props: NodeProps) {
           <span className="ep-card__status">交付打包</span>
           <span className="ep-card__counts">
             {shots.length > 0 ? `${shots.length} 镜` : ''}
-            {timelineDraft ? ' · 有时间线' : ' · 无时间线'}
+            {hasEffectiveTimeline ? ' · 有时间线' : ' · 无时间线'}
             {storyboardVersion && storyboardVersion >= 3 ? ' · 门禁开' : ''}
             {props.data?.syncedFrom ? ' · 来自智能剪辑' : ''}
           </span>

@@ -63,8 +63,8 @@
 }
 
 .nx9-flow-rail-step--future {
-  color: rgba(0, 0, 0, 0.3);
-  opacity: 0.5;
+  color: rgba(243, 240, 234, 0.38);
+  opacity: 1;
 }
 
 .nx9-flow-rail-step-badge {
@@ -93,13 +93,13 @@
 }
 
 .nx9-flow-rail-step-badge--blocked {
-  background: #E0E0E0;
-  color: rgba(0, 0, 0, 0.4);
+  background: rgba(255, 255, 255, 0.12);
+  color: rgba(243, 240, 234, 0.55);
 }
 
 .nx9-flow-rail-step-badge--future {
-  background: #E0E0E0;
-  color: rgba(0, 0, 0, 0.25);
+  background: rgba(255, 255, 255, 0.1);
+  color: rgba(243, 240, 234, 0.45);
 }
 
 .nx9-flow-rail-step-badge--error {
@@ -115,9 +115,9 @@
 }
 
 .nx9-flow-rail-step-badge--skipped {
-  background: #E0E0E0;
-  color: rgba(0, 0, 0, 0.25);
-  opacity: 0.5;
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(243, 240, 234, 0.35);
+  opacity: 0.7;
 }
 
 .nx9-flow-rail-step-label--skipped {
@@ -134,8 +134,8 @@
 }
 
 .nx9-flow-rail-step--skipped {
-  color: rgba(0, 0, 0, 0.25);
-  opacity: 0.5;
+  color: rgba(243, 240, 234, 0.35);
+  opacity: 0.7;
 }
 
 .nx9-flow-rail-step-waiting {
@@ -227,7 +227,7 @@
 .nx9-flow-rail-step-sep {
   width: 12px;
   height: 1px;
-  background: rgba(0, 0, 0, 0.1);
+  background: rgba(255, 255, 255, 0.14);
   flex-shrink: 0;
 }
 
@@ -244,7 +244,7 @@
 .nx9-flow-rail-free {
   padding: 4px 12px;
   text-align: center;
-  color: rgba(0, 0, 0, 0.45);
+  color: rgba(243, 240, 234, 0.55);
   font-size: 12px;
   line-height: 1.5;
 }
@@ -261,7 +261,7 @@
   align-items: center;
   gap: 4px;
   font-size: 10px;
-  color: rgba(0, 0, 0, 0.35);
+  color: rgba(243, 240, 234, 0.45);
   position: relative;
 }
 
@@ -277,7 +277,7 @@
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: rgba(0, 0, 0, 0.15);
+  background: rgba(255, 255, 255, 0.18);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -294,7 +294,7 @@
 }
 
 .nx9-flow-rail-free-dot-indicator--pending {
-  background: rgba(0, 0, 0, 0.15);
+  background: rgba(255, 255, 255, 0.18);
 }
 
 .nx9-flow-rail-free-dot-warn {
@@ -317,12 +317,13 @@
   z-index: 30;
   min-width: 200px;
   max-width: 280px;
-  background: #fff;
+  background: rgba(28, 26, 24, 0.96);
   border-radius: 10px;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.14);
-  border: 1px solid rgba(0, 0, 0, 0.06);
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.45);
+  border: 1px solid rgba(255, 255, 255, 0.12);
   padding: 10px 12px;
   pointer-events: auto;
+  color: rgba(243, 240, 234, 0.88);
 }
 
 .nx9-flow-rail-tooltip-header {
@@ -335,14 +336,14 @@
 .nx9-flow-rail-tooltip-title {
   font-size: 12px;
   font-weight: 600;
-  color: rgba(0, 0, 0, 0.8);
+  color: rgba(243, 240, 234, 0.92);
 }
 
 .nx9-flow-rail-tooltip-close {
   border: none;
   background: transparent;
   cursor: pointer;
-  color: rgba(0, 0, 0, 0.3);
+  color: rgba(243, 240, 234, 0.45);
   padding: 2px;
   border-radius: 4px;
   display: flex;
@@ -350,8 +351,8 @@
 }
 
 .nx9-flow-rail-tooltip-close:hover {
-  color: rgba(0, 0, 0, 0.6);
-  background: rgba(0, 0, 0, 0.05);
+  color: rgba(243, 240, 234, 0.85);
+  background: rgba(255, 255, 255, 0.08);
 }
 
 .nx9-flow-rail-tooltip-body {
@@ -402,41 +403,11 @@
   }
 }
 
-.nx9-app-dark .nx9-flow-rail {
-  --nx9-flow-rail-bg: rgba(247, 244, 238, 0.98);
-  --nx9-flow-rail-shadow: 0 8px 28px rgba(0, 0, 0, 0.28);
-  border-color: rgba(255,255,255,0.24);
-}
-
-.nx9-app-dark .nx9-flow-rail-step {
-  color: rgba(36, 34, 31, 0.7);
-}
-
-.nx9-app-dark .nx9-flow-rail-step:hover {
-  background: rgba(36, 34, 31, 0.06);
-}
-
-.nx9-app-dark .nx9-flow-rail-step--current {
-  color: var(--nx9-brand);
-}
-
-.nx9-app-dark .nx9-flow-rail-step--done {
-  color: rgba(36, 34, 31, 0.78);
-}
-
-.nx9-app-dark .nx9-flow-rail-step--future,
-.nx9-app-dark .nx9-flow-rail-step--skipped {
-  color: rgba(36, 34, 31, 0.52);
-  opacity: 1;
-}
-
-.nx9-app-dark .nx9-flow-rail-step-badge--future,
-.nx9-app-dark .nx9-flow-rail-step-badge--blocked,
-.nx9-app-dark .nx9-flow-rail-step-badge--skipped {
-  background: rgba(36, 34, 31, 0.11);
-  color: rgba(36, 34, 31, 0.55);
-}
-
-.nx9-app-dark .nx9-flow-rail-step-sep {
-  background: rgba(36, 34, 31, 0.24);
+/* 深色主题：保持深色玻璃条（勿再反转为浅色纸面） */
+.nx9-app-dark .nx9-flow-rail,
+.nx9-theme-dark .nx9-flow-rail {
+  --nx9-flow-rail-bg: rgba(18, 20, 24, 0.88);
+  --nx9-flow-rail-shadow: 0 10px 32px rgba(0, 0, 0, 0.45);
+  border-color: rgba(255, 255, 255, 0.12);
+  color: rgba(243, 240, 234, 0.72);
 }

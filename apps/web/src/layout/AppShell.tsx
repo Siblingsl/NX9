@@ -12,11 +12,10 @@ import { useWorkspaceCatalog } from '../stores/workspace-catalog';
 import { useCredentialVault } from '../stores/credential-vault';
 import { useActivityLog } from '../stores/activity-log';
 import { useFlowCommands } from '../stores/flow-commands';
-import { useFlowRuntime, useRemotionUi } from '../stores/flow-runtime';
+import { useFlowRuntime } from '../stores/flow-runtime';
 import { useExecutionQueue } from '../stores/execution-queue';
 import { useAssetLibraryModalUi } from '../stores/asset-library-modal-ui';
 import { useCreateWorkspaceDialogUi } from '../stores/create-workspace-dialog-ui';
-import { useSkillVault } from '../stores/skill-vault';
 import { isSurfaceEnabled } from '../config/product-surface';
 import { useWorkspaceDocument } from '../stores/workspace-document';
 import { useAppSurface } from '../stores/app-surface';
@@ -34,23 +33,8 @@ const AssetLibraryModal = lazy(() =>
 const CreateWorkspaceDialog = lazy(() =>
   import('../panels/CreateWorkspaceDialog').then((m) => ({ default: m.CreateWorkspaceDialog })),
 );
-const EpisodeStudioPanel = lazy(() =>
-  import('../panels/EpisodeStudioPanel').then((m) => ({ default: m.EpisodeStudioPanel })),
-);
-const UsagePanel = lazy(() =>
-  import('../panels/UsagePanel').then((m) => ({ default: m.UsagePanel })),
-);
-const GenerationHistoryPanel = lazy(() =>
-  import('../panels/GenerationHistoryPanel').then((m) => ({ default: m.GenerationHistoryPanel })),
-);
 const Director3dPanel = lazy(() =>
   import('../panels/Director3dPanel').then((m) => ({ default: m.Director3dPanel })),
-);
-const SkillsDrawer = lazy(() =>
-  import('../panels/SkillsDrawer').then((m) => ({ default: m.SkillsDrawer })),
-);
-const StageDeckTour = lazy(() =>
-  import('../engine/stage-deck/chrome/StageDeckTour').then((m) => ({ default: m.StageDeckTour })),
 );
 
 export default function AppShell() {
@@ -61,12 +45,10 @@ export default function AppShell() {
     activeId,
     fetchAll,
     create,
-    closeWorkspace,
     selectWorkspace,
     reloadToken,
   } = useWorkspaceCatalog();
   const toggleSettings = useCredentialVault((s) => s.toggleSettings);
-  const toggleSkills = useSkillVault((s) => s.toggleDrawer);
   const requestSpawn = useFlowCommands((s) => s.requestSpawn);
   const runtime = useFlowRuntime((s) => s.runtime);
   const batchPhase = useExecutionQueue((s) => s.phase);
@@ -76,16 +58,11 @@ export default function AppShell() {
   const appendLog = useActivityLog((s) => s.append);
   const [flowKey, setFlowKey] = useState(0);
   const [createSubmitting, setCreateSubmitting] = useState(false);
-  const [historyOpen, setHistoryOpen] = useState(false);
-  const assetLibModalOpen = useAssetLibraryModalUi((s) => s.open);
   const toggleAssetLibModal = useAssetLibraryModalUi((s) => s.toggle);
   const createDialogOpen = useCreateWorkspaceDialogUi((s) => s.open);
   const openCreateDialog = useCreateWorkspaceDialogUi((s) => s.openDialog);
   const closeCreateDialog = useCreateWorkspaceDialogUi((s) => s.closeDialog);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
-  const remotionOpen = useRemotionUi((s) => s.open);
-  const setRemotionOpen = useRemotionUi((s) => s.setOpen);
-  const [usageOpen, setUsageOpen] = useState(false);
   const bootstrapUser = useUserSession((s) => s.bootstrap);
   const user = useUserSession((s) => s.user);
   const bootstrapped = useRef(false);
@@ -95,7 +72,11 @@ export default function AppShell() {
 
   useEffect(() => {
     document.body.classList.toggle('nx9-app-dark-body', canvasTheme === 'dark');
-    return () => document.body.classList.remove('nx9-app-dark-body');
+    document.body.classList.toggle('nx9-app-dark', canvasTheme === 'dark');
+    return () => {
+      document.body.classList.remove('nx9-app-dark-body');
+      document.body.classList.remove('nx9-app-dark');
+    };
   }, [canvasTheme]);
 
   useEffect(() => {
@@ -221,7 +202,6 @@ export default function AppShell() {
                 onBatchRun={() => void handleBatchRun()}
                 onOpenAssets={() => toggleAssetLibModal()}
                 onOpenSettings={() => toggleSettings(true)}
-                onOpenHistory={() => setHistoryOpen(true)}
               >
                 <Suspense
                   fallback={
@@ -238,8 +218,8 @@ export default function AppShell() {
                 <p className="text-sm font-medium text-ink/70">选择或新建项目后再打开画布</p>
                 <button
                   type="button"
-                  onClick={goHome}
                   className="text-xs text-brand hover:underline"
+                  onClick={goHome}
                 >
                   返回导航
                 </button>
@@ -256,15 +236,6 @@ export default function AppShell() {
               defaultTitle={`项目 ${railItems.length + 1}`}
               defaultBootstrapCore
             />
-            {isSurfaceEnabled('generationHistory') && (
-              <GenerationHistoryPanel open={historyOpen} onClose={() => setHistoryOpen(false)} />
-            )}
-            {isSurfaceEnabled('episodeStudio') && (
-              <EpisodeStudioPanel open={remotionOpen} onClose={() => setRemotionOpen(false)} />
-            )}
-            {isSurfaceEnabled('usageTracking') && (
-              <UsagePanel open={usageOpen} onClose={() => setUsageOpen(false)} />
-            )}
           </Suspense>
         </main>
       </div>
@@ -275,9 +246,7 @@ export default function AppShell() {
 
       {isSurfaceEnabled('settings') && <SettingsModal />}
       <Suspense fallback={null}>
-        {isSurfaceEnabled('skillsDrawer') && <SkillsDrawer />}
         <Director3dPanel />
-        {isCanvas && isSurfaceEnabled('stageDeckTour') && <StageDeckTour />}
       </Suspense>
       {isCanvas && isSurfaceEnabled('logPanel') && <LogPanel />}
       <ToastHost />

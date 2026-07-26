@@ -45,38 +45,9 @@ export const useFlowRuntime = create<FlowRuntimeState>((set) => ({
 }));
 
 export const useStoryboardUi = create<{
-  open: boolean;
-  view: 'list' | 'grid' | 'timeline';
   selectedShotId: string | null;
-  tab: 'shots' | 'voice';
-  scrollToShotId: string | null;
-  toggle: () => void;
-  setOpen: (v: boolean) => void;
-  setView: (v: 'list' | 'grid' | 'timeline') => void;
   selectShot: (id: string | null) => void;
-  setTab: (t: 'shots' | 'voice') => void;
-  requestScrollToShot: (id: string | null) => void;
 }>((set) => ({
-  open: false,
-  view: 'list',
   selectedShotId: null,
-  tab: 'shots',
-  scrollToShotId: null,
-  /** 旧全屏故事板已拆除；open 恒为 false */
-  toggle: () => set({ open: false }),
-  setOpen: () => set({ open: false }),
-  setView: (view) => set({ view }),
   selectShot: (selectedShotId) => set({ selectedShotId }),
-  setTab: (tab) => set({ tab }),
-  requestScrollToShot: (scrollToShotId) => set({ scrollToShotId }),
-}));
-
-export const useRemotionUi = create<{
-  open: boolean;
-  setOpen: (v: boolean) => void;
-  requestOpen: () => void;
-}>((set) => ({
-  open: false,
-  setOpen: (open) => set({ open }),
-  requestOpen: () => set({ open: true }),
 }));

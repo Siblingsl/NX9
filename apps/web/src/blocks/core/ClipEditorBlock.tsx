@@ -1,6 +1,6 @@
-import { memo, useCallback, useMemo, useState } from 'react';
-import { type NodeProps, useNodes, useReactFlow } from '@xyflow/react';
-import { Check, Download, Film, Loader2, Sparkles, X } from 'lucide-react';
+import { memo, useCallback, useEffect, useMemo, useState } from 'react';
+import { type NodeProps, useEdges, useNodes, useReactFlow } from '@xyflow/react';
+import { Check, Download, Loader2, Sparkles, X } from 'lucide-react';
 import {
   resolveEngine,
   engineLabel,
@@ -8,13 +8,14 @@ import {
   type SmartEditEngine,
   type SmartEditProfile,
   type SmartSuggestion,
+  type TimelinePayload,
 } from '@nx9/shared';
 import { BlockShell } from '../shared/BlockShell';
 import { ScreenModal } from '../../components/ui/ScreenModal';
 import { api } from '../../api/client';
 import { useActivityLog } from '../../stores/activity-log';
-import { useWorkspaceDocument } from '../../stores/workspace-document';
-import { useRemotionUi } from '../../stores/flow-runtime';
+import { useUpstreamMedia } from '../../engine/stage-deck/chrome/attached-workspace/generation/use-upstream-media';
+import { useUpstreamShots } from '../../engine/stage-deck/chrome/attached-workspace/generation/use-upstream-shots';
 import {
   orchestrateDramaTimeline,
   orchestrateViralTimeline,
@@ -26,15 +27,27 @@ const ENGINES: SmartEditEngine[] = ['auto', 'remotion', 'hyperframes', 'ffmpeg']
 
 type StudioTab = 'arrange' | 'timeline' | 'render';
 
+function readNodeTimeline(data: Record<string, unknown> | undefined): TimelinePayload | null {
+  const raw = data?.timelineDraft;
+  if (!raw) return null;
+  if (typeof raw === 'string') {
+    try {
+      return JSON.parse(raw) as TimelinePayload;
+    } catch {
+      return null;
+    }
+  }
+  if (typeof raw === 'object') return raw as TimelinePayload;
+  return null;
+}
+
 function ClipEditorBlock(props: NodeProps) {
   const { updateNodeData } = useReactFlow();
   const nodes = useNodes();
+  const edges = useEdges();
   const appendLog = useActivityLog((s) => s.append);
-  const storyboard = useWorkspaceDocument((s) => s.storyboard);
-  const shots = storyboard.shots;
-  const timelineDraft = useWorkspaceDocument((s) => s.timelineDraft);
-  const setTimelineDraft = useWorkspaceDocument((s) => s.setTimelineDraft);
-  const setRemotionOpen = useRemotionUi((s) => s.setOpen);
+  const { clips: upstreamClips, hasMedia } = useUpstreamMedia(props.id);
+  const { hasUpstream: hasShotUpstream, shots: upstreamShots } = useUpstreamShots(props.id);
 
   const [studioOpen, setStudioOpen] = useState(false);
   const [studioTab, setStudioTab] = useState<StudioTab>('arrange');
@@ -42,7 +55,10 @@ function ClipEditorBlock(props: NodeProps) {
   const [tip, setTip] = useState('');
 
   const status = (props.data?.status as string) ?? 'idle';
-  const profile = (props.data?.profile as SmartEditProfile) ?? 'drama';
+  const storedProfile = props.data?.profile as SmartEditProfile | undefined;
+  const profile: SmartEditProfile =
+    storedProfile ??
+    (upstreamClips.length > 0 && upstreamShots.length === 0 ? 'viral' : 'drama');
   const engine: SmartEditEngine = resolveEngine(
     profile,
     (props.data?.engine as SmartEditEngine | undefined) ?? 'auto',
@@ -50,6 +66,29 @@ function ClipEditorBlock(props: NodeProps) {
   const outputUrl = (props.data?.outputUrl as string) || (props.data?.videoUrl as string);
   const pendingIds = (props.data?.pendingSuggestionIds as string[] | undefined) ?? [];
   const suggestions = (props.data?.suggestions as SmartSuggestion[] | undefined) ?? [];
+  const timelineDraft = useMemo(
+    () => readNodeTimeline(props.data as Record<string, unknown> | undefined),
+    [props.data],
+  );
+
+  useEffect(() => {
+    const nextIds = hasShotUpstream ? upstreamShots.map((s) => s.id) : [];
+    const prev = Array.isArray(props.data?.linkedShotIds)
+      ? (props.data.linkedShotIds as string[])
+      : [];
+    if (prev.length === nextIds.length && prev.every((id, i) => id === nextIds[i])) return;
+    updateNodeData(props.id, { linkedShotIds: nextIds });
+  }, [hasShotUpstream, upstreamShots, props.data?.linkedShotIds, props.id, updateNodeData]);
+
+  const writeTimeline = useCallback(
+    (timeline: TimelinePayload | null, extra?: Record<string, unknown>) => {
+      updateNodeData(props.id, {
+        timelineDraft: timeline,
+        ...(extra ?? {}),
+      });
+    },
+    [props.id, updateNodeData],
+  );
 
   const videoClips = useMemo(() => {
     if (!timelineDraft) return [];
@@ -78,10 +117,7 @@ function ClipEditorBlock(props: NodeProps) {
     [suggestions, pendingIds],
   );
 
-  const cardTitle =
-    timelineDraft?.title?.trim() ||
-    storyboard.title?.trim() ||
-    '智能剪辑';
+  const cardTitle = timelineDraft?.title?.trim() || '智能剪辑';
 
   const cardBadge =
     status === 'running' || running
@@ -105,24 +141,44 @@ function ClipEditorBlock(props: NodeProps) {
     setTip('编排中…');
     updateNodeData(props.id, { status: 'running' });
     try {
-      let result: { timeline: typeof timelineDraft; suggestions: SmartSuggestion[] };
+      let result: { timeline: TimelinePayload; suggestions: SmartSuggestion[] };
       if (profile === 'drama') {
+        if (!hasShotUpstream) {
+          throw new Error('请先连接导演台或带镜头的上游节点');
+        }
+        if (upstreamShots.length === 0) {
+          throw new Error('上游未提供可用镜头');
+        }
         result = await orchestrateDramaTimeline({
-          title: storyboard.title ?? '漫剧成片',
+          title: '漫剧成片',
           aspect: '9:16',
           approvedOnly: true,
+          shots: upstreamShots.map((s) => ({
+            id: s.id,
+            index: s.index,
+            status: s.status,
+            durationSec: s.durationSec,
+            videoAssetId: s.videoAssetId,
+            firstFrameAssetId: s.firstFrameAssetId,
+            audioAssetId: s.audioAssetId,
+            descriptionZh: s.descriptionZh,
+            subtitleText: s.subtitleText,
+          })),
         });
       } else {
-        const upstreamClips =
+        const dataClips =
           ((props.data?.upstream as { clips?: string[] } | undefined)?.clips ?? []);
         const extraClips = (props.data?.extraClips as string[] | undefined) ?? [];
+        const clips = [...upstreamClips, ...dataClips, ...extraClips].filter(Boolean);
+        if (clips.length === 0) {
+          throw new Error('请先连接视频上游，或放入额外片段');
+        }
         result = await orchestrateViralTimeline({
-          clips: [...upstreamClips, ...extraClips],
+          clips,
           aspect: '9:16',
         });
       }
-      setTimelineDraft(result.timeline);
-      updateNodeData(props.id, {
+      writeTimeline(result.timeline, {
         status: 'success',
         pendingSuggestionIds: result.suggestions.map((s) => s.id),
         suggestions: result.suggestions,
@@ -141,12 +197,14 @@ function ClipEditorBlock(props: NodeProps) {
     }
   }, [
     appendLog,
+    hasShotUpstream,
     profile,
     props.data,
     props.id,
-    setTimelineDraft,
-    storyboard.title,
     updateNodeData,
+    upstreamClips,
+    upstreamShots,
+    writeTimeline,
   ]);
 
   const handleRender = useCallback(async () => {
@@ -189,8 +247,9 @@ function ClipEditorBlock(props: NodeProps) {
         URL.revokeObjectURL(url);
         result = { ok: true, url: bundle.zipFilename, taskId: undefined };
       } else {
+        const withVideo = upstreamShots.filter((s) => s.videoAssetId);
         result = await api.concatEpisode({
-          shots: shots.filter((s) => s.videoAssetId),
+          shots: withVideo,
           requireApproved: true,
           title: timelineDraft.title || '智能剪辑',
         });
@@ -217,55 +276,62 @@ function ClipEditorBlock(props: NodeProps) {
     } finally {
       setRunning(false);
     }
-  }, [appendLog, engine, props.data, props.id, shots, timelineDraft, updateNodeData]);
+  }, [appendLog, engine, props.data, props.id, timelineDraft, updateNodeData, upstreamShots]);
 
   const handleAcceptSuggestion = useCallback(
     (suggestionId: string) => {
       const suggestion = suggestions.find((s) => s.id === suggestionId);
       if (!suggestion || !timelineDraft) return;
-      const merged: typeof timelineDraft = {
+      const merged: TimelinePayload = {
         ...timelineDraft,
-        ...(suggestion.patch as Partial<typeof timelineDraft>),
+        ...(suggestion.patch as Partial<TimelinePayload>),
       };
-      setTimelineDraft(merged);
-      const nextIds = pendingIds.filter((id) => id !== suggestionId);
-      updateNodeData(props.id, { pendingSuggestionIds: nextIds });
+      writeTimeline(merged, {
+        pendingSuggestionIds: pendingIds.filter((id) => id !== suggestionId),
+      });
       appendLog(`已采纳建议：${suggestion.message}`);
     },
-    [suggestions, timelineDraft, pendingIds, setTimelineDraft, updateNodeData, props.id, appendLog],
+    [suggestions, timelineDraft, pendingIds, writeTimeline, appendLog],
   );
 
   const handleRejectSuggestion = useCallback(
     (suggestionId: string) => {
       const suggestion = suggestions.find((s) => s.id === suggestionId);
-      const nextIds = pendingIds.filter((id) => id !== suggestionId);
-      updateNodeData(props.id, { pendingSuggestionIds: nextIds });
+      updateNodeData(props.id, {
+        pendingSuggestionIds: pendingIds.filter((id) => id !== suggestionId),
+      });
       appendLog(`已忽略建议：${suggestion?.message ?? suggestionId}`);
     },
     [pendingIds, updateNodeData, props.id, appendLog, suggestions],
   );
 
   const syncToExportPack = useCallback(() => {
-    const packNodes = nodes.filter((n) => n.type === 'export-pack');
-    if (packNodes.length === 0) {
-      appendLog('画布上无交付打包节点，请先放置 export-pack');
-      setTip('画布上无交付打包节点');
-      return;
-    }
     if (!timelineDraft) {
       appendLog('请先执行智能编排');
       setTip('请先执行智能编排');
       return;
     }
-    const packId = packNodes[0].id;
-    updateNodeData(packId, {
-      timelineDraft: JSON.stringify(timelineDraft),
-      syncedFrom: props.id,
-      syncedAt: new Date().toISOString(),
-    });
-    appendLog(`时间线已同步到交付打包（${packNodes.length} 个节点）`);
+    const downstreamPackIds = new Set(
+      edges.filter((e) => e.source === props.id).map((e) => e.target),
+    );
+    const packNodes = nodes.filter(
+      (n) => n.type === 'export-pack' && downstreamPackIds.has(n.id),
+    );
+    if (packNodes.length === 0) {
+      appendLog('请先把本节点连到交付打包，再同步时间线');
+      setTip('请连接交付打包后再同步');
+      return;
+    }
+    for (const pack of packNodes) {
+      updateNodeData(pack.id, {
+        timelineDraft: JSON.stringify(timelineDraft),
+        syncedFrom: props.id,
+        syncedAt: new Date().toISOString(),
+      });
+    }
+    appendLog(`时间线已同步到 ${packNodes.length} 个交付打包节点`);
     setTip(`已同步到交付打包（${packNodes.length}）`);
-  }, [nodes, props.id, timelineDraft, updateNodeData, appendLog]);
+  }, [edges, nodes, props.id, timelineDraft, updateNodeData, appendLog]);
 
   const setProfile = useCallback(
     (p: SmartEditProfile) => {
@@ -281,6 +347,15 @@ function ClipEditorBlock(props: NodeProps) {
     },
     [props.id, updateNodeData],
   );
+
+  const arrangeHint =
+    profile === 'drama'
+      ? hasShotUpstream
+        ? `本节点上游 ${upstreamShots.length} 个镜头`
+        : '漫剧模式：请连接导演台或镜头上游（不读取全局故事板）'
+      : hasMedia || upstreamClips.length > 0
+        ? `本节点上游 ${upstreamClips.length} 段视频`
+        : '爆款模式：请连接视频上游';
 
   return (
     <>
@@ -362,8 +437,9 @@ function ClipEditorBlock(props: NodeProps) {
                   <div className="se2-panel">
                     <h3 className="se2-panel__title">成片模式</h3>
                     <p className="se2-panel__hint">
-                      漫剧：按本集已批准镜头编排。爆款：按上游 / 额外素材片段编排。
+                      每个智能剪辑节点独立：只消费本节点连入的上游，时间线存在本节点上。
                     </p>
+                    <p className="se2-hint">{arrangeHint}</p>
                     <div className="se2-row">
                       <button
                         type="button"
@@ -580,18 +656,9 @@ function ClipEditorBlock(props: NodeProps) {
                         className="se2-btn"
                         disabled={!timelineDraft}
                         onClick={syncToExportPack}
-                        title="同步时间线到交付打包节点"
+                        title="同步时间线到已连接的交付打包节点"
                       >
                         同步到交付打包
-                      </button>
-                      <button
-                        type="button"
-                        className="se2-btn"
-                        onClick={() => setRemotionOpen(true)}
-                        title="在成片工作室预览/导出"
-                      >
-                        <Film size={14} />
-                        成片工作室
                       </button>
                     </div>
                     {tip && <p className="se2-tip">{tip}</p>}

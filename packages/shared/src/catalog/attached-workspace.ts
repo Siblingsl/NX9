@@ -821,3 +821,13 @@ export function shouldUseCompactNodeShell(kind: string): boolean {
   if (spec.compactCanvas) return true;
   return IMPLEMENTED_WORKSPACE_TYPES.has(spec.workspaceType);
 }
+
+/**
+ * 自有画布摘要卡（素材导入 / 智能剪辑 / 三台等）：
+ * 不走 CanvasNodeShell，也不被制作/审片模式收成空 CardShell。
+ */
+export function shouldPreserveNativeNodeCard(kind: string): boolean {
+  const spec = resolveAttachedWorkspace(kind);
+  if (!spec) return false;
+  return !spec.attachToNode && !spec.compactCanvas;
+}

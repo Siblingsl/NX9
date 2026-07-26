@@ -8,7 +8,6 @@ import { useWorkspaceDocument } from '../stores/workspace-document';
 import { useFlowRuntime } from '../stores/flow-runtime';
 import { useFlowCommands } from '../stores/flow-commands';
 import { useActivityLog } from '../stores/activity-log';
-import { useContextRailUi } from './stage-deck/stores/context-rail-ui';
 import { api } from '../api/client';
 import { runPictureGenJob } from './picture-gen-runner';
 import { runExportPack } from './export-pack-runner';
@@ -67,8 +66,7 @@ export function ensureCorePipelineNodes(): void {
 export function syncPreviewFromStoryboard(): void {
   const runtime = useFlowRuntime.getState().runtime;
   if (!runtime) {
-    useContextRailUi.getState().requestTab('storyboard');
-    log('已打开故事板；请在分镜台中同步后出图');
+    log('画布未就绪；请打开分镜台后同步');
     return;
   }
   const nodes = runtime.getNodes();
@@ -80,8 +78,7 @@ export function syncPreviewFromStoryboard(): void {
     log('已聚焦分镜台 · 请在「关键帧」Tab 同步并批量出图');
   } else {
     useFlowCommands.getState().requestSpawn('storyboard-desk');
-    useContextRailUi.getState().requestTab('storyboard');
-    log('已创建分镜台节点并打开故事板');
+    log('已创建分镜台节点');
   }
 }
 
@@ -101,7 +98,6 @@ export async function batchGenerateKeyframesFromShots(
   }
 
   ensureCorePipelineNodes();
-  useContextRailUi.getState().requestTab('storyboard');
 
   let ok = 0;
   let fail = 0;

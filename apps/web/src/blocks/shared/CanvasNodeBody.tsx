@@ -1,5 +1,5 @@
 import { memo, useCallback, useMemo } from 'react';
-import { ImageIcon, Loader2, Maximize2, Play } from 'lucide-react';
+import { ImageIcon, Loader2, Maximize2, Play, Video } from 'lucide-react';
 import {
   lookupBlock,
   normalizeNodeStatus,
@@ -102,6 +102,58 @@ function PictureOnlyBody({
   );
 }
 
+/** 视频生成卡：仅展示视频预览，参数与操作都在底部工作区 */
+function VideoOnlyBody({
+  videoUrl,
+  posterUrl,
+  status,
+  canOpenWorkspace,
+  onOpen,
+}: {
+  videoUrl?: string;
+  posterUrl?: string;
+  status: NodeRunStatus;
+  canOpenWorkspace: boolean;
+  onOpen: (e?: React.MouseEvent) => void;
+}) {
+  return (
+    <div className="pg-only nodrag nopan">
+      <div
+        className="pg-only__frame"
+        onDoubleClick={canOpenWorkspace ? onOpen : undefined}
+        onClick={canOpenWorkspace ? onOpen : undefined}
+        title={canOpenWorkspace ? '点击展开工作区' : undefined}
+        role={canOpenWorkspace ? 'button' : undefined}
+      >
+        {status === 'running' && (
+          <div className="pg-only__busy">
+            <Loader2 size={18} className="animate-spin" />
+          </div>
+        )}
+
+        {videoUrl ? (
+          <video
+            src={videoUrl}
+            poster={posterUrl}
+            muted
+            playsInline
+            preload="metadata"
+            className="pg-only__img"
+            draggable={false}
+          />
+        ) : posterUrl ? (
+          <img src={posterUrl} alt="" className="pg-only__img" draggable={false} />
+        ) : (
+          <div className="pg-only__empty">
+            <Video size={22} strokeWidth={1.25} />
+            <span>暂无视频</span>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 /** 生成类节点摘要 — 走 NodeSummaryBody 统一骨架 */
 export const CanvasNodeBody = memo(function CanvasNodeBody({
   kind,
@@ -133,6 +185,7 @@ export const CanvasNodeBody = memo(function CanvasNodeBody({
   );
 
   const isPicture = kind === 'picture-gen';
+  const isVideo = kind === 'clip-gen';
   const pictureUrls = useMemo(() => {
     if (!isPicture) return [] as string[];
     const urls = (data.previewUrls as string[] | undefined) ?? [];
@@ -147,6 +200,21 @@ export const CanvasNodeBody = memo(function CanvasNodeBody({
       <div className="pg pg-card">
         <PictureOnlyBody
           urls={pictureUrls}
+          status={status}
+          canOpenWorkspace={canOpenWorkspace}
+          onOpen={openWorkspace}
+        />
+      </div>
+    );
+  }
+
+  /* 视频生成：同图像生成，卡片只展示预览 */
+  if (isVideo) {
+    return (
+      <div className="pg pg-card">
+        <VideoOnlyBody
+          videoUrl={videoUrl}
+          posterUrl={thumb || undefined}
           status={status}
           canOpenWorkspace={canOpenWorkspace}
           onOpen={openWorkspace}

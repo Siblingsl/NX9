@@ -1,9 +1,11 @@
-import { Clapperboard, Film, LayoutGrid, Plus, Settings, Sparkles } from 'lucide-react';
+import { useState } from 'react';
+import { Clapperboard, Film, LayoutGrid, Plus, Settings, Sparkles, Trash2 } from 'lucide-react';
 import { useWorkspaceCatalog } from '../stores/workspace-catalog';
 import { useAppSurface } from '../stores/app-surface';
 import { isPrivateWorkspace } from '@nx9/shared';
 import { useCreateWorkspaceDialogUi } from '../stores/create-workspace-dialog-ui';
 import { useCredentialVault } from '../stores/credential-vault';
+import { toastError, toastSuccess } from '../stores/toast';
 
 /**
  * 应用导航页：选择制作台 或 高级画布。
@@ -13,13 +15,31 @@ export function HomeNavPage() {
   const items = useWorkspaceCatalog((s) => s.items);
   const activeId = useWorkspaceCatalog((s) => s.activeId);
   const selectWorkspace = useWorkspaceCatalog((s) => s.selectWorkspace);
+  const removeWorkspace = useWorkspaceCatalog((s) => s.remove);
   const goStudio = useAppSurface((s) => s.goStudio);
   const goCanvas = useAppSurface((s) => s.goCanvas);
   const openCreate = useCreateWorkspaceDialogUi((s) => s.openDialog);
   const toggleSettings = useCredentialVault((s) => s.toggleSettings);
+  const [pendingDelete, setPendingDelete] = useState<{ id: string; title: string } | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   const projects = items.filter(isPrivateWorkspace);
   const active = projects.find((p) => p.id === activeId) ?? projects[0];
+
+  const confirmDeleteProject = async () => {
+    if (!pendingDelete || deleting) return;
+    const { id, title } = pendingDelete;
+    setDeleting(true);
+    try {
+      await removeWorkspace(id);
+      setPendingDelete(null);
+      toastSuccess(`已删除「${title}」`);
+    } catch (err) {
+      toastError(err instanceof Error ? err.message : '删除项目失败');
+    } finally {
+      setDeleting(false);
+    }
+  };
 
   return (
     <div
@@ -64,18 +84,35 @@ export function HomeNavPage() {
             <h2 className="text-[11px] font-bold uppercase tracking-wider text-ink/40">项目</h2>
             <div className="flex flex-wrap gap-2">
               {projects.slice(0, 12).map((p) => (
-                <button
+                <div
                   key={p.id}
-                  type="button"
-                  onClick={() => void selectWorkspace(p.id)}
-                  className={`rounded-full border px-3.5 py-1.5 text-xs transition-all ${
+                  className={`group inline-flex items-center gap-1 rounded-full border pl-3.5 pr-1 py-1 text-xs transition-all ${
                     p.id === active?.id
                       ? 'border-brand/40 bg-brand/10 text-brand font-semibold shadow-sm'
                       : 'border-line/80 bg-white/70 text-ink/55 hover:border-brand/25'
                   }`}
                 >
-                  {p.title}
-                </button>
+                  <button
+                    type="button"
+                    onClick={() => void selectWorkspace(p.id)}
+                    className="py-0.5 max-w-[160px] truncate"
+                    title={p.title}
+                  >
+                    {p.title}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setPendingDelete({ id: p.id, title: p.title });
+                    }}
+                    className="p-1 rounded-full text-ink/30 hover:text-red-600 hover:bg-red-50 opacity-70 group-hover:opacity-100"
+                    title={`删除「${p.title}」`}
+                    aria-label={`删除「${p.title}」`}
+                  >
+                    <Trash2 size={12} />
+                  </button>
+                </div>
               ))}
             </div>
             {active && (
@@ -147,6 +184,46 @@ export function HomeNavPage() {
           制作台与画布分离 · 无右侧功能抽屉 · 镜头表为事实来源
         </p>
       </div>
+
+      {pendingDelete && (
+        <div
+          className="fixed inset-0 z-[120] flex items-center justify-center p-6"
+          style={{ background: 'rgba(26, 24, 20, 0.72)' }}
+          onClick={() => {
+            if (!deleting) setPendingDelete(null);
+          }}
+        >
+          <div
+            className="w-[320px] rounded-2xl border border-line bg-white p-5 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <p className="text-[15px] font-semibold text-ink mb-1">
+              删除项目「{pendingDelete.title}」？
+            </p>
+            <p className="text-[12px] text-ink/55 mb-5 leading-relaxed">
+              项目内的剧本、分镜、素材与画布数据将一并删除，且不可恢复。
+            </p>
+            <div className="flex items-center justify-end gap-2">
+              <button
+                type="button"
+                disabled={deleting}
+                onClick={() => setPendingDelete(null)}
+                className="px-3.5 py-2 rounded-xl text-[12px] text-ink/60 hover:bg-surface disabled:opacity-50"
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                disabled={deleting}
+                onClick={() => void confirmDeleteProject()}
+                className="px-3.5 py-2 rounded-xl text-[12px] font-semibold text-white bg-rose-600 hover:bg-rose-500 disabled:opacity-50"
+              >
+                {deleting ? '删除中…' : '确认删除'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -5,9 +5,9 @@ import {
 } from '@nx9/shared';
 import { useWorkspaceDocument } from '../stores/workspace-document';
 import { useFlowRuntime } from '../stores/flow-runtime';
-import { useContextRailUi } from '../engine/stage-deck/stores/context-rail-ui';
 import { useToast } from '../stores/toast';
 import { useCredentialVault } from '../stores/credential-vault';
+import { openLegacyRailTab } from '../engine/playbook-runner';
 
 export function usePlaybookAutoAdvance() {
   const session = useWorkspaceDocument((s) => s.playbookSession);
@@ -19,7 +19,6 @@ export function usePlaybookAutoAdvance() {
   const characters = useWorkspaceDocument((s) => s.characters);
   const advance = useWorkspaceDocument((s) => s.advancePlaybookStep);
   const runtime = useFlowRuntime((s) => s.runtime);
-  const requestRailTab = useContextRailUi((s) => s.requestTab);
   const pushToast = useToast((s) => s.push);
   const prevStepRef = useRef<string | null>(null);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -91,9 +90,7 @@ export function usePlaybookAutoAdvance() {
           }
           const nextStep = def.steps[newIdx];
           if (nextStep && nextStep.primaryAction.type === 'open_rail') {
-            requestRailTab(nextStep.primaryAction.tab, nextStep.primaryAction.sub
-              ? { librarySub: nextStep.primaryAction.sub as any }
-              : undefined);
+            openLegacyRailTab(nextStep.primaryAction.tab);
           }
         }
         const lastStepIdx = def.steps.length - 1;
@@ -108,5 +105,5 @@ export function usePlaybookAutoAdvance() {
     return () => {
       if (timerRef.current) clearTimeout(timerRef.current);
     };
-  }, [session, storyboard, voice, scriptPlan, environments, characters, runtime, advance, requestRailTab, pushToast, autoAdvanceEnabled]);
+  }, [session, storyboard, voice, scriptPlan, environments, characters, runtime, advance, pushToast, autoAdvanceEnabled]);
 }

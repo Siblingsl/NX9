@@ -43,21 +43,50 @@ export function has_source_text(ctx: PlaybookReadinessContext): boolean {
   );
 }
 
+/** 电商流程：素材导入 / 已生成商品图 */
+export function has_product_media(ctx: PlaybookReadinessContext): boolean {
+  return ctx.nodes.some((node) => {
+    if (node.type === 'asset-import' || node.type === 'media-pin') {
+      const importItems = node.data?.importItems;
+      if (Array.isArray(importItems) && importItems.some((item) => Boolean((item as { url?: string })?.url))) {
+        return true;
+      }
+      const url =
+        (node.data?.mediaUrl as string | undefined)?.trim() ||
+        (node.data?.fileUrl as string | undefined)?.trim() ||
+        (node.data?.pinUrl as string | undefined)?.trim() ||
+        (node.data?.url as string | undefined)?.trim();
+      if (url) return true;
+      const urls = node.data?.urls;
+      if (Array.isArray(urls) && urls.length > 0) return true;
+    }
+    if (
+      node.type === 'picture-gen' &&
+      (node.data?.status === 'done' || node.data?.status === 'success')
+    ) {
+      return true;
+    }
+    return false;
+  });
+}
+
 export function has_storyboard_shots(ctx: PlaybookReadinessContext): boolean {
   // 核心路径：至少 1 镜即可继续；「全出」覆盖率在后续步骤强制
   return scopedShots(ctx).length >= 1;
 }
 
 export function story_grid_confirmed(ctx: PlaybookReadinessContext): boolean {
-  const grid = ctx.nodes.find((node) => node.type === 'story-grid');
-  if (!grid || scopedShots(ctx).length === 0) return false;
-  const confirmedEpisodeIds = Array.isArray(grid.data?.confirmedEpisodeIds)
-    ? (grid.data.confirmedEpisodeIds as string[])
+  const desk = ctx.nodes.find(
+    (node) => node.type === 'storyboard-desk' || node.type === 'story-grid',
+  );
+  if (!desk || scopedShots(ctx).length === 0) return false;
+  const confirmedEpisodeIds = Array.isArray(desk.data?.confirmedEpisodeIds)
+    ? (desk.data.confirmedEpisodeIds as string[])
     : [];
   const activeEpisodeId = ctx.storyboard.activeEpisodeId;
   return activeEpisodeId
     ? confirmedEpisodeIds.includes(activeEpisodeId)
-    : grid.data?.gridConfirmed === true || confirmedEpisodeIds.length > 0;
+    : desk.data?.gridConfirmed === true || confirmedEpisodeIds.length > 0;
 }
 
 export function has_line_art_thumbnails(ctx: PlaybookReadinessContext): boolean {
@@ -199,6 +228,7 @@ type ReadinessFn = (ctx: PlaybookReadinessContext, ...args: string[]) => boolean
 
 export const readinessRegistry: Record<string, ReadinessFn> = {
   has_source_text,
+  has_product_media,
   has_storyboard_shots,
   story_grid_confirmed,
   has_line_art_thumbnails,

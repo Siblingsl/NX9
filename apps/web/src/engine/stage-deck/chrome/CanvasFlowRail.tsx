@@ -11,10 +11,10 @@ import {
 import { useWorkspaceDocument } from '../../../stores/workspace-document';
 import { useFlowRuntime } from '../../../stores/flow-runtime';
 import { useFlowCommands } from '../../../stores/flow-commands';
-import { useContextRailUi } from '../stores/context-rail-ui';
 import { useAssetLibraryModalUi } from '../../../stores/asset-library-modal-ui';
 import { useWorkspaceCatalog } from '../../../stores/workspace-catalog';
 import { focusStepNodes } from '../../playbook-focus';
+import { openLegacyRailTab } from '../../playbook-runner';
 import { translate } from '@nx9/shared';
 import '../../../styles/canvas-flow-rail.css';
 
@@ -35,7 +35,6 @@ export function CanvasFlowRail() {
   const characters = useWorkspaceDocument((s) => s.characters);
   const runtime = useFlowRuntime((s) => s.runtime);
   const selectedBlockId = useFlowRuntime((s) => s.selectedBlockId);
-  const requestRailTab = useContextRailUi((s) => s.requestTab);
   const openAssetLibraryAt = useAssetLibraryModalUi((s) => s.openAt);
   const activeProjectId = useWorkspaceCatalog((s) => s.activeId);
   const [hoveredStepId, setHoveredStepId] = useState<string | null>(null);
@@ -98,31 +97,31 @@ export function CanvasFlowRail() {
       if (envs.length === 0) reasons.push('缺少场景参考图，请先在素材库完善场景设定');
       else if (!envs.some((e) => (e.referenceUrls?.length ?? 0) >= 1)) reasons.push('缺少场景参考图，请在素材库上传场景参考图片');
     } else if (key === 'has_source_text') {
-      reasons.push('请先在左侧 Rail › Script 中粘贴剧本');
+      reasons.push('请先在编剧台完成成稿或粘贴剧本');
     } else if (key === 'has_scene_split') {
-      reasons.push('请先在 Script 中完成 AI 场次拆分');
+      reasons.push('请先在编剧台完成场次结构');
     } else if (key === 'has_storyboard_shots') {
-      reasons.push('请先生成故事板分镜表');
+      reasons.push('请先在分镜台生成镜表');
     } else if (key === 'story_grid_confirmed') {
-      reasons.push('请先在分镜网格检查并确认当前集');
+      reasons.push('请先在分镜台检查并确认当前集');
     } else if (key === 'has_character_bibles') {
       reasons.push('请先在素材库完善角色设定并上传参考图');
     } else if (key === 'has_camera_blocks') {
-      reasons.push('请先为镜头关联导演台/3D 机位模块');
+      reasons.push('请先为镜头关联导演台机位');
     } else if (key === 'has_keyframes') {
-      reasons.push('请先批量生成关键帧');
+      reasons.push('请先在导演台批量生成关键帧');
     } else if (key === 'all_keyframes_approved') {
-      reasons.push('请先审阅全部关键帧并标记通过');
+      reasons.push('请先在导演台审阅全部关键帧并放行');
     } else if (key === 'has_video_assets') {
-      reasons.push('请先生成视频素材');
+      reasons.push('请先完成视频生成，或打开智能剪辑编排时间线');
     } else if (key === 'consistency_resolved') {
       reasons.push('请先处理连贯性检查中的问题');
     } else if (key === 'has_video_takes') {
-      reasons.push('请先在 Episode Studio 中生成时间线');
+      reasons.push('请先在智能剪辑中生成时间线');
     } else if (key === 'all_videos_approved') {
       reasons.push('请先审阅全部视频并标记通过');
     } else if (key === 'export_ready') {
-      reasons.push('请先运行 export-pack 节点完成导出');
+      reasons.push('请先运行导出交付节点完成导出');
     } else {
       reasons.push(`条件未满足: ${step.verifyHint}`);
     }
@@ -162,7 +161,7 @@ export function CanvasFlowRail() {
     }
     const action = step.primaryAction;
     if (action.type === 'open_rail') {
-      requestRailTab(action.tab, action.sub ? { librarySub: action.sub as any } : undefined);
+      openLegacyRailTab(action.tab);
     } else if (action.type === 'open_panel') {
       const nodes = runtime.getNodes();
       const desk = nodes.find((n) => n.type === 'storyboard-desk');
@@ -196,7 +195,7 @@ export function CanvasFlowRail() {
         useViewMode.getState().setMode(action.mode);
       });
     }
-  }, [playbook, runtime, requestRailTab, openAssetLibraryAt, activeProjectId]);
+  }, [playbook, runtime, openAssetLibraryAt, activeProjectId]);
 
   const handleStepClick = useCallback((stepId: string, state: StepVisualState) => {
     setTooltip(null);
@@ -211,7 +210,7 @@ export function CanvasFlowRail() {
     if (state === 'current' && currentStep) {
       const action = currentStep.primaryAction;
       if (action.type === 'open_rail') {
-        requestRailTab(action.tab, action.sub ? { librarySub: action.sub as any } : undefined);
+        openLegacyRailTab(action.tab);
       } else if (action.type === 'open_panel') {
         const nodes = runtime.getNodes();
         const desk = nodes.find((n) => n.type === 'storyboard-desk');
@@ -224,7 +223,6 @@ export function CanvasFlowRail() {
       return;
     }
     if (state === 'error') {
-      requestRailTab('inspector');
       return;
     }
     if (state === 'blocked') {
@@ -241,7 +239,7 @@ export function CanvasFlowRail() {
       });
       return;
     }
-  }, [playbook, runtime, currentStep, requestRailTab, getBlockReasons, getActionLabel, executePrimaryAction]);
+  }, [playbook, runtime, currentStep, getBlockReasons, getActionLabel, executePrimaryAction]);
 
   useEffect(() => {
     if (!runtime || !hoveredStepId || !playbook) return;

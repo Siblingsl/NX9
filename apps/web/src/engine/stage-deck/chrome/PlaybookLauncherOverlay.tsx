@@ -1,4 +1,4 @@
-import { BookOpen, Box, Camera, Clapperboard, Film, Headphones, PenTool, UserCircle, Zap, Sparkles } from 'lucide-react';
+import { BookOpen, Box, Camera, Clapperboard, Film, Headphones, PenTool, ShoppingBag, UserCircle, Zap, Sparkles } from 'lucide-react';
 import { PLAYBOOK_DEFINITIONS, type PlaybookId, type PlaybookDefinition } from '@nx9/shared';
 
 const iconMap: Record<string, React.ComponentType<{ size?: number; className?: string }>> = {
@@ -10,6 +10,7 @@ const iconMap: Record<string, React.ComponentType<{ size?: number; className?: s
   Headphones,
   Camera,
   Box,
+  ShoppingBag,
 };
 
 function PlaybookCard({
@@ -100,7 +101,7 @@ export function PlaybookLauncherOverlay({ onStartPlaybook, onOpenLibrary, onDism
           <div>
             <h2 className="text-base font-semibold text-ink">从制作路径开始</h2>
             <p className="text-sm text-ink/55 mt-0.5">
-              推荐「AI 漫剧（核心流程）」：剧本 → 分镜 → 出图批审 → 视频 → 导出。画布用于精调，右侧编剧/分镜为主入口。
+              推荐「AI 漫剧」；也可选爆款短视频、电商生图 / 电商生视频。
             </p>
           </div>
         </div>

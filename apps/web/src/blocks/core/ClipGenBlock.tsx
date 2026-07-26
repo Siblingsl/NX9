@@ -359,11 +359,14 @@ function ClipGenBlock(props: NodeProps) {
   }, [appendLog, clipConcurrency, processOneShot, props.data?.linkedShotId, props.id, updateNodeData, shots, storyboard.activeEpisodeId]);
 
   const focusSmartEdit = useCallback(() => {
-    const clipNode = nodesAll.find((n) => n.type === 'clip-editor');
+    const outgoing = edges.filter((e) => e.source === props.id).map((e) => e.target);
+    const clipNode =
+      nodesAll.find((n) => n.type === 'clip-editor' && outgoing.includes(n.id)) ??
+      nodesAll.find((n) => n.type === 'clip-editor');
     if (!clipNode) { appendLog('画布上无智能剪辑节点'); return; }
     fitView({ nodes: [{ id: clipNode.id }], duration: 300 });
     appendLog('已聚焦智能剪辑节点');
-  }, [nodesAll, fitView, appendLog]);
+  }, [nodesAll, edges, fitView, appendLog, props.id]);
 
   return (
     <BlockShell {...props}>

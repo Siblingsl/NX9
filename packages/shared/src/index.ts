@@ -29,6 +29,9 @@ export {
   syncCurrentEpisodePlaybookProgress,
   hydrateEpisodePlaybookProgress,
   switchPlaybookEpisode,
+  migratePlaybookStepId,
+  migratePlaybookCompletedStepIds,
+  migratePlaybookSessionSteps,
 } from './utils/playbook-episode-progress';
 
 export type {
@@ -370,6 +373,7 @@ export {
   ATTACHED_WORKSPACE_REGISTRY,
   resolveAttachedWorkspace,
   shouldUseCompactNodeShell,
+  shouldPreserveNativeNodeCard,
   type AttachedWorkspaceType,
   type NodeFunctionalClass,
   type AttachedWorkspaceSpec,
@@ -582,6 +586,7 @@ export {
   readinessRegistry,
   type PlaybookReadinessContext,
   has_source_text,
+  has_product_media,
   has_storyboard_shots,
   story_grid_confirmed,
   has_line_art_thumbnails,

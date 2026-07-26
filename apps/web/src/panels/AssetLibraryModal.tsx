@@ -9,7 +9,6 @@ import type {
 import {
   ASSET_LIBRARY_TABS,
   BUILTIN_BACKLOT_TEMPLATES,
-  isPrivateWorkspace,
   MAX_ENV_REFERENCE_IMAGES,
   newBacklotWorkspaceItem,
   newCharacterProfile,
@@ -32,7 +31,6 @@ import {
   workspaceItemToEnvironmentProfile,
 } from '../engine/script-asset-candidates';
 import {
-  ArrowLeft,
   Globe2,
   FolderLock,
   Layers,
@@ -59,7 +57,6 @@ import { useAssetLibraryGenSettings } from '../stores/asset-library-gen-settings
 import AssetLibraryGenSettings, { resolveAssetLibraryImageRequest } from './asset-library/AssetLibraryGenSettings';
 import { runPictureGenJob } from '../engine/picture-gen-runner';
 import { cropCharacterSheetPanels } from '../engine/character-sheet-crop';
-import { PrivateProjectList } from './PrivateProjectList';
 import {
   CharacterDetailFields,
   CostumeDetailFields,
@@ -227,29 +224,19 @@ export function AssetLibraryModal() {
   const open = useAssetLibraryModalUi((s) => s.open);
   const scope = useAssetLibraryModalUi((s) => s.scope);
   const tab = useAssetLibraryModalUi((s) => s.tab);
-  const view = useAssetLibraryModalUi((s) => s.view);
-  const selectedProjectId = useAssetLibraryModalUi((s) => s.selectedProjectId);
   const navigateRequest = useAssetLibraryModalUi((s) => s.navigateRequest);
   const setOpen = useAssetLibraryModalUi((s) => s.setOpen);
   const setScope = useAssetLibraryModalUi((s) => s.setScope);
   const setTab = useAssetLibraryModalUi((s) => s.setTab);
-  const enterProject = useAssetLibraryModalUi((s) => s.enterProject);
-  const backToProjects = useAssetLibraryModalUi((s) => s.backToProjects);
   const clearNavigateRequest = useAssetLibraryModalUi((s) => s.clearNavigateRequest);
 
   const activeId = useWorkspaceCatalog((s) => s.activeId);
   const catalogItems = useWorkspaceCatalog((s) => s.items);
-  const privateProjects = useMemo(
-    () => catalogItems.filter(isPrivateWorkspace),
-    [catalogItems],
-  );
-  const catalogLoading = useWorkspaceCatalog((s) => s.loading);
   const selectWorkspace = useWorkspaceCatalog((s) => s.selectWorkspace);
-  const createProject = useWorkspaceCatalog((s) => s.create);
 
-  const selectedProject = useMemo(
-    () => privateProjects.find((w) => w.id === selectedProjectId),
-    [privateProjects, selectedProjectId],
+  const activeProject = useMemo(
+    () => catalogItems.find((w) => w.id === activeId),
+    [catalogItems, activeId],
   );
 
   const upsertCharacter = useWorkspaceDocument((s) => s.upsertCharacter);
@@ -303,13 +290,12 @@ export function AssetLibraryModal() {
       if (navigateRequest.itemId) setEditId(navigateRequest.itemId);
     } else {
       const projectId = navigateRequest.projectId ?? activeId;
-      if (projectId) {
+      if (projectId && projectId !== activeId) {
         void selectWorkspace(projectId);
-        enterProject(projectId);
       }
       if (navigateRequest.itemId) setEditId(navigateRequest.itemId);
-      if ((navigateRequest as { query?: string }).query?.trim()) {
-        setQuery((navigateRequest as { query: string }).query.trim());
+      if (navigateRequest.query?.trim()) {
+        setQuery(navigateRequest.query.trim());
       }
     }
     clearNavigateRequest();
@@ -320,7 +306,6 @@ export function AssetLibraryModal() {
     setScope,
     setTab,
     selectWorkspace,
-    enterProject,
     clearNavigateRequest,
   ]);
 
@@ -401,8 +386,7 @@ export function AssetLibraryModal() {
   }, [workspaceItems, publicTemplates]);
 
   const tabMeta = KIND_META[tab];
-  const canEditPrivate =
-    scope !== 'private' || (Boolean(selectedProjectId) && activeId === selectedProjectId);
+  const canEditPrivate = scope !== 'private' || Boolean(activeId);
   const canCreateAsset = scope === 'public' || canEditPrivate;
 
   /** 环境圣经 → 素材库场景页：补齐缺失条目，保证主路径只认素材库也能看到 extract 结果 */
@@ -426,27 +410,6 @@ export function AssetLibraryModal() {
       }
     }
   }, [open, scope, tab, canEditPrivate, environmentLibrary, upsertBacklotWorkspace]);
-
-  const handleEnterProject = useCallback(
-    (id: string) => {
-      void selectWorkspace(id);
-      enterProject(id);
-      setEditId(null);
-      setQuery('');
-      appendLog(`已进入私有项目素材库`);
-    },
-    [selectWorkspace, enterProject, appendLog],
-  );
-
-  const handleCreateProject = useCallback(
-    async (title: string) => {
-      const ws = await createProject({ title, visibility: 'private' });
-      handleEnterProject(ws.id);
-      toastSuccess(`私有项目「${title}」已创建`);
-      appendLog(`已创建私有项目：${title}`);
-    },
-    [createProject, handleEnterProject, appendLog],
-  );
 
   const saveCharacter = useCallback(
     (c: CharacterProfile) => {
@@ -939,30 +902,14 @@ export function AssetLibraryModal() {
         aria-label="关闭素材库"
         onClick={() => setOpen(false)}
       />
-      <div className="relative w-[min(960px,96vw)] h-[min(720px,90vh)] bg-white rounded-2xl shadow-2xl flex flex-col overflow-hidden border border-line">
+      <div className="nx9-asset-library-modal relative w-[min(960px,96vw)] h-[min(720px,90vh)] bg-white rounded-2xl shadow-2xl flex flex-col overflow-hidden border border-line">
         <header className="shrink-0 h-14 border-b border-line flex items-center px-5 gap-3">
-          {scope === 'private' && view === 'assets' && (
-            <button
-              type="button"
-              onClick={() => {
-                backToProjects();
-                setEditId(null);
-                setQuery('');
-              }}
-              className="p-1.5 rounded-lg hover:bg-surface text-ink/50"
-              title="返回项目列表"
-            >
-              <ArrowLeft size={18} />
-            </button>
-          )}
           <Layers size={20} className="text-brand shrink-0" />
           <div className="flex-1 min-w-0">
             <h2 className="font-semibold text-base text-ink">素材库</h2>
             <p className="text-[11px] text-ink/40 truncate">
               {scope === 'private'
-                ? view === 'projects'
-                  ? '项目私有 · 选择项目'
-                  : `项目私有 · ${selectedProject?.title ?? '…'}`
+                ? `项目私有 · ${activeProject?.title ?? '未打开项目'}`
                 : '公共素材 · 全项目可用'}
             </p>
           </div>
@@ -998,16 +945,6 @@ export function AssetLibraryModal() {
         </header>
 
         <div className="flex flex-1 min-h-0 flex-col">
-          {scope === 'private' && view === 'projects' ? (
-            <PrivateProjectList
-              projects={privateProjects}
-              activeDocId={activeId}
-              loading={catalogLoading}
-              onSelect={handleEnterProject}
-              onCreate={handleCreateProject}
-            />
-          ) : (
-            <>
               <div className="shrink-0 flex gap-1 px-4 py-2 border-b border-line overflow-x-auto nx9-scroll">
                 {ASSET_LIBRARY_TABS.map((t) => (
                   <button
@@ -1035,10 +972,10 @@ export function AssetLibraryModal() {
                 storyboard={storyboard}
               />
 
-              {!canEditPrivate ? (
+              {scope === 'private' && !activeId ? (
                 <div className="flex-1 flex flex-col items-center justify-center p-8 text-center">
                   <FolderLock size={36} className="text-brand/50 mb-3" />
-                  <p className="text-sm text-ink/55">正在加载项目素材…</p>
+                  <p className="text-sm text-ink/55">请先在画布顶部打开一个私有项目</p>
                 </div>
               ) : (
                 <>
@@ -1274,8 +1211,6 @@ export function AssetLibraryModal() {
                   </div>
                 </>
               )}
-            </>
-          )}
         </div>
       </div>
     </div>

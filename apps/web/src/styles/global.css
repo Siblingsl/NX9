@@ -651,34 +651,58 @@ body {
   color: #24221f !important;
 }
 
-.nx9-app-dark .nx9-context-menu {
-  background: rgba(245,242,236,0.96) !important;
-  border-color: rgba(255,255,255,0.18) !important;
-  color: #2a2723 !important;
-  box-shadow: 0 18px 48px rgba(0,0,0,0.36);
+.nx9-app-dark .nx9-context-menu,
+.nx9-app-dark-body .nx9-context-menu {
+  background: rgba(28, 26, 24, 0.96) !important;
+  border-color: rgba(255, 255, 255, 0.12) !important;
+  color: #e8e6e3 !important;
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.48);
 }
 
-.nx9-app-dark .nx9-context-menu__header {
+.nx9-app-dark .nx9-context-menu__header,
+.nx9-app-dark-body .nx9-context-menu__header {
   color: #fff !important;
+  border-bottom-color: rgba(255, 255, 255, 0.1) !important;
 }
 
-.nx9-app-dark .nx9-context-menu__item {
-  color: rgba(42,39,35,0.72) !important;
+.nx9-app-dark .nx9-context-menu__item,
+.nx9-app-dark-body .nx9-context-menu__item {
+  color: rgba(232, 230, 227, 0.82) !important;
 }
 
 .nx9-app-dark .nx9-context-menu__item:hover:not(:disabled),
-.nx9-app-dark .nx9-context-menu__item:focus-visible:not(:disabled) {
-  background: rgba(161,61,99,0.09) !important;
-  color: #2a2723 !important;
+.nx9-app-dark .nx9-context-menu__item:focus-visible:not(:disabled),
+.nx9-app-dark-body .nx9-context-menu__item:hover:not(:disabled),
+.nx9-app-dark-body .nx9-context-menu__item:focus-visible:not(:disabled) {
+  background: rgba(15, 118, 110, 0.18) !important;
+  color: #f5f2ec !important;
 }
 
-.nx9-app-dark .nx9-context-menu__item:disabled {
-  color: rgba(42,39,35,0.34) !important;
+.nx9-app-dark .nx9-context-menu__item:disabled,
+.nx9-app-dark-body .nx9-context-menu__item:disabled {
+  color: rgba(232, 230, 227, 0.35) !important;
   opacity: 1;
 }
 
-.nx9-app-dark .nx9-menu-icon {
-  background: rgba(161,61,99,0.11) !important;
+.nx9-app-dark .nx9-context-menu__item--danger,
+.nx9-app-dark-body .nx9-context-menu__item--danger {
+  color: #f87171 !important;
+}
+
+.nx9-app-dark .nx9-context-menu__item--danger:hover:not(:disabled),
+.nx9-app-dark-body .nx9-context-menu__item--danger:hover:not(:disabled) {
+  background: rgba(248, 113, 113, 0.14) !important;
+  color: #fecaca !important;
+}
+
+.nx9-app-dark .nx9-context-menu__divider,
+.nx9-app-dark-body .nx9-context-menu__divider {
+  background: rgba(255, 255, 255, 0.1) !important;
+}
+
+.nx9-app-dark .nx9-menu-icon,
+.nx9-app-dark-body .nx9-menu-icon {
+  background: rgba(255, 255, 255, 0.08) !important;
 }
 
 .nx9-theme-dark input,
@@ -917,4 +941,167 @@ body {
   50% {
     box-shadow: 0 0 0 6px rgba(161, 61, 99, 0.08);
   }
+}
+
+/* —— 深色：命令面板 / 素材库（含 body 挂载的 portal） —— */
+.nx9-app-dark .nx9-command-palette,
+.nx9-app-dark-body .nx9-command-palette {
+  background: rgba(28, 26, 24, 0.98) !important;
+  border-color: rgba(255, 255, 255, 0.12) !important;
+  color: #e8e6e3 !important;
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.55) !important;
+}
+
+.nx9-app-dark .nx9-command-palette .border-line,
+.nx9-app-dark .nx9-command-palette .border-b,
+.nx9-app-dark .nx9-command-palette .border-t,
+.nx9-app-dark-body .nx9-command-palette .border-line,
+.nx9-app-dark-body .nx9-command-palette .border-b,
+.nx9-app-dark-body .nx9-command-palette .border-t {
+  border-color: rgba(255, 255, 255, 0.1) !important;
+}
+
+.nx9-app-dark .nx9-command-palette input,
+.nx9-app-dark-body .nx9-command-palette input {
+  background: transparent !important;
+  color: #f5f2ec !important;
+}
+
+.nx9-app-dark .nx9-command-palette input::placeholder,
+.nx9-app-dark-body .nx9-command-palette input::placeholder {
+  color: rgba(232, 230, 227, 0.4) !important;
+}
+
+.nx9-app-dark .nx9-command-palette .text-ink\/40,
+.nx9-app-dark .nx9-command-palette .text-ink\/50,
+.nx9-app-dark-body .nx9-command-palette .text-ink\/40,
+.nx9-app-dark-body .nx9-command-palette .text-ink\/50 {
+  color: rgba(232, 230, 227, 0.5) !important;
+}
+
+.nx9-app-dark .nx9-command-palette kbd,
+.nx9-app-dark-body .nx9-command-palette kbd {
+  border-color: rgba(255, 255, 255, 0.16) !important;
+  color: rgba(232, 230, 227, 0.55) !important;
+}
+
+.nx9-app-dark .nx9-command-palette button,
+.nx9-app-dark-body .nx9-command-palette button {
+  color: rgba(232, 230, 227, 0.82) !important;
+}
+
+.nx9-app-dark .nx9-command-palette button.bg-brand\/10,
+.nx9-app-dark .nx9-command-palette button.text-brand,
+.nx9-app-dark-body .nx9-command-palette button.bg-brand\/10,
+.nx9-app-dark-body .nx9-command-palette button.text-brand {
+  background: rgba(15, 118, 110, 0.22) !important;
+  color: #5eead4 !important;
+}
+
+.nx9-app-dark .nx9-command-palette button:hover:not(.bg-brand\/10),
+.nx9-app-dark-body .nx9-command-palette button:hover:not(.bg-brand\/10) {
+  background: rgba(255, 255, 255, 0.06) !important;
+}
+
+.nx9-app-dark .nx9-command-palette .bg-surface,
+.nx9-app-dark-body .nx9-command-palette .bg-surface {
+  background: rgba(255, 255, 255, 0.08) !important;
+  color: rgba(232, 230, 227, 0.65) !important;
+  border-color: rgba(255, 255, 255, 0.12) !important;
+}
+
+.nx9-app-dark .nx9-asset-library-modal,
+.nx9-app-dark-body .nx9-asset-library-modal {
+  background: #1a1816 !important;
+  border-color: rgba(255, 255, 255, 0.12) !important;
+  color: #e8e6e3 !important;
+  box-shadow: 0 28px 80px rgba(0, 0, 0, 0.55) !important;
+}
+
+.nx9-app-dark .nx9-asset-library-modal .bg-white,
+.nx9-app-dark-body .nx9-asset-library-modal .bg-white {
+  background: rgba(255, 255, 255, 0.06) !important;
+}
+
+.nx9-app-dark .nx9-asset-library-modal .bg-surface,
+.nx9-app-dark .nx9-asset-library-modal .bg-surface\/35,
+.nx9-app-dark .nx9-asset-library-modal .bg-surface\/50,
+.nx9-app-dark-body .nx9-asset-library-modal .bg-surface,
+.nx9-app-dark-body .nx9-asset-library-modal .bg-surface\/35,
+.nx9-app-dark-body .nx9-asset-library-modal .bg-surface\/50 {
+  background: rgba(255, 255, 255, 0.06) !important;
+}
+
+.nx9-app-dark .nx9-asset-library-modal .text-ink,
+.nx9-app-dark-body .nx9-asset-library-modal .text-ink {
+  color: #e8e6e3 !important;
+}
+
+.nx9-app-dark .nx9-asset-library-modal .text-ink\/30,
+.nx9-app-dark .nx9-asset-library-modal .text-ink\/40,
+.nx9-app-dark .nx9-asset-library-modal .text-ink\/45,
+.nx9-app-dark .nx9-asset-library-modal .text-ink\/50,
+.nx9-app-dark .nx9-asset-library-modal .text-ink\/55,
+.nx9-app-dark .nx9-asset-library-modal .text-ink\/60,
+.nx9-app-dark-body .nx9-asset-library-modal .text-ink\/30,
+.nx9-app-dark-body .nx9-asset-library-modal .text-ink\/40,
+.nx9-app-dark-body .nx9-asset-library-modal .text-ink\/45,
+.nx9-app-dark-body .nx9-asset-library-modal .text-ink\/50,
+.nx9-app-dark-body .nx9-asset-library-modal .text-ink\/55,
+.nx9-app-dark-body .nx9-asset-library-modal .text-ink\/60 {
+  color: rgba(232, 230, 227, 0.55) !important;
+}
+
+.nx9-app-dark .nx9-asset-library-modal .border-line,
+.nx9-app-dark .nx9-asset-library-modal .border-b,
+.nx9-app-dark .nx9-asset-library-modal .border-r,
+.nx9-app-dark .nx9-asset-library-modal .border-t,
+.nx9-app-dark-body .nx9-asset-library-modal .border-line,
+.nx9-app-dark-body .nx9-asset-library-modal .border-b,
+.nx9-app-dark-body .nx9-asset-library-modal .border-r,
+.nx9-app-dark-body .nx9-asset-library-modal .border-t {
+  border-color: rgba(255, 255, 255, 0.1) !important;
+}
+
+.nx9-app-dark .nx9-asset-library-modal input,
+.nx9-app-dark .nx9-asset-library-modal textarea,
+.nx9-app-dark .nx9-asset-library-modal select,
+.nx9-app-dark-body .nx9-asset-library-modal input,
+.nx9-app-dark-body .nx9-asset-library-modal textarea,
+.nx9-app-dark-body .nx9-asset-library-modal select {
+  background: rgba(255, 255, 255, 0.06) !important;
+  border-color: rgba(255, 255, 255, 0.14) !important;
+  color: #f5f2ec !important;
+}
+
+.nx9-app-dark .nx9-asset-library-modal input::placeholder,
+.nx9-app-dark-body .nx9-asset-library-modal input::placeholder {
+  color: rgba(232, 230, 227, 0.4) !important;
+}
+
+.nx9-app-dark .nx9-asset-library-modal button:not(.bg-brand):not([class*='bg-brand']),
+.nx9-app-dark-body .nx9-asset-library-modal button:not(.bg-brand):not([class*='bg-brand']) {
+  color: rgba(232, 230, 227, 0.78);
+}
+
+.nx9-app-dark .nx9-asset-library-modal button:not(.bg-brand):not([class*='bg-brand']):hover,
+.nx9-app-dark-body .nx9-asset-library-modal button:not(.bg-brand):not([class*='bg-brand']):hover {
+  background: rgba(255, 255, 255, 0.08) !important;
+}
+
+.nx9-app-dark .nx9-asset-library-modal .bg-warn\/10,
+.nx9-app-dark-body .nx9-asset-library-modal .bg-warn\/10 {
+  background: rgba(194, 65, 12, 0.18) !important;
+}
+
+.nx9-app-dark .nx9-asset-library-modal .bg-ok\/10,
+.nx9-app-dark-body .nx9-asset-library-modal .bg-ok\/10 {
+  background: rgba(21, 128, 61, 0.18) !important;
+}
+
+.nx9-app-dark .nx9-asset-library-modal .bg-brand\/5,
+.nx9-app-dark .nx9-asset-library-modal .bg-brand\/10,
+.nx9-app-dark-body .nx9-asset-library-modal .bg-brand\/5,
+.nx9-app-dark-body .nx9-asset-library-modal .bg-brand\/10 {
+  background: rgba(15, 118, 110, 0.18) !important;
 }

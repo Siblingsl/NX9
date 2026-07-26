@@ -1,9 +1,8 @@
 import type { PlaybookStepAction, PlaybookStepDef, PlaybookDefinition, PlaybookSession, PlaybookReadinessContext } from '@nx9/shared';
 import { resolveNextStep } from '@nx9/shared';
-import { useContextRailUi } from './stage-deck/stores/context-rail-ui';
 import { useViewMode } from './stage-deck/stores/view-mode';
 import { useFlowCommands } from '../stores/flow-commands';
-import { useFlowRuntime, useRemotionUi } from '../stores/flow-runtime';
+import { useFlowRuntime } from '../stores/flow-runtime';
 import { useWorkspaceDocument } from '../stores/workspace-document';
 import { useDirector3dUi } from '../stores/director3d-ui';
 import { spawnCameraBlocksForShots } from './camera-block-spawn';
@@ -15,6 +14,22 @@ import {
   syncPreviewFromStoryboard,
 } from './core-pipeline-runner';
 
+function focusOrSpawn(kind: string) {
+  const runtime = useFlowRuntime.getState().runtime;
+  const node = runtime?.getNodes().find((n) => n.type === kind);
+  if (node) runtime?.focusBlock(node.id);
+  else useFlowCommands.getState().requestSpawn(kind);
+}
+
+/** Rail 已拆除：按旧 tab 名聚焦对应画布节点 */
+export function openLegacyRailTab(tab: string) {
+  if (tab === 'storyboard') focusOrSpawn('storyboard-desk');
+  else if (tab === 'script') focusOrSpawn('script-desk');
+  else if (tab === 'library') {
+    // 素材库走独立 Modal；此处不强制打开
+  }
+}
+
 export function executeStepAction(action: PlaybookStepAction, ctx: PlaybookReadinessContext): void {
   switch (action.type) {
     case 'spawn_camera_blocks': {
@@ -23,21 +38,16 @@ export function executeStepAction(action: PlaybookStepAction, ctx: PlaybookReadi
       break;
     }
     case 'open_rail': {
-      const opts = action.sub ? { librarySub: action.sub as 'templates' | 'history' | 'workflow' } : undefined;
-      useContextRailUi.getState().requestTab(action.tab, opts);
+      openLegacyRailTab(action.tab);
       break;
     }
     case 'open_panel':
       switch (action.panel) {
-        case 'storyboard-full': {
-          const runtime = useFlowRuntime.getState().runtime;
-          const desk = runtime?.getNodes().find((n) => n.type === 'storyboard-desk');
-          if (desk) runtime?.focusBlock(desk.id);
-          else useFlowCommands.getState().requestSpawn('storyboard-desk');
+        case 'storyboard-full':
+          focusOrSpawn('storyboard-desk');
           break;
-        }
         case 'episode-studio':
-          useRemotionUi.getState().setOpen(true);
+          focusOrSpawn('clip-editor');
           break;
         case 'director-3d':
           useDirector3dUi.getState().openStandalone();
@@ -92,7 +102,6 @@ export function executeStepAction(action: PlaybookStepAction, ctx: PlaybookReadi
           approveAllKeyframes();
           break;
         case 'batch_line_art':
-          useContextRailUi.getState().requestTab('storyboard');
           void batchGenerateKeyframesFromShots();
           break;
         case 'batch_keyframes':

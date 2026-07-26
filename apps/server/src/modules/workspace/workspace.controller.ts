@@ -51,8 +51,8 @@ export class WorkspaceController {
   }
 
   @Delete(':id')
-  remove(@Param('id') id: string) {
-    this.workspaces.remove(id);
+  async remove(@Param('id') id: string) {
+    await this.workspaces.remove(id);
     return { ok: true };
   }
 

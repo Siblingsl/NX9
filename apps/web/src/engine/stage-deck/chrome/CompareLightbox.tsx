@@ -3,7 +3,6 @@ import { useMemo, useState, useCallback } from 'react';
 import { Check, ChevronLeft, ChevronRight, GitCompare, Star, X } from 'lucide-react';
 import type { TakeRecord } from '@nx9/shared';
 import { useTakeStore } from '../stores/take-store';
-import { useRemotionUi } from '../../../stores/flow-runtime';
 import { useActivityLog } from '../../../stores/activity-log';
 
 interface CompareLightboxProps {
@@ -18,7 +17,6 @@ function isVideoUrl(url: string): boolean {
 
 export function CompareLightbox({ takeA, takeB, onClose }: CompareLightboxProps) {
   const [slider, setSlider] = useState(50);
-  const requestRemotion = useRemotionUi((s) => s.requestOpen);
   const appendLog = useActivityLog((s) => s.append);
   const pickTake = useTakeStore((s) => s.pickTake);
 
@@ -54,16 +52,6 @@ export function CompareLightbox({ takeA, takeB, onClose }: CompareLightboxProps)
           >
             <Check size={12} />
             采用 B
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              requestRemotion();
-              onClose();
-            }}
-            className="text-xs px-3 py-1.5 rounded-lg bg-brand hover:bg-brand/90"
-          >
-            打开工作室
           </button>
           <button type="button" onClick={onClose} className="p-2 rounded-xl hover:bg-white/10">
             <X size={20} />

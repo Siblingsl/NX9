@@ -4,7 +4,6 @@ import {
 import { useWorkspaceDocument } from '../../../stores/workspace-document';
 import { useFlowRuntime, useStoryboardUi } from '../../../stores/flow-runtime';
 import { useViewMode } from '../stores/view-mode';
-import { useContextRailUi } from '../stores/context-rail-ui';
 
 export type OpenReviewGateOptions = {
   /** 镜头 index 列表（与审阅关卡 pendingShots 一致） */
@@ -60,13 +59,6 @@ export function openReviewGateSession(
   const runtime = useFlowRuntime.getState().runtime;
   const director = runtime?.getNodes().find((n) => n.type === 'director-desk');
   if (director) runtime?.focusBlock(director.id);
-
-  if (pendingIndices.length) {
-    useContextRailUi.getState().setBanner({
-      kind: 'blocked',
-      shotIds: pendingIndices.map(String),
-    });
-  }
 
   if (!pendingIndices.length) return pendingIndices;
 

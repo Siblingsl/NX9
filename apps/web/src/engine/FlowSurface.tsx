@@ -61,7 +61,7 @@ import { LensMenu } from './stage-deck/canvas/LensMenu';
 import { useStageDeckNodeTypes } from './stage-deck/canvas/stage-deck-node-types';
 import { CommandPalette, useCommandPaletteHotkey } from './stage-deck/chrome/CommandPalette';
 import { useDeckUi } from './stage-deck/stores/deck-ui';
-import { useContextRailUi } from './stage-deck/stores/context-rail-ui';
+import { openLegacyRailTab } from './playbook-runner';
 import { isSurfaceEnabled } from '../config/product-surface';
 import { useViewMode } from './stage-deck/stores/view-mode';
 import { useTakeStore } from './stage-deck/stores/take-store';
@@ -98,8 +98,6 @@ import { StageDeckInteractionBridge } from './stage-deck/StageDeckInteractionBri
 import { normalizeDirectorProject } from '@nx9/director3d';
 import { useDirector3dUi } from '../stores/director3d-ui';
 import { openDirector3dStage } from './director3d-open';
-import { auditCorePipeline, repairCorePipeline } from './core-pipeline-graph';
-
 const CANVAS_GRID = {
   light: {
     background: '#E8E4DB',
@@ -914,27 +912,6 @@ const FlowSurfaceInner = memo(function FlowSurfaceInner({
     },
     [setEdges, updateNodeDataStable, appendLog, openReviewGateSession],
   );
-
-  useEffect(() => {
-    if (!isStageDeck || !ready) return;
-    const shots = useWorkspaceDocument.getState().storyboard.shots;
-    const pending = shots
-      .filter(
-        (s) =>
-          Boolean(s.firstFrameAssetId) &&
-          s.keyframeStatus !== 'approved' &&
-          s.status !== 'approved' &&
-          s.keyframeStatus !== 'failed' &&
-          s.status !== 'failed',
-      )
-      .map((s) => s.index);
-    const setBanner = useContextRailUi.getState().setBanner;
-    if (pending.length > 0 && useViewMode.getState().mode === 'review') {
-      setBanner({ kind: 'blocked', shotIds: pending.map(String) });
-    } else if (useContextRailUi.getState().banner?.kind === 'blocked') {
-      setBanner(null);
-    }
-  }, [nodes, storyboard, isStageDeck, ready]);
 
   useEffect(() => {
     if (!isStageDeck || !ready) return;
@@ -1816,24 +1793,7 @@ const FlowSurfaceInner = memo(function FlowSurfaceInner({
     [setNodes, appendLog, isStageDeck, openDirector3dForBlock, viewMode, updateNodeDataStable, syncSelectedBlockId, setDeckSelection],
   );
 
-  const corePipelineAudit = useMemo(
-    () => auditCorePipeline(nodes, edges),
-    [edges, nodes],
-  );
   const canvasGrid = CANVAS_GRID[canvasAppearance.theme === 'dark' ? 'dark' : 'light'];
-
-  const handleRepairCorePipeline = useCallback(async () => {
-    const repaired = repairCorePipeline(nodesRef.current, edgesRef.current);
-    await preloadBlockTypes(repaired.nodes.map((node) => node.type).filter(Boolean) as string[]);
-    pushFlowSnapshot(nodesRef.current, edgesRef.current);
-    setNodes(repaired.nodes);
-    setEdges(repaired.edges);
-    useWorkspaceDocument.getState().startPlaybook('pb-ai-comic-live');
-    appendLog(
-      `核心流程已修复 · 新增 ${repaired.addedNodeCount} 节点 / ${repaired.addedLinkCount} 连线 / 移除 ${repaired.removedBypassCount} 条绕过线`,
-    );
-    setTimeout(() => void fitView({ duration: 300, padding: 0.2 }), 100);
-  }, [appendLog, fitView, pushFlowSnapshot, setEdges, setNodes]);
 
   return (
     <div
@@ -1851,24 +1811,6 @@ const FlowSurfaceInner = memo(function FlowSurfaceInner({
           加载工作区…
         </div>
       )}
-      {isStageDeck && ready && corePipelineAudit.resemblesCore && !corePipelineAudit.valid && (
-        <div className="absolute left-4 top-14 z-[14] flex items-center gap-3 rounded-xl border border-warn/25 bg-white/95 px-3 py-2 shadow-panel backdrop-blur">
-          <div>
-            <p className="text-[11px] font-medium text-ink">当前画布缺少核心生产环节</p>
-            <p className="text-[9px] text-ink/45">
-              缺 {corePipelineAudit.missingKinds.length} 个节点 · {corePipelineAudit.missingLinkCount} 条连线
-              {corePipelineAudit.hasBypass ? ' · 存在绕过批审连线' : ''}
-            </p>
-          </div>
-          <button
-            type="button"
-            onClick={() => void handleRepairCorePipeline()}
-            className="rounded-lg bg-brand px-2.5 py-1 text-[10px] font-medium text-white"
-          >
-            一键修复
-          </button>
-        </div>
-      )}
       {isStageDeck && ready && nodes.length === 0 && !recipePickerDismissed && (
         isSurfaceEnabled('playbookWizard') ? (
         <PlaybookLauncherOverlay
@@ -1882,7 +1824,7 @@ const FlowSurfaceInner = memo(function FlowSurfaceInner({
             }
             const first = def.steps[0];
             if (first?.primaryAction.type === 'open_rail') {
-              useContextRailUi.getState().requestTab(first.primaryAction.tab, first.primaryAction.sub ? { librarySub: first.primaryAction.sub as any } : undefined);
+              openLegacyRailTab(first.primaryAction.tab);
             }
             setRecipePickerDismissed(true);
             setTimeout(() => {

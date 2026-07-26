@@ -1,7 +1,7 @@
 import { useMemo } from 'react';
-import { GitCompare, Grid3x3, RotateCcw, Star } from 'lucide-react';
+import { GitCompare, RotateCcw, Star } from 'lucide-react';
 import { useTakeStore } from '../stores/take-store';
-import { useStoryboardUi, useFlowRuntime } from '../../../stores/flow-runtime';
+import { useFlowRuntime } from '../../../stores/flow-runtime';
 
 interface TakeRailProps {
   blockId: string | null;
@@ -21,8 +21,6 @@ export function TakeRail({ blockId, onPickTake }: TakeRailProps) {
   );
   const openLightbox = useTakeStore((s) => s.openLightbox);
   const openCompare = useTakeStore((s) => s.openCompare);
-  const setStoryboardView = useStoryboardUi((s) => s.setView);
-  const setStoryboardOpen = useStoryboardUi((s) => s.setOpen);
   const runtime = useFlowRuntime((s) => s.runtime);
 
   const latestTake = takes.length > 0 ? takes[takes.length - 1] : undefined;
@@ -83,17 +81,6 @@ export function TakeRail({ blockId, onPickTake }: TakeRailProps) {
           >
             <RotateCcw size={11} />
             重跑
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              setStoryboardOpen(true);
-              setStoryboardView('grid');
-            }}
-            className="flex items-center gap-0.5 text-[10px] px-2 py-0.5 rounded-lg border border-white/15 hover:border-teal-400/40 text-white/60 shrink-0"
-          >
-            <Grid3x3 size={11} />
-            批审
           </button>
         </div>
       </div>

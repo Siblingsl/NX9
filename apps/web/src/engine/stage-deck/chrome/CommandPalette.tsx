@@ -10,7 +10,6 @@ import { Search } from 'lucide-react';
 import { useFlowCommands } from '../../../stores/flow-commands';
 import { useFlowRuntime } from '../../../stores/flow-runtime';
 import { useViewMode } from '../stores/view-mode';
-import { useContextRailUi } from '../stores/context-rail-ui';
 import { useWorkspaceDocument } from '../../../stores/workspace-document';
 import { isSurfaceEnabled } from '../../../config/product-surface';
 import type { NodeAlignAction } from '../../node-align';
@@ -38,6 +37,8 @@ const FEATURED_RECIPE_IDS = [
   'tpl-shot-script-desk',
   'tpl-text-to-picture',
   'tpl-image-to-clip',
+  'tpl-ecom-image',
+  'tpl-ecom-video',
   'tpl-storyboard-grid',
   'tpl-line-art-storyboard',
   'tpl-3d-preview',
@@ -95,7 +96,6 @@ export function CommandPalette({ open, onClose, onAlign }: CommandPaletteProps) 
   const requestLoadTemplate = useFlowCommands((s) => s.requestLoadTemplate);
   const runtime = useFlowRuntime((s) => s.runtime);
   const setMode = useViewMode((s) => s.setMode);
-  const requestRailTab = useContextRailUi((s) => s.requestTab);
 
   const commands = useMemo<CommandItem[]>(() => {
     const dockKinds = new Set(getDockBlocks().map((b) => b.kind));
@@ -195,13 +195,6 @@ export function CommandPalette({ open, onClose, onAlign }: CommandPaletteProps) 
         run: () => requestSpawn('sketch-pad'),
       },
       {
-        id: 'open-workflow-rail',
-        label: '打开 · 工作流 Rail',
-        keywords: ['workflow', 'zip', '模板', '导入', '导出'],
-        section: 'action',
-        run: () => requestRailTab('library', { librarySub: 'workflow' }),
-      },
-      {
         id: 'undo',
         label: '撤销',
         keywords: ['undo', '撤销', 'ctrl z'],
@@ -221,7 +214,6 @@ export function CommandPalette({ open, onClose, onAlign }: CommandPaletteProps) 
       (item) => {
         if (item.section === 'playbook' && !isSurfaceEnabled('playbookWizard')) return false;
         if (item.section === 'recipe' && !isSurfaceEnabled('workflowTemplates')) return false;
-        if (item.id === 'open-workflow-rail' && !isSurfaceEnabled('libraryRail')) return false;
         if (item.id === 'run-batch' && !isSurfaceEnabled('batchRun')) return false;
         return true;
       },
@@ -232,7 +224,6 @@ export function CommandPalette({ open, onClose, onAlign }: CommandPaletteProps) 
     runtime,
     setMode,
     onAlign,
-    requestRailTab,
   ]);
 
   const filtered = useMemo(() => {
@@ -292,7 +283,7 @@ export function CommandPalette({ open, onClose, onAlign }: CommandPaletteProps) 
   return createPortal(
     <div className="fixed inset-0 z-[100] flex items-start justify-center pt-[12vh] bg-ink/20 backdrop-blur-[2px]">
       <button type="button" className="absolute inset-0" aria-label="关闭" onClick={onClose} />
-      <div className="relative w-full max-w-xl rounded-2xl border border-line bg-white shadow-panel overflow-hidden">
+      <div className="nx9-command-palette relative w-full max-w-xl rounded-2xl border border-line bg-white shadow-panel overflow-hidden">
         <div className="flex items-center gap-2 px-4 py-3 border-b border-line">
           <Search size={16} className="text-ink/40" />
           <input

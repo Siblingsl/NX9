@@ -7,9 +7,6 @@ import { ToolWorkspace } from './tool/ToolWorkspace';
 import { ReportWorkspace } from './report/ReportWorkspace';
 import { ControlWorkspace } from './control/ControlWorkspace';
 import { StoryboardPreviewWorkspace } from './storyboard-preview/StoryboardPreviewWorkspace';
-
-import { ScriptBreakdownWorkspace } from './table/ScriptBreakdownWorkspace';
-import { StoryGridWorkspace } from './table/StoryGridWorkspace';
 import { ExportWorkspace } from './config/ExportWorkspace';
 
 export interface AttachedWorkspaceRouterProps {
@@ -44,13 +41,7 @@ export function AttachedWorkspaceRouter({ blockId, kind, onCollapse }: AttachedW
     case 'report':
       return <ReportWorkspace blockId={blockId} kind={kind} onCollapse={onCollapse} />;
     case 'table':
-      if (kind === 'dialogue-sheet' || kind === 'script-desk') {
-        // 编剧台自有 ScreenModal，不走底部 table 壳
-        return null;
-      }
-      if (kind === 'story-grid') {
-        return <StoryGridWorkspace blockId={blockId} kind={kind} onCollapse={onCollapse} />;
-      }
+      // 编剧台 / 旧对白表：自有 ScreenModal，不走底部 table 壳
       return null;
     case 'config':
       if (kind === 'export-pack') {
