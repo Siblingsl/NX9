@@ -40,7 +40,7 @@ function PlaybookCard({
       className={`text-left rounded-xl border px-3.5 py-3 transition-all ${
         playbook.featured
           ? 'border-brand/20 bg-brand/[0.03] hover:border-brand/50 hover:shadow-sm hover:bg-brand/[0.06]'
-          : 'border-line bg-white/50 hover:border-brand/30 hover:bg-white'
+          : 'border-line bg-surface/50 hover:border-brand/30 hover:bg-surface'
       }`}
     >
       <div className="flex items-start gap-3">

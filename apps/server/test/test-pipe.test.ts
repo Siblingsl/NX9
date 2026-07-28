@@ -45,30 +45,47 @@ describe('TEST-PIPE — Core 6-Step Production Pipeline', () => {
     const flow = template!.build();
     expect(flow.blocks.map((block) => block.type)).toEqual([
       'script-desk',
-      'asset-gate',
       'storyboard-desk',
       'picture-gen',
       'director-desk',
-      'director-desk',
       'clip-gen',
+      'clip-editor',
       'export-pack',
     ]);
+    expect(flow.blocks.some((block) => block.type === 'asset-gate')).toBe(false);
     const desk = flow.blocks.find((block) => block.type === 'storyboard-desk')!;
-    const directorDeskBlock = flow.blocks.find((block) => block.type === 'director-desk' && (block.data as Record<string, unknown>).queueFilter === 'missing');
-    const gate = flow.blocks.find((block) => block.type === 'asset-gate')!;
-    expect(flow.links.some((link) => link.target === gate.id && link.targetHandle === 'asset-gate')).toBe(true);
-    expect(flow.links.some((link) => link.source === gate.id && link.sourceHandle === 'asset-gate')).toBe(true);
+    const script = flow.blocks.find((block) => block.type === 'script-desk')!;
+    const directorDeskBlock = flow.blocks.find((block) => block.type === 'director-desk')!;
+    const editor = flow.blocks.find((block) => block.type === 'clip-editor')!;
+    expect(flow.blocks.filter((block) => block.type === 'director-desk')).toHaveLength(1);
+    expect(flow.links.some((link) => link.source === script.id && link.target === desk.id)).toBe(true);
     const capabilityLinks = flow.links.filter(
       (link) => link.target === desk.id && link.targetHandle === 'exec-picture',
     );
-    expect(capabilityLinks).toHaveLength(2);
-    expect(capabilityLinks.every((link) => link.sourceHandle === 'exec-picture')).toBe(true);
+    expect(capabilityLinks).toHaveLength(1);
+    expect(capabilityLinks[0]?.sourceHandle).toBe('exec-picture');
     expect(flow.links.some((link) => link.source === desk.id && link.target === directorDeskBlock.id)).toBe(true);
     expect(
       flow.links.some(
         (link) =>
           link.source === directorDeskBlock.id
           && flow.blocks.find((b) => b.id === link.target)?.type === 'clip-gen',
+      ),
+    ).toBe(true);
+    expect(
+      flow.links.some(
+        (link) =>
+          link.sourceHandle === 'clip'
+          && link.targetHandle === 'clip'
+          && flow.blocks.find((b) => b.id === link.source)?.type === 'clip-gen'
+          && link.target === editor.id,
+      ),
+    ).toBe(true);
+    expect(
+      flow.links.some(
+        (link) =>
+          link.source === editor.id
+          && flow.blocks.find((b) => b.id === link.target)?.type === 'export-pack',
       ),
     ).toBe(true);
   });

@@ -8,6 +8,7 @@ interface CredentialVaultState {
   load: () => Promise<void>;
   save: (partial: AppSettings) => Promise<void>;
   toggleSettings: (open?: boolean) => void;
+  openSettingsTo: (section: string) => void;
 }
 
 export const useCredentialVault = create<CredentialVaultState>((set) => ({
@@ -26,4 +27,10 @@ export const useCredentialVault = create<CredentialVaultState>((set) => ({
 
   toggleSettings: (open) =>
     set((s) => ({ settingsOpen: open ?? !s.settingsOpen })),
+  /** 打开设置并跳转到指定 Tab */
+  openSettingsTo: (section: string) => {
+    set({ settingsOpen: true });
+    // 通过 window 自定事件传递 section
+    window.dispatchEvent(new CustomEvent('nx9:openSettingsSection', { detail: { section } }));
+  },
 }));

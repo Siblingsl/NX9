@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import type { WebGLRenderer } from 'three';
 import type { Director3dHostOptions } from '../bridge/types';
 import { DirectorCanvas } from '../canvas/DirectorCanvas';
 import { normalizeDirectorProject } from '../schema/directorProject';
@@ -24,6 +25,8 @@ export function StageDeckShell({ options }: { options: Director3dHostOptions }) 
   const nodeCount = options.nodeCount ?? 0;
   const captureFnRef = useRef<(() => string) | null>(null);
   const [capturing, setCapturing] = useState(false);
+  const glRef = useRef<WebGLRenderer | null>(null);
+  const savedDprRef = useRef<number>(1);
 
   useEffect(() => {
     const store = useDirectorStore.getState();
@@ -49,12 +52,18 @@ export function StageDeckShell({ options }: { options: Director3dHostOptions }) 
   }, []);
 
   useEffect(() => {
+    const gl = glRef.current;
+    if (!gl) return;
+    const canvas = gl.domElement;
+    const normalDpr = Math.min(window.devicePixelRatio, 1.5);
+
     const onVisibility = () => {
-      const canvas = document.querySelector('.nx9-stage-canvas canvas') as HTMLCanvasElement | null;
-      if (!canvas) return;
       if (document.hidden) {
+        savedDprRef.current = gl.getPixelRatio();
+        gl.setPixelRatio(0.1);
         canvas.style.display = 'none';
       } else {
+        gl.setPixelRatio(savedDprRef.current || normalDpr);
         canvas.style.display = '';
       }
     };
@@ -111,6 +120,7 @@ export function StageDeckShell({ options }: { options: Director3dHostOptions }) 
             <DirectorCanvas
               performanceMode={mode}
               nodeCount={nodeCount}
+              onGLCreated={(gl) => { glRef.current = gl; }}
               onCaptureReady={(fn) => {
                 captureFnRef.current = fn;
               }}

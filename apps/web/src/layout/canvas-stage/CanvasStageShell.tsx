@@ -16,6 +16,7 @@ import {
   Search,
   Settings,
   Sparkles,
+  Trash2,
   Undo2,
   User,
   Image as ImageIcon,
@@ -40,7 +41,7 @@ const LANE_META: Record<
 
 function Glyph({ name }: { name: string }) {
   const Icon = (Icons as unknown as Record<string, React.ComponentType<{ size?: number }>>)[name];
-  if (!Icon) return <span className="w-3.5 h-3.5 rounded bg-white/20" />;
+  if (!Icon) return <span className="w-3.5 h-3.5 rounded bg-surface/20" />;
   return <Icon size={14} />;
 }
 
@@ -77,6 +78,7 @@ export interface CanvasStageShellProps {
   onRedo: () => void;
   onBatchRun: () => void;
   onOpenAssets: () => void;
+  onOpenTrash: () => void;
   onOpenSettings: () => void;
 }
 
@@ -102,6 +104,7 @@ export function CanvasStageShell({
   onRedo,
   onBatchRun,
   onOpenAssets,
+  onOpenTrash,
   onOpenSettings,
 }: CanvasStageShellProps) {
   const [toolsOpen, setToolsOpen] = useState(false);
@@ -172,6 +175,9 @@ export function CanvasStageShell({
           {user && (
             <span className="text-[11px] opacity-45 px-1 max-w-[72px] truncate">{user.name}</span>
           )}
+          <button type="button" className="cs-btn" onClick={onOpenTrash} title="资产回收站">
+            <Trash2 size={14} />
+          </button>
           <button type="button" className="cs-btn" onClick={onOpenSettings} title="设置">
             <Settings size={14} />
           </button>

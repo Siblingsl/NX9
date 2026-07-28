@@ -115,7 +115,7 @@ export function ExportWorkspace({ blockId, kind, onCollapse }: ExportWorkspacePr
             </div>
             <div className="max-h-36 space-y-1 overflow-y-auto nx9-scroll">
               {exportHistory.map((record) => (
-                <div key={record.id} className="flex items-center gap-2 rounded-md bg-white p-1.5">
+                <div key={record.id} className="flex items-center gap-2 rounded-md bg-surface p-1.5">
                   <button
                     type="button"
                     onClick={() => patch({ episodeUrl: record.url })}

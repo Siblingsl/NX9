@@ -4,6 +4,7 @@ import {
 import { useWorkspaceDocument } from '../../../stores/workspace-document';
 import { useFlowRuntime, useStoryboardUi } from '../../../stores/flow-runtime';
 import { useViewMode } from '../stores/view-mode';
+import { getAllChainShots } from '../../chain-storyboard-aggregate';
 
 export type OpenReviewGateOptions = {
   /** 镜头 index 列表（与审阅关卡 pendingShots 一致） */
@@ -16,10 +17,27 @@ export type OpenReviewGateOptions = {
   source?: 'director-desk' | 'clip-gen' | 'cascade';
 };
 
+function resolveReviewShots() {
+  const nodes = useFlowRuntime.getState().runtime?.getNodes() ?? [];
+  const chain = getAllChainShots(nodes);
+  if (chain.length > 0) return chain;
+  // 无链数据时仅作迁移兼容读全局
+  return getAllChainShots(nodes, { allowGlobalFallback: true });
+}
+
 /** 收集当前集「有图且未 approved」的关键帧待审 index */
 export function collectPendingKeyframeIndices(): number[] {
-  const shots = activeEpisodeShots(useWorkspaceDocument.getState().storyboard);
-  return shots
+  const nodes = useFlowRuntime.getState().runtime?.getNodes() ?? [];
+  const chain = getAllChainShots(nodes);
+  const shots =
+    chain.length > 0
+      ? chain
+      : activeEpisodeShots(useWorkspaceDocument.getState().storyboard);
+  const activeEp = useWorkspaceDocument.getState().storyboard.activeEpisodeId;
+  const scoped = activeEp
+    ? shots.filter((s) => s.episodeId === activeEp || !s.episodeId)
+    : shots;
+  return scoped
     .filter(
       (s) =>
         Boolean(s.firstFrameAssetId) &&
@@ -41,9 +59,9 @@ export function openReviewGateSession(
     : pendingIndicesOrOpts ?? {};
 
   let pendingIndices = opts.pendingIndices ? [...opts.pendingIndices] : [];
+  const shots = resolveReviewShots();
 
   if (opts.pendingShotIds?.length) {
-    const shots = useWorkspaceDocument.getState().storyboard.shots;
     const byId = new Map(shots.map((s) => [s.id, s]));
     for (const id of opts.pendingShotIds) {
       const s = byId.get(id);
@@ -62,7 +80,6 @@ export function openReviewGateSession(
 
   if (!pendingIndices.length) return pendingIndices;
 
-  const shots = useWorkspaceDocument.getState().storyboard.shots;
   const first = shots.find((s) => pendingIndices.includes(s.index));
   if (first) {
     useStoryboardUi.getState().selectShot(first.id);

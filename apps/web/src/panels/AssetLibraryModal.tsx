@@ -38,10 +38,10 @@ import {
   Sparkles,
   Loader2,
   Search,
+  Trash2,
   ShieldCheck,
   AlertTriangle,
   Network,
-  Trash2,
   X,
 } from 'lucide-react';
 import { api } from '../api/client';
@@ -55,8 +55,12 @@ import { toastSuccess } from '../stores/toast';
 import { useFlowRuntime } from '../stores/flow-runtime';
 import { useAssetLibraryGenSettings } from '../stores/asset-library-gen-settings';
 import AssetLibraryGenSettings, { resolveAssetLibraryImageRequest } from './asset-library/AssetLibraryGenSettings';
+import { useLibraryAcl } from '../engine/use-library-acl';
+import { useBibleImageGen } from '../engine/use-bible-image-gen';
 import { runPictureGenJob } from '../engine/picture-gen-runner';
 import { cropCharacterSheetPanels } from '../engine/character-sheet-crop';
+import { AssetTrashPanel } from './AssetTrashPanel';
+import { getAllChainShots } from '../engine/chain-storyboard-aggregate';
 import {
   CharacterDetailFields,
   CostumeDetailFields,
@@ -82,7 +86,12 @@ function AssetHealthPanel({
   workspaceItems: BacklotWorkspaceItem[];
   storyboard: ReturnType<typeof useWorkspaceDocument.getState>['storyboard'];
 }) {
+  const runtime = useFlowRuntime((s) => s.runtime);
   const analysis = useMemo(() => {
+    // F-003: 关系分析优先聚合链镜表
+    const relationShots = getAllChainShots(runtime?.getNodes() ?? [], {
+      allowGlobalFallback: true,
+    });
     const characterNames = new Map<string, CharacterProfile[]>();
     for (const c of characters) {
       const key = normalizeName(c.name);
@@ -97,10 +106,10 @@ function AssetHealthPanel({
       sceneNames.set(key, [...(sceneNames.get(key) ?? []), item]);
     }
     const usedCharacterNames = new Set(
-      storyboard.shots.flatMap((shot) => shot.characterNames ?? []).map(normalizeName).filter(Boolean),
+      relationShots.flatMap((shot) => shot.characterNames ?? []).map(normalizeName).filter(Boolean),
     );
     const usedSceneNames = new Set(
-      storyboard.shots.map((shot) => normalizeName(shot.sceneName)).filter(Boolean),
+      relationShots.map((shot) => normalizeName(shot.sceneName)).filter(Boolean),
     );
     const duplicateCharacters = [...characterNames.values()].filter((items) => items.length > 1).length;
     const duplicateScenes = [...sceneNames.values()].filter((items) => items.length > 1).length;
@@ -110,10 +119,10 @@ function AssetHealthPanel({
     const missingScenePrompts = sceneItems.filter((s) => !(s.promptEn || (s.creative as any)?.prompts?.scene?.text)?.trim()).length;
     const unlockedCharacters = characters.filter((c) => !(c.creative as any)?.consistency?.locked).length;
     const unlockedScenes = sceneItems.filter((s) => !(s.creative as any)?.locked).length;
-    const invalidShotCharacterRefs = storyboard.shots
+    const invalidShotCharacterRefs = relationShots
       .flatMap((shot) => shot.characterNames ?? [])
       .filter((name) => name && !characterNames.has(normalizeName(name))).length;
-    const invalidShotSceneRefs = storyboard.shots
+    const invalidShotSceneRefs = relationShots
       .filter((shot) => shot.sceneName && !sceneNames.has(normalizeName(shot.sceneName))).length;
     return {
       duplicateCharacters,
@@ -126,9 +135,9 @@ function AssetHealthPanel({
       unlockedScenes,
       invalidShotCharacterRefs,
       invalidShotSceneRefs,
-      relationCount: storyboard.shots.length,
+      relationCount: relationShots.length,
     };
-  }, [characters, storyboard.shots, workspaceItems]);
+  }, [characters, workspaceItems, runtime, storyboard.shots]);
 
   const issues = tab === 'character'
     ? [
@@ -165,11 +174,11 @@ function AssetHealthPanel({
         </div>
         <div className="flex flex-wrap justify-end gap-1">
           {issues.map(([label, count]) => (
-            <span key={label} className={`rounded-full px-2 py-0.5 text-[10px] ${count ? 'bg-warn/10 text-warn' : 'bg-white text-ink/40'}`}>
+            <span key={label} className={`rounded-full px-2 py-0.5 text-[10px] ${count ? 'bg-warn/10 text-warn' : 'bg-surface text-ink/40'}`}>
               {label} {count}
             </span>
           ))}
-          <span className="flex items-center gap-1 rounded-full bg-white px-2 py-0.5 text-[10px] text-ink/45">
+          <span className="flex items-center gap-1 rounded-full bg-surface px-2 py-0.5 text-[10px] text-ink/45">
             <Network size={10} />
             影响分析
           </span>
@@ -223,6 +232,9 @@ const KIND_META: Record<
 export function AssetLibraryModal() {
   const open = useAssetLibraryModalUi((s) => s.open);
   const scope = useAssetLibraryModalUi((s) => s.scope);
+  const acl = useLibraryAcl(scope);
+  const { canRead, canWrite, canDelete: canDeleteItem } = acl;
+  const bibleImg = useBibleImageGen();
   const tab = useAssetLibraryModalUi((s) => s.tab);
   const navigateRequest = useAssetLibraryModalUi((s) => s.navigateRequest);
   const setOpen = useAssetLibraryModalUi((s) => s.setOpen);
@@ -268,6 +280,7 @@ export function AssetLibraryModal() {
 
   const [query, setQuery] = useState('');
   const [editId, setEditId] = useState<string | null>(null);
+  const [showTrash, setShowTrash] = useState(false);
   const [costumeGenBusy, setCostumeGenBusy] = useState(false);
   const [costumeGenProgress, setCostumeGenProgress] = useState<string | null>(null);
   const [charSheetGenBusy, setCharSheetGenBusy] = useState(false);
@@ -386,8 +399,8 @@ export function AssetLibraryModal() {
   }, [workspaceItems, publicTemplates]);
 
   const tabMeta = KIND_META[tab];
-  const canEditPrivate = scope !== 'private' || Boolean(activeId);
-  const canCreateAsset = scope === 'public' || canEditPrivate;
+  const canEditPrivate = (scope !== 'private' || Boolean(activeId)) && canWrite;
+  const canCreateAsset = (scope === 'public' || canEditPrivate) && canWrite;
 
   /** 环境圣经 → 素材库场景页：补齐缺失条目，保证主路径只认素材库也能看到 extract 结果 */
   useEffect(() => {
@@ -539,6 +552,7 @@ export function AssetLibraryModal() {
 
   const handleDelete = useCallback(
     (id: string) => {
+      if (!window.confirm('移入回收站？30 天内可恢复。')) return;
       if (tab === 'character') {
         if (scope === 'private') removeCharacter(id);
         else publicRemoveCharacter(id);
@@ -564,6 +578,7 @@ export function AssetLibraryModal() {
         publicRemoveTemplate(id);
       }
       if (editId === id) setEditId(null);
+      toastSuccess('已移入回收站');
     },
     [
       tab,
@@ -883,6 +898,25 @@ export function AssetLibraryModal() {
     toastSuccess('已复制到公共素材库');
   }, [selectedWorkspaceItem, scope, publicUpsertTemplate]);
 
+  // F-038: 从公共库复制非内置条目到当前项目私有库
+  const handleCopyPublicToWorkspace = useCallback(
+    (itemId: string) => {
+      if (!activeId) {
+        toastSuccess('请先打开一个项目');
+        return;
+      }
+      const tpl = publicTemplates.find((t) => t.id === itemId);
+      if (!tpl) return;
+      const workspaceItem = templateToWorkspaceItem(tpl, tpl.id);
+      if (!workspaceItem) return;
+      const item = refreshWorkspacePrompts(workspaceItem);
+      saveWorkspaceItem(item);
+      toastSuccess(`已复制「${item.label}」到当前项目`);
+      appendLog(`素材库：复制公共素材「${item.label}」到项目`);
+    },
+    [activeId, publicTemplates, saveWorkspaceItem, appendLog],
+  );
+
   const handleScopeChange = useCallback(
     (next: AssetScope) => {
       setScope(next);
@@ -902,7 +936,7 @@ export function AssetLibraryModal() {
         aria-label="关闭素材库"
         onClick={() => setOpen(false)}
       />
-      <div className="nx9-asset-library-modal relative w-[min(960px,96vw)] h-[min(720px,90vh)] bg-white rounded-2xl shadow-2xl flex flex-col overflow-hidden border border-line">
+      <div className="nx9-asset-library-modal relative w-[min(960px,96vw)] h-[min(720px,90vh)] bg-surface rounded-2xl shadow-2xl flex flex-col overflow-hidden border border-line">
         <header className="shrink-0 h-14 border-b border-line flex items-center px-5 gap-3">
           <Layers size={20} className="text-brand shrink-0" />
           <div className="flex-1 min-w-0">
@@ -918,7 +952,7 @@ export function AssetLibraryModal() {
               type="button"
               onClick={() => handleScopeChange('private')}
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
-                scope === 'private' ? 'bg-white shadow-sm text-brand' : 'text-ink/50'
+                scope === 'private' ? 'bg-surface shadow-sm text-brand' : 'text-ink/50'
               }`}
             >
               <FolderLock size={14} />
@@ -928,13 +962,21 @@ export function AssetLibraryModal() {
               type="button"
               onClick={() => handleScopeChange('public')}
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
-                scope === 'public' ? 'bg-white shadow-sm text-brand' : 'text-ink/50'
+                scope === 'public' ? 'bg-surface shadow-sm text-brand' : 'text-ink/50'
               }`}
             >
               <Globe2 size={14} />
               公共
             </button>
           </div>
+          <button
+            type="button"
+            title="资产回收站"
+            onClick={() => setShowTrash((v) => !v)}
+            className={`p-2 rounded-lg hover:bg-surface ${showTrash ? 'text-warn bg-warn/10' : 'text-ink/50'}`}
+          >
+            <Trash2 size={18} />
+          </button>
           <button
             type="button"
             onClick={() => setOpen(false)}
@@ -944,6 +986,11 @@ export function AssetLibraryModal() {
           </button>
         </header>
 
+        {showTrash ? (
+          <div className="flex-1 min-h-0 overflow-y-auto nx9-scroll p-4">
+            <AssetTrashPanel defaultScope={scope} />
+          </div>
+        ) : (
         <div className="flex flex-1 min-h-0 flex-col">
               <div className="shrink-0 flex gap-1 px-4 py-2 border-b border-line overflow-x-auto nx9-scroll">
                 {ASSET_LIBRARY_TABS.map((t) => (
@@ -1061,11 +1108,26 @@ export function AssetLibraryModal() {
                             >
                               导入
                             </button>
+                          ) : scope === 'public' ? (
+                            <button
+                              type="button"
+                              title="复制到项目私有库"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleCopyPublicToWorkspace(item.id);
+                              }}
+                              className="absolute right-1 top-1/2 -translate-y-1/2 px-1.5 py-0.5 rounded text-[10px] text-accent/80 hover:bg-accent/10 opacity-0 group-hover:opacity-100"
+                            >
+                              复制到项目
+                            </button>
                           ) : (
                             <button
                               type="button"
-                              onClick={() => handleDelete(item.id)}
-                              className="absolute right-1 top-1/2 -translate-y-1/2 p-1 rounded text-ink/30 hover:text-red-600 opacity-0 group-hover:opacity-100"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                if (canDeleteItem) handleDelete(item.id);
+                              }}
+                              className={`absolute right-1 top-1/2 -translate-y-1/2 p-1 rounded ${canDeleteItem ? 'text-ink/30 hover:text-red-600 opacity-0 group-hover:opacity-100' : 'text-ink/10 cursor-not-allowed'}`}
                             >
                               <Trash2 size={12} />
                             </button>
@@ -1101,6 +1163,38 @@ export function AssetLibraryModal() {
                           )}
                         />
                       )}
+                      {/* F-037: 一键生成定妆图 */}
+                      {tab === 'character' && selectedChar && canWrite && (
+                        <div className="mt-2">
+                          <button
+                            type="button"
+                            disabled={bibleImg.generating}
+                            onClick={async () => {
+                              const charBible = selectedChar.bible ?? {};
+                              const desc = [charBible.appearance, charBible.personality].filter(Boolean).join('；');
+                              const url = await bibleImg.generate({
+                                kind: 'character',
+                                name: selectedChar.name,
+                                description: desc || selectedChar.name,
+                                existingImageUrl: selectedChar.referenceImageUrl,
+                              });
+                              if (url) {
+                                saveCharacter({ ...selectedChar, referenceImageUrl: url });
+                              }
+                            }}
+                            className="w-full rounded-lg bg-brand text-white text-[10px] py-1.5 disabled:opacity-50 flex items-center justify-center gap-1"
+                          >
+                            {bibleImg.generating ? (
+                              <><Loader2 size={12} className="animate-spin" /> 生成中…</>
+                            ) : (
+                              <>✨ 生成定妆图</>
+                            )}
+                          </button>
+                          {bibleImg.error && (
+                            <p className="text-[9px] text-red mt-1">{bibleImg.error}</p>
+                          )}
+                        </div>
+                      )}
 
                       {tab === 'sound' && selectedSound && (
                         <VoiceDetailFields
@@ -1112,14 +1206,52 @@ export function AssetLibraryModal() {
                       )}
 
                       {tab === 'scene' && selectedWorkspaceItem && (
-                        <SceneDetailFields
-                          item={selectedWorkspaceItem}
-                          onChange={saveWorkspaceItem}
-                          onRefreshPrompts={() => saveWorkspaceItem(refreshWorkspacePrompts(selectedWorkspaceItem))}
-                          onUploadRef={(f) => void handleUploadWorkspaceMedia(f, selectedWorkspaceItem, 'referenceUrls')}
-                          onUploadSheet={(f) => void handleUploadWorkspaceMedia(f, selectedWorkspaceItem, 'sheetUrl')}
-                          onRemoveRef={(idx) => handleRemoveSceneRef(selectedWorkspaceItem, idx)}
-                        />
+                        <>
+                          {/* F-037: 一键生成场景图 */}
+                          {canWrite && (
+                            <div className="mt-2">
+                              <button
+                                type="button"
+                                disabled={bibleImg.generating}
+                                onClick={async () => {
+                                  const creative = getSceneCreative(selectedWorkspaceItem);
+                                  const desc = [creative.description, selectedWorkspaceItem.promptZh, selectedWorkspaceItem.promptEn].filter(Boolean).join('；');
+                                  const url = await bibleImg.generate({
+                                    kind: 'scene',
+                                    name: selectedWorkspaceItem.label,
+                                    description: desc || selectedWorkspaceItem.label,
+                                    existingImageUrl: creative.referenceUrls?.[0] ?? creative.sheetUrl ?? null,
+                                  });
+                                  if (url) {
+                                    const refs = creative.referenceUrls ?? [];
+                                    saveWorkspaceItem({
+                                      ...selectedWorkspaceItem,
+                                      creative: { ...creative, referenceUrls: [url, ...refs] },
+                                    });
+                                  }
+                                }}
+                                className="w-full rounded-lg bg-brand text-white text-[10px] py-1.5 disabled:opacity-50 flex items-center justify-center gap-1"
+                              >
+                                {bibleImg.generating ? (
+                                  <><Loader2 size={12} className="animate-spin" /> 生成中…</>
+                                ) : (
+                                  <>✨ 生成场景图</>
+                                )}
+                              </button>
+                              {bibleImg.error && (
+                                <p className="text-[9px] text-red mt-1">{bibleImg.error}</p>
+                              )}
+                            </div>
+                          )}
+                          <SceneDetailFields
+                            item={selectedWorkspaceItem}
+                            onChange={saveWorkspaceItem}
+                            onRefreshPrompts={() => saveWorkspaceItem(refreshWorkspacePrompts(selectedWorkspaceItem))}
+                            onUploadRef={(f) => void handleUploadWorkspaceMedia(f, selectedWorkspaceItem, 'referenceUrls')}
+                            onUploadSheet={(f) => void handleUploadWorkspaceMedia(f, selectedWorkspaceItem, 'sheetUrl')}
+                            onRemoveRef={(idx) => handleRemoveSceneRef(selectedWorkspaceItem, idx)}
+                          />
+                        </>
                       )}
 
                       {tab === 'costume' && selectedWorkspaceItem && scope === 'public' && selectedWorkspaceItem.sourceTemplateId === selectedWorkspaceItem.id && (
@@ -1212,6 +1344,7 @@ export function AssetLibraryModal() {
                 </>
               )}
         </div>
+        )}
       </div>
     </div>
   );

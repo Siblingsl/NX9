@@ -284,7 +284,7 @@
   border-radius: 12px;
   padding: 9px 16px;
   color: var(--desk-btn-primary-ink, #1a1714);
-  background: linear-gradient(135deg, var(--set-accent), color-mix(in srgb, var(--set-accent) 74%, #fff));
+  background: linear-gradient(135deg, var(--set-accent), color-mix(in srgb, var(--set-accent) 74%, var(--nx9-bg)));
   font-size: 13px;
   font-weight: 800;
   border: none;

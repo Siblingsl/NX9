@@ -28,7 +28,7 @@ export const SOCKET_REGISTRY: Record<string, SocketProfile> = {
   'continuity-check': { accepts: ['prompt', 'picture', 'clip'], emits: ['prompt', 'meta'] },
   'script-desk': { accepts: ['prompt'], emits: ['prompt', 'meta'] },
   'dialogue-sheet': { accepts: ['prompt'], emits: ['prompt', 'meta'] },
-  'asset-gate': { accepts: ['prompt', 'meta'], emits: ['prompt', 'meta'] },
+  // F-005: asset-gate 已删除 — 能力拆并到编剧台/分镜台
   'voice-cast': { accepts: ['prompt', 'sound'], emits: ['sound', 'meta'] },
   'bridge-clip': { accepts: ['prompt', 'clip'], emits: ['prompt', 'picture', 'meta'] },
   'caption-asr': { accepts: ['clip', 'sound', 'prompt'], emits: ['prompt', 'clip', 'meta'] },
@@ -263,19 +263,147 @@ export const VERTICAL_SOCKETS: Record<string, VerticalSocketSpec[]> = {
       id: 'exec-picture',
     },
   ],
-  'asset-gate': [
-    {
-      kind: 'meta',
-      position: 'top',
-      type: 'both',
-      id: 'asset-gate',
-      label: '设定门禁',
-    },
-  ],
+  // F-005: asset-gate 已删除，上下口能力拆并到编剧台/分镜台
 };
 
 export function resolveVerticalSockets(kind: string): VerticalSocketSpec[] {
   return VERTICAL_SOCKETS[kind] ?? [];
+}
+
+/** F-006: 上下能力口仅当 data.showExecPorts === true 时启用（缺省 false） */
+export function isExecPortsEnabled(data?: Record<string, unknown> | null): boolean {
+  return data?.showExecPorts === true;
+}
+
+/** F-006: 当前节点可见的竖直能力口（未开启时返回空，供吸附/渲染共用） */
+export function resolveVisibleVerticalSockets(
+  kind: string,
+  data?: Record<string, unknown> | null,
+): VerticalSocketSpec[] {
+  if (!isExecPortsEnabled(data)) return [];
+  return resolveVerticalSockets(kind);
+}
+
+export function isExecHandle(handle?: string | null): boolean {
+  if (!handle) return false;
+  if (EXEC_PICTURE_HANDLES.has(handle) || EXEC_3D_HANDLES.has(handle)) return true;
+  const base = handle.endsWith('-out') ? handle.slice(0, -4) : handle;
+  if (EXEC_PICTURE_HANDLES.has(base) || EXEC_3D_HANDLES.has(base)) return true;
+  return handle.startsWith('exec-') || base.startsWith('exec-');
+}
+
+/**
+ * F-006: 连接校验（含 handle）。
+ * 未开启 showExecPorts 的节点禁止连入/连出 exec 上下口。
+ */
+export function validateConnectionWithHandles(
+  sourceKind: string,
+  targetKind: string,
+  sourceData?: Record<string, unknown> | null,
+  targetData?: Record<string, unknown> | null,
+  sourceHandle?: string | null,
+  targetHandle?: string | null,
+): { ok: boolean; reason?: 'socket_incompatible' | 'exec_ports_disabled' } {
+  if (!validateLink(sourceKind, targetKind, sourceData ?? undefined)) {
+    return { ok: false, reason: 'socket_incompatible' };
+  }
+  const sourceExec = isExecHandle(sourceHandle);
+  const targetExec = isExecHandle(targetHandle);
+  if (!sourceExec && !targetExec) return { ok: true };
+
+  if (
+    sourceExec &&
+    resolveVerticalSockets(sourceKind).length > 0 &&
+    !isExecPortsEnabled(sourceData)
+  ) {
+    return { ok: false, reason: 'exec_ports_disabled' };
+  }
+  if (
+    targetExec &&
+    resolveVerticalSockets(targetKind).length > 0 &&
+    !isExecPortsEnabled(targetData)
+  ) {
+    return { ok: false, reason: 'exec_ports_disabled' };
+  }
+  return { ok: true };
+}
+
+/**
+ * F-006: 数据边不得挂在上下 exec 口。
+ * 编剧→分镜、分镜→导演 若缺 handle 或误挂 exec，一律改回左右 prompt。
+ * 另：出图已挂分镜能力口时，拆除出图→导演旁路。
+ */
+export function normalizeDataEdgeHandlesAwayFromExec<
+  T extends { id: string; type?: string | null },
+  L extends {
+    id: string;
+    source: string;
+    target: string;
+    sourceHandle?: string | null;
+    targetHandle?: string | null;
+  },
+>(nodes: T[], links: L[]): L[] {
+  const typeById = new Map(nodes.map((n) => [n.id, n.type ?? '']));
+  const isStoryboardHost = (t: string) =>
+    t === 'storyboard-desk' || t === 'storyboard-preview' || t === 'story-grid';
+
+  const pictureIdsWithDeskExec = new Set<string>();
+  for (const link of links) {
+    const sourceType = typeById.get(link.source) ?? '';
+    const targetType = typeById.get(link.target) ?? '';
+    const usesExec =
+      isExecHandle(link.sourceHandle) || isExecHandle(link.targetHandle);
+    if (
+      usesExec &&
+      sourceType === 'picture-gen' &&
+      isStoryboardHost(targetType)
+    ) {
+      pictureIdsWithDeskExec.add(link.source);
+    }
+    if (
+      usesExec &&
+      targetType === 'picture-gen' &&
+      isStoryboardHost(sourceType)
+    ) {
+      pictureIdsWithDeskExec.add(link.target);
+    }
+  }
+
+  return links
+    .filter((link) => {
+      const sourceType = typeById.get(link.source) ?? '';
+      const targetType = typeById.get(link.target) ?? '';
+      // 出图已挂分镜时，禁止再直连导演台（视觉旁路）
+      if (
+        sourceType === 'picture-gen' &&
+        targetType === 'director-desk' &&
+        pictureIdsWithDeskExec.has(link.source)
+      ) {
+        return false;
+      }
+      return true;
+    })
+    .map((link) => {
+      const sourceType = typeById.get(link.source) ?? '';
+      const targetType = typeById.get(link.target) ?? '';
+      const sourceExec = isExecHandle(link.sourceHandle);
+      const targetExec = isExecHandle(link.targetHandle);
+      const missing =
+        link.sourceHandle == null ||
+        link.sourceHandle === '' ||
+        link.targetHandle == null ||
+        link.targetHandle === '';
+
+      const scriptToDesk =
+        sourceType === 'script-desk' && isStoryboardHost(targetType);
+      const deskToDirector =
+        isStoryboardHost(sourceType) && targetType === 'director-desk';
+
+      if ((scriptToDesk || deskToDirector) && (missing || sourceExec || targetExec)) {
+        return { ...link, sourceHandle: 'prompt', targetHandle: 'prompt' };
+      }
+      return link;
+    });
 }
 
 /** 分镜关键帧宿主：分镜台（及迁移前的预览节点） */

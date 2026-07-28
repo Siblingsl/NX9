@@ -9,6 +9,7 @@ import { isSurfaceEnabled } from '../../config/product-surface';
 
 interface CanvasNodeShellProps extends NodeProps {
   alias?: string;
+  onRunOverride?: () => void;
 }
 
 /**
@@ -61,7 +62,7 @@ export const CanvasNodeShell = memo(function CanvasNodeShell(props: CanvasNodeSh
           kind={kind}
           data={data}
           alias={props.alias}
-          onRun={showRun ? () => void handleRun() : undefined}
+          onRun={showRun ? (props.onRunOverride ?? (() => void handleRun())) : undefined}
           canOpenWorkspace={canOpenWorkspace}
         />
       </BlockShell>

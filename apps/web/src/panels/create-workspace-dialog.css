@@ -109,6 +109,6 @@
 
 .nx9-create-project__primary {
   color: var(--desk-btn-primary-ink, #1a1714);
-  background: linear-gradient(135deg, var(--cp-accent), color-mix(in srgb, var(--cp-accent) 74%, #fff));
+  background: linear-gradient(135deg, var(--cp-accent), color-mix(in srgb, var(--cp-accent) 74%, var(--nx9-bg)));
   box-shadow: 0 10px 24px color-mix(in srgb, var(--cp-accent) 24%, transparent);
 }

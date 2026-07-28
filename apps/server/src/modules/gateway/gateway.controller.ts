@@ -10,8 +10,9 @@ export class GatewayController {
   proxyLlm(
     @Body() body: Record<string, unknown>,
     @Headers('x-nx9-user-id') userId?: string,
+    @Headers('x-nx9-workspace-id') workspaceId?: string,
   ) {
-    return this.gateway.proxyLlm(body, userId);
+    return this.gateway.proxyLlm(body, userId, workspaceId);
   }
 
   @Post('llm/stream')
@@ -37,32 +38,36 @@ export class GatewayController {
   proxyImage(
     @Body() body: Record<string, unknown>,
     @Headers('x-nx9-user-id') userId?: string,
+    @Headers('x-nx9-workspace-id') workspaceId?: string,
   ) {
-    return this.gateway.proxyImage(body, userId);
+    return this.gateway.proxyImage(body, userId, workspaceId);
   }
 
   @Post('video')
   proxyVideo(
     @Body() body: Record<string, unknown>,
     @Headers('x-nx9-user-id') userId?: string,
+    @Headers('x-nx9-workspace-id') workspaceId?: string,
   ) {
-    return this.gateway.proxyVideo(body, userId);
+    return this.gateway.proxyVideo(body, userId, workspaceId);
   }
 
   @Post('tts')
   proxyTts(
     @Body() body: Record<string, unknown>,
     @Headers('x-nx9-user-id') userId?: string,
+    @Headers('x-nx9-workspace-id') workspaceId?: string,
   ) {
-    return this.gateway.proxyTts(body, userId);
+    return this.gateway.proxyTts(body, userId, workspaceId);
   }
 
   @Post('video/poll')
   pollVideo(
     @Body() body: { taskId: string; baseUrl?: string },
     @Headers('x-nx9-user-id') userId?: string,
+    @Headers('x-nx9-workspace-id') workspaceId?: string,
   ) {
-    return this.gateway.pollVideo(body.taskId, body.baseUrl, userId);
+    return this.gateway.pollVideo(body.taskId, body.baseUrl, userId, workspaceId);
   }
 
   @Post('voicebox/probe')
@@ -84,15 +89,17 @@ export class GatewayController {
   proxyFal(
     @Body() body: { model: string; input: Record<string, unknown> },
     @Headers('x-nx9-user-id') userId?: string,
+    @Headers('x-nx9-workspace-id') workspaceId?: string,
   ) {
-    return this.gateway.proxyFal(body, userId);
+    return this.gateway.proxyFal(body, userId, workspaceId);
   }
 
   @Post('comfy')
   proxyComfy(
     @Body() body: { workflow: Record<string, unknown>; baseUrl?: string; prompt?: string },
     @Headers('x-nx9-user-id') userId?: string,
+    @Headers('x-nx9-workspace-id') workspaceId?: string,
   ) {
-    return this.gateway.proxyComfy(body, userId);
+    return this.gateway.proxyComfy(body, userId, workspaceId);
   }
 }

@@ -10,9 +10,11 @@ import {
   mergeCharacterDrafts,
   mergeSceneDrafts,
   migrateDialogueSheetDataToPackage,
+  runConsistencyChecks,
   screenplayFullText,
   screenplayWordCount,
   touchScreenplayPackage,
+  type ConsistencyCheckItem,
   type ScreenplayPackage,
   type ScriptDeskAgentMessage,
   type ScriptDeskAgentSession,
@@ -111,8 +113,48 @@ export function confirmPackage(pkg: ScreenplayPackage): ScreenplayPackage {
 }
 
 export function runConsistencyCheck(pkg: ScreenplayPackage): ScreenplayPackage {
-  const diagnostics = buildNarrativeConsistencyDiagnostics(pkg);
-  return touchScreenplayPackage(pkg, { diagnostics });
+  const narrativeDiags = buildNarrativeConsistencyDiagnostics(pkg);
+  const checkItems = runConsistencyChecks(pkg);
+  const merged = [...narrativeDiags];
+  for (const item of checkItems) {
+    const code = `consistency-${item.category}`;
+    if (!merged.some((d) => d.code === code && d.message === item.message)) {
+      merged.push({
+        level: item.severity === 'error' ? 'error' : 'warning',
+        code,
+        message: item.message,
+        entityId: item.target.id,
+      });
+    }
+  }
+  return touchScreenplayPackage(pkg, { diagnostics: merged });
+}
+
+export function applyConsistencyFixes(pkg: ScreenplayPackage): { package: ScreenplayPackage; fixedCount: number } {
+  let fixedCount = 0;
+  let nextChars = pkg.bible.characters.map((c) => {
+    let char = c;
+    if (!char.voiceNotes?.trim()) {
+      char = { ...char, voiceNotes: '请补充对白语气描述' };
+      fixedCount++;
+    }
+    if (!char.appearance?.trim()) {
+      char = { ...char, appearance: '请补充外貌/服装描述' };
+      fixedCount++;
+    }
+    return char;
+  });
+  let nextScenes = pkg.bible.scenes.map((s) => {
+    if (!s.location?.trim() && !s.summary?.trim()) {
+      fixedCount++;
+      return { ...s, location: '请补充地点描述' };
+    }
+    return s;
+  });
+  const next = touchScreenplayPackage(pkg, {
+    bible: { world: pkg.bible.world, characters: nextChars, scenes: nextScenes },
+  });
+  return { package: next, fixedCount };
 }
 
 function makeMsgId() {
@@ -277,10 +319,21 @@ export async function runScriptDeskSkill(
       });
       const rawPatch = (res.patch ?? {}) as Record<string, unknown>;
       if (skillId === 'consistency') {
-        // Merge LLM diagnostics with local rules diagnostics
         const llmDiags = (rawPatch.diagnostics ?? rawPatch) as Array<Record<string, unknown>> | undefined;
         const localDiags = buildNarrativeConsistencyDiagnostics(pkg);
+        const checkItems = runConsistencyChecks(pkg);
         const merged = [...localDiags];
+        for (const item of checkItems) {
+          const code = `consistency-${item.category}`;
+          if (!merged.some((d) => d.code === code && d.message === item.message)) {
+            merged.push({
+              level: item.severity === 'error' ? 'error' : 'warning',
+              code,
+              message: item.message,
+              entityId: item.target.id,
+            });
+          }
+        }
         if (Array.isArray(llmDiags)) {
           for (const d of llmDiags) {
             if (!merged.some((m) => m.code === d.code)) {
@@ -289,7 +342,7 @@ export async function runScriptDeskSkill(
           }
         }
         return {
-          assistantText: res.explanation || `一致性检查完成（LLM + 规则），诊断 ${merged.length} 条。`,
+          assistantText: res.explanation || `一致性检查完成（LLM + 规则 + 专检），诊断 ${merged.length} 条。`,
           patch: { diagnostics: merged },
         };
       }
@@ -302,9 +355,22 @@ export async function runScriptDeskSkill(
       const fallback = String(e);
       if (skillId === 'consistency') {
         const localDiags = buildNarrativeConsistencyDiagnostics(pkg);
+        const checkItems = runConsistencyChecks(pkg);
+        const merged = [...localDiags];
+        for (const item of checkItems) {
+          const code = `consistency-${item.category}`;
+          if (!merged.some((d) => d.code === code && d.message === item.message)) {
+            merged.push({
+              level: item.severity === 'error' ? 'error' : 'warning',
+              code,
+              message: item.message,
+              entityId: item.target.id,
+            });
+          }
+        }
         return {
-          assistantText: `LLM 一致性检查失败，已降级为规则检查：${fallback}`,
-          patch: { diagnostics: localDiags },
+          assistantText: `LLM 一致性检查失败，已降级为规则+专检：${fallback}`,
+          patch: { diagnostics: merged },
         };
       }
       return {

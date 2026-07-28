@@ -5,9 +5,9 @@ import type { BlockDefinition, BlockCategory } from '../types/block';
  * 历史 kind 不在此表；加载时由 migrate-block-kinds 改写。
  *
  * Dock 默认可见 ≈ 16；concealed = 高级/命令面板可搜。
- * ScreenModal 弹窗节点（script-desk / asset-gate /
+ * ScreenModal 弹窗节点（script-desk /
  * storyboard-desk / continuity-check）仅登记；编剧台 UI 由功能 3 升级。
- * 角色/场景设定主入口为素材库，不再提供画布节点。
+ * 角色/场景设定主入口为素材库；asset-gate 已拆并为编剧「设定就绪」+ 分镜预检。
  */
 export const BLOCK_CATALOG: BlockDefinition[] = [
   // ── 素材 / 复刻入口 ──
@@ -84,12 +84,14 @@ export const BLOCK_CATALOG: BlockDefinition[] = [
   },
   {
     kind: 'asset-gate',
-    label: '设定检查',
+    label: '设定检查（已废弃）',
     category: 'craft',
-    hint: 'Bible/镜需求对照 · 缺口补齐 · 放行',
+    hint: '已废弃 · 能力已合并到编剧台「设定就绪」和分镜台预检',
     glyph: 'GitBranch',
     accent: '#D97706',
     nx9Native: true,
+    deprecated: true,
+    concealed: true,
   },
   {
     kind: 'storyboard-desk',

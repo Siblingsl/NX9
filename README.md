@@ -14,22 +14,28 @@ NX9/
 
 ## 特性
 
-- **全模块注册表**：60+ 模块类型已注册，核心模块已实现，其余通过 GenericBlock 占位并保持连线兼容
-- **性能优先画布**：单工作区挂载、懒加载模块、分级性能模式、可见区域渲染、防抖保存
-- **NestJS 后端**：工作区 CRUD、设置、资产上传、API 代理网关
+- **核心 6 步管线**：编剧台 → 分镜台 → 导演台 → 智能剪辑 → 交付打包 → 审片台，全流程 AI 辅助一体化生产
+- **双主题 Desk**：暖纸底浅色 + 深色画布双模式；卡片式模块面板，古铜金 (#A67C4A) 品牌主色
+- **性能优先画布**：FlowSurface 引擎、懒加载模块、分级性能模式、可见区域渲染、防抖保存
+- **NestJS 后端**：工作区 CRUD、设置、资产上传、API 代理网关、Remotion 服务端真渲染
+- **18 种工作台模块**：11 个 NX9 自研（nx9Native），涵盖编剧、分镜、导演、配音、剪辑、宫格、交付等全流程
 - **Electron 预留**：`platform/runtime-bridge.ts` 抽象桌面能力，Web 模式零改动扩展
 
-## 配色（制作台视觉）
+## 配色（画布 / Desk 视觉）
 
-| 用途 | 颜色 |
-|------|------|
-| 背景 | `#F4F1EA` 暖纸底 |
-| 主文字 | `#1A1814` |
-| 品牌主色 | `#0F766E` 青绿 |
-| 次级色 | `#1E3A5F` 深蓝 |
-| 成功 | `#15803D` |
-| 警告 | `#C2410C` |
-| 分割线 | `#E4DFD6` |
+| 用途 | 浅色 | 深色 |
+|------|------|------|
+| 画布底 | `#E8E4DB` | `#0C0E12` |
+| 面板底 | `#F7F4EE` | `#161719` |
+| 卡片底 | `#FBF9F5 → #F3EFE7` | `#1A1C1F → #141618` |
+| 品牌主色 | `#A67C4A` 古铜金 | `#C4A574` |
+| 主文字 | `rgba(32,28,24,0.92)` | `rgba(236,232,224,0.92)` |
+| 次文字 | `rgba(32,28,24,0.55)` | `rgba(236,232,224,0.55)` |
+| 分割线 | `rgba(42,36,28,0.1)` | `rgba(255,255,255,0.08)` |
+| 成功 | `#4A8A62` | `#8FB89A` |
+| 警告 | `#C4834A` | `#D4A574` |
+
+> 颜色体系由 `desk-palette.css` + `tokens.css` + `tailwind.config.js` 三层定义，通过 CSS 变量切换深浅主题。
 
 ## 开发
 
@@ -68,17 +74,21 @@ pnpm --filter @nx9/shared build
 
 ## 技术栈（NX9 自研）
 
-| 维度 | NX9 |
-|------|-----|
-| 后端 | NestJS |
-| 画布 | FlowSurface + perf-controller |
-| 节点 | blocks/ |
-| 状态 | workspace-catalog, credential-vault 等 |
-| 主题 | 无主题包，仅基础配色 |
+| 维度 | 实现 |
+|------|------|
+| 后端 | NestJS (Express) |
+| 前端 | React 19 + Vite |
+| 画布 | FlowSurface + perf-controller + desk-palette |
+| 节点 | 18 种工作台模块 (block-catalog) |
+| 3D | Director3d 自研引擎 |
+| 渲染 | Remotion / HyperFrames / FFmpeg |
+| 状态 | workspace-catalog + flow-graph-mirror |
+| 主题 | CSS 变量双主题 (浅/深)，无第三方主题包 |
 | 桌面 | 预留 `runtime-bridge`，暂未接入 Electron |
 
 ## 后续扩展
 
-1. 按模块优先级逐个替换 GenericBlock 为完整实现
-2. 补充 gateway 代理路由（RH、FAL、视频、音频等）
+1. 按 [缺陷台账](docs/NX9-PROJECT-DEFECT-ANALYSIS.md) F 项优先级收口至真实 100%（当前 21 项已完成）
+2. 补充 gateway 代理路由（视频、音频、TTS 等）
 3. 接入 Electron 时注入 `window.nx9Desktop`
+4. CI / 自动化测试覆盖关键交互回归

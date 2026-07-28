@@ -38,7 +38,7 @@ export function CompareLightbox({ takeA, takeB, onClose }: CompareLightboxProps)
             onClick={() => {
               handleAddToTimeline(takeA.id);
             }}
-            className="text-xs px-3 py-1.5 rounded-lg border border-white/30 hover:bg-white/10 flex items-center gap-1"
+            className="text-xs px-3 py-1.5 rounded-lg border border-white/30 hover:bg-surface/10 flex items-center gap-1"
           >
             <Check size={12} />
             采用 A
@@ -48,12 +48,12 @@ export function CompareLightbox({ takeA, takeB, onClose }: CompareLightboxProps)
             onClick={() => {
               handleAddToTimeline(takeB.id);
             }}
-            className="text-xs px-3 py-1.5 rounded-lg border border-white/30 hover:bg-white/10 flex items-center gap-1"
+            className="text-xs px-3 py-1.5 rounded-lg border border-white/30 hover:bg-surface/10 flex items-center gap-1"
           >
             <Check size={12} />
             采用 B
           </button>
-          <button type="button" onClick={onClose} className="p-2 rounded-xl hover:bg-white/10">
+          <button type="button" onClick={onClose} className="p-2 rounded-xl hover:bg-surface/10">
             <X size={20} />
           </button>
         </div>
@@ -66,7 +66,7 @@ export function CompareLightbox({ takeA, takeB, onClose }: CompareLightboxProps)
           <MediaPreview url={takeA.assetUrl} label="A" />
         </div>
         <div
-          className="absolute top-0 bottom-0 w-0.5 bg-white shadow-lg"
+          className="absolute top-0 bottom-0 w-0.5 bg-surface shadow-lg"
           style={{ left: `${slider}%` }}
         />
         <input
@@ -86,7 +86,7 @@ export function CompareLightbox({ takeA, takeB, onClose }: CompareLightboxProps)
 function MediaPreview({ url, label }: { url: string; label: string }) {
   return (
     <div className="w-full h-full bg-black flex items-center justify-center relative">
-      <span className="absolute top-3 left-3 text-xs font-mono bg-white/20 text-white px-2 py-0.5 rounded">
+      <span className="absolute top-3 left-3 text-xs font-mono bg-surface/20 text-white px-2 py-0.5 rounded">
         {label}
       </span>
       {isVideoUrl(url) ? (
@@ -143,7 +143,7 @@ export function TakeLightbox({
                 const other = siblings.find((t) => t.id !== current.id);
                 if (other) onCompare(current.id, other.id);
               }}
-              className="text-xs px-3 py-1.5 rounded-lg border border-white/30 hover:bg-white/10"
+              className="text-xs px-3 py-1.5 rounded-lg border border-white/30 hover:bg-surface/10"
             >
               对比另一版
             </button>
@@ -155,7 +155,7 @@ export function TakeLightbox({
           >
             设为主 Take
           </button>
-          <button type="button" onClick={onClose} className="p-2 rounded-xl hover:bg-white/10">
+          <button type="button" onClick={onClose} className="p-2 rounded-xl hover:bg-surface/10">
             <X size={20} />
           </button>
         </div>
@@ -165,7 +165,7 @@ export function TakeLightbox({
           type="button"
           disabled={cursor <= 0}
           onClick={nav.prev}
-          className="p-2 rounded-full bg-white/10 disabled:opacity-30 text-white"
+          className="p-2 rounded-full bg-surface/10 disabled:opacity-30 text-white"
         >
           <ChevronLeft size={24} />
         </button>
@@ -176,7 +176,7 @@ export function TakeLightbox({
           type="button"
           disabled={cursor >= siblings.length - 1}
           onClick={nav.next}
-          className="p-2 rounded-full bg-white/10 disabled:opacity-30 text-white"
+          className="p-2 rounded-full bg-surface/10 disabled:opacity-30 text-white"
         >
           <ChevronRight size={24} />
         </button>

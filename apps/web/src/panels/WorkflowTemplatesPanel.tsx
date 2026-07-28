@@ -21,7 +21,7 @@ export function WorkflowTemplatesPanel({
   ] as const;
 
   return (
-    <aside className="w-[320px] shrink-0 border-l border-line bg-white flex flex-col h-full absolute right-0 top-0 z-20 shadow-panel">
+    <aside className="w-[320px] shrink-0 border-l border-line bg-surface flex flex-col h-full absolute right-0 top-0 z-20 shadow-panel">
       <div className="h-12 shrink-0 border-b border-line flex items-center px-3 gap-2">
         <LayoutTemplate size={18} className="text-brand" />
         <span className="font-semibold text-sm flex-1">工作流模板</span>

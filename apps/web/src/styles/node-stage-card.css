@@ -120,7 +120,7 @@
   height: var(--sc-socket) !important;
   min-width: var(--sc-socket) !important;
   min-height: var(--sc-socket) !important;
-  border: var(--sc-socket-border) solid color-mix(in srgb, #fff 88%, transparent) !important;
+  border: var(--sc-socket-border) solid color-mix(in srgb, var(--nx9-bg) 88%, transparent) !important;
   border-radius: 999px !important;
   box-sizing: border-box !important;
   opacity: 0.8;
@@ -147,6 +147,14 @@
     0 0 0 3px color-mix(in srgb, var(--sc-accent) 28%, transparent);
 }
 
+/* 次要数据口锚点：占位给 RF 连边，不参与交互 */
+.nx9-stage-card .nx9-socket--anchor {
+  opacity: 0 !important;
+  pointer-events: none !important;
+  border: none !important;
+  box-shadow: none !important;
+}
+
 /* both 口：source 叠在 target 上，视觉一个点 */
 .nx9-stage-card .nx9-socket--both-source {
   z-index: 6;
@@ -168,11 +176,11 @@
   --sc-socket: 14px;
   border-radius: 4px !important;
   border-width: 1.5px !important;
-  border-color: color-mix(in srgb, #fff 70%, transparent) !important;
+  border-color: color-mix(in srgb, var(--nx9-bg) 70%, transparent) !important;
   box-shadow: 0 1px 3px color-mix(in srgb, #000 45%, transparent);
   background-image:
-    linear-gradient(#fff, #fff),
-    linear-gradient(#fff, #fff) !important;
+    linear-gradient(var(--nx9-bg), var(--nx9-bg)),
+    linear-gradient(var(--nx9-bg), var(--nx9-bg)) !important;
   background-size:
     8px 1.5px,
     1.5px 8px !important;

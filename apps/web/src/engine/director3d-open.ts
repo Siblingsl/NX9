@@ -7,6 +7,7 @@ import { normalizeDirectorProject, type DirectorProject } from '@nx9/director3d'
 import { useDirector3dUi } from '../stores/director3d-ui';
 import { useWorkspaceDocument } from '../stores/workspace-document';
 import { prepareDirectorProjectForShot } from './director3d-character-sync';
+import { findChainShot } from './chain-storyboard-aggregate';
 
 type FlowNode = { id: string; type?: string | null; data?: Record<string, unknown> | unknown };
 type FlowEdge = { source: string; target: string };
@@ -54,11 +55,13 @@ export function openDirector3dStage(ctx: Director3dOpenContext): void {
   // 仅真实 720 全景可作天空盒；2D 关键帧/参考图不可塞 panorama（会变成照片背景+网格）
   const panoramaUrl = previewPayload.panorama720?.imageUrl;
   const referenceUrl = linkedFrame?.imageUrl ?? linkedFrame?.referenceImageUrl ?? undefined;
-  const lineArtUrl =
-    (data.linkedShotId as string | undefined) &&
-    useWorkspaceDocument
-      .getState()
-      .storyboard.shots.find((s) => s.id === data.linkedShotId)?.firstFrameAssetId;
+  // F-003: 优先从链镜表读取；禁止回退全局
+  const linkedShotId = data.linkedShotId as string | undefined;
+  let lineArtUrl: string | undefined;
+  if (linkedShotId) {
+    const shot = findChainShot(linkedShotId, ctx.nodes as Array<{ id: string; type?: string | null; data?: Record<string, unknown> }>);
+    lineArtUrl = shot?.firstFrameAssetId ?? undefined;
+  }
 
   let environmentProject: DirectorProject = panoramaUrl
     ? { ...project, panorama: { url: panoramaUrl, yaw: 0, exposure: 1 } }

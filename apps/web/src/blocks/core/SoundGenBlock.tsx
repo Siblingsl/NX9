@@ -1,11 +1,13 @@
 import { lazy, memo, Suspense, useCallback, useMemo, useRef } from 'react';
 import { type NodeProps, useEdges, useNodes, useReactFlow } from '@xyflow/react';
-import { gatherUpstream, AUDIO_FORMAT_OPTIONS, SPEECH_RATE_OPTIONS } from '@nx9/shared';
+import { gatherUpstream, AUDIO_FORMAT_OPTIONS, SPEECH_RATE_OPTIONS, resolveRunLabel } from '@nx9/shared';
 import { BlockShell } from '../shared/BlockShell';
 import { GenUpstreamHint } from '../shared/upstream-hints';
 import { useUpstreamPrompt } from '../shared/use-upstream-prompt';
 import { api } from '../../api/client';
 import { useActivityLog } from '../../stores/activity-log';
+import { useUnifiedMentions } from '../../engine/use-unified-mentions';
+import { useCredentialVault } from '../../stores/credential-vault';
 import { useAllAssetLibraryItems } from '../../hooks/use-asset-library-items';
 import { MentionEditor } from '../../engine/stage-deck/chrome/MentionEditor';
 import { AssetLinkField, assetRefFromData, patchWithAssetRef } from '../shared/AssetLinkField';
@@ -76,7 +78,10 @@ function SoundGenBlock(props: NodeProps) {
       sourceHandle: e.sourceHandle ?? undefined,
       targetHandle: e.targetHandle ?? undefined,
     }));
-    const gathered = gatherUpstream(props.id, flowBlocks, flowLinks);
+    const data = props.data as Record<string, unknown>;
+    const policy = data.upstreamPolicy as import('@nx9/shared').UpstreamPolicy | undefined;
+    const primarySourceId = data.primarySourceId as string | null | undefined;
+    const gathered = gatherUpstream(props.id, flowBlocks, flowLinks, policy, primarySourceId);
     const upstreamText = gathered.prompts.filter(Boolean).join('\n\n');
     const input = upstreamText || text;
     if (!input.trim()) {
@@ -129,6 +134,60 @@ function SoundGenBlock(props: NodeProps) {
     edges,
     updateNodeData,
   ]);
+
+  // F-014: BGM 生成（真接入，替代占位）
+  const { resolve: resolveMentions } = useUnifiedMentions(props.id);
+  const bgmSettings = useCredentialVault((s) => ({
+    provider: s.settings?.bgmProvider ?? 'suno',
+    apiKey: s.settings?.bgmApiKey ?? '',
+  }));
+
+  const generateBgm = useCallback(async () => {
+    const content = (props.data?.content as string) ?? '';
+    if (!content.trim()) {
+      updateNodeData(props.id, { status: 'error', error: '请输入 BGM 描述' });
+      return;
+    }
+    // F-014: 检查 BGM 配置
+    if (!bgmSettings.apiKey) {
+      updateNodeData(props.id, { status: 'error', error: 'BGM 服务未配置。请先在设置中配置 BGM API Key。' });
+      appendLog('BGM 生成失败：未配置 BGM API Key');
+      return;
+    }
+    updateNodeData(props.id, { status: 'running' });
+    appendLog(`BGM 生成启动 · ${props.id}`);
+    try {
+      const resolvedPrompt = resolveMentions(content);
+      const finalPrompt = resolvedPrompt.resolved || content;
+      const res = await fetch('/api/gateway/music', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt: finalPrompt, durationSec: 30, provider: bgmSettings.provider, apiKey: bgmSettings.apiKey }),
+      });
+      if (!res.ok) {
+        const err = await res.text();
+        throw new Error(err || 'BGM 生成失败');
+      }
+      const { taskId } = await res.json();
+      let attempts = 0;
+      const poll = async (): Promise<string> => {
+        const pollRes = await fetch(`/api/gateway/music/${taskId}`);
+        if (!pollRes.ok) throw new Error('查询任务状态失败');
+        const task = await pollRes.json();
+        if (task.status === 'done') return task.url;
+        if (task.status === 'error') throw new Error(task.error || 'BGM 生成失败');
+        if (++attempts > 30) throw new Error('BGM 生成超时');
+        await new Promise((r) => setTimeout(r, 2000));
+        return poll();
+      };
+      const url = await poll();
+      updateNodeData(props.id, { status: 'done', audioUrl: url });
+      appendLog(`BGM 生成完成 · ${props.id}`);
+    } catch (e) {
+      updateNodeData(props.id, { status: 'error', error: String(e) });
+      appendLog(`BGM 生成失败 · ${props.id}`);
+    }
+  }, [props.id, props.data, updateNodeData, appendLog]);
 
   if (soundMode === 'cast') {
     return (
@@ -184,10 +243,21 @@ function SoundGenBlock(props: NodeProps) {
             rows={3}
             className="w-full rounded-lg border border-line px-2 py-1 resize-y"
           />
-          <p className="text-[10px] text-ink/45">BGM 需接入专用音乐 API（Suno / Udio 等），当前为占位模式。</p>
-          <button type="button" disabled className="w-full rounded-xl bg-gray-400 text-white py-1.5 cursor-not-allowed">
-            BGM 生成（开发中）
+          <p className="text-[10px] text-ink/45">BGM 生成 · 需在设置中配置 BGM Provider 和 API Key</p>
+          <button
+            type="button"
+            disabled={status === 'running' || !(props.data?.content as string)?.trim()}
+            onClick={() => void generateBgm()}
+            className="w-full rounded-xl bg-brand text-white py-1.5 disabled:opacity-50"
+          >
+            {status === 'running' ? '生成中…' : status === 'done' ? '已生成' : '生成 BGM'}
           </button>
+          {(props.data?.audioUrl as string) && (
+            <audio src={props.data?.audioUrl as string} controls className="w-full" />
+          )}
+          {(props.data?.error as string) && (
+            <p className="text-[10px] text-red-600">{props.data.error as string}</p>
+          )}
         </div>
       </BlockShell>
     );
@@ -257,7 +327,7 @@ function SoundGenBlock(props: NodeProps) {
           <select
             value={provider}
             onChange={(e) => updateNodeData(props.id, { provider: e.target.value })}
-            className="flex-1 rounded-lg border border-line bg-white px-2 py-1 text-xs"
+            className="flex-1 rounded-lg border border-line bg-surface px-2 py-1 text-xs"
           >
             <option value="cloud">云端 TTS</option>
             <option value="luxtts">LuxTTS 声线克隆</option>
@@ -299,7 +369,7 @@ function SoundGenBlock(props: NodeProps) {
             <select
               value={voice}
               onChange={(e) => updateNodeData(props.id, { voice: e.target.value })}
-              className="flex-1 rounded-lg border border-line bg-white px-2 py-1 text-xs"
+              className="flex-1 rounded-lg border border-line bg-surface px-2 py-1 text-xs"
             >
               {CLOUD_VOICES.map((v) => (
                 <option key={v} value={v}>
@@ -320,7 +390,7 @@ function SoundGenBlock(props: NodeProps) {
                   referenceAudioUrl: c?.referenceAudioUrl ?? '',
                 });
               }}
-              className="w-full rounded-lg border border-line bg-white px-2 py-1 text-xs"
+              className="w-full rounded-lg border border-line bg-surface px-2 py-1 text-xs"
             >
               <option value="">— 从角色库选择 —</option>
               {characters
@@ -364,7 +434,7 @@ function SoundGenBlock(props: NodeProps) {
           disabled={status === 'running'}
           className="w-full rounded-xl bg-accent text-white text-sm py-2 hover:bg-accent/90 disabled:opacity-50"
         >
-          {status === 'running' ? '配音中…' : '生成配音'}
+          {resolveRunLabel('sound-gen').primary}
         </button>
       </div>
     </BlockShell>

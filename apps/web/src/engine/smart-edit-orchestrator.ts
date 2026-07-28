@@ -50,6 +50,8 @@ export async function orchestrateDramaTimeline(opts: {
     descriptionZh?: string;
     subtitleText?: string | null;
   }>;
+  /** F-014: 上游 sound-gen 生成的 BGM URL */
+  bgmUrl?: string;
 }): Promise<OrchestrateResult> {
   const shots = [...opts.shots]
     .filter((s) => (opts.approvedOnly ? s.status === 'approved' : true))
@@ -88,6 +90,25 @@ export async function orchestrateDramaTimeline(opts: {
       id: 'A1',
       kind: 'audio',
       clips: a1Clips,
+    });
+  }
+
+  // F-014: 上游 sound-gen BGM 注入
+  if (opts.bgmUrl) {
+    const bgmDur = timeline.tracks
+      .filter((t) => t.kind === 'video')
+      .reduce((sum, t) => sum + t.clips.reduce((s, c) => s + c.durationSec, 0), 0);
+    timeline.tracks.push({
+      id: 'track-bgm',
+      kind: 'audio',
+      clips: [{
+        id: 'bgm-1',
+        type: 'audio',
+        assetUrl: opts.bgmUrl,
+        startSec: 0,
+        durationSec: bgmDur > 0 ? bgmDur : 60,
+        label: 'BGM',
+      }],
     });
   }
 
@@ -143,6 +164,8 @@ export async function orchestrateViralTimeline(opts: {
   templateId?: string;
   aspect?: string;
   targetDurationSec?: number;
+  /** F-014: 上游 sound-gen 生成的 BGM URL */
+  bgmUrl?: string;
 }): Promise<OrchestrateResult> {
   const clips = opts.clips.filter(Boolean);
   const suggestions: SmartSuggestion[] = [];
@@ -184,6 +207,22 @@ export async function orchestrateViralTimeline(opts: {
     ],
     renderPreset: 'hyperframes-vertical',
   };
+
+  // F-014: 上游 sound-gen BGM 注入
+  if (opts.bgmUrl) {
+    timeline.tracks.push({
+      id: 'track-bgm',
+      kind: 'audio',
+      clips: [{
+        id: 'bgm-1',
+        type: 'audio',
+        assetUrl: opts.bgmUrl,
+        startSec: 0,
+        durationSec: fullDur > 0 ? fullDur : 60,
+        label: 'BGM',
+      }],
+    });
+  }
 
   suggestions.push({
     id: makeId(),

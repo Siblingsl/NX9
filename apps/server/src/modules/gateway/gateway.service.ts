@@ -69,10 +69,12 @@ export class GatewayService {
 
   private async track(
     kind: string,
-    opts?: { userId?: string; model?: string; units?: number },
+    opts?: { userId?: string; model?: string; units?: number; workspaceId?: string },
   ) {
     try {
-      await this.usage.record(kind, opts);
+      // F-009: 将 workspaceId 写入 metadata 供按项目聚合
+      const metadata = opts?.workspaceId ? { workspaceId: opts.workspaceId } : undefined;
+      await this.usage.record(kind, { ...opts, metadata });
     } catch {
       /* usage DB optional */
     }
@@ -265,7 +267,7 @@ export class GatewayService {
     return full;
   }
 
-  async proxyLlm(body: Record<string, unknown>, userId?: string) {
+  async proxyLlm(body: Record<string, unknown>, userId?: string, workspaceId?: string) {
     const apiKey = this.apiKey('llm');
     if (!apiKey) throw new BadRequestException('LLM API key not configured');
 
@@ -292,12 +294,12 @@ export class GatewayService {
       throw new ServiceUnavailableException(`Upstream LLM error: ${text.slice(0, 200)}`);
     }
     const json = await res.json();
-    void this.track('llm', { userId, model });
+    void this.track('llm', { userId, model, workspaceId });
     return json;
   }
 
   /** OpenAI-compatible /images/generations — saves PNG to storage/images. */
-  async proxyImage(body: Record<string, unknown>, userId?: string): Promise<{
+  async proxyImage(body: Record<string, unknown>, userId?: string, workspaceId?: string): Promise<{
     ok: boolean;
     url: string;
     urls?: string[];
@@ -314,11 +316,11 @@ export class GatewayService {
     const n = Math.min(4, Math.max(1, (body.n as number) || 1));
 
     if (this.shouldUseMagicHour(model, body.provider as string | undefined)) {
-      return this.proxyImageMagicHour({ prompt, model, size, n }, userId);
+      return this.proxyImageMagicHour({ prompt, model, size, n }, userId, workspaceId);
     }
 
     if (this.shouldUseGemini(model, body.provider as string | undefined)) {
-      return this.proxyImageGemini(body, userId);
+      return this.proxyImageGemini(body, userId, workspaceId);
     }
 
     // 未显式选模型但已配置 Gemini、且无 OpenAI 主 Key 时，默认走 Gemini 图片
@@ -328,6 +330,7 @@ export class GatewayService {
         return this.proxyImageGemini(
           { ...body, model: model && model !== 'dall-e-3' ? model : 'gemini-2.5-flash-image' },
           userId,
+          workspaceId,
         );
       }
     }
@@ -335,7 +338,7 @@ export class GatewayService {
     const apiKey = this.apiKey('image');
     if (!apiKey) {
       if (this.magicHour.hasKey()) {
-        return this.proxyImageMagicHour({ prompt, model: 'magic-hour', size, n }, userId);
+        return this.proxyImageMagicHour({ prompt, model: 'magic-hour', size, n }, userId, workspaceId);
       }
       throw new BadRequestException('Primary API key not configured');
     }
@@ -380,7 +383,7 @@ export class GatewayService {
 
     if (urls.length === 0) throw new ServiceUnavailableException('No image data in response');
 
-    void this.track('image', { userId, model });
+    void this.track('image', { userId, model, workspaceId });
     return {
       ok: true,
       url: urls[0],
@@ -393,6 +396,7 @@ export class GatewayService {
   private async proxyImageGemini(
     body: Record<string, unknown>,
     userId?: string,
+    workspaceId?: string,
   ): Promise<{
     ok: boolean;
     url: string;
@@ -463,7 +467,7 @@ export class GatewayService {
       referenceParts: referenceParts.length ? referenceParts : undefined,
     });
 
-    void this.track('image', { userId, model: result.model, units: result.urls.length });
+    void this.track('image', { userId, model: result.model, units: result.urls.length, workspaceId });
     return {
       ok: true,
       url: result.urls[0],
@@ -476,6 +480,7 @@ export class GatewayService {
   private async proxyImageMagicHour(
     opts: { prompt: string; model: string; size: string; n: number },
     userId?: string,
+    workspaceId?: string,
   ): Promise<{
     ok: boolean;
     url: string;
@@ -517,7 +522,7 @@ export class GatewayService {
     for (const remote of remoteUrls) {
       urls.push(await this.saveRemoteImage(remote, 'mh'));
     }
-    void this.track('image', { userId, model: opts.model || 'magic-hour' });
+    void this.track('image', { userId, model: opts.model || 'magic-hour', workspaceId });
     return { ok: true, url: urls[0], urls, taskId, status: 'success' };
   }
 
@@ -525,7 +530,7 @@ export class GatewayService {
    * Video generation — async-capable OpenAI-compatible endpoint.
    * Polls up to 90s when upstream returns task id.
    */
-  async proxyVideo(body: Record<string, unknown>, userId?: string): Promise<{
+  async proxyVideo(body: Record<string, unknown>, userId?: string, workspaceId?: string): Promise<{
     ok: boolean;
     url?: string;
     status: 'success' | 'processing' | 'failed';
@@ -537,7 +542,7 @@ export class GatewayService {
 
     const model = this.normalizeOpenAiVideoModel((body.model as string) || 'veo');
     if (this.shouldUseMagicHour(model, body.provider as string | undefined)) {
-      return this.proxyVideoMagicHour(body, userId);
+      return this.proxyVideoMagicHour(body, userId, workspaceId);
     }
 
     const provider = this.resolveVideoProvider(body);
@@ -638,7 +643,7 @@ export class GatewayService {
     const url = await this.extractVideoUrl(json);
     if (url) {
       const local = await this.saveVideoFromUrl(url, baseUrl);
-      void this.track('video', { userId, model });
+      void this.track('video', { userId, model, workspaceId });
       return { ok: true, status: 'success', url: local, taskId };
     }
 
@@ -653,6 +658,7 @@ export class GatewayService {
   private async proxyVideoMagicHour(
     body: Record<string, unknown>,
     userId?: string,
+    workspaceId?: string,
   ): Promise<{
     ok: boolean;
     url?: string;
@@ -702,7 +708,7 @@ export class GatewayService {
         return { ok: false, status: 'failed', taskId, message: 'Magic Hour 视频完成但无下载地址' };
       }
       const local = await this.saveVideoFromUrl(remote);
-      void this.track('video', { userId, model });
+      void this.track('video', { userId, model, workspaceId });
       return { ok: true, status: 'success', url: local, taskId };
     }
 
@@ -727,6 +733,7 @@ export class GatewayService {
     taskId: string,
     baseUrlOverride?: string,
     userId?: string,
+    workspaceId?: string,
   ): Promise<{
     ok: boolean;
     url?: string;
@@ -755,8 +762,8 @@ export class GatewayService {
           mh.kind === 'image'
             ? await this.saveRemoteImage(remote, 'mh')
             : await this.saveVideoFromUrl(remote);
-        if (mh.kind === 'video') void this.track('video', { userId });
-        if (mh.kind === 'image') void this.track('image', { userId });
+        if (mh.kind === 'video') void this.track('video', { userId, workspaceId });
+        if (mh.kind === 'image') void this.track('image', { userId, workspaceId });
         return { ok: true, status: 'success', url: local, taskId };
       }
 
@@ -781,7 +788,7 @@ export class GatewayService {
     if (!provider.apiKey) throw new BadRequestException(`${provider.label} 未配置 API Key`);
     const polled = await this.pollVideoTask(provider, taskId);
     if (polled?.status === 'success' && polled.url) {
-      void this.track('video', { userId });
+      void this.track('video', { userId, workspaceId });
     }
     return (
       polled ?? {
@@ -995,7 +1002,7 @@ export class GatewayService {
     return voice;
   }
 
-  async proxyTts(body: Record<string, unknown>, userId?: string): Promise<{
+  async proxyTts(body: Record<string, unknown>, userId?: string, workspaceId?: string): Promise<{
     ok: boolean;
     url: string;
     bytes: number;
@@ -1038,7 +1045,7 @@ export class GatewayService {
             ref_duration: (body.ref_duration as number) ?? cfg.luxTtsRefDuration ?? 5,
           });
           const url = this.saveAudioBuffer(buffer, 'lux');
-          void this.track('tts', { userId, model: onCpu ? 'luxtts-cpu' : 'luxtts' });
+          void this.track('tts', { userId, model: onCpu ? 'luxtts-cpu' : 'luxtts', workspaceId });
           return {
             ok: true,
             url,
@@ -1069,7 +1076,7 @@ export class GatewayService {
         if (probe.available) {
           const { buffer } = await this.voicebox.synthesize(cfg.voiceboxBaseUrl, input, effectiveVoice);
           const url = this.saveAudioBuffer(buffer, 'vb');
-          void this.track('tts', { userId, model: 'voicebox' });
+          void this.track('tts', { userId, model: 'voicebox', workspaceId });
           return {
             ok: true,
             url,
@@ -1107,7 +1114,7 @@ export class GatewayService {
     const buf = Buffer.from(await res.arrayBuffer());
     const ext = format === 'mp3' ? 'mp3' : format;
     const url = this.saveAudioBuffer(buf, 'cloud', ext);
-    void this.track('tts', { userId, model });
+    void this.track('tts', { userId, model, workspaceId });
     return {
       ok: true,
       url,
@@ -1241,6 +1248,7 @@ export class GatewayService {
   async proxyFal(
     body: { model: string; input: Record<string, unknown> },
     userId?: string,
+    workspaceId?: string,
   ): Promise<{ ok: boolean; url?: string; output?: Record<string, unknown> }> {
     const apiKey = this.settings.getRaw().primaryApiKey || '';
     if (!apiKey) throw new BadRequestException('请在设置中配置 Fal.ai API Key（primaryApiKey）');
@@ -1271,7 +1279,7 @@ export class GatewayService {
     }
 
     const json = (await res.json()) as Record<string, unknown>;
-    void this.track('image', { userId, model: `fal:${model}` });
+    void this.track('image', { userId, model: `fal:${model}`, workspaceId });
 
     const imageUrl =
       (json.image as { url?: string })?.url ||
@@ -1290,7 +1298,7 @@ export class GatewayService {
       (json.id as string);
     const status = (json.status as string) || '';
     if (requestId && /inprogress|queued|processing/i.test(status)) {
-      return this.pollFalRequest(model, requestId, apiKey, userId);
+      return this.pollFalRequest(model, requestId, apiKey, userId, workspaceId);
     }
     if (status && /inprogress|queued|processing/i.test(status) && !requestId) {
       throw new ServiceUnavailableException(`Fal 任务已排队但缺少 request_id，无法轮询：${status}`);
@@ -1304,6 +1312,7 @@ export class GatewayService {
     requestId: string,
     apiKey: string,
     userId?: string,
+    workspaceId?: string,
   ): Promise<{ ok: boolean; url?: string; output?: Record<string, unknown> }> {
     for (let i = 0; i < 30; i++) {
       await new Promise((r) => setTimeout(r, 3000));
@@ -1320,7 +1329,7 @@ export class GatewayService {
         (typeof json.url === 'string' ? json.url : undefined);
       if (imageUrl) {
         const saved = await this.saveRemoteImage(imageUrl, 'fal');
-        void this.track('image', { userId, model: `fal:${model}` });
+        void this.track('image', { userId, model: `fal:${model}`, workspaceId });
         return { ok: true, url: saved, output: json };
       }
       const status = (json.status as string) || '';
@@ -1365,6 +1374,7 @@ export class GatewayService {
   async proxyComfy(
     body: { workflow: Record<string, unknown>; baseUrl?: string; prompt?: string },
     userId?: string,
+    workspaceId?: string,
   ): Promise<{ ok: boolean; url?: string; promptId?: string; message?: string }> {
     const baseUrl = this.resolveComfyBaseUrl(body.baseUrl);
     if (!body.workflow || typeof body.workflow !== 'object') {
@@ -1417,7 +1427,7 @@ export class GatewayService {
       if (!existsSync(PATHS.images)) mkdirSync(PATHS.images, { recursive: true });
       const name = `${Date.now()}-comfy-${Math.random().toString(36).slice(2, 8)}.png`;
       writeFileSync(join(PATHS.images, name), Buffer.from(await imgRes.arrayBuffer()));
-      void this.track('image', { userId, model: 'comfyui' });
+      void this.track('image', { userId, model: 'comfyui', workspaceId });
       return {
         ok: true,
         url: `/media/images/${encodeURIComponent(name)}`,

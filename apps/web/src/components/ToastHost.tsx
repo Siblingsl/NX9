@@ -21,10 +21,10 @@ function ToastCard({ item, onDismiss }: { item: ToastItem; onDismiss: () => void
     <div
       className={`flex items-start gap-2 rounded-xl border shadow-panel px-3 py-2.5 min-w-[240px] max-w-sm ${
         item.variant === 'error'
-          ? 'border-warn/30 bg-white'
+          ? 'border-warn/30 bg-surface'
           : item.variant === 'success'
-            ? 'border-ok/30 bg-white'
-            : 'border-line bg-white'
+            ? 'border-ok/30 bg-surface'
+            : 'border-line bg-surface'
       }`}
       role="status"
     >

@@ -53,16 +53,15 @@ export const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
   {
     id: 'tpl-nx9-character-pipeline',
     label: '角色设定 → 出图',
-    description: '角色设定 → 提示词 → 图像生成 → 预览（NX9 默认配方）',
+    description: '角色设定 → 提示词 → 图像生成 → 预览（F-013 更新）',
     category: 'story',
     build() {
-      const a = node('character-sheet', 0, 0, { characterName: '新角色' });
-      const b = node('prompt', 1, 0);
-      const c = node('picture-gen', 2, 0);
-      const d = node('preview-sink', 3, 0);
+      const a = node('script-desk', 0, 0, { playbookStepId: 'script-desk' });
+      const b = node('picture-gen', 1, 0);
+      const c = node('asset-import', 2, 0);
       return {
-        blocks: [a, b, c, d],
-        links: [edge(a.id, b.id), edge(b.id, c.id), edge(c.id, d.id)],
+        blocks: [a, b, c],
+        links: [edge(a.id, b.id), edge(b.id, c.id)],
       };
     },
   },
@@ -72,9 +71,9 @@ export const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
     description: '提示词 → 图像生成 → 结果预览',
     category: 'image',
     build() {
-      const a = node('prompt', 0, 0, { content: 'cinematic portrait, soft lighting' });
+      const a = node('picture-gen', 0, 0, { content: 'cinematic portrait, soft lighting' });
       const b = node('picture-gen', 1, 0);
-      const c = node('preview-sink', 2, 0);
+      const c = node('asset-import', 2, 0);
       return { blocks: [a, b, c], links: [edge(a.id, b.id), edge(b.id, c.id)] };
     },
   },
@@ -85,9 +84,9 @@ export const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
     category: 'video',
     build() {
       const a = node('asset-import', 0, 0, { mediaKind: 'picture' });
-      const b = node('prompt-studio', 0, 1, { studioTab: 'camera', selectedPresetIds: ['cam-dolly-in'] });
+      const b = node('picture-gen', 0, 1, { studioTab: 'camera', selectedPresetIds: ['cam-dolly-in'] });
       const c = node('clip-gen', 1, 0);
-      const d = node('preview-sink', 2, 0);
+      const d = node('asset-import', 2, 0);
       return {
         blocks: [a, b, c, d],
         links: [edge(a.id, c.id), edge(b.id, c.id), edge(c.id, d.id)],
@@ -100,10 +99,10 @@ export const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
     description: '电影感 + 分镜网格 → 切分 → 预览',
     category: 'story',
     build() {
-      const a = node('prompt-studio', 0, 0, { studioTab: 'cinema' });
+      const a = node('picture-gen', 0, 0, { studioTab: 'cinema' });
       const b = node('storyboard-desk', 1, 0, { rows: 3, cols: 3 });
-      const c = node('grid-split', 2, 0, { rows: 3, cols: 3 });
-      const d = node('preview-sink', 3, 0);
+      const c = node('grid-compose', 2, 0, { gridMode: 'split', rows: 3, cols: 3 });
+      const d = node('asset-import', 3, 0);
       return {
         blocks: [a, b, c, d],
         links: [edge(a.id, b.id), edge(b.id, c.id), edge(c.id, d.id)],
@@ -116,10 +115,10 @@ export const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
     description: '风格工坊 + 多角度 → 批量出图（LibTV 角色设定流）',
     category: 'story',
     build() {
-      const a = node('style-lab', 0, 0, { styleLabTab: 'style' });
-      const b = node('prompt-studio', 1, 0, { studioTab: 'angle' });
+      const a = node('reference-board', 0, 0, { styleLabTab: 'style' });
+      const b = node('picture-gen', 1, 0, { studioTab: 'angle' });
       const c = node('picture-gen', 2, 0);
-      const d = node('picture-merge', 3, 0, { direction: 'horizontal' });
+      const d = node('grid-compose', 3, 0, { gridMode: 'compose', direction: 'horizontal' });
       return {
         blocks: [a, b, c, d],
         links: [edge(a.id, c.id), edge(b.id, c.id), edge(c.id, d.id)],
@@ -133,7 +132,7 @@ export const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
     category: 'story',
     build() {
       const a = node('storyboard-desk', 0, 0);
-      const b = node('grid-prompt-reverse', 1, 0, { rows: 3, cols: 3 });
+      const b = node('picture-gen', 1, 0, { rows: 3, cols: 3 });
       const c = node('clip-gen', 2, 0);
       return {
         blocks: [a, b, c],
@@ -192,11 +191,11 @@ export const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
   {
     id: 'tpl-reference-picture',
     label: '参考板生图',
-    description: '参考板 + 角色设定 → 图像生成（§9.4）',
+    description: '参考板 + 角色 → 图像生成 + 连贯性检查（F-035 更新）',
     category: 'story',
     build() {
       const a = node('reference-board', 0, 0);
-      const b = node('character-sheet', 0, 1);
+      const b = node('script-desk', 0, 1, {});
       const c = node('picture-gen', 1, 0);
       const d = node('continuity-check', 2, 0);
       return {
@@ -227,9 +226,9 @@ export const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
     category: 'tool',
     build() {
       const a = node('clip-editor', 0, 0);
-      const b = node('subtitle-burn', 1, 0);
-      const c = node('color-grade', 2, 0);
-      const d = node('preview-sink', 3, 0);
+      const b = node('caption-asr', 1, 0, { captionMode: 'burn' });
+      const c = node('clip-editor', 2, 0, { editorMode: 'grade' });
+      const d = node('asset-import', 3, 0);
       return {
         blocks: [a, b, c, d],
         links: [edge(a.id, b.id), edge(b.id, c.id), edge(c.id, d.id)],
@@ -242,9 +241,9 @@ export const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
     description: '场面调度 → 灯光 → 深度通道 → 生图',
     category: 'tool',
     build() {
-      const a = node('director-desk', 0, 0);
-      const b = node('light-rig', 1, 0);
-      const c = node('depth-pass', 2, 0);
+      const a = node('director-desk', 0, 0, { directorMode: 'blocking' });
+      const b = node('director-desk', 1, 0, { directorMode: 'light' });
+      const c = node('director-desk', 2, 0, { directorMode: 'depth' });
       const d = node('picture-gen', 3, 0);
       return {
         blocks: [a, b, c, d],
@@ -255,12 +254,12 @@ export const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
   {
     id: 'tpl-sclass-seedance',
     label: 'S-Class Seedance 连续镜头',
-    description: '分镜台 → Seedance 连续镜头 → 审阅 → 交付',
+    description: '分镜台 → Seedance 连续镜头 → 导演台审阅 → 交付  (F-035 更新)',
     category: 'story',
     build() {
       const a = node('storyboard-desk', 0, 0);
-      const b = node('clip-gen', 1, 0, { sclassEnabled: true, videoMode: 'chain', model: 'seedance' });
-      const c = node('review-gate', 2, 0);
+      const b = node('clip-gen', 1, 0, { videoMode: 'seedance', model: 'seedance' });
+      const c = node('director-desk', 2, 0, { queueFilter: 'all' });
       const d = node('export-pack', 3, 0);
       return {
         blocks: [a, b, c, d],
@@ -285,16 +284,15 @@ export const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
   {
     id: 'tpl-vertical-episode',
     label: '竖屏单集合成',
-    description: '视频 → 剪辑拼接 → 混音 → 交付打包（竖屏 9:16 流程）',
+    description: '视频 → 智能剪辑 → 交付打包（竖屏 9:16 流程）',
     category: 'video',
     build() {
       const a = node('clip-gen', 0, 0);
-      const b = node('clip-editor', 1, 0, {});
-      const c = node('audio-mix', 2, 0, {});
-      const d = node('export-pack', 3, 0, {});
+      const b = node('clip-editor', 1, 0, { profile: 'drama' });
+      const c = node('export-pack', 2, 0, {});
       return {
-        blocks: [a, b, c, d],
-        links: [edge(a.id, b.id), edge(b.id, c.id), edge(c.id, d.id)],
+        blocks: [a, b, c],
+        links: [edge(a.id, b.id), edge(b.id, c.id)],
       };
     },
   },
@@ -316,13 +314,13 @@ export const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
   {
     id: 'tpl-voice-drama',
     label: '声音剧',
-    description: '对白表 → 多角色配音 → 混音 → 剪辑（完整声音后期链）',
+    description: '对白表 → 多角色配音 → 智能剪辑（含 VO 音轨） → 导出交付',
     category: 'story',
     build() {
       const a = node('script-desk', 0, 0);
       const b = node('sound-gen', 1, 0);
-      const c = node('audio-mix', 2, 0);
-      const d = node('clip-editor', 3, 0);
+      const c = node('clip-editor', 2, 0, { profile: 'voice-drama' });
+      const d = node('export-pack', 3, 0, {});
       return { blocks: [a, b, c, d], links: [edge(a.id, b.id), edge(b.id, c.id), edge(c.id, d.id)] };
     },
   },
@@ -432,7 +430,7 @@ export const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
     category: 'video',
     build() {
       const a = node('clip-gen', 0, 0);
-      const b = node('bridge-clip', 1, 0);
+      const b = node('clip-gen', 1, 0, { videoMode: 'bridge' });
       const c = node('clip-gen', 2, 0);
       const d = node('director-desk', 3, 0, { studioTab: 'deliver' });
       return { blocks: [a, b, c, d], links: [edge(a.id, b.id), edge(b.id, c.id), edge(c.id, d.id)] };
@@ -444,7 +442,7 @@ export const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
     description: '封面制作 → 交付打包（单图封面 + manifest）',
     category: 'image',
     build() {
-      const a = node('thumbnail-maker', 0, 0);
+      const a = node('export-pack', 0, 0);
       const b = node('export-pack', 1, 0);
       return { blocks: [a, b], links: [edge(a.id, b.id)] };
     },
@@ -499,43 +497,47 @@ export const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
     id: 'tpl-core-episode',
     label: '核心成片流水线',
     description:
-      '剧本拆分 → 设定检查 → 分镜台（图像生成 + 3D）→ 导演台批出与审阅 → 视频生成 → 导出',
+      '编剧台 → 分镜台（挂图像生成）→ 导演台批出与审阅 → 视频生成 → 智能剪辑 → 导出交付',
     category: 'story',
     build() {
       const script = node('script-desk', 0, 2, {
-        playbookStepId: 'script-breakdown',
+        playbookStepId: 'script-desk',
         playbookStepIndex: 1,
       });
-      const gate = node('asset-gate', 1, 2, {
-        playbookStepId: 'story-grid',
-        playbookStepIndex: 2,
-      });
-      const desk = node('storyboard-desk', 2.5, 2, {
+      // F-005: asset-gate 已删除，编剧台直接连分镜台
+      const desk = node('storyboard-desk', 2, 2, {
         playbookStepId: 'storyboard-desk',
-        playbookStepIndex: 3,
+        playbookStepIndex: 2,
+        showExecPorts: true,
       });
       const picture = node('picture-gen', 2, 0, {
         playbookStepId: 'storyboard-desk',
-        playbookStepIndex: 3,
+        playbookStepIndex: 2,
+        showExecPorts: true,
       });
-      const director3d = node('director-desk', 3, 0, {
-        playbookStepId: 'storyboard-desk',
+      // 3D 已并入导演台，主链只保留一个导演台节点
+      const directorDesk = node('director-desk', 4, 2, {
+        playbookStepId: 'director-desk',
         playbookStepIndex: 3,
-      });
-      const directorDesk = node('director-desk', 3.5, 2, {
-        playbookStepId: 'keyframe-review',
-        playbookStepIndex: 4,
         queueFilter: 'missing',
         autoOpenReview: true,
         syncStyleToPicture: true,
         studioTab: 'deliver',
+        showExecPorts: false,
       });
       const video = node('clip-gen', 5.5, 2, {
         playbookStepId: 'video-gen',
-        playbookStepIndex: 5,
+        playbookStepIndex: 4,
         videoMode: 'single',
+        showExecPorts: false,
       });
-      const pack = node('export-pack', 6.5, 2, {
+      const editor = node('clip-editor', 7, 2, {
+        playbookStepId: 'smart-edit',
+        playbookStepIndex: 5,
+        profile: 'drama',
+        showExecPorts: false,
+      });
+      const pack = node('export-pack', 8.5, 2, {
         playbookStepId: 'export',
         playbookStepIndex: 6,
         exportMode: 'ffmpeg-episode',
@@ -543,37 +545,40 @@ export const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
       return {
         blocks: [
           script,
-          gate,
           desk,
           picture,
-          director3d,
           directorDesk,
           video,
+          editor,
           pack,
         ],
         links: [
-          {
-            ...edge(script.id, gate.id),
-            targetHandle: 'asset-gate',
-          },
-          {
-            ...edge(gate.id, desk.id),
-            sourceHandle: 'asset-gate',
-          },
-          {
-            ...edge(picture.id, desk.id),
+          // F-006: 数据边必须显式左右口；否则 RF 会落到先渲染的顶侧 exec-picture
+          edge(script.id, desk.id, {
+            sourceHandle: 'prompt',
+            targetHandle: 'prompt',
+          }),
+          // 出图仅挂分镜台能力口；禁止直连导演台旁路
+          edge(picture.id, desk.id, {
             sourceHandle: 'exec-picture',
             targetHandle: 'exec-picture',
-          },
-          {
-            ...edge(director3d.id, desk.id),
-            sourceHandle: 'exec-picture',
-            targetHandle: 'exec-picture',
-          },
-          edge(picture.id, directorDesk.id),
-          edge(desk.id, directorDesk.id),
-          edge(directorDesk.id, video.id),
-          edge(video.id, pack.id),
+          }),
+          edge(desk.id, directorDesk.id, {
+            sourceHandle: 'prompt',
+            targetHandle: 'prompt',
+          }),
+          edge(directorDesk.id, video.id, {
+            sourceHandle: 'picture',
+            targetHandle: 'picture',
+          }),
+          edge(video.id, editor.id, {
+            sourceHandle: 'clip',
+            targetHandle: 'clip',
+          }),
+          edge(editor.id, pack.id, {
+            sourceHandle: 'clip',
+            targetHandle: 'clip',
+          }),
         ],
       };
     },

@@ -1,87 +1,33 @@
+/**
+ * use-upstream-shots — 视频生成等节点的上游镜头消费 hook。
+ *
+ * F-003 SSOT：只消费有连线的上游 storyboard-desk 的 chainStoryboard。
+ * F-004：无入边 → 空列表；禁止回退全局 storyboard.shots。
+ */
 import { useMemo } from 'react';
 import { useEdges, useNodes } from '@xyflow/react';
-import {
-  activeEpisodeShots,
-  gatherUpstream,
-  type StoryboardShot,
-} from '@nx9/shared';
-import { useWorkspaceDocument } from '../../../../../stores/workspace-document';
-
-function isDirectorSourceKind(kind?: string | null): boolean {
-  return kind === 'director-desk';
-}
+import { resolveUpstreamShotsFromGraph } from '@nx9/shared';
 
 /**
  * 视频生成等节点：只消费「有连线」的上游镜头。
  * - 无入边 → 不展示本集镜表
- * - 有入边 → 仅解析连入节点上的镜头 id / 关键帧图匹配 / 导演台本集有关键帧镜
+ * - 有入边 → 仅解析连入节点的 chainStoryboard 中的镜头
  */
 export function useUpstreamShots(blockId: string) {
   const nodes = useNodes();
   const edges = useEdges();
-  const storyboard = useWorkspaceDocument((state) => state.storyboard);
 
-  return useMemo(() => {
-    const incoming = edges.filter(
-      (edge) => edge.target === blockId && nodes.some((node) => node.id === edge.source),
-    );
-    if (incoming.length === 0) {
-      return {
-        hasUpstream: false,
-        shots: [] as StoryboardShot[],
-        shotIds: [] as string[],
-      };
-    }
-
-    const flowBlocks = nodes.map((node) => ({
-      id: node.id,
-      type: node.type ?? 'prompt',
-      position: node.position,
-      data: (node.data ?? {}) as Record<string, unknown>,
-    }));
-    const flowLinks = incoming.map((edge) => ({
-      id: edge.id,
-      source: edge.source,
-      target: edge.target,
-      sourceHandle: edge.sourceHandle ?? undefined,
-      targetHandle: edge.targetHandle ?? undefined,
-    }));
-    const upstream = gatherUpstream(blockId, flowBlocks, flowLinks);
-    const idSet = new Set<string>(upstream.shotIds ?? []);
-
-    const sourceNodes = incoming
-      .map((edge) => nodes.find((node) => node.id === edge.source))
-      .filter((node): node is (typeof nodes)[number] => Boolean(node));
-
-    const hasDirector = sourceNodes.some((node) => isDirectorSourceKind(node.type));
-    if (hasDirector && idSet.size === 0) {
-      for (const shot of activeEpisodeShots(storyboard)) {
-        if (shot.firstFrameAssetId) idSet.add(shot.id);
-      }
-    }
-
-    const pictureUrls = new Set((upstream.pictures ?? []).filter(Boolean));
-    if (pictureUrls.size > 0) {
-      for (const shot of storyboard.shots) {
-        if (
-          (shot.firstFrameAssetId && pictureUrls.has(shot.firstFrameAssetId)) ||
-          (shot.lastFrameAssetId && pictureUrls.has(shot.lastFrameAssetId))
-        ) {
-          idSet.add(shot.id);
-        }
-      }
-    }
-
-    const byId = new Map(storyboard.shots.map((shot) => [shot.id, shot]));
-    const shots = [...idSet]
-      .map((id) => byId.get(id))
-      .filter((shot): shot is StoryboardShot => Boolean(shot))
-      .sort((a, b) => a.index - b.index);
-
-    return {
-      hasUpstream: true,
-      shots,
-      shotIds: shots.map((shot) => shot.id),
-    };
-  }, [nodes, edges, blockId, storyboard]);
+  return useMemo(
+    () =>
+      resolveUpstreamShotsFromGraph(
+        blockId,
+        nodes.map((n) => ({
+          id: n.id,
+          type: n.type,
+          data: (n.data ?? {}) as Record<string, unknown>,
+        })),
+        edges.map((e) => ({ source: e.source, target: e.target })),
+      ),
+    [nodes, edges, blockId],
+  );
 }

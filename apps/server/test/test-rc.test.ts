@@ -23,4 +23,16 @@ describe('TEST-RC — Recipe Catalog (pure function tests)', () => {
 
     expect(templates.length).toBeGreaterThanOrEqual(1);
   });
+
+  it('TEST-RC-002: 全部模板无迁移味 — build() 产物无 migratedFrom 字段', () => {
+    for (const tpl of WORKFLOW_TEMPLATES) {
+      const { blocks } = tpl.build();
+      for (const block of blocks) {
+        expect(
+          (block.data as Record<string, unknown>).migratedFrom,
+          `模板「${tpl.id}」的节点 ${block.id}(${block.type}) 仍依赖 kind 迁移`
+        ).toBeUndefined();
+      }
+    }
+  });
 });

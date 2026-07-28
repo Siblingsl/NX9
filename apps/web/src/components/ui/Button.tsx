@@ -10,7 +10,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
     const base = 'inline-flex items-center justify-center gap-1.5 font-medium rounded-xl transition-colors disabled:opacity-40 disabled:cursor-not-allowed';
     const variants: Record<string, string> = {
       primary: 'bg-brand text-white hover:bg-brand/90',
-      secondary: 'border border-line bg-white text-ink/70 hover:border-brand/30 hover:text-brand',
+      secondary: 'border border-line bg-surface text-ink/70 hover:border-brand/30 hover:text-brand',
       ghost: 'text-ink/50 hover:bg-surface hover:text-ink/80',
       danger: 'bg-error text-white hover:bg-error/90',
     };

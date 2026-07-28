@@ -29,7 +29,7 @@ function ConfigSelect({
         value={value}
         onChange={(e) => onChange(e.target.value)}
         onMouseDown={stop}
-        className="appearance-none rounded-full border border-line/50 bg-white pl-2.5 pr-6 py-1 text-[10px] text-ink/70 cursor-pointer hover:border-brand/30 hover:text-brand focus:outline-none focus:border-brand/40 transition-colors"
+        className="appearance-none rounded-full border border-line/50 bg-surface pl-2.5 pr-6 py-1 text-[10px] text-ink/70 cursor-pointer hover:border-brand/30 hover:text-brand focus:outline-none focus:border-brand/40 transition-colors"
       >
         {options.map((o) => (
           <option key={o.id} value={o.id}>
@@ -146,7 +146,7 @@ export function GenConfigPillBar({ blockId, kind, embedded = false }: GenConfigP
             onClick={() => setSeedOpen((v) => !v)}
             className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] border transition-colors ${
               seedOpen || data.seed != null
-                ? 'bg-white border-line/60 text-ink/70'
+                ? 'bg-surface border-line/60 text-ink/70'
                 : 'bg-transparent border-line/40 text-ink/45 hover:border-line/60 hover:text-ink/60'
             }`}
           >
@@ -156,7 +156,7 @@ export function GenConfigPillBar({ blockId, kind, embedded = false }: GenConfigP
           </button>
           {seedOpen && (
             <div
-              className="absolute left-0 bottom-full mb-1.5 z-20 w-40 rounded-xl border border-line/60 bg-white shadow-panel p-2"
+              className="absolute left-0 bottom-full mb-1.5 z-20 w-40 rounded-xl border border-line/60 bg-surface shadow-panel p-2"
               onMouseDown={stop}
             >
               <input

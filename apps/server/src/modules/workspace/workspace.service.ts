@@ -1,6 +1,6 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import { existsSync, readdirSync, statSync } from 'fs';
-import { join } from 'path';
+import { existsSync, readdirSync, statSync, unlinkSync, renameSync, mkdirSync } from 'fs';
+import { join, basename } from 'path';
 import type { WorkspacePayload, WorkspaceSummary, WorkspaceVisibility } from '@nx9/shared';
 import { computeWorkspaceAssetCount, normalizeWorkspacePayload } from '@nx9/shared';
 import { JsonStoreService } from '../../common/json-store.service';
@@ -67,7 +67,14 @@ export class WorkspaceService {
     const list = this.store.readJson<WorkspaceSummary[]>(PATHS.workspaceIndex, []);
     const items =
       Array.isArray(list) && list.length > 0 ? list : this.recoverFromFiles();
-    return ownerId ? items.filter((w) => w.ownerId === ownerId || !w.ownerId) : items;
+    const active = items.filter((w: any) => !w.deletedAt);
+    return ownerId ? active.filter((w) => w.ownerId === ownerId || !w.ownerId) : active;
+  }
+
+  /** 含已软删条目（内部用） */
+  private listJsonAll(): WorkspaceSummary[] {
+    const list = this.store.readJson<WorkspaceSummary[]>(PATHS.workspaceIndex, []);
+    return Array.isArray(list) && list.length > 0 ? list : this.recoverFromFiles();
   }
 
   async list(ownerId?: string): Promise<WorkspaceSummary[]> {
@@ -96,7 +103,7 @@ export class WorkspaceService {
       nextBlockIndex: 1,
     });
     this.store.writeJson(this.workspaceFile(id), payload);
-    const list = this.listJson();
+    const list = this.listJsonAll();
     list.push(item);
     this.store.writeJson(PATHS.workspaceIndex, list);
     return item;
@@ -136,7 +143,7 @@ export class WorkspaceService {
     }
 
     this.store.writeJson(file, normalized);
-    const list = this.listJson();
+    const list = this.listJsonAll();
     const idx = list.findIndex((w) => w.id === id);
     const now = Date.now();
     const updated: WorkspaceSummary = {
@@ -149,6 +156,7 @@ export class WorkspaceService {
       createdAt: idx >= 0 ? list[idx].createdAt : this.createdAtFromId(id, now),
       updatedAt: now,
       ownerId: idx >= 0 ? list[idx].ownerId : undefined,
+      deletedAt: (list[idx] as any)?.deletedAt,
     };
     if (idx >= 0) list[idx] = updated;
     else list.push(updated);
@@ -158,7 +166,7 @@ export class WorkspaceService {
 
   async rename(id: string, title: string): Promise<WorkspaceSummary> {
     if (this.usePrisma()) return this.prismaStore.rename(id, title);
-    const list = this.listJson();
+    const list = this.listJsonAll();
     const idx = list.findIndex((w) => w.id === id);
     if (idx < 0) throw new NotFoundException(`Workspace ${id} not found`);
     list[idx] = { ...list[idx], title: title.trim() || list[idx].title, updatedAt: Date.now() };
@@ -167,13 +175,65 @@ export class WorkspaceService {
   }
 
   async remove(id: string): Promise<void> {
+    // F-010: 改为软删除 — 移入回收站
     if (this.usePrisma()) return this.prismaStore.remove(id);
+    const list = this.listJsonAll();
+    const idx = list.findIndex((w) => w.id === id);
+    if (idx < 0) return;
+    list[idx] = { ...list[idx], deletedAt: Date.now(), updatedAt: Date.now() } as WorkspaceSummary & { deletedAt: number };
+    this.store.writeJson(PATHS.workspaceIndex, list);
+  }
+
+  async listTrash(): Promise<WorkspaceSummary[]> {
+    await this.purgeExpiredTrash();
+    if (this.usePrisma()) return this.prismaStore.listTrash();
+    const all = this.listJsonAll();
+    const now = Date.now();
+    const THIRTY_DAYS = 30 * 24 * 60 * 60 * 1000;
+    return all
+      .filter((w: any) => w.deletedAt)
+      .map((w: any) => ({ ...w, deletedAt: w.deletedAt as number }))
+      .filter((w) => now - w.deletedAt < THIRTY_DAYS)
+      .sort((a, b) => b.deletedAt - a.deletedAt);
+  }
+
+  /** F-010: 清理过期回收站项目（≥30天） */
+  async purgeExpiredTrash(): Promise<number> {
+    if (this.usePrisma()) return this.prismaStore.purgeExpiredTrash();
+    const THIRTY_DAYS = 30 * 24 * 60 * 60 * 1000;
+    const now = Date.now();
+    const all = this.listJsonAll();
+    const expired = all.filter((w: any) => w.deletedAt && now - w.deletedAt >= THIRTY_DAYS);
+    for (const item of expired) {
+      const file = this.workspaceFile(item.id);
+      if (existsSync(file)) {
+        unlinkSync(file);
+      }
+    }
+    const remaining = all.filter((w: any) => !w.deletedAt || now - w.deletedAt < THIRTY_DAYS);
+    this.store.writeJson(PATHS.workspaceIndex, remaining);
+    return expired.length;
+  }
+
+  async restore(id: string): Promise<WorkspaceSummary> {
+    if (this.usePrisma()) return this.prismaStore.restore(id);
+    const list = this.listJsonAll();
+    const idx = list.findIndex((w) => w.id === id);
+    if (idx < 0) throw new NotFoundException(`Workspace ${id} not found in trash`);
+    const item = list[idx];
+    delete (item as any).deletedAt;
+    list[idx] = { ...item, updatedAt: Date.now() };
+    this.store.writeJson(PATHS.workspaceIndex, list);
+    return list[idx];
+  }
+
+  async purge(id: string): Promise<void> {
+    if (this.usePrisma()) return this.prismaStore.purge(id);
     const file = this.workspaceFile(id);
     if (existsSync(file)) {
-      const { unlinkSync } = require('fs') as typeof import('fs');
       unlinkSync(file);
     }
-    const list = this.listJson().filter((w) => w.id !== id);
+    const list = this.listJsonAll().filter((w) => w.id !== id);
     this.store.writeJson(PATHS.workspaceIndex, list);
   }
 

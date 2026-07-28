@@ -1,9 +1,11 @@
 import {
   bindStoryboardShotAssets,
+  buildChainStoryboardPayload,
   flattenScriptBreakdownShots,
   isScreenplayPackage,
   screenplayFullText,
   storyboardShotsFromScriptBreakdown,
+  type ChainStoryboardPayload,
   type ScreenplayPackage,
   type ScriptBreakdownPayload,
   type ScriptBreakdownShot,
@@ -220,9 +222,24 @@ export function applyDeskBreakdown(
   applyScriptBreakdownPayload(blockId, payload, { syncAssets: false });
   projectBreakdownToWorkspace(payload);
   const flat = flattenScriptBreakdownShots(payload);
+  // F-003: 构建链镜表并写入节点 data.chainStoryboard
+  const shots = storyboardShotsFromScriptBreakdown(payload);
+  const chainPayload: ChainStoryboardPayload = buildChainStoryboardPayload(undefined, {
+    title: payload.title,
+    episodes: payload.episodes.map((ep) => ({
+      id: ep.id,
+      index: ep.index,
+      title: ep.title,
+      status: 'draft' as const,
+      logline: ep.logline,
+    })),
+    shots,
+    activeEpisodeId: payload.episodes[0]?.id ?? null,
+  });
   updateNodeData(blockId, {
     status: 'success',
     scriptBreakdown: payload,
+    chainStoryboard: chainPayload,
     content: `${payload.title} · ${payload.episodes.length} 集 · ${flat.length} 镜`,
     output: flat.map((s) => s.imagePrompt).filter(Boolean).join('\n\n'),
     meta: {

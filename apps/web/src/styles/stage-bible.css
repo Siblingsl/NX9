@@ -9,7 +9,7 @@
   --sb-faint: rgba(26, 24, 20, 0.4);
   --sb-line: rgba(26, 24, 20, 0.1);
   --sb-panel: rgba(26, 24, 20, 0.04);
-  --sb-panel-2: #fff;
+  --sb-panel-2: var(--nx9-bg);
   --sb-accent: #0d9488;
   --sb-accent-soft: rgba(13, 148, 136, 0.1);
   --sb-warn: #c2410c;
@@ -176,7 +176,7 @@
   gap: 6px;
   border-radius: 10px;
   border: 1px solid var(--sb-line);
-  background: #fff;
+  background: var(--sb-panel-2);
   color: var(--sb-ink);
   font-size: 12px;
   font-weight: 600;
@@ -264,7 +264,7 @@
   width: 100%;
   border-radius: 10px;
   border: 1px solid var(--sb-line);
-  background: #fff;
+  background: var(--sb-panel-2);
   color: var(--sb-ink);
   font-size: 12px;
   padding: 8px 10px;
@@ -311,7 +311,7 @@
 .sb-chip {
   border-radius: 999px;
   border: 1px solid var(--sb-line);
-  background: #fff;
+  background: var(--sb-panel-2);
   color: var(--sb-muted);
   font-size: 11px;
   padding: 4px 10px;
@@ -333,7 +333,7 @@
   font-size: 11px;
   color: var(--sb-faint);
   line-height: 1.5;
-  background: #fff;
+  background: var(--sb-panel-2);
 }
 
 .sb-section-title {
@@ -404,7 +404,7 @@
 
 .nx9-screen-modal__panel.sb-modal .nx9-screen-modal__chrome {
   border-bottom: 1px solid rgba(26, 24, 20, 0.08) !important;
-  background: #fff !important;
+  background: var(--sb-panel-2) !important;
 }
 
 .nx9-screen-modal__panel.sb-modal .nx9-screen-modal__title {
@@ -418,7 +418,7 @@
 
 .nx9-screen-modal__panel.sb-modal .nx9-screen-modal__close {
   border-color: rgba(26, 24, 20, 0.1) !important;
-  background: #fff !important;
+  background: var(--sb-panel-2) !important;
   color: rgba(26, 24, 20, 0.55) !important;
 }
 
@@ -449,7 +449,7 @@
 .nx9-stage-card .sb .sb-input,
 .nx9-stage-card .sb .sb-textarea,
 .nx9-stage-card .sb .sb-select {
-  background: #fff;
+  background: var(--sb-panel-2);
   color: #1a1814;
   border-color: rgba(26, 24, 20, 0.12);
 }

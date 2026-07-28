@@ -5,6 +5,7 @@ import { useFlowCommands } from '../stores/flow-commands';
 import { useFlowRuntime } from '../stores/flow-runtime';
 import { useWorkspaceDocument } from '../stores/workspace-document';
 import { useDirector3dUi } from '../stores/director3d-ui';
+import { useActivityLog } from '../stores/activity-log';
 import { spawnCameraBlocksForShots } from './camera-block-spawn';
 import {
   approveAllKeyframes,
@@ -33,8 +34,13 @@ export function openLegacyRailTab(tab: string) {
 export function executeStepAction(action: PlaybookStepAction, ctx: PlaybookReadinessContext): void {
   switch (action.type) {
     case 'spawn_camera_blocks': {
-      const shots = useWorkspaceDocument.getState().storyboard.shots;
-      spawnCameraBlocksForShots(action.mode, shots);
+      // F-003/F-004: 仅用链镜表；未注入则不回退全局
+      const shots = ctx.chainShots !== undefined ? ctx.chainShots : [];
+      if (shots.length === 0) {
+        useActivityLog.getState().append('无上游链镜表，已跳过机位生成（F-004）');
+        break;
+      }
+      spawnCameraBlocksForShots(action.mode, shots as any);
       break;
     }
     case 'open_rail': {
@@ -108,7 +114,12 @@ export function executeStepAction(action: PlaybookStepAction, ctx: PlaybookReadi
           void batchGenerateKeyframesFromShots();
           break;
         case 'batch_videos':
-          void batchGenerateVideosFromShots();
+          // F-004: 无链镜表时阻断，禁止误批全局
+          if (!ctx.chainShots || ctx.chainShots.length === 0) {
+            useActivityLog.getState().append('请连接分镜台/导演台后再批出视频（F-004）');
+            break;
+          }
+          void batchGenerateVideosFromShots(undefined, false, undefined, ctx.chainShots as any);
           break;
         case 'sync_preview':
           syncPreviewFromStoryboard();

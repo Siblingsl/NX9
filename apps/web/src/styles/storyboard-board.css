@@ -4,7 +4,7 @@
   --sb-ink: #1a1a1a;
   --sb-line: #2a241c;
   --sb-paper: #f3f1ec;
-  --sb-cell: #ffffff;
+  --sb-cell: var(--nx9-bg);
   --sb-muted: #6b6560;
   /* 导引色：红动作 / 蓝机位 / 橙照明 / 绿构图 / 紫情绪 / 黑说明 */
   --sb-action: #e11d48;

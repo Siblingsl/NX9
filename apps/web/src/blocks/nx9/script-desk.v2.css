@@ -759,6 +759,28 @@
 .sd2-diag--warning,
 .sd2-diag--error { border-color: color-mix(in srgb, var(--sd2-warn) 40%, var(--sd2-line)); color: var(--sd2-warn); }
 
+.sd2-diag--clickable {
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.sd2-diag--clickable:hover {
+  background: color-mix(in srgb, var(--sd2-accent) 8%, var(--desk-bg));
+  border-color: var(--sd2-accent-line);
+}
+
+.sd2-bible-card--highlight {
+  border-color: var(--sd2-accent-line) !important;
+  background: color-mix(in srgb, var(--sd2-accent) 10%, var(--desk-bg)) !important;
+  box-shadow: 0 0 0 1px var(--sd2-accent-line);
+}
+
+.sd2-diag-actions {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 10px;
+  flex-wrap: wrap;
+}
+
 /* ── 底栏 ── */
 
 .sd2-bottom {

@@ -102,4 +102,8 @@ export interface AppSettings {
    * - cpu：仍用 LuxTTS CPU 推理（较慢，完全离线）
    */
   luxTtsNoGpuFallback?: 'cpu' | 'cloud';
+  /** BGM 音乐生成 Provider：suno | udio | elevenlabs */
+  bgmProvider?: string;
+  /** BGM 音乐生成 API Key */
+  bgmApiKey?: string;
 }

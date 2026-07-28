@@ -51,7 +51,7 @@ export const PromptComposer = memo(function PromptComposer({
   const showGen = isPromptBarGenKind(kind);
 
   return (
-    <div className="rounded-xl border border-line dark:border-[#333] bg-white dark:bg-[#1a1a1a] overflow-hidden">
+    <div className="rounded-xl border border-line dark:border-[#333] bg-surface dark:bg-[#1a1a1a] overflow-hidden">
       <AssetMentionInput
         as="textarea"
         value={value}

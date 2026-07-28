@@ -1,10 +1,11 @@
-import { Body, Controller, Get, Param, Post, Query, Res } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Post, Query, Res } from '@nestjs/common';
 import { Response } from 'express';
 import type { StoryboardShot, TimelinePayload } from '@nx9/shared';
 import { buildTimelineFromShots, timelineToHyperFramesHtml } from '@nx9/shared';
 import { AnalyzeService } from './analyze.service';
 import { MontageService } from './montage.service';
 import { HyperframesService, type RenderResult } from './hyperframes.service';
+import { RemotionRenderer } from './remotion.renderer';
 import { WorkspaceService } from '../workspace/workspace.service';
 
 interface RemotionTask {
@@ -23,6 +24,7 @@ export class MontageController {
   constructor(
     private readonly montage: MontageService,
     private readonly analyze: AnalyzeService,
+    private readonly remotionRenderer: RemotionRenderer,
     private readonly hyperframes: HyperframesService,
     private readonly workspace: WorkspaceService,
   ) {}
@@ -189,23 +191,24 @@ export class MontageController {
     return { ok: true, ...status };
   }
 
+  @Delete('tasks/:taskId')
+  cancelTask(@Param('taskId') taskId: string) {
+    const cancelled = this.hyperframes.cancelTask(taskId);
+    return { ok: cancelled, message: cancelled ? '已取消' : '任务未找到' };
+  }
+
   @Post('render-remotion')
-  renderRemotion(@Body() body: { timeline: TimelinePayload; codec?: string }) {
-    const taskId = `remotion-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    const task: RemotionTask = {
-      taskId,
-      status: 'queued',
-      progress: 0,
-      message: 'Remotion 渲染已入队（P2 功能，当前为异步任务骨架）',
-      createdAt: Date.now(),
-    };
-    remotionTasks.set(taskId, task);
-    return { ok: true, taskId, status: 'queued', message: task.message };
+  async renderRemotion(@Body() body: { timeline: TimelinePayload; codec?: string }) {
+    const { taskId, status } = await this.remotionRenderer.submit(
+      body.timeline,
+      body.codec ?? 'h264',
+    );
+    return { ok: true, taskId, status, message: 'Remotion 渲染已入队' };
   }
 
   @Get('remotion-tasks/:taskId')
   getRemotionTaskStatus(@Param('taskId') taskId: string) {
-    const task = remotionTasks.get(taskId);
+    const task = this.remotionRenderer.getStatus(taskId);
     if (!task) return { ok: false, message: 'task not found' };
     return { ok: true, ...task };
   }

@@ -24,7 +24,7 @@ export function Drawer({ open, onClose, title, children, side = 'right' }: Drawe
   return (
     <div className="fixed inset-0 z-40 bg-black/20" onClick={onClose}>
       <div
-        className={`absolute top-0 ${side === 'right' ? 'right-0' : 'left-0'} h-full w-[360px] bg-white shadow-xl border-l border-line flex flex-col`}
+        className={`absolute top-0 ${side === 'right' ? 'right-0' : 'left-0'} h-full w-[360px] bg-surface shadow-xl border-l border-line flex flex-col`}
         onClick={(e) => e.stopPropagation()}
       >
         {title && (

@@ -7,7 +7,9 @@ import {
   resolveAccepts,
   resolveEmits,
   resolveVerticalSockets,
+  type UpstreamPolicy,
 } from '@nx9/shared';
+import { UpstreamPolicySelect } from './UpstreamPolicySelect';
 import { Loader2 } from 'lucide-react';
 import { useStageDeckFlag } from '../../stores/stage-deck-flag';
 import { SideSocketRails, VerticalSocketRails } from './NodeSockets';
@@ -63,7 +65,8 @@ export const BlockShell = memo(function BlockShell({
   const verticalBottom = verticalSockets.filter((s) => s.position === 'bottom');
   const hasExecPorts = verticalSockets.length > 0;
   const configuredShowExecPorts = (data as { showExecPorts?: boolean }).showExecPorts;
-  const showExecPorts = configuredShowExecPorts ?? hasExecPorts;
+  // F-006: 默认仅左右数据口；上下能力口需显式开启
+  const showExecPorts = configuredShowExecPorts ?? false;
   const status = (data as { status?: string }).status;
   const blockIndex = (data as { blockIndex?: number }).blockIndex;
   const hideBlockIndex = useStageDeckFlag((s) => s.isEnabled());
@@ -108,12 +111,13 @@ export const BlockShell = memo(function BlockShell({
         execPortsVisible && verticalBottom.length > 0 ? 'has-ports-bottom' : ''
       }`}
     >
+      <SideSocketRails accepts={accepts} emits={emits} hidden={hideSockets} />
+      {/* F-006: 左右口先于上下口，避免无 handle 的边默认挂到顶侧 exec */}
       <VerticalSocketRails
         top={verticalTop}
         bottom={verticalBottom}
         hidden={!execPortsVisible}
       />
-      <SideSocketRails accepts={accepts} emits={emits} hidden={hideSockets} />
 
       <div className="nx9-stage-card__surface">
         <div className="nx9-stage-card__accent" style={{ background: accent }} aria-hidden />
@@ -143,6 +147,12 @@ export const BlockShell = memo(function BlockShell({
         <div className="nx9-stage-card__body nodrag nopan nowheel nx9-stage-card-fallback">
           {children}
         </div>
+        <UpstreamPolicySelect
+          nodeId={id}
+          upstreamPolicy={(data as any)?.upstreamPolicy as UpstreamPolicy | undefined}
+          primarySourceId={(data as any)?.primarySourceId as string | null | undefined}
+          onChange={(policyData) => updateNodeData(id, policyData)}
+        />
       </div>
     </div>
   );

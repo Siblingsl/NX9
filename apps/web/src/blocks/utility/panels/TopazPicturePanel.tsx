@@ -77,7 +77,7 @@ function TopazPictureBlock(props: NodeProps) {
             <select
               value={model}
               onChange={(e) => updateNodeData(props.id, { model: e.target.value })}
-              className="w-full rounded border border-line px-1 py-0.5 mt-0.5 bg-white"
+              className="w-full rounded border border-line px-1 py-0.5 mt-0.5 bg-surface"
             >
               <option value="std">Standard</option>
               <option value="fidelity">High Fidelity</option>

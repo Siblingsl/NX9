@@ -86,6 +86,9 @@ export {
   resolveStoryboardVideoVersions,
   appendStoryboardVideoVersion,
   adoptStoryboardVideoVersion,
+  approveStoryboardVideoShot,
+  rejectStoryboardVideoShot,
+  resolveVideoStatusBadge,
   appendStoryboardReviewEvent,
   appendEpisodeExportRecord,
 } from './types/storyboard';
@@ -292,6 +295,12 @@ export type { TimelineClip, TimelineTrack, TimelinePayload, TimelineAspect, Time
 export { migrateTimelinePayload } from './utils/timeline-migrate';
 export { FIXTURE_TIMELINE_V2, FIXTURE_SHOTS_FOR_TIMELINE } from './utils/fixtures-timeline';
 export {
+  parseTimelineDraft,
+  countTimelineClips,
+  hasEffectiveTimeline,
+  type TimelineDraftRaw,
+} from './utils/timeline-effective';
+export {
   timelineToHyperFramesVars,
   timelineToHyperFramesHtml,
   listHyperFramesTemplates,
@@ -406,6 +415,7 @@ export {
   migrateBlockKind,
   migrateBlockKinds,
   stripReviewGateFromGraph,
+  stripAssetGateFromGraph,
   getBlockKindMigrationTarget,
   isDeprecatedBlockKind,
   type MigratableNode,
@@ -424,6 +434,11 @@ export {
   EXEC_3D_HANDLES,
   VERTICAL_SOCKETS,
   resolveVerticalSockets,
+  isExecPortsEnabled,
+  resolveVisibleVerticalSockets,
+  isExecHandle,
+  validateConnectionWithHandles,
+  normalizeDataEdgeHandlesAwayFromExec,
   isStoryboardExecLink,
   isDirector3dDeskLink,
   isStoryboardPreviewHostKind,
@@ -546,6 +561,23 @@ export {
   type AssetLibraryItem,
 } from './utils/asset-library';
 export {
+  ASSET_TRASH_RETENTION_MS,
+  isAssetTrashed,
+  isAssetActive,
+  softDeleteAsset,
+  restoreAsset,
+  filterActiveAssets,
+  filterTrashedAssets,
+  purgeExpiredAssets,
+  purgeAssetById,
+  softDeleteAssetById,
+  restoreAssetById,
+  daysRemainingInTrash,
+  type SoftDeletable,
+  type AssetTrashKind,
+  type AssetTrashEntry,
+} from './utils/asset-trash';
+export {
   resolveBlockCharacters,
   enrichPromptWithCharacters,
   characterPromptSuffix,
@@ -580,6 +612,119 @@ export {
 } from './utils/playbook-step-visual';
 export { MAX_ENV_REFERENCE_IMAGES } from './types/environment';
 
+export type {
+  ChainStoryboardPayload,
+} from './utils/chain-storyboard';
+export {
+  readChainStoryboard,
+  buildChainStoryboardPayload,
+  patchChainShot,
+  activeChainEpisodeShots,
+  chainHasShots,
+  migrateGlobalToChainStoryboard,
+} from './utils/chain-storyboard';
+export {
+  resolveUpstreamShotsFromGraph,
+  type UpstreamShotNode,
+  type UpstreamShotEdge,
+  type ResolveUpstreamShotsResult,
+} from './utils/resolve-upstream-shots';
+export {
+  extractReferenceConstraints,
+  constraintsToPromptSuffix,
+  resolveCompositionTemplate,
+  buildConstrainedPrompt,
+  type ReferenceConstraint,
+  type CompositionTemplate,
+  BUILTIN_COMPOSITION_TEMPLATES,
+} from './utils/constraint-assembler';
+export {
+  runConsistencyChecks,
+  type ConsistencyCheckItem,
+} from './utils/script-consistency';
+export {
+  resolveRunLabel,
+  type RunLabelDict,
+} from './utils/run-labels';
+export {
+  UTILITY_BLOCKS,
+  applyShotReviewFromReport,
+  type UtilityBlockDef,
+} from './utils/block-utility-link';
+export {
+  ECOM_IMAGE_SPECS,
+  ECOM_VIDEO_SPECS,
+  ECOM_ALL_SPECS,
+  lookupEcomSpec,
+  buildEcomPackDescription,
+  type EcomSpec,
+} from './utils/ecom-specs';
+export {
+  validatePoseCommand,
+  poseCommandSummary,
+  type Director3dPoseCommand,
+  type Director3dCharacterPose,
+  type Director3dCameraPose,
+} from './utils/director3d-pose-schema';
+export {
+  resolveUpstreamSources,
+  mergeUpstreamData,
+  type UpstreamPolicy,
+  type UpstreamSource,
+} from './utils/upstream-policy';
+export {
+  canModifyLibraryItem,
+  canCopyFromPublic,
+  checkLibraryAccess,
+  setLibraryAclConfig,
+  getLibraryAclConfig,
+  type LibraryScope,
+} from './utils/library-acl';
+export {
+  CLIP_GEN_MODE_CONFIGS,
+  lookupClipGenMode,
+  isClipGenModeAvailable,
+  type ClipGenMode,
+  type ClipGenModeConfig,
+} from './utils/seedance-bridge';
+export {
+  CAMERA_PRESETS,
+  lookupCameraPreset,
+  type CameraPreset,
+} from './data/camera-presets';
+export {
+  createHyperframesJobState,
+  submitHyperframesJob,
+  startPollingHyperframes,
+  updateHyperframesProgress,
+  completeHyperframesJob,
+  failHyperframesJob,
+  cancelHyperframesJob,
+  canRetryHyperframes,
+  hyperframesJobSummary,
+  type HyperframesJobState,
+  type HyperframesJobStatus,
+} from './utils/hyperframes-job-state';
+export {
+  createEpisodeQueue,
+  queueNextEpisode,
+  queueMarkSuccess,
+  queueMarkError,
+  queueSkipEpisode,
+  queueAdvance,
+  queuePause,
+  queueResume,
+  queueCancel,
+  queueSummary,
+  type EpisodeQueueState,
+  type QueueProgress,
+} from './utils/episode-breakdown-queue';
+export {
+  resolveMentionsForPrompt,
+  buildPromptWithReferences,
+  type MentionRef,
+} from './utils/mention-resolver';
+
 export {
   evaluatePlaybookStep,
   resolveNextStep,
@@ -605,6 +750,9 @@ export {
   has_character_bibles,
   has_camera_blocks,
   has_keyframes,
+  has_reference_board,
+  has_viral_output,
+  has_timeline_draft,
   consistency_resolved,
   export_ready,
 } from './utils/playbook-readiness';
@@ -690,8 +838,17 @@ export {
   lookupPictureModel,
   type PictureGenModelDef,
 } from './data/gen-models';
-export { PERF, resolvePerfTier } from './constants/perf-thresholds';
-export type { PerfTier } from './constants/perf-thresholds';
+export {
+  PERF,
+  resolvePerfTier,
+  resolvePerfToast,
+  perfTierLabel,
+} from './constants/perf-thresholds';
+export type {
+  PerfTier,
+  PerfToastReason,
+  PerfToastDecision,
+} from './constants/perf-thresholds';
 export {
   LINE_ART_SUFFIX,
   buildLineArtGridPrompt,
@@ -761,3 +918,27 @@ export {
   LEXICON,
   BANNED_TERMS,
 } from './i18n/user-lexicon';
+
+// F-015: 导出清单
+export {
+  shotsToManifestRows,
+  manifestToCsv,
+  manifestToHtml,
+  manifestToPdf,
+  recoverExportFromHistory,
+  type ManifestRow,
+} from './utils/export-manifest';
+
+// F-034: 声音剧编排
+export {
+  mapVoiceLinesToShots,
+  buildVoiceDramaTimeline,
+} from './utils/voice-drama-orchestrator';
+
+// F-037: 资产库 Bible→定妆/场景图
+export {
+  buildBibleImagePrompt,
+  buildBibleImagePatch,
+  type AssetBibleImageRequest,
+  type AssetBibleImageResult,
+} from './utils/asset-bible-image';

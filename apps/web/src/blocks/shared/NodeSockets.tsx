@@ -6,17 +6,20 @@ import {
   type VerticalSocketSpec,
 } from '@nx9/shared';
 
-/** 左右数据口：每侧仅 1 个（主类型），避免一堆色点 */
+/** 左右数据口：主类型可见；其余 kind 仅作 RF 锚点（管线边可能指定 picture/clip 等） */
 export const SideSocketHandle = memo(function SideSocketHandle({
   kind,
   type,
   id,
   hidden,
+  ghost,
 }: {
   kind: SocketKind;
   type: 'source' | 'target';
   id?: string;
   hidden?: boolean;
+  /** 不可见、不可点：仅让 React Flow 能解析已有边的 handle id */
+  ghost?: boolean;
 }) {
   if (hidden) return null;
   return (
@@ -24,9 +27,16 @@ export const SideSocketHandle = memo(function SideSocketHandle({
       type={type}
       position={type === 'target' ? Position.Left : Position.Right}
       id={id ?? kind}
-      className="nx9-socket nx9-socket--side"
-      style={{ background: SOCKET_COLORS[kind], top: '50%' }}
-      title={kind}
+      className={`nx9-socket nx9-socket--side${ghost ? ' nx9-socket--anchor' : ''}`}
+      style={{
+        background: ghost ? 'transparent' : SOCKET_COLORS[kind],
+        top: '50%',
+        ...(ghost
+          ? { opacity: 0, pointerEvents: 'none' as const, border: 'none', boxShadow: 'none' }
+          : null),
+      }}
+      title={ghost ? undefined : kind}
+      aria-hidden={ghost || undefined}
     />
   );
 });
@@ -94,18 +104,27 @@ export function SideSocketRails({
 }) {
   if (hidden) return null;
   // 每侧只露主类型一口：兼容性仍由 validateLink(节点类型) 判定
+  // 次要 kind 挂不可见锚点，避免管线边 targetHandle=picture|clip 触发 RF #008
   const inKind = accepts[0];
   const outKind = emits[0];
+  const anchorTargets = accepts.slice(1);
+  const anchorSources = emits.slice(1);
   return (
     <>
-      {inKind && (
+      {(inKind || anchorTargets.length > 0) && (
         <div className="nx9-stage-card__ports nx9-stage-card__ports--left">
-          <SideSocketHandle kind={inKind} type="target" />
+          {inKind && <SideSocketHandle kind={inKind} type="target" />}
+          {anchorTargets.map((kind) => (
+            <SideSocketHandle key={`in-${kind}`} kind={kind} type="target" ghost />
+          ))}
         </div>
       )}
-      {outKind && (
+      {(outKind || anchorSources.length > 0) && (
         <div className="nx9-stage-card__ports nx9-stage-card__ports--right">
-          <SideSocketHandle kind={outKind} type="source" />
+          {outKind && <SideSocketHandle kind={outKind} type="source" />}
+          {anchorSources.map((kind) => (
+            <SideSocketHandle key={`out-${kind}`} kind={kind} type="source" ghost />
+          ))}
         </div>
       )}
     </>

@@ -8,6 +8,12 @@ import type { EpisodeMeta, StoryboardShot } from '../types/storyboard';
 import { enrichPromptWithCharacters } from './character-prompt';
 import { enrichPromptWithEnvironment } from './environment-prompt';
 import { buildLineArtShotPrompt } from './line-art-prompt';
+import {
+  resolveCompositionTemplate,
+  buildConstrainedPrompt,
+  type ReferenceConstraint,
+  type CompositionTemplate,
+} from './constraint-assembler';
 
 export interface StudioPromptContext {
   shot: StoryboardShot;
@@ -167,19 +173,49 @@ export function buildStudioLineArtPrompt(ctx: StudioPromptContext): string {
 export function applyStudioPromptsToShot(
   shot: StoryboardShot,
   ctx: Omit<StudioPromptContext, 'shot'>,
-  opts?: { force?: boolean },
+  opts?: {
+    force?: boolean;
+    constraints?: ReferenceConstraint | null;
+    templates?: CompositionTemplate[];
+  },
 ): Partial<StoryboardShot> {
   const force = opts?.force ?? false;
   const full: StudioPromptContext = { ...ctx, shot };
   const image = buildStudioImagePrompt(full);
   const video = buildStudioVideoPrompt(full);
   const sketch = buildStudioLineArtPrompt(full);
+
+  // F-017/F-032: 构图模板与参考板约束注入
+  let imageFinal = force || !shot.imagePromptPro?.trim() ? image : shot.imagePromptPro;
+  let videoFinal = force || !shot.videoPromptPro?.trim() ? video : shot.videoPromptPro;
+  let sketchFinal = force || !shot.sketchPrompt?.trim() ? sketch : shot.sketchPrompt;
+
+  const template = opts?.templates
+    ? resolveCompositionTemplate(shot, opts.templates)
+    : undefined;
+
+  if (opts?.constraints || template) {
+    const constrainedImage = buildConstrainedPrompt(imageFinal, opts?.constraints ?? null, template);
+    if (constrainedImage.blocked) {
+      return {
+        status: 'failed',
+        promptEn: `⚠ 构图/约束阻塞：${constrainedImage.reason ?? '未通过'}`,
+      };
+    }
+    imageFinal = constrainedImage.prompt;
+
+    const constrainedVideo = buildConstrainedPrompt(videoFinal, opts?.constraints ?? null, template);
+    videoFinal = constrainedVideo.prompt;
+
+    const constrainedSketch = buildConstrainedPrompt(sketchFinal, opts?.constraints ?? null, template);
+    sketchFinal = constrainedSketch.prompt;
+  }
+
   return {
-    imagePromptPro: force || !shot.imagePromptPro?.trim() ? image : shot.imagePromptPro,
-    videoPromptPro: force || !shot.videoPromptPro?.trim() ? video : shot.videoPromptPro,
-    // 同步到执行链常用字段，便于出图/出视频 runner 读取
-    promptEn: force || !shot.promptEn?.trim() ? image : shot.promptEn,
-    videoPromptEn: force || !shot.videoPromptEn?.trim() ? video : shot.videoPromptEn,
-    sketchPrompt: force || !shot.sketchPrompt?.trim() ? sketch : shot.sketchPrompt,
+    imagePromptPro: imageFinal,
+    videoPromptPro: videoFinal,
+    promptEn: imageFinal,
+    videoPromptEn: videoFinal,
+    sketchPrompt: sketchFinal,
   };
 }

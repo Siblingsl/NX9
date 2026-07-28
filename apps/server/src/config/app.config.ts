@@ -4,6 +4,9 @@ export const APP_VERSION = '0.1.0';
 export const HOST = process.env.NX9_HOST ?? '127.0.0.1';
 export const PORT = Number(process.env.NX9_PORT ?? 3001);
 
+/** F-038: 公共库写权限开关（默认 false → 公共库只读） */
+export const ALLOW_PUBLIC_WRITE = process.env.ALLOW_PUBLIC_WRITE === 'true';
+
 /** Monorepo root — cwd is apps/server when started via pnpm workspace */
 const ROOT = join(process.cwd(), '..', '..');
 
@@ -17,6 +20,7 @@ export const PATHS = {
   images: join(ROOT, 'storage', 'images'),
   videos: join(ROOT, 'storage', 'videos'),
   skills: join(ROOT, 'skills'),
+  remotion: join(ROOT, 'public', 'media'),
   workspaceIndex: join(ROOT, 'data', 'workspaces.json'),
   settings: join(ROOT, 'data', 'settings.json'),
 };

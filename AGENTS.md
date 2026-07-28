@@ -34,6 +34,22 @@
 
 除此之外没有更高优先级的外部参考源。
 
+## Dev 排障：`lazy` → `undefined`（强制顺序）
 
+控制台若出现：
+
+`Element type is invalid. Received a promise that resolves to: undefined. Lazy element type must resolve to a class or function.`
+
+**口诀：`lazy → undefined` 先查 Vite 空 chunk，再查 export。**
+
+1. **先排除浏览器扩展噪声**（如 Immersive Translate `token invalid`）——与 NX9 无关，勿当业务缺陷改代码。
+2. **先查 Vite 开发服缓存**，勿上来改业务 / registry / export：
+   - 硬刷新（Ctrl+Shift+R）
+   - 重启 `pnpm run dev`
+   - 仍不行则删除 `apps/web/node_modules/.vite` 后再重启
+3. **再核验模块**：对嫌疑路径请求 Vite 变换结果（如 `/src/blocks/craft/StoryboardDeskBlock.tsx`）。若返回极短空模块（无 `export default`），即缓存损坏；触碰文件或清缓存即可，**不是**缺 default 的代码 bug。
+4. 仅当变换结果里确实缺少可用的 `default`（或 `lazy(...).then(m => ({ default: m.X }))` 的 `m.X` 为 `undefined`）时，才改 export / lazy 映射。
+
+典型误判：巨型 Desk（如 `StoryboardDeskBlock`）在 HMR/重编后被 Vite 缓存成空 chunk，表现为画布节点 `lazy` 崩溃。
 
 

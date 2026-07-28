@@ -15,6 +15,7 @@ import { useFlowCommands } from '../stores/flow-commands';
 import { useFlowRuntime } from '../stores/flow-runtime';
 import { useExecutionQueue } from '../stores/execution-queue';
 import { useAssetLibraryModalUi } from '../stores/asset-library-modal-ui';
+import { useAssetTrashModalUi } from '../stores/asset-trash-modal-ui';
 import { useCreateWorkspaceDialogUi } from '../stores/create-workspace-dialog-ui';
 import { isSurfaceEnabled } from '../config/product-surface';
 import { useWorkspaceDocument } from '../stores/workspace-document';
@@ -29,6 +30,9 @@ const StageDeckSurface = lazy(() =>
 
 const AssetLibraryModal = lazy(() =>
   import('../panels/AssetLibraryModal').then((m) => ({ default: m.AssetLibraryModal })),
+);
+const AssetTrashModal = lazy(() =>
+  import('../panels/AssetTrashModal').then((m) => ({ default: m.AssetTrashModal })),
 );
 const CreateWorkspaceDialog = lazy(() =>
   import('../panels/CreateWorkspaceDialog').then((m) => ({ default: m.CreateWorkspaceDialog })),
@@ -59,6 +63,7 @@ export default function AppShell() {
   const [flowKey, setFlowKey] = useState(0);
   const [createSubmitting, setCreateSubmitting] = useState(false);
   const toggleAssetLibModal = useAssetLibraryModalUi((s) => s.toggle);
+  const openAssetTrash = useAssetTrashModalUi((s) => s.setOpen);
   const createDialogOpen = useCreateWorkspaceDialogUi((s) => s.open);
   const openCreateDialog = useCreateWorkspaceDialogUi((s) => s.openDialog);
   const closeCreateDialog = useCreateWorkspaceDialogUi((s) => s.closeDialog);
@@ -201,6 +206,7 @@ export default function AppShell() {
                 onRedo={() => runtime?.redo()}
                 onBatchRun={() => void handleBatchRun()}
                 onOpenAssets={() => toggleAssetLibModal()}
+                onOpenTrash={() => openAssetTrash(true)}
                 onOpenSettings={() => toggleSettings(true)}
               >
                 <Suspense
@@ -228,6 +234,7 @@ export default function AppShell() {
 
           <Suspense fallback={null}>
             {isSurfaceEnabled('assetLibraryModal') && <AssetLibraryModal />}
+            <AssetTrashModal />
             <CreateWorkspaceDialog
               open={createDialogOpen}
               onClose={closeCreateDialog}

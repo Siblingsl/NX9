@@ -15,12 +15,27 @@ import {
 import { api } from '../../api/client';
 import { runPictureGenJob } from '../picture-gen-runner';
 import { useWorkspaceDocument } from '../../stores/workspace-document';
+import { useFlowRuntime } from '../../stores/flow-runtime';
+import { findChainShot, findChainShotByBlockId } from '../chain-storyboard-aggregate';
 import type { BlockExecutorContext } from './types';
 
-function linkedShotForBlock(blockId: string, data: Record<string, unknown>) {
-  const shots = useWorkspaceDocument.getState().storyboard.shots;
+function linkedShotForBlock(
+  blockId: string,
+  data: Record<string, unknown>,
+  nodes?: Array<{ id: string; type?: string | null; data?: Record<string, unknown> }>,
+) {
   const linkedShotId = data.linkedShotId as string | undefined;
-  return shots.find((s) => s.id === linkedShotId || s.linkedBlockId === blockId);
+  // F-003: 仅从链镜表查找（nodes 缺省时用镜像）
+  const graph =
+    nodes && nodes.length > 0
+      ? nodes
+      : (useFlowRuntime.getState().runtime?.getNodes() as
+          | Array<{ id: string; type?: string | null; data?: Record<string, unknown> }>
+          | undefined) ?? [];
+  if (linkedShotId) {
+    return findChainShot(linkedShotId, graph) ?? undefined;
+  }
+  return findChainShotByBlockId(blockId, graph) ?? undefined;
 }
 
 function characterContextForBlock(block: FlowBlock, upstreamPictures: string[] = []) {

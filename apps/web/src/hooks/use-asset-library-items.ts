@@ -4,6 +4,7 @@ import {
   BUILTIN_BACKLOT_TEMPLATES,
   BUILTIN_PUBLIC_SOUND_ASSETS,
   characterToItem,
+  isAssetActive,
   listBacklotTemplates,
   soundToItem,
   templateToAsset,
@@ -23,24 +24,46 @@ export function useAssetLibraryItems(scope: AssetScope, kind?: AssetLibraryKind)
     const privateItems: AssetLibraryItem[] = [];
     const publicItems: AssetLibraryItem[] = [];
 
-    for (const c of characters) privateItems.push(characterToItem(c, 'private'));
-    for (const s of sounds) privateItems.push(soundToItem(s, 'private'));
-    for (const ws of backlotWorkspace) privateItems.push(workspaceItemToAsset(ws, 'private'));
+    for (const c of characters) {
+      if (!isAssetActive(c)) continue;
+      privateItems.push(characterToItem(c, 'private'));
+    }
+    for (const s of sounds) {
+      if (!isAssetActive(s)) continue;
+      privateItems.push(soundToItem(s, 'private'));
+    }
+    for (const ws of backlotWorkspace) {
+      if (!isAssetActive(ws)) continue;
+      privateItems.push(workspaceItemToAsset(ws, 'private'));
+    }
     for (const tpl of listBacklotTemplates('character', backlotCustom)) {
-      if ('createdAt' in tpl) privateItems.push(templateToAsset(tpl, 'private'));
+      if ('createdAt' in tpl) {
+        if (!isAssetActive(tpl)) continue;
+        privateItems.push(templateToAsset(tpl, 'private'));
+      }
     }
     for (const kindKey of ['costume', 'scene', 'shot', 'emotion', 'hook'] as const) {
       for (const tpl of listBacklotTemplates(kindKey, backlotCustom)) {
-        if ('createdAt' in tpl) privateItems.push(templateToAsset(tpl, 'private'));
+        if ('createdAt' in tpl) {
+          if (!isAssetActive(tpl)) continue;
+          privateItems.push(templateToAsset(tpl, 'private'));
+        }
       }
     }
 
-    for (const c of publicPayload.characters) publicItems.push(characterToItem(c, 'public'));
-    for (const s of publicPayload.sounds) publicItems.push(soundToItem(s, 'public'));
+    for (const c of publicPayload.characters) {
+      if (!isAssetActive(c)) continue;
+      publicItems.push(characterToItem(c, 'public'));
+    }
+    for (const s of publicPayload.sounds) {
+      if (!isAssetActive(s)) continue;
+      publicItems.push(soundToItem(s, 'public'));
+    }
     for (const s of BUILTIN_PUBLIC_SOUND_ASSETS) {
       publicItems.push({ ...soundToItem(s, 'public'), builtin: true });
     }
     for (const tpl of publicPayload.templates) {
+      if (!isAssetActive(tpl)) continue;
       publicItems.push(templateToAsset(tpl, 'public'));
     }
     for (const tpl of BUILTIN_BACKLOT_TEMPLATES) {

@@ -90,7 +90,7 @@ export function PromptBatchPanel({
           placeholder={
             promptMode === 'single' ? '合成指令，例：融合参考图为一张海报' : '广播提示词，将应用到每张素材'
           }
-          className={`w-full text-xs rounded-lg border border-brand/25 bg-white px-2.5 py-2 placeholder:text-ink/35 focus:outline-none focus:border-brand/45 nodrag nopan ${
+          className={`w-full text-xs rounded-lg border border-brand/25 bg-surface px-2.5 py-2 placeholder:text-ink/35 focus:outline-none focus:border-brand/45 nodrag nopan ${
             isTargetActive(mentionTarget, 'global') ? activeInputClass : idleInputClass
           }`}
         />
@@ -120,7 +120,7 @@ export function PromptBatchPanel({
           {items.map((item, index) => (
             <div
               key={item.id}
-              className="flex items-center gap-2 px-2 py-1.5 bg-white/50 hover:bg-surface/40 group"
+              className="flex items-center gap-2 px-2 py-1.5 bg-surface/50 hover:bg-surface/40 group"
             >
               {item.imageUrl ? (
                 <img

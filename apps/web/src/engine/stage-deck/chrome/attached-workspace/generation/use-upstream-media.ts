@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
 import { useEdges, useNodes } from '@xyflow/react';
-import { gatherUpstream } from '@nx9/shared';
+import { gatherUpstream, type UpstreamPolicy } from '@nx9/shared';
 
 export function useUpstreamMedia(blockId: string) {
   const nodes = useNodes();
@@ -22,11 +22,15 @@ export function useUpstreamMedia(blockId: string) {
         sourceHandle: e.sourceHandle ?? undefined,
         targetHandle: e.targetHandle ?? undefined,
       }));
-    const upstream = gatherUpstream(blockId, flowBlocks, flowLinks);
+    const nodeData = nodes.find((n) => n.id === blockId)?.data as Record<string, unknown> | undefined;
+    const policy = nodeData?.upstreamPolicy as UpstreamPolicy | undefined;
+    const primarySourceId = nodeData?.primarySourceId as string | null | undefined;
+    const upstream = gatherUpstream(blockId, flowBlocks, flowLinks, policy, primarySourceId);
     return {
       pictures: upstream.pictures ?? [],
       clips: upstream.clips ?? [],
-      hasMedia: (upstream.pictures?.length ?? 0) > 0 || (upstream.clips?.length ?? 0) > 0,
+      sounds: upstream.sounds ?? [],
+      hasMedia: (upstream.pictures?.length ?? 0) > 0 || (upstream.clips?.length ?? 0) > 0 || (upstream.sounds?.length ?? 0) > 0,
     };
   }, [nodes, edges, blockId]);
 }

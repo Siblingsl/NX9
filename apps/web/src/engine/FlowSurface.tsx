@@ -29,12 +29,12 @@ import {
   type OnNodeDrag,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import { PERF, validateLink, WORKFLOW_TEMPLATES, lookupBlock, canExecuteNode, resolveNodeInteraction, isPromptBarKind, syncAssetImportNodeFields, isStoryboardExecLink, isDirector3dDeskLink, buildMediaPinNodeData, parseMediaPinPayload } from '@nx9/shared';
+import { PERF, validateLink, validateConnectionWithHandles, WORKFLOW_TEMPLATES, lookupBlock, canExecuteNode, resolveNodeInteraction, isPromptBarKind, syncAssetImportNodeFields, isStoryboardExecLink, isDirector3dDeskLink, buildMediaPinNodeData, parseMediaPinPayload } from '@nx9/shared';
 import { blockTypes, preloadBlockTypes } from '../blocks/registry';
 import { MEDIA_PIN_MIME } from './media-pin-drag';
 import { api } from '../api/client';
 import { useFlowHistory, type FlowSnapshot } from '../hooks/use-flow-history';
-import { debounce, usePerfController } from './perf-controller';
+import { debounce, usePerfController, resolvePerfToast } from './perf-controller';
 import { runFlowBatch, RUNNABLE_BLOCKS } from './flow-runner';
 import { useActivityLog } from '../stores/activity-log';
 import { toastError, useToast } from '../stores/toast';
@@ -42,6 +42,7 @@ import { useCredentialVault } from '../stores/credential-vault';
 import { useFlowCommands } from '../stores/flow-commands';
 import { useFlowRuntime } from '../stores/flow-runtime';
 import { useStoryboardUi } from '../stores/flow-runtime';
+import { useFlowGraphMirror } from '../stores/flow-graph-mirror';
 import { useWorkspaceDocument } from '../stores/workspace-document';
 import { PLAYBOOK_DEFINITIONS, type PlaybookId } from '@nx9/shared';
 import { useExecutionQueue } from '../stores/execution-queue';
@@ -52,6 +53,12 @@ import {
   pasteClipboard,
   setPasteAnchorScreen,
 } from './flow-clipboard';
+import {
+  getAllChainShots,
+  findChainShot,
+  findChainShotByBlockId,
+  someChainShotLinked,
+} from './chain-storyboard-aggregate';
 import { applyNodeAlignment, type NodeAlignAction } from './node-align';
 import { EdgeContextMenu, PaneContextMenu, SelectionContextMenu } from './FlowContextMenu';
 import { exactDropPosition, findOpenPosition, relocateNodeGroup } from './spawn-placement';
@@ -91,6 +98,7 @@ import { TakeRail } from './stage-deck/chrome/TakeRail';
 import { TakeLightboxHost } from './stage-deck/chrome/CompareLightbox';
 import { PlaybookLauncherOverlay } from './stage-deck/chrome/PlaybookLauncherOverlay';
 import { RecipePickerOverlay } from './stage-deck/chrome/RecipePickerOverlay';
+import { EmptyCanvasGuide } from '../components/canvas/EmptyCanvasGuide';
 import { CanvasFlowRail } from './stage-deck/chrome/CanvasFlowRail';
 import { filterBlocksForWireDrop } from './stage-deck/interaction/wire-drop';
 import { computeGroupBounds } from './stage-deck/canvas/SceneGroup';
@@ -236,6 +244,8 @@ const FlowSurfaceInner = memo(function FlowSurfaceInner({
   const viewMode = useViewMode((s) => s.mode);
   const hydrateViewMode = useViewMode((s) => s.hydrate);
   const setDeckSelection = useDeckUi((s) => s.setSelection);
+  /** 底部工作区打开时必须抬高选中节点，否则会透出/点穿下方节点（尤其 intensive） */
+  const promptBarVisible = useDeckUi((s) => s.promptBarVisible);
   const hydrateTakes = useTakeStore((s) => s.hydrate);
   const stageDeckNodeTypes = useStageDeckNodeTypes();
 
@@ -246,6 +256,12 @@ const FlowSurfaceInner = memo(function FlowSurfaceInner({
   nodesRef.current = nodes;
   edgesRef.current = edges;
   selectedBlockIdRef.current = selectedBlockId;
+
+  // F-002/F-003: 镜像图供制作台在画布卸载后仍读写同一 chainStoryboard
+  useEffect(() => {
+    if (!ready) return;
+    useFlowGraphMirror.getState().syncGraph(workspaceId, nodes, edges);
+  }, [ready, workspaceId, nodes, edges]);
 
   const bindFocusBlock = useCallback((fn: (blockId: string) => void) => {
     focusBlockRef.current = fn;
@@ -306,6 +322,23 @@ const FlowSurfaceInner = memo(function FlowSurfaceInner({
   const activeBatchBlockIds = useExecutionQueue((s) => s.activeBlockIds);
 
   const perf = usePerfController(nodes, edges, dragging, reduceMotion);
+  // F-012: 仅阈值触发 Toast（制作模式 forced intensive 不误报）；同档去重、升档可再提示
+  const perfToastLevelRef = useRef(0);
+  useEffect(() => {
+    const toast = resolvePerfToast(nodes.length, edges.length);
+    if (!toast) {
+      perfToastLevelRef.current = 0;
+      return;
+    }
+    if (toast.level <= perfToastLevelRef.current) return;
+    perfToastLevelRef.current = toast.level;
+    appendLog(`[性能] ${toast.message}`);
+    useToast.getState().push({
+      id: `perf-${toast.reason}`,
+      message: toast.message,
+      variant: toast.reason === 'danger-warn' ? 'error' : 'info',
+    });
+  }, [nodes.length, edges.length, appendLog]);
   const effectiveIntensive =
     perf.intensive || (isStageDeck && isProduceMode(viewMode));
 
@@ -450,14 +483,18 @@ const FlowSurfaceInner = memo(function FlowSurfaceInner({
     const pending = consumeSpawn();
     if (!pending) return;
     const id = `blk-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    // F-003: 从链镜表查找，回退全局
+    const currentNodes = nodesRef.current;
     const shot = pending.shotId
-      ? useWorkspaceDocument.getState().storyboard.shots.find((s) => s.id === pending.shotId)
+      ? (findChainShot(pending.shotId, currentNodes) ?? useWorkspaceDocument.getState().storyboard.shots.find((s: any) => s.id === pending.shotId))
       : undefined;
     pushFlowSnapshot(nodes, edges);
     const at =
       pending.exact && pending.at
         ? exactDropPosition(pending.at)
         : findOpenPosition(nodes, pending.at ? { preferred: pending.at } : {});
+    // F-006: 核心工作流节点（分镜台/分镜预览）默认打开上下能力口
+    const defaultShowExecPorts = pending.kind === 'storyboard-desk' || pending.kind === 'storyboard-preview';
     setNodes((nds) => [
       ...nds,
       {
@@ -469,16 +506,27 @@ const FlowSurfaceInner = memo(function FlowSurfaceInner({
           status: 'idle',
           linkedShotId: pending.shotId ?? undefined,
           content: shot?.promptEn || shot?.descriptionZh || '',
+          ...(defaultShowExecPorts ? { showExecPorts: true } : {}),
           ...(pending.data ?? {}),
         },
       },
     ]);
+    // F-036: 自动连边到指定源节点（如导演台→工具块）
+    if (pending.data?.connectToSource) {
+      const sourceId = pending.data.connectToSource as string;
+      const edgeId = `e-${sourceId}-${id}`;
+      setEdges((eds) => [
+        ...eds,
+        { id: edgeId, source: sourceId, target: id, type: 'default' } as any,
+      ]);
+    }
+
     if (pending.shotId) {
       updateShot(pending.shotId, { linkedBlockId: id });
       selectShot(pending.shotId);
     }
     appendLog(`添加模块: ${pending.kind}${shot ? ` · 镜头 #${shot.index}` : ''}`);
-  }, [spawnKind, ready, consumeSpawn, nodes, edges, push, setNodes, appendLog, updateShot, selectShot]);
+  }, [spawnKind, ready, consumeSpawn, nodes, edges, push, setNodes, setEdges, appendLog, updateShot, selectShot]);
 
   const loadWorkflowTemplate = useCallback(
     async (id: string, mode: 'merge' | 'replace' = 'merge') => {
@@ -712,11 +760,32 @@ const FlowSurfaceInner = memo(function FlowSurfaceInner({
         ? new Set(queueSnapshot.completedBlockIds)
         : new Set<string>();
       const session = useWorkspaceDocument.getState().playbookSession;
+      // F-003: 注入 chainShots（优先使用链数据）
+      const chainDeskNode = currentNodes.find((n) =>
+        n.type === 'storyboard-desk' &&
+        (n.data as Record<string, unknown>)?.chainStoryboard,
+      );
+      const chainRaw = chainDeskNode
+        ? ((chainDeskNode.data as Record<string, unknown>)?.chainStoryboard as { shots: Array<Record<string, unknown>> } | undefined)
+        : undefined;
       const ctx: import('@nx9/shared').PlaybookReadinessContext = {
-        storyboard: {
+        chainShots: chainRaw?.shots?.map((sh) => ({
+          id: sh.id as string,
+          episodeId: sh.episodeId as string | undefined,
+          status: (sh.status as string) ?? 'draft',
+          firstFrameAssetId: sh.firstFrameAssetId as string | undefined,
+          videoAssetId: sh.videoAssetId as string | undefined,
+          keyframeStatus: sh.keyframeStatus as string | undefined,
+          videoStatus: sh.videoStatus as string | undefined,
+          linkedBlockId: sh.linkedBlockId as string | undefined,
+        })),
+        // F-003: 从链镜表聚合（回退全局）
+        storyboard: (() => {
+          const chainShotsAgg = getAllChainShots(currentNodes);
+          return {
           title: useWorkspaceDocument.getState().storyboard.title,
           activeEpisodeId: useWorkspaceDocument.getState().storyboard.activeEpisodeId,
-          shots: useWorkspaceDocument.getState().storyboard.shots.map((sh) => ({
+          shots: chainShotsAgg.map((sh) => ({
             id: sh.id,
             episodeId: sh.episodeId,
             status: sh.status as string,
@@ -726,7 +795,8 @@ const FlowSurfaceInner = memo(function FlowSurfaceInner({
             videoStatus: sh.videoStatus,
             linkedBlockId: sh.linkedBlockId ?? undefined,
           })),
-        },
+        };
+        })(),
         voice: useWorkspaceDocument.getState().voice,
         nodes: currentNodes.map((n) => ({ id: n.id, type: n.type ?? '', data: n.data as Record<string, unknown> })),
         playbookSession: session,
@@ -915,7 +985,8 @@ const FlowSurfaceInner = memo(function FlowSurfaceInner({
 
   useEffect(() => {
     if (!isStageDeck || !ready) return;
-    const shots = useWorkspaceDocument.getState().storyboard.shots;
+    // F-003: 从链镜表聚合（回退全局）
+    const shots = getAllChainShots(nodesRef.current);
     const pending = shots.filter(
       (s) =>
         Boolean(s.firstFrameAssetId) &&
@@ -963,6 +1034,9 @@ const FlowSurfaceInner = memo(function FlowSurfaceInner({
       if (!id) return;
       const node = selected[0];
       // 旧全屏故事板已拆除：选中节点只同步镜头选中态，不再打开任何故事板页
+      if (node.type === 'storyboard-desk') {
+        useFlowGraphMirror.getState().setLastFocusedStoryboardDeskId(id);
+      }
       if (
         node.type === 'director-desk' ||
         node.type === 'storyboard-desk' ||
@@ -971,17 +1045,15 @@ const FlowSurfaceInner = memo(function FlowSurfaceInner({
         node.type === 'script-desk' ||
         node.type === 'picture-gen'
       ) {
-        const linkedShot = storyboard.shots.find(
-          (s) => s.linkedBlockId === id || s.id === (node.data?.linkedShotId as string),
-        );
+        // F-003: 从链镜表查找
+        const linkedShot = findChainShotByBlockId(id, nodesRef.current);
         const shotId =
           (node.data?.linkedShotId as string | undefined) || linkedShot?.id;
         if (shotId) selectShot(shotId);
         return;
       }
-      const linkedShot = storyboard.shots.find(
-        (s) => s.linkedBlockId === id || s.id === (node.data?.linkedShotId as string),
-      );
+      // F-003: 从链镜表查找（回退全局）
+      const linkedShot = findChainShotByBlockId(id, nodesRef.current);
       if (linkedShot) {
         selectShot(linkedShot.id);
       }
@@ -1127,7 +1199,8 @@ const FlowSurfaceInner = memo(function FlowSurfaceInner({
       pushFlowSnapshot(nodesRef.current, edgesRef.current);
       setNodes((prev) => prev.filter((n) => !removeIds.has(n.id)));
       setEdges((prev) => prev.filter((e) => !removeIds.has(e.source) && !removeIds.has(e.target)));
-      for (const shot of useWorkspaceDocument.getState().storyboard.shots) {
+      // F-003: 从链镜表聚合清理 linkedBlockId（回退全局）
+      for (const shot of getAllChainShots(nodesRef.current)) {
         if (shot.linkedBlockId && removeIds.has(shot.linkedBlockId)) {
           useWorkspaceDocument.getState().updateShot(shot.id, { linkedBlockId: undefined });
         }
@@ -1169,9 +1242,8 @@ const FlowSurfaceInner = memo(function FlowSurfaceInner({
       const selNodes = nodesRef.current.filter((n) => ids.includes(n.id));
       for (const node of selNodes) {
         const shotId = node.data?.linkedShotId as string | undefined;
-        const linked = storyboard.shots.find(
-          (s) => s.id === shotId || s.linkedBlockId === node.id,
-        );
+        // F-003: 从链镜表查找（回退全局）
+        const linked = findChainShot(shotId ?? '', nodesRef.current) || findChainShotByBlockId(node.id, nodesRef.current);
         if (linked) {
           selectShot(linked.id);
           appendLog(`已选中镜头 #${linked.index + 1}（请用画布「分镜台」编辑）`);
@@ -1350,7 +1422,75 @@ const FlowSurfaceInner = memo(function FlowSurfaceInner({
         return selectedBlockIdRef.current;
       },
     });
-    return () => unregisterRuntime();
+
+    // F-012 DEV: 浏览器控制台 __NX9_BENCH__.inject(1000, 'picture-gen') 批量真实节点压测
+    if (import.meta.env.DEV) {
+      const w = window as unknown as {
+        __NX9_BENCH__?: {
+          getCounts: () => { nodes: number; edges: number; intensive: boolean };
+          inject: (
+            count?: number,
+            kind?: string,
+          ) => { totalNodes: number; totalEdges: number; kind: string };
+          clear: () => void;
+        };
+      };
+      w.__NX9_BENCH__ = {
+        getCounts: () => ({
+          nodes: nodesRef.current.length,
+          edges: edgesRef.current.length,
+          intensive: effectiveIntensiveRef.current,
+        }),
+        inject: (count = 1000, kind = 'picture-gen') => {
+          const colW = kind === 'picture-gen' || kind === 'clip-gen' ? 300 : 220;
+          const rowH = kind === 'picture-gen' || kind === 'clip-gen' ? 220 : 160;
+          const cols = 20;
+          const nodes: typeof nodesRef.current = [];
+          const edges: typeof edgesRef.current = [];
+          const baseIndex = nextIndexRef.current;
+          for (let i = 0; i < count; i++) {
+            const id = `bench-${i}`;
+            nodes.push({
+              id,
+              type: kind,
+              position: { x: (i % cols) * colW, y: Math.floor(i / cols) * rowH },
+              data: {
+                blockIndex: baseIndex + i,
+                status: 'idle',
+                label: kind === 'picture-gen' ? `图像生成 ${i}` : `压测 ${kind} ${i}`,
+                prompt: kind === 'picture-gen' ? `benchmark picture ${i}` : undefined,
+              },
+            });
+            if (i > 0) {
+              edges.push({
+                id: `bench-edge-${i}`,
+                source: `bench-${i - 1}`,
+                target: id,
+                type: 'channel',
+                data: {},
+              });
+            }
+          }
+          nextIndexRef.current = baseIndex + count;
+          setNodes((prev) => [...prev.filter((n) => !String(n.id).startsWith('bench-')), ...nodes]);
+          setEdges((prev) => [...prev.filter((e) => !String(e.id).startsWith('bench-')), ...edges]);
+          const totalNodes =
+            nodesRef.current.filter((n) => !String(n.id).startsWith('bench-')).length + count;
+          return { totalNodes, totalEdges: count > 0 ? count - 1 : 0, kind };
+        },
+        clear: () => {
+          setNodes((prev) => prev.filter((n) => !String(n.id).startsWith('bench-')));
+          setEdges((prev) => prev.filter((e) => !String(e.id).startsWith('bench-')));
+        },
+      };
+    }
+
+    return () => {
+      unregisterRuntime();
+      if (import.meta.env.DEV) {
+        delete (window as unknown as { __NX9_BENCH__?: unknown }).__NX9_BENCH__;
+      }
+    };
   }, [ready, registerRuntime, unregisterRuntime, setNodes, setEdges, updateNodeDataStable, fitViewToNodes, highlightNodes]);
 
   useEffect(() => {
@@ -1407,11 +1547,15 @@ const FlowSurfaceInner = memo(function FlowSurfaceInner({
       const source = nodes.find((n) => n.id === conn.source);
       const target = nodes.find((n) => n.id === conn.target);
       if (!source || !target) return false;
-      return validateLink(
+      // F-006: 未开启 showExecPorts 时拒绝上下 exec 口吸附
+      return validateConnectionWithHandles(
         source.type ?? '',
         target.type ?? '',
         source.data as Record<string, unknown>,
-      );
+        target.data as Record<string, unknown>,
+        conn.sourceHandle,
+        conn.targetHandle,
+      ).ok;
     },
     [nodes],
   );
@@ -1526,8 +1670,27 @@ const FlowSurfaceInner = memo(function FlowSurfaceInner({
   const onConnectEnd: OnConnectEnd = useCallback(
     (event, connectionState) => {
       setConnecting(false);
-      if (!isStageDeck || connectionState.isValid) return;
+      if (connectionState.isValid) return;
       const fromNode = connectionState.fromNode;
+      const toNode = connectionState.toNode;
+      if (fromNode?.type && toNode?.type) {
+        const check = validateConnectionWithHandles(
+          fromNode.type,
+          toNode.type,
+          fromNode.data as Record<string, unknown>,
+          toNode.data as Record<string, unknown>,
+          connectionState.fromHandle?.id ?? null,
+          connectionState.toHandle?.id ?? null,
+        );
+        if (check.reason === 'exec_ports_disabled') {
+          useToast.getState().push({
+            message: '上下口为能力挂载，请用左右数据口或先打开能力口',
+            variant: 'info',
+          });
+          return;
+        }
+      }
+      if (!isStageDeck) return;
       if (!fromNode?.id || !fromNode.type) return;
       const clientX = 'clientX' in event ? event.clientX : event.changedTouches[0]?.clientX ?? 0;
       const clientY = 'clientY' in event ? event.clientY : event.changedTouches[0]?.clientY ?? 0;
@@ -1853,6 +2016,19 @@ const FlowSurfaceInner = memo(function FlowSurfaceInner({
         />
         ) : null
       )}
+      {/* F-041: 首次进入画布引导（空图时展示，与其他引导不冲突） */}
+      {isStageDeck && ready && nodes.length === 0 && recipePickerDismissed && (
+        <EmptyCanvasGuide
+          nodeCount={nodes.length}
+          onPickPlaybook={() => {
+            setRecipePickerDismissed(false);
+          }}
+          onOpenCommandPalette={() => setCommandOpen(true)}
+          onLoadTemplate={() => {
+            setRecipePickerDismissed(false);
+          }}
+        />
+      )}
       {isStageDeck && ready && isSurfaceEnabled('playbookFlowRail') && <CanvasFlowRail />}
 
       <ReactFlow
@@ -1898,7 +2074,7 @@ const FlowSurfaceInner = memo(function FlowSurfaceInner({
         defaultViewport={viewportRef.current}
         onlyRenderVisibleElements={effectiveIntensive}
         nodesDraggable
-        elevateNodesOnSelect={!effectiveIntensive}
+        elevateNodesOnSelect={!effectiveIntensive || promptBarVisible}
       >
         {canvasAppearance.gridStyle === 'blank' ? null : canvasAppearance.gridStyle === 'lines' ? (
           <Background
@@ -1993,8 +2169,9 @@ const FlowSurfaceInner = memo(function FlowSurfaceInner({
             const n = nodes.find((node) => node.id === id);
             if (!n) return false;
             const shotId = n.data?.linkedShotId as string | undefined;
+            // F-003: 从链镜表检查关联（回退全局）
             return Boolean(
-              shotId || storyboard.shots.some((s) => s.linkedBlockId === n.id),
+              shotId || someChainShotLinked(n.id, nodes),
             );
           }).length}
           cascadeEnabled={

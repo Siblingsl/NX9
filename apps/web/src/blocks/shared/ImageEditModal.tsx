@@ -92,7 +92,7 @@ export const ImageEditModal = memo(function ImageEditModal({
   return createPortal(
     <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/45 p-4">
       <div
-        className="w-full max-w-3xl rounded-2xl border border-line bg-white shadow-panel overflow-hidden"
+        className="w-full max-w-3xl rounded-2xl border border-line bg-surface shadow-panel overflow-hidden"
         onDoubleClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between px-4 py-3 border-b border-line bg-surface/80">
@@ -101,14 +101,14 @@ export const ImageEditModal = memo(function ImageEditModal({
             <div className="flex rounded-lg border border-line overflow-hidden text-xs">
               <button
                 type="button"
-                className={`px-3 py-1.5 flex items-center gap-1 ${mode === 'crop' ? 'bg-brand text-white' : 'bg-white text-ink/70'}`}
+                className={`px-3 py-1.5 flex items-center gap-1 ${mode === 'crop' ? 'bg-brand text-white' : 'bg-surface text-ink/70'}`}
                 onClick={() => setMode('crop')}
               >
                 <Crop size={12} /> 裁剪
               </button>
               <button
                 type="button"
-                className={`px-3 py-1.5 flex items-center gap-1 ${mode === 'grid' ? 'bg-brand text-white' : 'bg-white text-ink/70'}`}
+                className={`px-3 py-1.5 flex items-center gap-1 ${mode === 'grid' ? 'bg-brand text-white' : 'bg-surface text-ink/70'}`}
                 onClick={() => setMode('grid')}
               >
                 <Grid3x3 size={12} /> 宫格切分

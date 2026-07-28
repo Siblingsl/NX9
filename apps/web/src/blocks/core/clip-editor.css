@@ -1,4 +1,4 @@
-﻿
+
 /* ── 功能1：智能剪辑 desk 卡片 ── */
 .se-card {
   display: flex;
@@ -34,7 +34,7 @@
 .se-chip {
   flex: 1;
   border: 1px solid var(--desk-line, #ddd);
-  background: var(--desk-bg-2, #f5f5f5);
+  background: var(--desk-bg-2, var(--nx9-bg));
   color: var(--desk-muted, #888);
   border-radius: 999px;
   padding: 4px 8px;
@@ -55,7 +55,7 @@
 .se-engine {
   flex: 1;
   border: 1px solid var(--desk-line, #ddd);
-  background: var(--desk-bg-2, #f5f5f5);
+  background: var(--desk-bg-2, var(--nx9-bg));
   color: var(--desk-muted, #888);
   border-radius: 6px;
   padding: 3px 4px;
@@ -76,7 +76,7 @@
   padding: 4px;
   border: 1px solid var(--desk-line, #ddd);
   border-radius: 6px;
-  background: var(--desk-bg, #fff);
+  background: var(--desk-bg, var(--nx9-bg));
 }
 .se-mini-rail {
   display: flex;
@@ -108,7 +108,7 @@
   justify-content: center;
   gap: 4px;
   border: 1px solid var(--desk-line, #ddd);
-  background: var(--desk-bg-2, #f5f5f5);
+  background: var(--desk-bg-2, var(--nx9-bg));
   color: var(--desk-ink, #222);
   border-radius: 8px;
   padding: 5px 8px;

@@ -1,5 +1,6 @@
 import React from 'react';
 import { Composition } from 'remotion';
+import type { TimelinePayload } from '@nx9/shared';
 import { Nx9Episode } from './Nx9Episode';
 
 export const Root: React.FC = () => {
@@ -7,7 +8,8 @@ export const Root: React.FC = () => {
     <>
       <Composition
         id="Nx9Episode"
-        component={Nx9Episode}
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        component={Nx9Episode as any}
         durationInFrames={300}
         fps={30}
         width={1080}
@@ -22,7 +24,7 @@ export const Root: React.FC = () => {
             width: 1080,
             height: 1920,
             tracks: [],
-          },
+          } as TimelinePayload,
         }}
       />
     </>

@@ -2,7 +2,7 @@ import { memo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { type NodeProps } from '@xyflow/react';
 import { X } from 'lucide-react';
-import { BlockShell } from '../shared/BlockShell';
+import { CanvasNodeShell } from '../shared/CanvasNodeShell';
 import './media-pin.css';
 
 function stop(e: React.SyntheticEvent) {
@@ -31,26 +31,10 @@ function MediaPinBlock(props: NodeProps) {
   const [lightbox, setLightbox] = useState(false);
 
   return (
-    <BlockShell {...props}>
-      <div className="nx9-media-pin">
-        <button
-          type="button"
-          className="nx9-media-pin__frame"
-          onDoubleClick={(e) => {
-            e.stopPropagation();
-            if (url) setLightbox(true);
-          }}
-          title="双击放大"
-        >
-          {url ? (
-            <img src={url} alt="" draggable={false} className="nx9-media-pin__img" />
-          ) : (
-            <div className="nx9-media-pin__empty">无图像</div>
-          )}
-        </button>
-      </div>
+    <>
+      <CanvasNodeShell {...props} onRunOverride={url ? () => setLightbox(true) : undefined} />
       {lightbox && url ? <PinLightbox url={url} onClose={() => setLightbox(false)} /> : null}
-    </BlockShell>
+    </>
   );
 }
 

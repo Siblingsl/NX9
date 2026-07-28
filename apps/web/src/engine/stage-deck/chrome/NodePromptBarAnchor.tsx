@@ -100,7 +100,7 @@ export const NodePromptBarAnchor = memo(function NodePromptBarAnchor({
 
   return (
     <div
-      className="absolute z-[70] nodrag nopan nowheel pointer-events-auto"
+      className="nx9-prompt-bar-anchor absolute z-[70] nodrag nopan nowheel pointer-events-auto"
       style={{
         left: '50%',
         top: '100%',
@@ -112,6 +112,8 @@ export const NodePromptBarAnchor = memo(function NodePromptBarAnchor({
       onPointerMove={onDragPointerMove}
       onPointerUp={onDragPointerUp}
       onPointerCancel={onDragPointerUp}
+      onMouseDown={(e) => e.stopPropagation()}
+      onClick={(e) => e.stopPropagation()}
     >
       <NodeAttachedPromptBar blockId={blockId} kind={kind} />
     </div>

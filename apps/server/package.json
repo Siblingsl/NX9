@@ -3,13 +3,14 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "pnpm run build && nest start --watch",
+    "dev": "nest start --watch",
     "build": "prisma generate && nest build",
     "build:nest": "nest build",
     "start": "node dist/main.js",
     "test": "vitest run --reporter=verbose",
     "test:watch": "vitest --watch",
     "typecheck": "tsc -p tsconfig.json --noEmit",
+    "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
     "prisma:push": "prisma db push"
   },
@@ -27,7 +28,8 @@
     "rxjs": "^7.8.1",
     "sharp": "^0.34.5",
     "@hyperframes/producer": "^0.7.64",
-    "@hyperframes/core": "^0.7.64"
+    "@hyperframes/core": "^0.7.64",
+    "@remotion/renderer": "^4.0.0"
   },
   "devDependencies": {
     "@nestjs/cli": "^11.0.0",

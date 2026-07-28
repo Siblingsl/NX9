@@ -1,5 +1,6 @@
-import { Body, Controller, Get, Headers, Put } from '@nestjs/common';
+import { Body, Controller, Get, Headers, Put, ForbiddenException } from '@nestjs/common';
 import type { PublicLibraryPayload } from '@nx9/shared';
+import { checkLibraryAccess } from '@nx9/shared';
 import { PublicLibraryService } from './public-library.service';
 
 @Controller('api/public-library')
@@ -16,6 +17,10 @@ export class PublicLibraryController {
     @Headers('x-nx9-user-id') ownerId: string | undefined,
     @Body() payload: PublicLibraryPayload,
   ) {
+    const writeCheck = checkLibraryAccess('public', 'write');
+    if (!writeCheck.allowed) {
+      throw new ForbiddenException(writeCheck.reason ?? '公共库写操作未开启');
+    }
     return this.library.save(ownerId, payload);
   }
 }

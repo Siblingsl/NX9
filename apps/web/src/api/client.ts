@@ -10,6 +10,7 @@ import type {
   WorkspacePayload,
   WorkspaceSummary,
 } from '@nx9/shared';
+import { getCurrentWorkspaceId } from './workspace-context';
 
 function userHeaders(): Record<string, string> {
   try {
@@ -17,7 +18,12 @@ function userHeaders(): Record<string, string> {
     if (!raw) return {};
     const parsed = JSON.parse(raw) as { state?: { userId?: string } };
     const id = parsed?.state?.userId;
-    return id ? { 'X-NX9-User-Id': id } : {};
+    const headers: Record<string, string> = {};
+    if (id) headers['X-NX9-User-Id'] = id;
+    // F-009: 传递当前 workspaceId 供用量事件标记
+    const wsId = getCurrentWorkspaceId();
+    if (wsId) headers['X-NX9-Workspace-Id'] = wsId;
+    return headers;
   } catch {
     return {};
   }
@@ -753,13 +759,18 @@ export const api = {
   createUser: (name: string, email?: string) =>
     request<UserSummary>('/api/users', { method: 'POST', body: JSON.stringify({ name, email }) }),
 
-  usageSummary: (days = 7, userId?: string) =>
+  usageSummary: (days = 7, userId?: string, workspaceId?: string) =>
     request<UsageSummary>(
-      `/api/usage/summary?days=${days}${userId ? `&userId=${encodeURIComponent(userId)}` : ''}`,
+      `/api/usage/summary?days=${days}${userId ? `&userId=${encodeURIComponent(userId)}` : ''}${workspaceId ? `&workspaceId=${encodeURIComponent(workspaceId)}` : ''}`,
     ),
-  usageRecent: (limit = 50, userId?: string) =>
-    request<{ id: string; kind: string; model?: string | null; units: number; createdAt: number }[]>(
-      `/api/usage/recent?limit=${limit}${userId ? `&userId=${encodeURIComponent(userId)}` : ''}`,
+  usageRecent: (limit = 50, userId?: string, workspaceId?: string) =>
+    request<{ id: string; kind: string; model?: string | null; units: number; workspaceId?: string | null; createdAt: number }[]>(
+      `/api/usage/recent?limit=${limit}${userId ? `&userId=${encodeURIComponent(userId)}` : ''}${workspaceId ? `&workspaceId=${encodeURIComponent(workspaceId)}` : ''}`,
+    ),
+  /** F-009: 按日聚合用量 */
+  usageDaily: (days = 7, userId?: string, workspaceId?: string) =>
+    request<{ day: string; kind: string; count: number; units: number }[]>(
+      `/api/usage/daily?days=${days}${userId ? `&userId=${encodeURIComponent(userId)}` : ''}${workspaceId ? `&workspaceId=${encodeURIComponent(workspaceId)}` : ''}`,
     ),
 
   renderHyperframes: (body: { timeline: unknown; templateId?: string; transitionPack?: string }) =>

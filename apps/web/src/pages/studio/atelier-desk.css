@@ -400,7 +400,7 @@
 
 .atelier__polaroid {
   width: 112px;
-  background: #fff;
+  background: var(--nx9-bg);
   padding: 8px 8px 22px;
   box-shadow: var(--at-card-shadow);
   transform: rotate(-2deg);

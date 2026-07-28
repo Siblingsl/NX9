@@ -43,6 +43,13 @@ export class HyperframesService {
     return this.tasks.get(taskId) ?? null;
   }
 
+  /** F-046: 取消渲染任务 */
+  cancelTask(taskId: string): boolean {
+    if (!this.tasks.has(taskId)) return false;
+    this.tasks.set(taskId, { status: 'cancelled' });
+    return true;
+  }
+
   private async processRender(
     taskId: string,
     timeline: TimelinePayload,

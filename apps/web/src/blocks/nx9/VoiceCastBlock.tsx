@@ -64,7 +64,7 @@ function VoiceCastBlock(props: NodeProps) {
                     setProfileMap(next);
                     updateNodeData(props.id, { profileMap: next });
                   }}
-                  className="flex-1 rounded border border-line px-1 py-0.5 text-[10px] bg-white"
+                  className="flex-1 rounded border border-line px-1 py-0.5 text-[10px] bg-surface"
                 >
                   <option value="alloy">Alloy（默认）</option>
                   <option value="echo">Echo</option>

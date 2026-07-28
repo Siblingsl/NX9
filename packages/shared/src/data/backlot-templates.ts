@@ -46,6 +46,8 @@ export interface BacklotCustomTemplate {
   createdAt: number;
   /** Creative Asset Center 扩展数据 */
   creative?: import('../types/creative-asset-center').WorkspaceCreativeExtension;
+  /** F-010: 软删除时间戳，非空表示已移入回收站 */
+  deletedAt?: number;
 }
 
 export interface BacklotCustomPayload {
@@ -68,6 +70,8 @@ export interface BacklotWorkspaceItem {
   sourceTemplateId?: string;
   /** Creative Asset Center 扩展数据 */
   creative?: import('../types/creative-asset-center').WorkspaceCreativeExtension;
+  /** F-010: 软删除时间戳，非空表示已移入回收站 */
+  deletedAt?: number;
 }
 
 export interface BacklotWorkspacePayload {

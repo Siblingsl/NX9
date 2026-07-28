@@ -5,6 +5,7 @@ import type { ScreenplayPackage } from '../types/screenplay-package';
 import { isScreenplayPackage, screenplayFullText } from '../types/screenplay-package';
 import { promptItemsToBatch } from '../types/prompt-batch';
 import { resolveAssetImportItems } from '../utils/asset-import';
+import { resolveUpstreamSources, type UpstreamPolicy } from '../utils/upstream-policy';
 
 export interface UpstreamOutputs {
   prompts: string[];
@@ -121,13 +122,30 @@ export function gatherUpstream(
   blockId: string,
   blocks: FlowBlock[],
   links: FlowLink[],
+  policy?: UpstreamPolicy,
+  primarySourceId?: string | null,
 ): UpstreamOutputs {
   const byId = new Map(blocks.map((b) => [b.id, b]));
   const incoming = links.filter((l) => l.target === blockId).map((l) => l.source);
   const out: UpstreamOutputs = { prompts: [], pictures: [], clips: [], sounds: [] };
 
-  for (const srcId of incoming) {
-    const block = byId.get(srcId);
+  // F-027: 按策略解析上游
+  const effective = policy
+    ? (() => {
+        const result = resolveUpstreamSources(
+          incoming.map((id) => {
+            const b = byId.get(id);
+            return b ? { nodeId: b.id, nodeType: b.type, data: b.data } : null;
+          }).filter(Boolean) as { nodeId: string; nodeType: string; data: unknown }[],
+          policy,
+          primarySourceId || undefined,
+        );
+        return result.sources.map((s) => byId.get(s.nodeId)).filter(Boolean) as FlowBlock[];
+      })()
+    : incoming.map((id) => byId.get(id)).filter(Boolean) as FlowBlock[];
+
+  for (const block of effective) {
+    const srcId = block.id;
     if (!block) continue;
     const d = block.data ?? {};
     const kind = block.type;
@@ -178,7 +196,14 @@ export function gatherUpstream(
       }
       continue;
     }
-    if (kind === 'asset-gate' || kind === 'story-grid' || kind === 'storyboard-desk') {
+    if (kind === 'story-grid' || kind === 'storyboard-desk') {
+      // F-003: 优先从 chainStoryboard 读取
+      const chain = d.chainStoryboard as { shots: Array<{ imagePrompt?: string; id: string }> } | undefined;
+      if (chain?.shots) {
+        out.shotIds = [...new Set([...(out.shotIds ?? []), ...chain.shots.map((s) => s.id)])];
+        const prompts = chain.shots.map((s) => s.imagePrompt).filter(Boolean) as string[];
+        out.prompts.push(...prompts);
+      }
       const payload = d.scriptBreakdown as ScriptBreakdownPayload | undefined;
       if (payload?.version === 1) {
         out.scriptBreakdowns = [...(out.scriptBreakdowns ?? []), payload];
@@ -189,6 +214,7 @@ export function gatherUpstream(
       if (isScreenplayPackage(pkg)) {
         out.screenplayPackages = [...(out.screenplayPackages ?? []), pkg];
       }
+      // F-027: 当有多条上游 storyboard-desk 时，默认全部合并
       if (kind === 'storyboard-desk' || kind === 'story-grid') {
         const preview = d.storyboardPreview as import('../types/storyboard-preview').StoryboardPreviewPayload | undefined;
         if (preview?.version === 1) {

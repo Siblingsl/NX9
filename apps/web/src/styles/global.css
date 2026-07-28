@@ -162,7 +162,7 @@ body {
 
 /* Canvas context menus */
 .nx9-context-menu {
-  background: #fff;
+  background: var(--nx9-bg);
   border: 1px solid var(--nx9-line);
   border-radius: 12px;
   box-shadow: 0 16px 40px rgba(34, 34, 34, 0.12);
@@ -198,7 +198,7 @@ body {
 
 .nx9-context-menu__item:hover:not(:disabled),
 .nx9-context-menu__item:focus-visible:not(:disabled) {
-  background: color-mix(in srgb, var(--nx9-brand) 10%, #fff);
+  background: color-mix(in srgb, var(--nx9-brand) 10%, var(--nx9-bg));
 }
 
 .nx9-context-menu__item:disabled {
@@ -216,7 +216,7 @@ body {
 }
 
 .nx9-context-menu__item--danger:hover:not(:disabled) {
-  background: color-mix(in srgb, #b42318 10%, #fff);
+  background: color-mix(in srgb, #b42318 10%, var(--nx9-bg));
 }
 
 .nx9-context-menu__divider {
@@ -232,7 +232,7 @@ body {
   width: 20px;
   height: 20px;
   border-radius: 6px;
-  background: color-mix(in srgb, currentColor 12%, #fff);
+  background: color-mix(in srgb, currentColor 12%, var(--nx9-bg));
   flex-shrink: 0;
 }
 
@@ -427,14 +427,21 @@ body {
 }
 
 .nx9-theme-dark.nx9-stage-deck .nx9-attached-prompt-bar {
-  background: rgba(36,34,31,0.96) !important;
+  background: #1a1c1f !important;
   border-color: rgba(255,255,255,0.16) !important;
   color: #e8e6e3 !important;
   box-shadow: 0 18px 44px rgba(0,0,0,0.42);
+  backdrop-filter: none;
+}
+
+/* 底部工作区打开时抬高所属节点，避免被密集节点盖住/点穿 */
+.nx9-stage-deck .react-flow__node.selected:has(.nx9-prompt-bar-anchor),
+.nx9-flow .react-flow__node.selected:has(.nx9-prompt-bar-anchor) {
+  z-index: 1000 !important;
 }
 
 .nx9-theme-dark.nx9-stage-deck .nx9-composer-panel {
-  background: rgba(27,26,23,0.96) !important;
+  background: #161719 !important;
   border-color: rgba(255,255,255,0.14) !important;
   box-shadow: inset 0 1px 0 rgba(255,255,255,0.04);
 }
@@ -505,7 +512,7 @@ body {
 }
 
 .nx9-app-dark .nx9-workspace-rail .bg-white,
-.nx9-app-dark .nx9-workspace-rail [class*='hover:bg-white']:hover {
+.nx9-app-dark .nx9-workspace-rail [class*='hover:bg-surface']:hover {
   background: rgba(255,255,255,0.08) !important;
 }
 
@@ -814,12 +821,12 @@ body {
 }
 
 .nx9-topbar-icon-btn:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--nx9-brand) 6%, #fff);
+  background: color-mix(in srgb, var(--nx9-brand) 6%, var(--nx9-bg));
   color: var(--nx9-brand);
 }
 
 .nx9-topbar-icon-btn--active {
-  background: color-mix(in srgb, var(--nx9-brand) 10%, #fff);
+  background: color-mix(in srgb, var(--nx9-brand) 10%, var(--nx9-bg));
   color: var(--nx9-brand);
 }
 
@@ -842,12 +849,12 @@ body {
 .nx9-topbar-pill:hover {
   border-color: color-mix(in srgb, var(--nx9-brand) 30%, var(--nx9-line));
   color: var(--nx9-brand);
-  background: color-mix(in srgb, var(--nx9-brand) 4%, #fff);
+  background: color-mix(in srgb, var(--nx9-brand) 4%, var(--nx9-bg));
 }
 
 .nx9-topbar-pill--active {
   border-color: color-mix(in srgb, var(--nx9-brand) 35%, var(--nx9-line));
-  background: color-mix(in srgb, var(--nx9-brand) 8%, #fff);
+  background: color-mix(in srgb, var(--nx9-brand) 8%, var(--nx9-bg));
   color: var(--nx9-brand);
 }
 
@@ -896,20 +903,20 @@ body {
 
 .nx9-status-chip--warn {
   border-color: color-mix(in srgb, var(--nx9-warn) 25%, transparent);
-  background: color-mix(in srgb, var(--nx9-warn) 8%, #fff);
+  background: color-mix(in srgb, var(--nx9-warn) 8%, var(--nx9-bg));
   color: var(--nx9-warn);
 }
 
 .nx9-status-chip--running {
   border-color: color-mix(in srgb, var(--nx9-brand) 20%, transparent);
-  background: color-mix(in srgb, var(--nx9-brand) 6%, #fff);
+  background: color-mix(in srgb, var(--nx9-brand) 6%, var(--nx9-bg));
   color: rgba(34, 34, 34, 0.7);
   cursor: pointer;
   transition: background 150ms ease;
 }
 
 .nx9-status-chip--running:hover {
-  background: color-mix(in srgb, var(--nx9-brand) 10%, #fff);
+  background: color-mix(in srgb, var(--nx9-brand) 10%, var(--nx9-bg));
 }
 
 .nx9-workspace-rail {

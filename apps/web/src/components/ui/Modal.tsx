@@ -23,7 +23,7 @@ export function Modal({ open, onClose, title, children }: ModalProps) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={onClose}>
       <div
-        className="min-w-[320px] max-w-[480px] rounded-2xl bg-white shadow-xl border border-line"
+        className="min-w-[320px] max-w-[480px] rounded-2xl bg-surface shadow-xl border border-line"
         onClick={(e) => e.stopPropagation()}
       >
         {title && (

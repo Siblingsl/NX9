@@ -25,6 +25,8 @@ export interface AssetLibraryItem {
   imageUrl?: string;
   hookPhase?: 'opening' | 'ending';
   builtin?: boolean;
+  /** F-010: 软删除时间戳 */
+  deletedAt?: number;
 }
 
 export const ASSET_LIBRARY_TABS: { key: AssetLibraryKind; label: string; hint: string }[] = [
@@ -82,6 +84,7 @@ export function characterToItem(c: CharacterProfile, scope: AssetScope): AssetLi
     description: c.descriptionZh,
     imageUrl: c.creative?.fullSheetUrl ?? c.referenceImageUrl ?? undefined,
     audioUrl: c.referenceAudioUrl ?? undefined,
+    deletedAt: c.deletedAt,
   };
 }
 
@@ -101,6 +104,7 @@ export function workspaceItemToAsset(item: BacklotWorkspaceItem, scope: AssetSco
     description: creative.description ?? item.promptZh,
     imageUrl: creative.sheetUrl ?? creative.referenceUrls?.[0] ?? undefined,
     hookPhase: item.hookPhase,
+    deletedAt: item.deletedAt,
   };
 }
 
@@ -114,6 +118,7 @@ export function templateToAsset(tpl: BacklotCustomTemplate, scope: AssetScope, b
     description: tpl.description ?? tpl.promptZh,
     hookPhase: tpl.hookPhase,
     builtin,
+    deletedAt: tpl.deletedAt,
   };
 }
 
@@ -126,6 +131,7 @@ export function soundToItem(s: SoundAssetProfile, scope: AssetScope): AssetLibra
     prompt: resolveAssetPromptText('sound', s),
     description: s.description,
     audioUrl: s.audioUrl,
+    deletedAt: s.deletedAt,
   };
 }
 

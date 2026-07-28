@@ -21,6 +21,7 @@ import { ToolsModule } from './modules/tools/tools.module';
 import { TopazModule } from './modules/topaz/topaz.module';
 import { WorkspaceModule } from './modules/workspace/workspace.module';
 import { PublicLibraryModule } from './modules/public-library/public-library.module';
+import { ExportModule } from './modules/export/export.module';
 
 @Module({
   imports: [
@@ -42,6 +43,7 @@ import { PublicLibraryModule } from './modules/public-library/public-library.mod
     ImageOpsModule,
     ToolsModule,
     TopazModule,
+    ExportModule,
     ServeStaticModule.forRoot(
       { rootPath: PATHS.uploads, serveRoot: '/media/uploads' },
       { rootPath: PATHS.exports, serveRoot: '/media/exports' },
@@ -49,6 +51,8 @@ import { PublicLibraryModule } from './modules/public-library/public-library.mod
       { rootPath: PATHS.audio, serveRoot: '/media/audio' },
       { rootPath: PATHS.images, serveRoot: '/media/images' },
       { rootPath: PATHS.videos, serveRoot: '/media/videos' },
+      { rootPath: PATHS.remotion, serveRoot: '/media' },
+      { rootPath: join(PATHS.data, 'export-manifests'), serveRoot: '/media/export-manifests' },
     ),
   ],
   providers: [JsonStoreService],
@@ -64,6 +68,7 @@ export class AppModule {
       PATHS.images,
       PATHS.videos,
       PATHS.skills,
+      join(PATHS.data, 'export-manifests'),
     ]);
   }
 }

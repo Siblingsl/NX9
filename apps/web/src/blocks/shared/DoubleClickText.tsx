@@ -90,7 +90,7 @@ export const DoubleClickText = memo(function DoubleClickText({
         onChange={(e) => setDraft(e.target.value)}
         spellCheck={false}
         rows={6}
-        className="w-full rounded px-2 py-1.5 text-[12px] outline-none nodrag nopan bg-white text-ink border border-brand/40"
+        className="w-full rounded px-2 py-1.5 text-[12px] outline-none nodrag nopan bg-surface text-ink border border-brand/40"
         onKeyDown={(e) => {
           if (e.key === 'Escape') cancel();
           if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) save();

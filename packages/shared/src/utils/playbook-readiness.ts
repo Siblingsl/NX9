@@ -1,5 +1,6 @@
 import type { PlaybookStepDef, PlaybookDefinition } from '../data/playbook-definitions';
 import type { PlaybookSession } from '../types/workspace';
+import { hasEffectiveTimeline, type TimelineDraftRaw } from './timeline-effective';
 
 export interface PlaybookReadinessContext {
   storyboard: {
@@ -16,6 +17,18 @@ export interface PlaybookReadinessContext {
       linkedBlockId?: string;
     }>;
   };
+  /** 按链隔离的镜表（F-003），替代全局 storyboard 读路径 */
+  chainShots?: Array<{
+    id: string;
+    episodeId?: string | null;
+    status: string;
+      firstFrameAssetId?: string;
+      videoAssetId?: string;
+      keyframeStatus?: string;
+      videoStatus?: string;
+      linkedBlockId?: string;
+    }>;
+  referenceItems?: unknown[];
   voice: { lines: unknown[] };
   nodes: Array<{ id: string; type: string; data: Record<string, unknown> }>;
   scriptPlan?: { sourceText?: string; scenes?: Array<{ characters: string[] }> };
@@ -25,10 +38,12 @@ export interface PlaybookReadinessContext {
 }
 
 function scopedShots(ctx: PlaybookReadinessContext) {
+  // F-003: chainShots 已注入（含空数组）时禁止回退全局
+  const shots = ctx.chainShots !== undefined ? ctx.chainShots : ctx.storyboard.shots;
   const activeEpisodeId = ctx.storyboard.activeEpisodeId;
-  if (!activeEpisodeId) return ctx.storyboard.shots;
-  const scoped = ctx.storyboard.shots.filter((shot) => shot.episodeId === activeEpisodeId);
-  return scoped.length > 0 ? scoped : ctx.storyboard.shots;
+  if (!activeEpisodeId) return shots;
+  const scoped = shots.filter((shot) => shot.episodeId === activeEpisodeId);
+  return scoped.length > 0 ? scoped : shots;
 }
 
 export function has_source_text(ctx: PlaybookReadinessContext): boolean {
@@ -167,6 +182,34 @@ export function has_environment_bibles(ctx: PlaybookReadinessContext, ...args: s
   );
 }
 
+/** F-007: 爆款·参考约束 — 存在 reference-board 且有 ≥1 参考项/URL */
+export function has_reference_board(ctx: PlaybookReadinessContext): boolean {
+  return ctx.nodes.some((node) => {
+    if (node.type !== 'reference-board') return false;
+    const data = node.data as Record<string, unknown>;
+    if (Array.isArray(data.items) && data.items.length > 0) return true;
+    if (typeof data.url === 'string' && data.url.trim().length > 0) return true;
+    return false;
+  });
+}
+
+/** F-007: 爆款·生成 — 下游 picture-gen 或 clip-gen success 且有媒体 */
+export function has_viral_output(ctx: PlaybookReadinessContext): boolean {
+  return ctx.nodes.some((node) =>
+    (node.type === 'picture-gen' || node.type === 'clip-gen') &&
+    (node.data?.status === 'done' || node.data?.status === 'success') &&
+    (typeof (node.data as any).mediaUrl === 'string' || Array.isArray((node.data as any).mediaUrls))
+  );
+}
+
+/** F-007/F-011: 智能剪辑 — clip-editor 有效时间线（tracks[].clips 或遗留 clips）≥1（F-029：仅检查节点级 data.timelineDraft） */
+export function has_timeline_draft(ctx: PlaybookReadinessContext): boolean {
+  return ctx.nodes.some((node) => {
+    if (node.type !== 'clip-editor') return false;
+    return hasEffectiveTimeline((node.data as Record<string, unknown> | undefined)?.timelineDraft as TimelineDraftRaw);
+  });
+}
+
 export function has_character_bibles(ctx: PlaybookReadinessContext): boolean {
   const chars = ctx.characters ?? [];
   if (chars.length === 0) return false;
@@ -218,10 +261,27 @@ export function consistency_resolved(ctx: PlaybookReadinessContext): boolean {
 }
 
 export function export_ready(ctx: PlaybookReadinessContext): boolean {
-  return ctx.nodes.some(n =>
-    n.type === 'export-pack' &&
-    (n.data?.status === 'done' || n.data?.status === 'success')
-  );
+  // F-047: 存在 export-pack 且（最近一次 history success 有有效产物 URL，或有效时间线可导）
+  // 禁止仅靠 status 字符串判 ready；必须有实际产物 URL。
+  return ctx.nodes.some(n => {
+    if (n.type !== 'export-pack') return false;
+    const data = n.data as Record<string, unknown>;
+    // 检查最近一次 history success 且有有效产物 URL
+    const history = data.exportHistory as Array<{ status: string; url?: string }> | undefined;
+    if (Array.isArray(history) && history.length > 0 && history[0].status === 'success' && history[0].url) {
+      return true;
+    }
+    // 检查有效 episodeUrl（实际产物 URL）
+    if (data.episodeUrl && typeof data.episodeUrl === 'string' && data.episodeUrl.trim().length > 0) {
+      return true;
+    }
+    // 检查有效时间线（tracks[].clips 或遗留 clips；含 JSON 字符串）
+    if (hasEffectiveTimeline(data.timelineDraft as TimelineDraftRaw)) {
+      return true;
+    }
+    // 禁止：return data?.status === 'done' || data?.status === 'success';
+    return false;
+  });
 }
 
 type ReadinessFn = (ctx: PlaybookReadinessContext, ...args: string[]) => boolean;
@@ -237,6 +297,9 @@ export const readinessRegistry: Record<string, ReadinessFn> = {
   all_videos_approved,
   has_video_takes,
   has_video_assets,
+  has_reference_board,
+  has_viral_output,
+  has_timeline_draft,
   canvas_node_done,
   review_gate_passed,
   has_character_refs,

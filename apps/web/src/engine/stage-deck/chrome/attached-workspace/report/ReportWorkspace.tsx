@@ -232,7 +232,7 @@ export function ReportWorkspace({ blockId, kind, onCollapse }: ReportWorkspacePr
               <button
                 type="button"
                 onClick={focusPreview}
-                className="flex-1 rounded-lg border border-brand/25 bg-white py-1.5 text-[10px] text-brand"
+                className="flex-1 rounded-lg border border-brand/25 bg-surface py-1.5 text-[10px] text-brand"
               >
                 返回分镜预览修改
               </button>
@@ -390,7 +390,7 @@ export function ReportWorkspace({ blockId, kind, onCollapse }: ReportWorkspacePr
                               }))
                             }
                             placeholder="必须填写修改意见…"
-                            className="w-full resize-none rounded border border-warn/25 bg-white px-2 py-1 text-[9px] outline-none"
+                            className="w-full resize-none rounded border border-warn/25 bg-surface px-2 py-1 text-[9px] outline-none"
                           />
                           <div className="mt-1 flex flex-wrap justify-end gap-1">
                             <button

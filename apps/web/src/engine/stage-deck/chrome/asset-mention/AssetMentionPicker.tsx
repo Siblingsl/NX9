@@ -116,7 +116,7 @@ export function AssetMentionPicker({
   return createPortal(
     <div
       ref={panelRef}
-      className="fixed z-[9999] w-56 rounded-xl border border-line bg-white shadow-panel py-1 nx9-scroll max-h-52 overflow-y-auto nodrag nopan"
+      className="fixed z-[9999] w-56 rounded-xl border border-line bg-surface shadow-panel py-1 nx9-scroll max-h-52 overflow-y-auto nodrag nopan"
       style={style}
       onMouseDown={stop}
     >

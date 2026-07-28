@@ -67,7 +67,7 @@ function TopazClipBlock(props: NodeProps) {
           <select
             value={upscaleModel}
             onChange={(e) => updateNodeData(props.id, { upscaleModel: e.target.value })}
-            className="mt-0.5 w-full rounded-lg border border-line px-2 py-1 bg-white"
+            className="mt-0.5 w-full rounded-lg border border-line px-2 py-1 bg-surface"
           >
             <option value="iris-3">iris-3</option>
             <option value="nyx-3">nyx-3</option>

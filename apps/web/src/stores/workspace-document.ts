@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { setCurrentWorkspaceId } from '../api/workspace-context';
 import type {
   BacklotCustomPayload,
   BacklotCustomTemplate,
@@ -43,6 +44,10 @@ import {
   migrateEnvironmentProfile,
   createEpisodeMeta,
   listEpisodeMetas,
+  purgeExpiredAssets,
+  softDeleteAssetById,
+  restoreAssetById,
+  purgeAssetById,
   type PlaybookReadinessContext,
   type EpisodeMeta,
 } from '@nx9/shared';
@@ -57,7 +62,6 @@ interface WorkspaceDocumentState {
   backlotCustom: BacklotCustomPayload;
   backlotWorkspace: BacklotWorkspacePayload;
   canvasAppearance: CanvasAppearance;
-  timelineDraft: TimelinePayload | null;
   scriptPlan: ScriptPlanPayload | null;
   environments: EnvironmentLibraryPayload | null;
   playbookSession: PlaybookSession | null;
@@ -65,7 +69,9 @@ interface WorkspaceDocumentState {
   hydrated: boolean;
   hydrate: (workspaceId: string, payload: WorkspacePayload) => void;
   reset: () => void;
+  /** @deprecated F-003: 使用 chainStoryboard 代替。仅用于迁移兼容。 */
   setStoryboard: (sb: StoryboardPayload) => void;
+  /** @deprecated F-003: 使用 chainStoryboard 代替。仅用于迁移兼容。 */
   setActiveEpisodeId: (episodeId: string | null) => void;
   /** 制作台：创建/切换/完成剧集 */
   upsertEpisodeMeta: (ep: EpisodeMeta) => void;
@@ -81,15 +87,28 @@ interface WorkspaceDocumentState {
   updateVoiceLine: (id: string, patch: Partial<VoiceLine>) => void;
   addVoiceLines: (lines: VoiceLine[]) => void;
   upsertCharacter: (profile: CharacterProfile) => void;
+  /** F-010: 软删除 → 回收站 */
   removeCharacter: (id: string) => void;
+  restoreCharacter: (id: string) => { restoredId: string; conflictRenamed: boolean };
+  purgeCharacter: (id: string) => void;
   upsertSound: (sound: SoundAssetProfile) => void;
+  /** F-010: 软删除 → 回收站 */
   removeSound: (id: string) => void;
+  restoreSound: (id: string) => { restoredId: string; conflictRenamed: boolean };
+  purgeSound: (id: string) => void;
   addBacklotCustom: (item: BacklotCustomTemplate) => void;
+  /** F-010: 软删除 → 回收站 */
   removeBacklotCustom: (id: string) => void;
+  restoreBacklotCustom: (id: string) => { restoredId: string; conflictRenamed: boolean };
+  purgeBacklotCustom: (id: string) => void;
   upsertBacklotWorkspace: (item: BacklotWorkspaceItem) => void;
+  /** F-010: 软删除 → 回收站 */
   removeBacklotWorkspace: (id: string) => void;
+  restoreBacklotWorkspace: (id: string) => { restoredId: string; conflictRenamed: boolean };
+  purgeBacklotWorkspace: (id: string) => void;
+  /** F-010: 清理过期资产（≥30天） */
+  purgeExpiredTrashedAssets: () => number;
   setCanvasAppearance: (appearance: CanvasAppearance) => void;
-  setTimelineDraft: (draft: TimelinePayload | null) => void;
   setScriptPlan: (plan: ScriptPlanPayload) => void;
   setEnvironments: (envs: EnvironmentLibraryPayload) => void;
   startPlaybook: (playbookId: PlaybookId) => void;
@@ -140,7 +159,6 @@ export const useWorkspaceDocument = create<WorkspaceDocumentState>((set, get) =>
   backlotCustom: emptyBacklotCustom(),
   backlotWorkspace: emptyBacklotWorkspace(),
   canvasAppearance: DEFAULT_CANVAS_APPEARANCE,
-  timelineDraft: null,
   scriptPlan: null,
   environments: null,
   playbookSession: null,
@@ -148,6 +166,8 @@ export const useWorkspaceDocument = create<WorkspaceDocumentState>((set, get) =>
   hydrated: false,
 
   hydrate: (workspaceId, payload) => {
+    // F-009: 同步当前 workspaceId 到 API 上下文（供用量标记）
+    setCurrentWorkspaceId(workspaceId);
     const storyboard = payload.storyboard
       ? migrateStoryboardPayload(payload.storyboard)
       : emptyStoryboard();
@@ -155,14 +175,33 @@ export const useWorkspaceDocument = create<WorkspaceDocumentState>((set, get) =>
     const playbookSession = rawSession
       ? hydrateEpisodePlaybookProgress(rawSession, resolveActiveEpisodeId(storyboard))
       : null;
+
+    // F-010: 加载时清理过期软删资产
+    const charPurged = purgeExpiredAssets(payload.characters?.characters ?? []);
+    const soundPurged = purgeExpiredAssets(payload.soundLibrary?.sounds ?? []);
+    const customPurged = purgeExpiredAssets(payload.backlotCustom?.items ?? []);
+    const wsPurged = purgeExpiredAssets(payload.backlotWorkspace?.items ?? []);
+
     set({
       workspaceId,
       storyboard,
       voice: payload.voice ?? emptyVoice(),
-      characters: payload.characters ?? emptyCharacterLibrary(),
-      soundLibrary: payload.soundLibrary ?? emptySoundLibrary(),
-      backlotCustom: payload.backlotCustom ?? emptyBacklotCustom(),
-      backlotWorkspace: payload.backlotWorkspace ?? emptyBacklotWorkspace(),
+      characters: {
+        version: 1,
+        characters: charPurged.items,
+      },
+      soundLibrary: {
+        version: 1,
+        sounds: soundPurged.items,
+      },
+      backlotCustom: {
+        version: 1,
+        items: customPurged.items,
+      },
+      backlotWorkspace: {
+        version: 1,
+        items: wsPurged.items,
+      },
       canvasAppearance: (payload as any).canvasAppearance ?? DEFAULT_CANVAS_APPEARANCE,
       scriptPlan: (payload as any).scriptPlan ?? null,
       environments: (payload as any).environments
@@ -424,7 +463,29 @@ export const useWorkspaceDocument = create<WorkspaceDocumentState>((set, get) =>
     set((s) => ({
       characters: {
         ...s.characters,
-        characters: s.characters.characters.filter((c) => c.id !== id),
+        characters: softDeleteAssetById(s.characters.characters, id),
+      },
+    })),
+
+  restoreCharacter: (id) => {
+    let result = { restoredId: id, conflictRenamed: false };
+    set((s) => {
+      const next = restoreAssetById(s.characters.characters, id, () =>
+        `char-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      );
+      result = { restoredId: next.restoredId, conflictRenamed: next.conflictRenamed };
+      return {
+        characters: { ...s.characters, characters: next.items },
+      };
+    });
+    return result;
+  },
+
+  purgeCharacter: (id) =>
+    set((s) => ({
+      characters: {
+        ...s.characters,
+        characters: purgeAssetById(s.characters.characters, id),
       },
     })),
 
@@ -440,7 +501,29 @@ export const useWorkspaceDocument = create<WorkspaceDocumentState>((set, get) =>
     set((s) => ({
       soundLibrary: {
         ...s.soundLibrary,
-        sounds: s.soundLibrary.sounds.filter((x) => x.id !== id),
+        sounds: softDeleteAssetById(s.soundLibrary.sounds, id),
+      },
+    })),
+
+  restoreSound: (id) => {
+    let result = { restoredId: id, conflictRenamed: false };
+    set((s) => {
+      const next = restoreAssetById(s.soundLibrary.sounds, id, () =>
+        `sound-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      );
+      result = { restoredId: next.restoredId, conflictRenamed: next.conflictRenamed };
+      return {
+        soundLibrary: { ...s.soundLibrary, sounds: next.items },
+      };
+    });
+    return result;
+  },
+
+  purgeSound: (id) =>
+    set((s) => ({
+      soundLibrary: {
+        ...s.soundLibrary,
+        sounds: purgeAssetById(s.soundLibrary.sounds, id),
       },
     })),
 
@@ -456,7 +539,29 @@ export const useWorkspaceDocument = create<WorkspaceDocumentState>((set, get) =>
     set((s) => ({
       backlotCustom: {
         ...s.backlotCustom,
-        items: s.backlotCustom.items.filter((x: BacklotCustomTemplate) => x.id !== id),
+        items: softDeleteAssetById(s.backlotCustom.items, id),
+      },
+    })),
+
+  restoreBacklotCustom: (id) => {
+    let result = { restoredId: id, conflictRenamed: false };
+    set((s) => {
+      const next = restoreAssetById(s.backlotCustom.items, id, () =>
+        `tpl-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      );
+      result = { restoredId: next.restoredId, conflictRenamed: next.conflictRenamed };
+      return {
+        backlotCustom: { ...s.backlotCustom, items: next.items },
+      };
+    });
+    return result;
+  },
+
+  purgeBacklotCustom: (id) =>
+    set((s) => ({
+      backlotCustom: {
+        ...s.backlotCustom,
+        items: purgeAssetById(s.backlotCustom.items, id),
       },
     })),
 
@@ -475,13 +580,51 @@ export const useWorkspaceDocument = create<WorkspaceDocumentState>((set, get) =>
     set((s) => ({
       backlotWorkspace: {
         ...s.backlotWorkspace,
-        items: s.backlotWorkspace.items.filter((x) => x.id !== id),
+        items: softDeleteAssetById(s.backlotWorkspace.items, id),
       },
     })),
 
-  setCanvasAppearance: (appearance) => set({ canvasAppearance: appearance }),
+  restoreBacklotWorkspace: (id) => {
+    let result = { restoredId: id, conflictRenamed: false };
+    set((s) => {
+      const next = restoreAssetById(s.backlotWorkspace.items, id, () =>
+        `ws-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      );
+      result = { restoredId: next.restoredId, conflictRenamed: next.conflictRenamed };
+      return {
+        backlotWorkspace: { ...s.backlotWorkspace, items: next.items },
+      };
+    });
+    return result;
+  },
 
-  setTimelineDraft: (draft) => set({ timelineDraft: draft }),
+  purgeBacklotWorkspace: (id) =>
+    set((s) => ({
+      backlotWorkspace: {
+        ...s.backlotWorkspace,
+        items: purgeAssetById(s.backlotWorkspace.items, id),
+      },
+    })),
+
+  purgeExpiredTrashedAssets: () => {
+    let total = 0;
+    set((s) => {
+      const chars = purgeExpiredAssets(s.characters.characters);
+      const sounds = purgeExpiredAssets(s.soundLibrary.sounds);
+      const custom = purgeExpiredAssets(s.backlotCustom.items);
+      const ws = purgeExpiredAssets(s.backlotWorkspace.items);
+      total = chars.purgedCount + sounds.purgedCount + custom.purgedCount + ws.purgedCount;
+      return {
+        characters: { ...s.characters, characters: chars.items },
+        soundLibrary: { ...s.soundLibrary, sounds: sounds.items },
+        backlotCustom: { ...s.backlotCustom, items: custom.items },
+        backlotWorkspace: { ...s.backlotWorkspace, items: ws.items },
+      };
+    });
+    return total;
+  },
+
+  setCanvasAppearance: (appearance) => set({ canvasAppearance: appearance }),
 
   setScriptPlan: (plan) => set({ scriptPlan: plan }),
 

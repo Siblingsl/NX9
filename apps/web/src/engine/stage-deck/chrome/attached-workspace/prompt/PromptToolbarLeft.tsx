@@ -33,7 +33,7 @@ export function ModePills({
           onMouseDown={stop}
           onClick={() => onChange(m.id)}
           className={`px-2 py-0.5 rounded-md text-[10px] transition-colors nodrag nopan ${
-            value === m.id ? 'bg-white text-brand shadow-sm font-medium' : 'text-ink/45 hover:text-ink'
+            value === m.id ? 'bg-surface text-brand shadow-sm font-medium' : 'text-ink/45 hover:text-ink'
           }`}
         >
           {m.label}

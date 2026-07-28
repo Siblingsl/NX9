@@ -171,7 +171,7 @@
   align-items: center;
   gap: 8px;
   color: var(--desk-btn-primary-ink);
-  background: linear-gradient(135deg, var(--desk-accent), color-mix(in srgb, var(--desk-accent) 70%, #fff));
+  background: linear-gradient(135deg, var(--desk-accent), color-mix(in srgb, var(--desk-accent) 70%, var(--nx9-bg)));
   box-shadow: 0 4px 16px color-mix(in srgb, var(--desk-accent) 30%, transparent);
   transition: filter 0.15s, transform 0.1s;
 }

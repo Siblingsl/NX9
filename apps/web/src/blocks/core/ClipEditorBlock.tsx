@@ -10,10 +10,12 @@ import {
   type SmartSuggestion,
   type TimelinePayload,
 } from '@nx9/shared';
+import { buildVoiceDramaTimeline } from '@nx9/shared';
 import { BlockShell } from '../shared/BlockShell';
 import { ScreenModal } from '../../components/ui/ScreenModal';
 import { api } from '../../api/client';
 import { useActivityLog } from '../../stores/activity-log';
+import { useWorkspaceDocument } from '../../stores/workspace-document';
 import { useUpstreamMedia } from '../../engine/stage-deck/chrome/attached-workspace/generation/use-upstream-media';
 import { useUpstreamShots } from '../../engine/stage-deck/chrome/attached-workspace/generation/use-upstream-shots';
 import {
@@ -42,11 +44,11 @@ function readNodeTimeline(data: Record<string, unknown> | undefined): TimelinePa
 }
 
 function ClipEditorBlock(props: NodeProps) {
-  const { updateNodeData } = useReactFlow();
+  const { updateNodeData, fitView } = useReactFlow();
   const nodes = useNodes();
   const edges = useEdges();
   const appendLog = useActivityLog((s) => s.append);
-  const { clips: upstreamClips, hasMedia } = useUpstreamMedia(props.id);
+  const { clips: upstreamClips, sounds: upstreamSounds, hasMedia } = useUpstreamMedia(props.id);
   const { hasUpstream: hasShotUpstream, shots: upstreamShots } = useUpstreamShots(props.id);
 
   const [studioOpen, setStudioOpen] = useState(false);
@@ -164,6 +166,7 @@ function ClipEditorBlock(props: NodeProps) {
             descriptionZh: s.descriptionZh,
             subtitleText: s.subtitleText,
           })),
+          bgmUrl: upstreamSounds[0],
         });
       } else {
         const dataClips =
@@ -176,6 +179,7 @@ function ClipEditorBlock(props: NodeProps) {
         result = await orchestrateViralTimeline({
           clips,
           aspect: '9:16',
+          bgmUrl: upstreamSounds[0],
         });
       }
       writeTimeline(result.timeline, {
@@ -204,6 +208,7 @@ function ClipEditorBlock(props: NodeProps) {
     updateNodeData,
     upstreamClips,
     upstreamShots,
+    upstreamSounds,
     writeTimeline,
   ]);
 
@@ -305,11 +310,26 @@ function ClipEditorBlock(props: NodeProps) {
     [pendingIds, updateNodeData, props.id, appendLog, suggestions],
   );
 
+  // F-050: 全部采纳
+  const handleAcceptAll = useCallback(() => {
+    if (!timelineDraft) return;
+    let updated = { ...timelineDraft };
+    for (const sg of pendingItems) {
+      const suggestion = suggestions.find((s) => s.id === sg.id);
+      if (suggestion?.patch) {
+        updated = { ...updated, ...(suggestion.patch as Partial<typeof timelineDraft>) };
+      }
+    }
+    writeTimeline(updated);
+    updateNodeData(props.id, { pendingSuggestionIds: [], confirmedAt: new Date().toISOString() });
+    appendLog(`已全部采纳 ${pendingItems.length} 条建议`);
+  }, [pendingItems, suggestions, timelineDraft, writeTimeline, updateNodeData, props.id, appendLog]);
+
   const syncToExportPack = useCallback(() => {
     if (!timelineDraft) {
       appendLog('请先执行智能编排');
       setTip('请先执行智能编排');
-      return;
+      return 0;
     }
     const downstreamPackIds = new Set(
       edges.filter((e) => e.source === props.id).map((e) => e.target),
@@ -320,7 +340,7 @@ function ClipEditorBlock(props: NodeProps) {
     if (packNodes.length === 0) {
       appendLog('请先把本节点连到交付打包，再同步时间线');
       setTip('请连接交付打包后再同步');
-      return;
+      return 0;
     }
     for (const pack of packNodes) {
       updateNodeData(pack.id, {
@@ -331,7 +351,46 @@ function ClipEditorBlock(props: NodeProps) {
     }
     appendLog(`时间线已同步到 ${packNodes.length} 个交付打包节点`);
     setTip(`已同步到交付打包（${packNodes.length}）`);
+    return packNodes.length;
   }, [edges, nodes, props.id, timelineDraft, updateNodeData, appendLog]);
+
+  // F-011/F-050: 确认时间线并送交导出（写 confirmedAt + 同步 export-pack）
+  const handleConfirmTimeline = useCallback(() => {
+    if (pendingItems.length > 0) {
+      appendLog('请先处理所有待确认建议');
+      return;
+    }
+    if (!timelineDraft) {
+      appendLog('请先执行智能编排');
+      setTip('请先执行智能编排');
+      return;
+    }
+    updateNodeData(props.id, { confirmedAt: new Date().toISOString() });
+    const synced = syncToExportPack();
+    if (synced > 0) {
+      const pack = nodes.find(
+        (n) =>
+          n.type === 'export-pack' &&
+          edges.some((e) => e.source === props.id && e.target === n.id),
+      );
+      if (pack) fitView({ nodes: [{ id: pack.id }], duration: 300 });
+      appendLog('时间线已确认并送交导出');
+      setTip('已确认并送交交付打包');
+    } else {
+      appendLog('时间线已确认；请连接交付打包后再同步');
+      setTip('已确认 · 请连接交付打包');
+    }
+  }, [
+    pendingItems,
+    timelineDraft,
+    updateNodeData,
+    props.id,
+    appendLog,
+    syncToExportPack,
+    nodes,
+    edges,
+    fitView,
+  ]);
 
   const setProfile = useCallback(
     (p: SmartEditProfile) => {
@@ -361,9 +420,20 @@ function ClipEditorBlock(props: NodeProps) {
     <>
       <BlockShell {...props}>
         <div className="se2-card nodrag nopan">
-          <button type="button" className="se2-card__clickable" onClick={() => openStudio()}>
+          <div
+            className="se2-card__clickable"
+            role="button"
+            tabIndex={0}
+            onClick={() => openStudio()}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                openStudio();
+              }
+            }}
+          >
             <div className="se2-card__header">
-              <span className="se2-card__eyebrow">智能剪辑 · 成片</span>
+              <span className="se2-card__eyebrow">智能剪辑 · 编排</span>
               <span className={`se2-card__badge ${cardBadge.cls}`}>{cardBadge.text}</span>
             </div>
             <div className="se2-card__title">{cardTitle}</div>
@@ -372,11 +442,12 @@ function ClipEditorBlock(props: NodeProps) {
               {pendingItems.length > 0 ? ` · ${pendingItems.length} 建议` : ''}
             </div>
             <div className="se2-card__logline">
+              {/* F-011: 成片出口心智收口 */}
               {outputUrl
                 ? '成片已导出 · 可打开台内预览或同步交付'
                 : timelineDraft
-                  ? '时间线已就绪 · 打开台内确认建议并渲染'
-                  : '点击打开智能剪辑 · 编排时间线并渲染成片'}
+                  ? '时间线已编排 · 可确认并送交导出'
+                  : '点击打开智能剪辑 · 编排时间线'}
             </div>
             <div className="se2-card__actions">
               <button
@@ -390,7 +461,7 @@ function ClipEditorBlock(props: NodeProps) {
                 打开智能剪辑
               </button>
             </div>
-          </button>
+          </div>
         </div>
       </BlockShell>
 
@@ -398,7 +469,7 @@ function ClipEditorBlock(props: NodeProps) {
         open={studioOpen}
         onClose={() => setStudioOpen(false)}
         title="智能剪辑"
-        subtitle="编排时间线 → 确认建议 → 渲染成片"
+        subtitle="编排时间线 → 确认并送交导出 · 最终出片在交付打包"
         width="min(1180px, calc(100vw - 24px))"
         variant="default"
         className="se2-modal"
@@ -426,7 +497,7 @@ function ClipEditorBlock(props: NodeProps) {
               className={`se2-pipeline__step ${studioTab === 'render' ? 'is-on' : ''}`}
               onClick={() => setStudioTab('render')}
             >
-              <b>3</b> 渲染交付
+              <b>3</b> 预览 / 送交
             </button>
           </div>
 
@@ -489,7 +560,16 @@ function ClipEditorBlock(props: NodeProps) {
                       </div>
                     ) : (
                       <div className="se2-suggestions">
-                        <p className="se2-hint">{pendingItems.length} 条待确认</p>
+                        <div className="flex items-center gap-2 mb-1">
+                          <p className="se2-hint flex-1">{pendingItems.length} 条待确认</p>
+                          <button
+                            type="button"
+                            className="se2-btn se2-btn--ghost"
+                            onClick={handleAcceptAll}
+                          >
+                            全部采纳
+                          </button>
+                        </div>
                         {pendingItems.map((sg) => (
                           <div key={sg.id} className="se2-suggestion-row">
                             <span className="se2-sg-kind">{sg.kind}</span>
@@ -604,10 +684,22 @@ function ClipEditorBlock(props: NodeProps) {
                         </button>
                         <button
                           type="button"
-                          className="se2-btn se2-btn--primary"
+                          className="se2-btn"
                           onClick={() => setStudioTab('render')}
                         >
-                          去渲染
+                          预览渲染
+                        </button>
+                        {/* F-011/F-050: 确认时间线并送交导出（主 CTA） */}
+                        <button
+                          type="button"
+                          className="se2-btn se2-btn--primary"
+                          onClick={handleConfirmTimeline}
+                          disabled={pendingItems.length > 0 || !timelineDraft}
+                          title={pendingItems.length > 0 ? '请先处理待确认建议' : '确认时间线并送交导出'}
+                        >
+                          {pendingItems.length > 0
+                            ? `${pendingItems.length} 条建议待处理`
+                            : '确认时间线并送交导出'}
                         </button>
                       </div>
                     </>
@@ -618,9 +710,9 @@ function ClipEditorBlock(props: NodeProps) {
               {studioTab === 'render' && (
                 <>
                   <div className="se2-panel">
-                    <h3 className="se2-panel__title">渲染引擎</h3>
+                    <h3 className="se2-panel__title">预览渲染（非最终出片）</h3>
                     <p className="se2-panel__hint">
-                      Auto 按模式择优；Remotion 当前为客户端 Studio bundle 下载。
+                      此处仅预览。最终成片请在交付打包导出。Auto 按模式择优；Remotion 当前为客户端 Studio bundle 下载。
                     </p>
                     <div className="se2-row">
                       {ENGINES.map((e) => (
@@ -635,6 +727,30 @@ function ClipEditorBlock(props: NodeProps) {
                         </button>
                       ))}
                     </div>
+                    {/* F-034: 注入对白音轨（F-014: 同时注入上游 BGM） */}
+                    <button
+                      type="button"
+                      className="w-full rounded-lg border border-line text-[9px] py-1.5 text-ink/60 hover:border-brand/30"
+                      onClick={() => {
+                        const tl = timelineDraft;
+                        if (!tl) { appendLog('先编排时间线'); return; }
+                        try {
+                          const voiceLines = useWorkspaceDocument.getState().voice.lines;
+                          if (!voiceLines || voiceLines.length === 0) { appendLog('无对白行可注入'); return; }
+                          const bgmUrl = upstreamSounds[0];
+                          const updated = buildVoiceDramaTimeline(tl, voiceLines, bgmUrl);
+                          writeTimeline(updated);
+                          const voCount = voiceLines.map((l: any) => l.audioAssetId).filter(Boolean).length;
+                          const parts = [`${voCount} 条对白音轨`];
+                          if (bgmUrl) parts.push('BGM 音轨');
+                          appendLog(`已注入 ${parts.join(' + ')}`);
+                        } catch (e) {
+                          appendLog(`注入失败: ${String(e)}`);
+                        }
+                      }}
+                    >
+                      🎤 注入对白音轨（从对白行{upstreamSounds[0] ? ' + BGM' : ''}）
+                    </button>
                     {engine === 'remotion' && (
                       <p className="se2-hint se2-hint--warn">
                         <Download size={12} style={{ marginRight: 4, verticalAlign: '-1px' }} />
@@ -644,21 +760,30 @@ function ClipEditorBlock(props: NodeProps) {
                     <div className="se2-actions">
                       <button
                         type="button"
-                        className="se2-btn se2-btn--primary"
+                        className="se2-btn"
                         disabled={running || !timelineDraft}
                         onClick={() => void handleRender()}
                       >
                         {running ? <Loader2 size={14} className="se2-spin" /> : null}
-                        {running ? '运行中…' : '渲染导出'}
+                        {running ? '运行中…' : '预览渲染'}
+                      </button>
+                      <button
+                        type="button"
+                        className="se2-btn se2-btn--primary"
+                        disabled={!timelineDraft}
+                        onClick={handleConfirmTimeline}
+                        title="确认时间线并送交已连接的交付打包"
+                      >
+                        确认时间线并送交导出
                       </button>
                       <button
                         type="button"
                         className="se2-btn"
                         disabled={!timelineDraft}
-                        onClick={syncToExportPack}
-                        title="同步时间线到已连接的交付打包节点"
+                        onClick={() => syncToExportPack()}
+                        title="仅同步时间线到已连接的交付打包节点"
                       >
-                        同步到交付打包
+                        仅同步时间线
                       </button>
                     </div>
                     {tip && <p className="se2-tip">{tip}</p>}

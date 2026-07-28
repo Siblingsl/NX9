@@ -1562,3 +1562,50 @@
   .sg2-body { grid-template-columns: 1fr; }
   .sg2-left { border-right: 0; border-bottom: 1px solid var(--sg-line, var(--desk-line)); max-height: 180px; }
 }
+
+/* ── F-005 上游就绪预检条 ── */
+.sg3-readiness-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 14px;
+  margin: 0 0 8px 0;
+  border-radius: 8px;
+  font-size: 13px;
+  line-height: 1.4;
+  background: #292524;
+  border: 1px solid #44403c;
+  color: #d6d3d1;
+}
+.sg3-readiness-bar--ready {
+  background: #14532d;
+  border-color: #22c55e;
+  color: #bbf7d0;
+}
+.sg3-readiness-bar__ok,
+.sg3-readiness-bar__warn,
+.sg3-readiness-bar__unknown {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+}
+.sg3-readiness-bar__warn { color: #fbbf24; }
+.sg3-readiness-bar__unknown { color: #94a3b8; }
+.sg3-readiness-bar__mode {
+  flex-shrink: 0;
+  border: 1px solid #57534e;
+  background: #1c1917;
+  color: #a8a29e;
+  border-radius: 999px;
+  padding: 2px 10px;
+  font-size: 11px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.sg3-readiness-bar__mode:hover {
+  border-color: #a8a29e;
+  color: #e7e5e4;
+}

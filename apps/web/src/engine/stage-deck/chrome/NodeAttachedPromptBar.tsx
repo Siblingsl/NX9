@@ -35,9 +35,10 @@ export function NodeAttachedPromptBar({ blockId, kind, onCollapse }: NodeAttache
 
   return (
     <div
-      className={`nx9-attached-prompt-bar rounded-2xl border border-line dark:border-[#333] bg-white/95 dark:bg-[#222222]/95 backdrop-blur-md shadow-panel nx9-deck-enter ${deskClass}`}
+      className={`nx9-attached-prompt-bar rounded-2xl border border-line dark:border-[#333] bg-surface dark:bg-[#1a1c1f] shadow-panel nx9-deck-enter ${deskClass}`}
       onMouseDown={(e) => e.stopPropagation()}
       onPointerDown={(e) => e.stopPropagation()}
+      onClick={(e) => e.stopPropagation()}
       onWheel={(e) => e.stopPropagation()}
     >
       <AttachedWorkspaceRouter blockId={blockId} kind={kind} onCollapse={handleCollapse} />

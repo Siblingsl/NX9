@@ -3,7 +3,9 @@ import {
   migrateV2ToV3,
   migrateBlockKinds,
   stripReviewGateFromGraph,
+  stripAssetGateFromGraph,
   normalizeWorkspacePayload,
+  normalizeDataEdgeHandlesAwayFromExec,
   type WorkspacePayload,
   type WorkspacePayloadV3,
 } from '@nx9/shared';
@@ -91,10 +93,14 @@ export function fromPayload(
     targetHandle: l.targetHandle ?? undefined,
     edgeType: l.edgeType,
   }));
-  const stripped = stripReviewGateFromGraph(rawNodes, rawLinks);
+  // F-005: 先拆除 asset-gate 节点并桥接边，再拆 review-gate，最后迁移剩余的旧 kind
+  const strippedGate = stripAssetGateFromGraph(rawNodes, rawLinks);
+  const stripped = stripReviewGateFromGraph(strippedGate.nodes, strippedGate.links);
   const migrated = migrateBlockKinds(stripped.nodes);
   const nodes: Node[] = migrated.nodes as Node[];
-  const edges: Edge[] = stripped.links.map((l: (typeof stripped.links)[number]) => {
+  // F-006: 加载时把误挂上下口的数据边改回左右 prompt
+  const normalizedLinks = normalizeDataEdgeHandlesAwayFromExec(nodes, stripped.links);
+  const edges: Edge[] = normalizedLinks.map((l: (typeof normalizedLinks)[number]) => {
     const pathType = l.edgeType && l.edgeType !== 'default' ? l.edgeType : undefined;
     return {
       id: l.id,

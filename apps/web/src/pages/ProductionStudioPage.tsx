@@ -182,6 +182,40 @@ export function ProductionStudioPage() {
               <span className="atelier__pro">PRO</span>
             </div>
           </div>
+          {/* F-002: 链绑定状态徽标 — 与画布同源·链 {desk} */}
+          {desk.studioBinding ? (
+            <span className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] border border-line bg-surface/50 text-ink/60 shrink-0" title={`画布绑定 desk ${desk.studioBinding.chainRootNodeId}`}>
+              <span className="size-1.5 rounded-full bg-ok/70" />
+              与画布同源·链{' '}
+              {desk.deskOptions.find((d) => d.id === desk.studioBinding!.chainRootNodeId)?.label
+                ?? desk.studioBinding.chainRootNodeId.slice(0, 8)}
+              {desk.deskOptions.length > 1 && (
+                <select
+                  className="ml-1 max-w-[7rem] bg-transparent border-0 text-[9px] text-ink/70 outline-none"
+                  value={desk.studioBinding.chainRootNodeId}
+                  onChange={(e) => desk.selectDeskBinding(e.target.value)}
+                  title="切换绑定的分镜台链"
+                >
+                  {desk.deskOptions.map((d) => (
+                    <option key={d.id} value={d.id}>
+                      {d.label}（{d.shotCount}）
+                    </option>
+                  ))}
+                </select>
+              )}
+            </span>
+          ) : (
+            <span className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] border border-warn/30 bg-warn/5 text-warn/70 shrink-0">
+              <span className="size-1.5 rounded-full bg-warn/70" />
+              未绑定·
+              <button
+                type="button"
+                className="underline hover:no-underline"
+                onClick={goCanvas}
+                title="在画布创建分镜台以启用链绑定"
+              >前往画布</button>
+            </span>
+          )}
         </div>
         <div className="atelier__top-actions">
           <button type="button" className="atelier__icon-btn" title="搜索" onClick={() => openSheet('storyboard')}>
@@ -1129,7 +1163,7 @@ function StoryboardStage({ desk }: { desk: StudioDesk }) {
                 <div className="absolute top-1 right-1 flex flex-col gap-0.5 z-[2]">
                   <button
                     type="button"
-                    className="w-7 h-7 rounded-md bg-white/90 border border-line shadow-sm flex items-center justify-center"
+                    className="w-7 h-7 rounded-md bg-surface/90 border border-line shadow-sm flex items-center justify-center"
                     title="上移"
                     onClick={(e) => {
                       e.stopPropagation();
@@ -1140,7 +1174,7 @@ function StoryboardStage({ desk }: { desk: StudioDesk }) {
                   </button>
                   <button
                     type="button"
-                    className="w-7 h-7 rounded-md bg-white/90 border border-line shadow-sm flex items-center justify-center"
+                    className="w-7 h-7 rounded-md bg-surface/90 border border-line shadow-sm flex items-center justify-center"
                     title="下移"
                     onClick={(e) => {
                       e.stopPropagation();

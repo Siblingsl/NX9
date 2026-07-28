@@ -1,5 +1,6 @@
 import { Suspense, useEffect, useRef } from 'react';
 import { Canvas } from '@react-three/fiber';
+import type { WebGLRenderer } from 'three';
 import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib';
 import { useDirectorStore } from '../store/directorStore';
 import { captureViewport } from '../io/capture';
@@ -15,9 +16,10 @@ export interface DirectorCanvasProps {
   onCaptureReady?: (capture: () => string) => void;
   nodeCount?: number;
   onRendererReady?: (renderer: { dispose: () => void }) => void;
+  onGLCreated?: (gl: WebGLRenderer) => void;
 }
 
-export function DirectorCanvas({ performanceMode = 'normal', onCaptureReady, nodeCount = 0, onRendererReady }: DirectorCanvasProps) {
+export function DirectorCanvas({ performanceMode = 'normal', onCaptureReady, nodeCount = 0, onRendererReady, onGLCreated }: DirectorCanvasProps) {
   const viewMode = useDirectorStore((s) => s.viewMode);
   const controlsRef = useRef<OrbitControlsImpl | null>(null);
   const shadowsOff = performanceMode === 'low' || nodeCount >= 80;
@@ -35,6 +37,7 @@ export function DirectorCanvas({ performanceMode = 'normal', onCaptureReady, nod
       }}
       onCreated={({ gl, scene }) => {
         gl.setClearColor('#0f1115');
+        onGLCreated?.(gl);
         onCaptureReady?.(() => captureViewport(gl));
         onRendererReady?.({
           dispose: () => {

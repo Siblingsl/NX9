@@ -1,3 +1,4 @@
+import React from 'react';
 import {
   X,
   Key,
@@ -7,6 +8,7 @@ import {
   Cable,
   Palette,
   SlidersHorizontal,
+  BarChart3,
   Loader2,
 } from 'lucide-react';
 import { useEffect, useState, useCallback, useRef } from 'react';
@@ -21,16 +23,17 @@ import type {
   CanvasThemeMode,
 } from '@nx9/shared';
 import { FLOW_EDGE_TYPES } from '../engine/flow-edge-types';
-import { translate } from '@nx9/shared';
+import { perfTierLabel, resolvePerfTier, translate } from '@nx9/shared';
 import { useCredentialVault } from '../stores/credential-vault';
 import { useStageDeckFlag } from '../stores/stage-deck-flag';
 import { useWorkspaceDocument } from '../stores/workspace-document';
+import { useFlowGraphMirror } from '../stores/flow-graph-mirror';
 import { useDevPromptOverrides } from '../stores/dev-prompt-overrides';
 import { api } from '../api/client';
 import { getRuntime } from '../platform/runtime-bridge';
 import './settings-modal.css';
 
-type SettingsSection = 'connection' | 'canvas' | 'prefs';
+type SettingsSection = 'connection' | 'canvas' | 'prefs' | 'usage';
 
 const SECTIONS: {
   id: SettingsSection;
@@ -41,6 +44,7 @@ const SECTIONS: {
   { id: 'connection', label: '连接', hint: '模型与服务', icon: Cable },
   { id: 'canvas', label: '画布', hint: '主题与外观', icon: Palette },
   { id: 'prefs', label: '偏好', hint: '创作习惯', icon: SlidersHorizontal },
+  { id: 'usage', label: '用量', hint: 'Token 使用统计', icon: BarChart3 },
 ];
 
 export function SettingsModal() {
@@ -50,6 +54,18 @@ export function SettingsModal() {
   const [vbStatus, setVbStatus] = useState<string | null>(null);
   const [luxStatus, setLuxStatus] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+
+  // F-009: 监听命令面板或其他入口跳转到指定 Tab
+  useEffect(() => {
+    const handler = (e: CustomEvent) => {
+      const section = e.detail?.section;
+      if (section && ['connection','canvas','prefs','usage'].includes(section)) {
+        setSection(section as SettingsSection);
+      }
+    };
+    window.addEventListener('nx9:openSettingsSection', handler as EventListener);
+    return () => window.removeEventListener('nx9:openSettingsSection', handler as EventListener);
+  }, []);
 
   useEffect(() => {
     if (settingsOpen && !settings) void load();
@@ -161,12 +177,15 @@ export function SettingsModal() {
             )}
             {section === 'canvas' && <CanvasSettings />}
             {section === 'prefs' && <PrefsSettings draft={draft} setDraft={setDraft} />}
+            {section === 'usage' && <UsagePanelWrapper />}
           </div>
         </div>
 
         <footer className="nx9-settings__footer">
           <p className="nx9-settings__footer-hint">
-            {section === 'canvas' ? '画布外观立即生效，仅当前工作区' : '连接与偏好需保存后生效'}
+            {section === 'canvas'
+              ? '画布外观立即生效，仅当前工作区'
+              : '连接与偏好需保存后生效'}
           </p>
           <div className="nx9-settings__footer-actions">
             <button type="button" className="nx9-settings__cancel" onClick={close}>
@@ -570,6 +589,25 @@ function ConnectionSettings({
             </p>
           )}
         </div>
+
+        {/* F-014: BGM 设置 */}
+        <div className="nx9-settings__inset">
+          <div className="nx9-settings__inset-title">BGM 音乐生成</div>
+          <div className="nx9-settings__field-grid">
+            <Field
+              label="BGM Provider"
+              value={draft.bgmProvider ?? 'suno'}
+              onChange={(v) => setDraft({ ...draft, bgmProvider: v })}
+              placeholder="suno / udio / elevenlabs"
+              plain
+            />
+            <Field
+              label="BGM API Key"
+              value={draft.bgmApiKey ?? ''}
+              onChange={(v) => setDraft({ ...draft, bgmApiKey: v })}
+            />
+          </div>
+        </div>
       </SettingCard>
 
       <SettingCard
@@ -789,12 +827,35 @@ function PrefsSettings({
   draft: AppSettings;
   setDraft: (v: AppSettings) => void;
 }) {
+  const nodeCount = useFlowGraphMirror((s) => s.nodes.length);
+  const edgeCount = useFlowGraphMirror((s) => s.edges.length);
+  const tier = resolvePerfTier(nodeCount, edgeCount);
+
   return (
     <div className="space-y-4">
       <div className="nx9-settings__hero">
         <p className="nx9-settings__hero-title">创作偏好</p>
         <p className="nx9-settings__hero-desc">控制流程节奏、动效与调试信息，保存后在本机生效。</p>
       </div>
+
+      <div className="nx9-settings__pref-row" style={{ cursor: 'default' }}>
+        <div className="flex-1 min-w-0">
+          <span className="nx9-settings__pref-label">当前画布性能档位</span>
+          <p className="nx9-settings__pref-desc">
+            {perfTierLabel(tier)} · {nodeCount} 节点 / {edgeCount} 连线
+            {tier === 'intensive'
+              ? '（达阈值已降级特效；制作模式另有独立降载，不单独弹性能 Toast）'
+              : '（少节点时制作模式不会误报性能 Toast）'}
+          </p>
+        </div>
+        <span
+          className="text-xs tabular-nums shrink-0 px-2 py-0.5 rounded border border-line"
+          style={{ color: 'var(--desk-muted, #888)' }}
+        >
+          {tier}
+        </span>
+      </div>
+
       <div className="nx9-settings__pref-list">
         <PrefsCheckbox
           draft={draft}
@@ -1027,6 +1088,17 @@ function ProbeProvidersBlock() {
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+function UsagePanelWrapper() {
+  const UsagePanel = React.lazy(() => import('./UsagePanel').then((m) => ({ default: m.UsagePanel })));
+  return (
+    <div className="nx9-settings__section">
+      <React.Suspense fallback={<div className="text-[11px] text-ink/40 p-4">加载中…</div>}>
+        <UsagePanel />
+      </React.Suspense>
     </div>
   );
 }

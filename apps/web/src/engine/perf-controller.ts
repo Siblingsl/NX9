@@ -1,6 +1,15 @@
 import { useMemo } from 'react';
 import type { Edge, Node } from '@xyflow/react';
-import { PERF, resolvePerfTier, type PerfTier } from '@nx9/shared';
+import {
+  PERF,
+  resolvePerfTier,
+  resolvePerfToast,
+  type PerfTier,
+  type PerfToastDecision,
+  type PerfToastReason,
+} from '@nx9/shared';
+
+export type { PerfToastReason, PerfToastDecision };
 
 export interface PerfState {
   tier: PerfTier;
@@ -8,6 +17,16 @@ export interface PerfState {
   hideChrome: boolean;
   reduceEdgeMotion: boolean;
 }
+
+/** @deprecated 使用 `@nx9/shared` 的 resolvePerfToast(blockCount, linkCount) */
+export function resolvePerfToastFromGraph(
+  nodes: Node[],
+  edges: Edge[],
+): PerfToastDecision | null {
+  return resolvePerfToast(nodes.length, edges.length);
+}
+
+export { resolvePerfToast };
 
 export function usePerfController(
   nodes: Node[],

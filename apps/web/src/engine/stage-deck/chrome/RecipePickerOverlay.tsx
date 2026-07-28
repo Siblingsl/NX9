@@ -41,7 +41,7 @@ export function RecipePickerOverlay({ onPick, onBlank }: RecipePickerOverlayProp
               key={tpl.id}
               type="button"
               onClick={() => onPick(tpl.id)}
-              className="text-left rounded-xl border border-line px-3 py-2.5 hover:border-brand/40 hover:bg-white transition-colors"
+              className="text-left rounded-xl border border-line px-3 py-2.5 hover:border-brand/40 hover:bg-surface transition-colors"
             >
               <span className="flex items-center gap-1.5 text-xs font-medium text-ink">
                 <LayoutTemplate size={14} className="text-brand shrink-0" />

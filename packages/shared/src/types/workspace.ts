@@ -151,6 +151,8 @@ export interface WorkspaceSummary {
   ownerId?: string;
   createdAt: number;
   updatedAt: number;
+  /** F-010: 软删除时间戳（回收站） */
+  deletedAt?: number;
 }
 
 export interface UserSummary {

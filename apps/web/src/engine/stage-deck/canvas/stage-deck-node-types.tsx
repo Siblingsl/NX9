@@ -18,7 +18,7 @@ export function createStageDeckNodeTypes(): Record<string, ComponentType<NodePro
   const canvasFirst = isSurfaceEnabled('canvasFirst');
 
   const wrapped = Object.fromEntries(
-    Object.entries(blockTypes).map(([kind, Block]) => [
+    (Object.entries(blockTypes) as [string, ComponentType<NodeProps>][]).map(([kind, Block]) => [
       kind,
       memo(function StageDeckBlock(props: NodeProps) {
         const mode = useViewMode((s) => s.mode);

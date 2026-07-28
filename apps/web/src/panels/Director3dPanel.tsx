@@ -6,10 +6,12 @@ import { toastSuccess } from '../stores/toast';
 import {
   emptyStoryboardPreview,
   newBacklotWorkspaceItem,
+  resolvePerfToast,
   type StoryboardPreviewPayload,
 } from '@nx9/shared';
 import { useDirector3dUi } from '../stores/director3d-ui';
 import { useFlowRuntime } from '../stores/flow-runtime';
+import { useFlowGraphMirror } from '../stores/flow-graph-mirror';
 import { useWorkspaceDocument } from '../stores/workspace-document';
 import { useAssetLibraryModalUi } from '../stores/asset-library-modal-ui';
 import { useActivityLog } from '../stores/activity-log';
@@ -19,6 +21,7 @@ import { applyPrimaryTakeToNodeData } from '../engine/stage-deck/utils/take-util
 import { isStageDeckEnabled } from '../stores/stage-deck-flag';
 import { syncDirector3dToBlocking } from '../engine/blocking-3d-sync';
 import { extractDirectorCharacterPlacements } from '../engine/director3d-character-sync';
+import { disposeDirectorWebGLLifecycle } from '../engine/director-webgl-lifecycle';
 
 const Director3dShell = lazy(() =>
   import('@nx9/director3d').then((m) => ({ default: m.Director3dShell })),
@@ -48,14 +51,23 @@ export function Director3dPanel() {
   const appendLog = useActivityLog((s) => s.append);
   const intensive = runtime?.intensive ?? false;
   const webglOk = useMemo(() => isWebGLAvailable(), [open]);
+  const disposeRef = useRef<(() => void) | undefined>(undefined);
+  // F-012: 仅当节点/连线达阈值时提示「3D 预览降质」；制作模式 forced intensive 不误报
+  const graphNodeCount = useFlowGraphMirror((s) => s.nodes.length);
+  const graphEdgeCount = useFlowGraphMirror((s) => s.edges.length);
   const intensiveShownRef = useRef(false);
 
   useEffect(() => {
-    if (intensive && !intensiveShownRef.current) {
-      intensiveShownRef.current = true;
-      useToast.getState().push({ message: '画布节点较多，3D 导演台将使用性能模式', variant: 'info' });
-    }
-  }, [intensive]);
+    if (!intensive || intensiveShownRef.current) return;
+    const hit = resolvePerfToast(graphNodeCount, graphEdgeCount);
+    if (!hit) return;
+    intensiveShownRef.current = true;
+    useToast.getState().push({
+      id: 'perf-3d-downgrade',
+      message: '3D 预览已降质以保障画布流畅',
+      variant: 'info',
+    });
+  }, [intensive, graphNodeCount, graphEdgeCount]);
 
   const persistProject = useCallback(
     (next: DirectorProject) => {
@@ -248,6 +260,17 @@ export function Director3dPanel() {
     close();
   }, [close]);
 
+  const handleRendererReady = useCallback((renderer: { dispose: () => void }) => {
+    disposeRef.current = renderer.dispose;
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      disposeRef.current?.();
+      disposeDirectorWebGLLifecycle();
+    };
+  }, []);
+
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
@@ -310,6 +333,7 @@ export function Director3dPanel() {
             },
             onSaveSceneTemplate: handleSaveSceneTemplate,
             onClose: handleClose,
+            onRendererReady: handleRendererReady,
           }}
         />
       </Suspense>

@@ -159,11 +159,14 @@
   --pg-accent-soft: var(--desk-accent-soft);
   --pg-accent-line: var(--desk-accent-line);
   --pg-ok: var(--desk-ok);
-  background: var(--desk-card-bg) !important;
+  /* 实心底，禁止玻璃透出画布节点；点击由壳层拦截，避免点穿 */
+  background: var(--desk-bg-2) !important;
   border-color: var(--desk-card-border) !important;
   color: var(--desk-ink);
   box-shadow: var(--desk-shadow) !important;
-  backdrop-filter: blur(12px);
+  backdrop-filter: none;
+  isolation: isolate;
+  pointer-events: auto;
 }
 
 .nx9-attached-prompt-bar.is-picture-desk .nx9-composer-panel {

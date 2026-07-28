@@ -48,7 +48,30 @@ export function CanvasFlowRail() {
     return PLAYBOOK_DEFINITIONS.find((p) => p.id === session.playbookId) ?? null;
   }, [session]);
 
-  const readinessCtx = useMemo(() => ({
+  const readinessCtx = useMemo(() => {
+    const nodes = runtime?.getNodes() ?? [];
+    const chainDeskNode = nodes.find(
+      (n) => n.type === 'storyboard-desk' && (n.data as Record<string, unknown>)?.chainStoryboard,
+    );
+    const chainRaw = chainDeskNode
+      ? ((chainDeskNode.data as Record<string, unknown>)?.chainStoryboard as {
+          shots: Array<Record<string, unknown>>;
+        } | undefined)
+      : undefined;
+    const chainShots = (chainRaw?.shots ?? []).map((sh) => ({
+      id: sh.id as string,
+      episodeId: sh.episodeId as string | undefined,
+      status: (sh.status as string) ?? 'draft',
+      firstFrameAssetId: sh.firstFrameAssetId as string | undefined,
+      videoAssetId: sh.videoAssetId as string | undefined,
+      keyframeStatus: sh.keyframeStatus as string | undefined,
+      videoStatus: sh.videoStatus as string | undefined,
+      linkedBlockId: sh.linkedBlockId as string | undefined,
+    }));
+
+    return {
+    // F-003: 始终注入 chainShots（可为空），禁止 readiness 静默回退全局
+    chainShots,
     storyboard: {
       title: storyboard.title,
       activeEpisodeId: storyboard.activeEpisodeId,
@@ -64,7 +87,7 @@ export function CanvasFlowRail() {
       })),
     },
     voice,
-    nodes: (runtime?.getNodes() ?? []).map((n) => ({ id: n.id, type: n.type ?? 'unknown', data: (n.data ?? {}) as Record<string, unknown> })),
+    nodes: nodes.map((n) => ({ id: n.id, type: n.type ?? 'unknown', data: (n.data ?? {}) as Record<string, unknown> })),
     scriptPlan: scriptPlan ?? undefined,
     environments: environments?.environments ?? undefined,
     characters: characters.characters.map((c) => ({
@@ -74,7 +97,8 @@ export function CanvasFlowRail() {
       referenceImageUrl: c.referenceImageUrl ?? undefined,
     })),
     playbookSession: session,
-  }), [storyboard, voice, runtime, scriptPlan, environments, characters, session]);
+  };
+  }, [storyboard, voice, runtime, scriptPlan, environments, characters, session]);
 
   const stepStates = useMemo(() => {
     if (!session) return [];
@@ -113,13 +137,19 @@ export function CanvasFlowRail() {
     } else if (key === 'all_keyframes_approved') {
       reasons.push('请先在导演台审阅全部关键帧并放行');
     } else if (key === 'has_video_assets') {
-      reasons.push('请先完成视频生成，或打开智能剪辑编排时间线');
+      reasons.push('请先完成视频生成，确保全部镜头有 videoAssetId');
     } else if (key === 'consistency_resolved') {
       reasons.push('请先处理连贯性检查中的问题');
     } else if (key === 'has_video_takes') {
-      reasons.push('请先在智能剪辑中生成时间线');
+      reasons.push('请先完成视频生成，确保全部镜头有视频');
+    } else if (key === 'has_timeline_draft') {
+      reasons.push('请先在智能剪辑中生成时间线片段');
+    } else if (key === 'has_reference_board') {
+      reasons.push('请先在参考板添加参考图或参考链接（不要求分镜镜头）');
+    } else if (key === 'has_viral_output') {
+      reasons.push('请先运行图片/视频生成节点产出媒体');
     } else if (key === 'all_videos_approved') {
-      reasons.push('请先审阅全部视频并标记通过');
+      reasons.push('请先审阅全部视频并标记通过（可选步骤，可跳过）');
     } else if (key === 'export_ready') {
       reasons.push('请先运行导出交付节点完成导出');
     } else {

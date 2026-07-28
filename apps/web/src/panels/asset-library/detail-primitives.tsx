@@ -168,7 +168,7 @@ export function MediaSlot({
                 <ZoomIn size={16} className="text-white opacity-0 drop-shadow transition group-hover:opacity-100" />
               </span>
             </button>
-            <label className="flex cursor-pointer items-center justify-center border-t border-line bg-white/70 px-2 py-1 text-[10px] text-ink/55 hover:bg-brand/5 hover:text-brand">
+            <label className="flex cursor-pointer items-center justify-center border-t border-line bg-surface/70 px-2 py-1 text-[10px] text-ink/55 hover:bg-brand/5 hover:text-brand">
               更换
               <input
                 type="file"

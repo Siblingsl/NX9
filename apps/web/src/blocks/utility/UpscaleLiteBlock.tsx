@@ -41,7 +41,7 @@ function UpscaleLiteBlock(props: NodeProps) {
           <select
             value={scale}
             onChange={(e) => updateNodeData(props.id, { scale: Number(e.target.value) })}
-            className="mt-0.5 w-full rounded-lg border border-line px-2 py-1 bg-white"
+            className="mt-0.5 w-full rounded-lg border border-line px-2 py-1 bg-surface"
           >
             <option value={1.5}>1.5×</option>
             <option value={2}>2×</option>

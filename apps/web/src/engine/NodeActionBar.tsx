@@ -24,7 +24,7 @@ export const NodeActionBar = memo(function NodeActionBar({
   const canRun = RUNNABLE_BLOCKS.has(nodeType);
 
   return (
-    <div className="absolute -top-11 left-1/2 -translate-x-1/2 z-20 flex items-center gap-1 rounded-full border border-line bg-white shadow-panel px-2 py-1">
+    <div className="absolute -top-11 left-1/2 -translate-x-1/2 z-20 flex items-center gap-1 rounded-full border border-line bg-surface shadow-panel px-2 py-1">
       {isRunning ? (
         <button
           type="button"

@@ -2,12 +2,14 @@
  * 核心 6 步生产路径（Shot-first）：
  * 剧本 → 分镜列表 → 分镜图全出 → 批审 → 视频全出 → 简单拼接导出
  *
- * 以 storyboard.shots 为 SSOT，不依赖阶段节点链。
+ * F-003/F-004: 视频批出以 chainShots / 链镜表为 SSOT，禁止回退全局 storyboard.shots。
  */
 import { useWorkspaceDocument } from '../stores/workspace-document';
 import { useFlowRuntime } from '../stores/flow-runtime';
 import { useFlowCommands } from '../stores/flow-commands';
 import { useActivityLog } from '../stores/activity-log';
+import { getAllChainShots, findDeskIdForShot } from './chain-storyboard-aggregate';
+import { getMirroredFlowGraph, useFlowGraphMirror } from '../stores/flow-graph-mirror';
 import { api } from '../api/client';
 import { runPictureGenJob } from './picture-gen-runner';
 import { runExportPack } from './export-pack-runner';
@@ -25,7 +27,9 @@ import {
   resolveStoryboardGuideOverlay,
   buildCharacterContext,
   resolveVideoGenParams,
+  readChainStoryboard,
   type StoryboardPreviewPayload,
+  type StoryboardShot,
 } from '@nx9/shared';
 import { useExecutionQueue } from '../stores/execution-queue';
 import {
@@ -47,7 +51,6 @@ export function ensureCorePipelineNodes(): void {
   const spawn = useFlowCommands.getState().requestSpawn;
   for (const kind of [
     'script-desk',
-    'asset-gate',
     'storyboard-desk',
     'picture-gen',
     'director-desk',
@@ -265,21 +268,65 @@ async function pollVideoUntilDone(taskId: string): Promise<string | undefined> {
  * @param shotIds 限定镜头；视频生成工作区必须传入本节点上游镜，避免吃整集
  * @param clipGenBlockId 使用该节点的模型/画幅参数，保证多 clip-gen 彼此独立
  */
+/**
+ * 批量生成视频（F-004：强制链镜表；无 chain 时不批出全局）
+ * @param chainShots - 链镜表；缺省时从 runtime/镜像聚合，绝不回退全局 store
+ */
 export async function batchGenerateVideosFromShots(
   shotIds?: string[],
   force = false,
   clipGenBlockId?: string,
+  chainShots?: StoryboardShot[],
 ): Promise<{ ok: number; fail: number }> {
   const doc = useWorkspaceDocument.getState();
-  const episodeShots = activeEpisodeShots(doc.storyboard);
+  const runtime = useFlowRuntime.getState().runtime;
+  const mirrored = getMirroredFlowGraph();
+  const graphNodes = runtime?.getNodes()?.length ? runtime.getNodes() : mirrored.nodes;
+  const graphEdges = runtime?.getEdges()?.length ? runtime.getEdges() : mirrored.edges;
+
+  const resolvedChain: StoryboardShot[] =
+    chainShots && chainShots.length > 0
+      ? chainShots
+      : getAllChainShots(graphNodes);
+
+  if (!resolvedChain.length) {
+    log('无上游链镜表，已禁止回退全局批出（F-004）。请连接分镜台/导演台后再试');
+    return { ok: 0, fail: 0 };
+  }
+
+  const sourceShots = resolvedChain;
   const requested = shotIds?.length ? new Set(shotIds) : null;
   const shots = requested
-    ? doc.storyboard.shots.filter((s) => requested.has(s.id)).sort((a, b) => a.index - b.index)
-    : episodeShots;
+    ? sourceShots.filter((s) => requested.has(s.id)).sort((a, b) => a.index - b.index)
+    : sourceShots;
   if (shots.length === 0) {
     log(requested ? '上游镜头列表为空' : '分镜列表为空');
     return { ok: 0, fail: 0 };
   }
+
+  const patchShotOnChain = (shotId: string, patch: Partial<StoryboardShot>) => {
+    const deskId = findDeskIdForShot(shotId, graphNodes);
+    if (deskId && runtime?.updateNodeData) {
+      const desk = graphNodes.find((n) => n.id === deskId);
+      const chain = desk ? readChainStoryboard((desk.data ?? {}) as Record<string, unknown>) : undefined;
+      if (chain) {
+        const newShots = chain.shots.map((s) => (s.id === shotId ? { ...s, ...patch } : s));
+        runtime.updateNodeData(deskId, { chainStoryboard: { ...chain, shots: newShots } } as Record<string, unknown>);
+        return;
+      }
+    }
+    // 画布未挂载时写镜像
+    if (deskId) {
+      const desk = useFlowGraphMirror.getState().nodes.find((n) => n.id === deskId);
+      const chain = desk ? readChainStoryboard((desk.data ?? {}) as Record<string, unknown>) : undefined;
+      if (chain) {
+        const newShots = chain.shots.map((s) => (s.id === shotId ? { ...s, ...patch } : s));
+        useFlowGraphMirror.getState().updateNodeData(deskId, {
+          chainStoryboard: { ...chain, shots: newShots },
+        } as Record<string, unknown>);
+      }
+    }
+  };
 
   const unapproved = shots.filter((s) => s.keyframeStatus !== 'approved');
   if (unapproved.length > 0) {
@@ -305,9 +352,8 @@ export async function batchGenerateVideosFromShots(
   log(`开始批量视频 · ${targets.length} 镜`);
   let ok = 0;
   let fail = 0;
-  const runtime = useFlowRuntime.getState().runtime;
-  const nodes = runtime?.getNodes() ?? [];
-  const edges = runtime?.getEdges() ?? [];
+  const nodes = graphNodes;
+  const edges = graphEdges;
   const clipNode = clipGenBlockId
     ? nodes.find((node) => node.id === clipGenBlockId)
     : nodes.find((node) => node.type === 'clip-gen');
@@ -388,7 +434,7 @@ export async function batchGenerateVideosFromShots(
       if (modelId.startsWith('grok-imagine-video') && !shot.firstFrameAssetId) {
         throw new Error('Grok Imagine 当前需要首图，请先在分镜预览生成首图');
       }
-      doc.updateShot(shot.id, { videoStatus: 'draft' });
+      patchShotOnChain(shot.id, { videoStatus: 'draft' });
       // 出片参考用「带箭头引导图」加强意图；提示词强制成片不画出箭头
       let guideImageUrl = shot.firstFrameAssetId ?? undefined;
       if (
@@ -430,14 +476,14 @@ export async function batchGenerateVideosFromShots(
         model: (clipData.model as string | undefined) || 'veo',
         status: 'candidate' as const,
       };
-      doc.updateShot(shot.id, {
-        ...appendStoryboardVideoVersion(shot, version),
+      patchShotOnChain(shot.id, {
+        ...appendStoryboardVideoVersion(shot as StoryboardShot, version),
       });
       ok++;
       log(`视频完成 · #${shot.index + 1}`);
     } catch (e) {
       fail++;
-      doc.updateShot(shot.id, { videoStatus: 'failed', status: 'failed' });
+      patchShotOnChain(shot.id, { videoStatus: 'failed', status: 'failed' });
       log(`视频失败 · #${shot.index + 1}: ${String(e)}`);
     }
   }
@@ -446,16 +492,22 @@ export async function batchGenerateVideosFromShots(
   queue.reportProgress({ done: ok + fail, total: targets.length, currentBlockId: null });
   queue.finish();
   const resultClipNode = clipGenBlockId
-    ? runtime?.getNodes().find((node) => node.id === clipGenBlockId)
-    : runtime?.getNodes().find((node) => node.type === 'clip-gen');
+    ? (runtime?.getNodes() ?? graphNodes).find((node) => node.id === clipGenBlockId)
+    : (runtime?.getNodes() ?? graphNodes).find((node) => node.type === 'clip-gen');
   if (resultClipNode) {
-    const completed = (requested
-      ? useWorkspaceDocument.getState().storyboard.shots.filter((shot) => requested.has(shot.id))
-      : activeEpisodeShots(useWorkspaceDocument.getState().storyboard)
-    )
+    const latestNodes = runtime?.getNodes() ?? getMirroredFlowGraph().nodes;
+    const latestShots = getAllChainShots(latestNodes);
+    const scoped = requested
+      ? latestShots.filter((shot) => requested.has(shot.id))
+      : latestShots;
+    const completed = scoped
       .map((shot) => shot.videoAssetId)
       .filter((url): url is string => Boolean(url));
-    runtime?.updateNodeData(resultClipNode.id, {
+    const updateFn = (id: string, data: Record<string, unknown>) => {
+      if (runtime?.updateNodeData) runtime.updateNodeData(id, data);
+      else useFlowGraphMirror.getState().updateNodeData(id, data);
+    };
+    updateFn(resultClipNode.id, {
       status: videoCancelled ? 'idle' : fail > 0 ? 'error' : 'success',
       videoUrls: completed,
       videoUrl: completed[0],
@@ -471,7 +523,13 @@ export async function batchGenerateVideosFromShots(
  * 简单拼接导出：优先 FFmpeg concat 故事板视频；
  * 成功后标记 export-pack 节点 done + projectStatus。
  */
+/** @deprecated F-003: 使用 chainShots 感知的导出路径代替全局 storyboard.shots。 */
 export async function simpleConcatExport(): Promise<{ ok: boolean; url?: string; message?: string }> {
+  if (process.env.NODE_ENV === 'development') {
+    console.warn(
+      '[F-003] simpleConcatExport 使用全局 storyboard.shots，应迁移到链感知路径。',
+    );
+  }
   const doc = useWorkspaceDocument.getState();
   const shots = activeEpisodeShots(doc.storyboard);
   const runtime = useFlowRuntime.getState().runtime;

@@ -40,4 +40,6 @@ export interface AppSettings {
     advancedProviders?: ProviderCredential[];
     cloudTargets?: CloudTarget[];
     preferences?: AppPreferences;
+    bgmProvider?: string;
+    bgmApiKey?: string;
 }

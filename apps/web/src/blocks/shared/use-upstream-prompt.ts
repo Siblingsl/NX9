@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
 import { useEdges, useNodes } from '@xyflow/react';
-import { gatherUpstream } from '@nx9/shared';
+import { gatherUpstream, type UpstreamPolicy } from '@nx9/shared';
 
 export function useUpstreamPrompt(nodeId: string) {
   const nodes = useNodes();
@@ -20,7 +20,12 @@ export function useUpstreamPrompt(nodeId: string) {
       sourceHandle: e.sourceHandle ?? undefined,
       targetHandle: e.targetHandle ?? undefined,
     }));
-    const upstream = gatherUpstream(nodeId, flowBlocks, flowLinks);
+    // F-027: 从当前节点 data 读取策略
+    const node = nodes.find((n) => n.id === nodeId);
+    const nodeData = node?.data as Record<string, unknown> | undefined;
+    const policy = nodeData?.upstreamPolicy as UpstreamPolicy | undefined;
+    const primarySourceId = nodeData?.primarySourceId as string | null | undefined;
+    const upstream = gatherUpstream(nodeId, flowBlocks, flowLinks, policy, primarySourceId);
     const preview =
       upstream.prompts.filter(Boolean).join(' · ') ||
       upstream.promptBatch?.[0]?.prompt ||

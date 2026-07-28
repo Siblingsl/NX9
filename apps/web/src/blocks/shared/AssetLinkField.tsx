@@ -108,7 +108,7 @@ export function AssetLinkField({
             关联{ASSET_KIND_MENTION_PREFIX[kind]}素材…
           </button>
           {pickerOpen && options.length > 0 && (
-            <ul className="absolute z-20 left-0 right-0 mt-1 max-h-40 overflow-y-auto rounded-lg border border-line bg-white shadow-lg py-1 nx9-scroll">
+            <ul className="absolute z-20 left-0 right-0 mt-1 max-h-40 overflow-y-auto rounded-lg border border-line bg-surface shadow-lg py-1 nx9-scroll">
               {options.map((opt) => (
                 <li key={`${opt.scope}-${opt.id}`}>
                   <button
@@ -124,7 +124,7 @@ export function AssetLinkField({
             </ul>
           )}
           {pickerOpen && options.length === 0 && (
-            <div className="absolute z-20 left-0 right-0 mt-1 rounded-lg border border-line bg-white shadow-lg p-3 text-[10px] text-ink/40 text-center">
+            <div className="absolute z-20 left-0 right-0 mt-1 rounded-lg border border-line bg-surface shadow-lg p-3 text-[10px] text-ink/40 text-center">
               暂无素材，请先在素材库中创建
             </div>
           )}

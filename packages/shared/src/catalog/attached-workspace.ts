@@ -43,7 +43,7 @@ export interface AttachedWorkspaceSpec {
 /**
  * ATTACHED_WORKSPACE_REGISTRY — 全量节点跟随工作区注册表。
  *
- * 数据来源：NX9-BOTTOM-WORKSPACE-REFACTOR-SPEC-v1.md §7 全量节点映射表。
+ * 见 docs/NX9-PROJECT-DEFECT-ANALYSIS.md § 查档路径。
  * 规则：新增 kind 时在此登记 + 运行 gen-attached-workspace-doc.mjs。
  * 禁止在 UI 层写 if (kind === 'xxx') 散落逻辑。
  */
@@ -271,18 +271,7 @@ export const ATTACHED_WORKSPACE_REGISTRY: Record<string, AttachedWorkspaceSpec> 
   },
 
   // ── §7.2 资源编辑类 → Editor / Board / Table ──
-  'asset-gate': {
-    kind: 'asset-gate',
-    functionalClass: 'analysis-report',
-    workspaceType: 'report',
-    /** 自有 ScreenModal 门禁台 */
-    attachToNode: false,
-    compactCanvas: false,
-    showRun: false,
-    showPreview: false,
-    phase: 'P2',
-    note: '设定检查：画布暗色门禁表 + ScreenModal 总览/角色/场景',
-  },
+  // F-005: asset-gate 已删除，能力拆并到编剧台设定就绪 + 分镜台预检
   'reference-board': {
     kind: 'reference-board',
     functionalClass: 'resource-editor',
@@ -812,7 +801,7 @@ const IMPLEMENTED_WORKSPACE_TYPES = new Set<AttachedWorkspaceType>([
 /**
  * 是否使用 L1 统一摘要卡（CanvasNodeShell）。
  * 生成类等：摘要 + 底部工作区；完整表单不进画布卡。
- * 见 docs/NX9-CANVAS-NODE-CONTRACT.md
+ * 见 docs/NX9-PROJECT-DEFECT-ANALYSIS.md § 查档路径。
  */
 export function shouldUseCompactNodeShell(kind: string): boolean {
   const spec = resolveAttachedWorkspace(kind);

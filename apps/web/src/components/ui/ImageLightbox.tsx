@@ -118,7 +118,7 @@ export function ImageLightbox({
           <button
             type="button"
             onClick={() => zoomBy(-0.25)}
-            className="rounded-xl border border-white/15 p-2 text-white/80 hover:bg-white/10 hover:text-white"
+            className="rounded-xl border border-white/15 p-2 text-white/80 hover:bg-surface/10 hover:text-white"
             aria-label="缩小"
             title="缩小"
           >
@@ -127,7 +127,7 @@ export function ImageLightbox({
           <button
             type="button"
             onClick={resetView}
-            className="min-w-[52px] rounded-xl border border-white/15 px-2 py-2 text-[11px] text-white/80 hover:bg-white/10 hover:text-white"
+            className="min-w-[52px] rounded-xl border border-white/15 px-2 py-2 text-[11px] text-white/80 hover:bg-surface/10 hover:text-white"
             aria-label="重置缩放"
             title="重置缩放"
           >
@@ -136,7 +136,7 @@ export function ImageLightbox({
           <button
             type="button"
             onClick={() => zoomBy(0.25)}
-            className="rounded-xl border border-white/15 p-2 text-white/80 hover:bg-white/10 hover:text-white"
+            className="rounded-xl border border-white/15 p-2 text-white/80 hover:bg-surface/10 hover:text-white"
             aria-label="放大"
             title="放大"
           >
@@ -145,7 +145,7 @@ export function ImageLightbox({
           <button
             type="button"
             onClick={resetView}
-            className="rounded-xl border border-white/15 p-2 text-white/80 hover:bg-white/10 hover:text-white"
+            className="rounded-xl border border-white/15 p-2 text-white/80 hover:bg-surface/10 hover:text-white"
             aria-label="重置"
             title="重置"
           >
@@ -154,7 +154,7 @@ export function ImageLightbox({
           <button
             type="button"
             onClick={onClose}
-            className="rounded-xl border border-white/15 p-2 text-white/80 hover:bg-white/10 hover:text-white"
+            className="rounded-xl border border-white/15 p-2 text-white/80 hover:bg-surface/10 hover:text-white"
             aria-label="关闭预览"
           >
             <X size={18} />

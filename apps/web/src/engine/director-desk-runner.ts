@@ -3,6 +3,7 @@
  * P0 队列批出 · P1 状态机/重试 · P2 强制参考/风格锁 · P3 优先 3D + 送视频
  */
 import type { Edge, Node } from '@xyflow/react';
+import { findChainShot } from './chain-storyboard-aggregate';
 import {
   activeEpisodeShots,
   appendStoryboardReviewEvent,
@@ -10,8 +11,14 @@ import {
   enrichPromptWithEnvironment,
   pickReferenceImage,
   resolveBlockCharacters,
+  buildConstrainedPrompt,
+  resolveCompositionTemplate,
+  extractReferenceConstraints,
+  BUILTIN_COMPOSITION_TEMPLATES,
   type CharacterProfile,
   type EnvironmentProfile,
+  type ReferenceConstraint,
+  type CompositionTemplate,
   type StoryboardShot,
 } from '@nx9/shared';
 import { useWorkspaceDocument } from '../stores/workspace-document';
@@ -64,6 +71,12 @@ export interface DirectorDeskBatchOptions {
   pictureNodeData?: Record<string, unknown>;
   upstreamPictures?: string[];
   blockData?: Record<string, unknown>;
+  /** F-017/F-032: 参考板约束（从上游 reference-board 节点提取） */
+  referenceConstraint?: ReferenceConstraint | null;
+  /** F-017/F-032: 构图模板 */
+  compositionTemplate?: CompositionTemplate;
+  /** F-017: 构图强约束 — 启用后无模板阻发 */
+  enforceComposition?: boolean;
   onShotStart?: (shot: StoryboardShot, index: number, total: number) => void;
   onShotPhase?: (shot: StoryboardShot, phase: DirectorShotPhase, detail?: string) => void;
   onShotDone?: (
@@ -111,6 +124,28 @@ export function findDirectorPictureGenNode(
     if (edge.target === deskBlockId) {
       const n = nodes.find((x) => x.id === edge.source && x.type === 'picture-gen');
       if (n) return n;
+    }
+  }
+  // F-006: 出图挂在上游分镜台能力口时，经分镜间接定位
+  for (const edge of edges) {
+    if (edge.target !== deskBlockId) continue;
+    const upstream = nodes.find((x) => x.id === edge.source);
+    if (
+      upstream?.type !== 'storyboard-desk' &&
+      upstream?.type !== 'storyboard-preview' &&
+      upstream?.type !== 'story-grid'
+    ) {
+      continue;
+    }
+    for (const e2 of edges) {
+      if (e2.target === upstream.id) {
+        const n = nodes.find((x) => x.id === e2.source && x.type === 'picture-gen');
+        if (n) return n;
+      }
+      if (e2.source === upstream.id) {
+        const n = nodes.find((x) => x.id === e2.target && x.type === 'picture-gen');
+        if (n) return n;
+      }
     }
   }
   return nodes.find((n) => n.type === 'picture-gen');
@@ -297,13 +332,18 @@ export function isDirectorKeyframeGatePassed(shots: StoryboardShot[]): boolean {
 }
 
 /** 当前集关键帧待审 index + 是否放行（替代原审阅关卡节点同步） */
-export function summarizePendingKeyframeGate(): {
+export function summarizePendingKeyframeGate(
+  chainShots?: Array<{ id: string; index: number; keyframeStatus?: string; status?: string }>,
+): {
   pendingIndices: number[];
   gatePassed: boolean;
 } {
-  const shots = activeEpisodeShots(useWorkspaceDocument.getState().storyboard);
+  // F-003: 优先使用链镜表
+  const shots = chainShots?.length
+    ? chainShots
+    : activeEpisodeShots(useWorkspaceDocument.getState().storyboard);
   const pending = shots
-    .filter((s) => !isShotKeyframeApproved(s))
+    .filter((s) => s.keyframeStatus !== 'approved' && s.status !== 'approved')
     .map((s) => s.index)
     .sort((a, b) => a - b);
   return {
@@ -323,9 +363,10 @@ export function syncDirectorReviewGateFromShots(_args?: {
   return { pendingIndices: synced.pendingIndices, gatePassed: synced.gatePassed };
 }
 
-export function approveDirectorKeyframe(shotId: string): boolean {
+export function approveDirectorKeyframe(shotId: string, nodes?: Array<{ id: string; type?: string | null; data?: Record<string, unknown> }>): boolean {
   const doc = useWorkspaceDocument.getState();
-  const shot = doc.storyboard.shots.find((s) => s.id === shotId);
+  // F-003: 优先从链镜表查找（回退全局）
+  const shot = (nodes ? findChainShot(shotId, nodes) : undefined) ?? doc.storyboard.shots.find((s) => s.id === shotId);
   if (!shot?.firstFrameAssetId) return false;
   const event = {
     id: `review-${shot.id}-${Date.now()}`,
@@ -372,11 +413,13 @@ export async function rejectDirectorKeyframe(args: {
   shotId: string;
   comment: string;
   regenerate?: boolean;
+  nodes?: Array<{ id: string; type?: string | null; data?: Record<string, unknown> }>;
 }): Promise<{ ok: boolean; regenerated?: boolean }> {
   const comment = args.comment.trim();
   if (!comment) return { ok: false };
   const doc = useWorkspaceDocument.getState();
-  const shot = doc.storyboard.shots.find((s) => s.id === args.shotId);
+  // F-003: 优先从链镜表查找（回退全局）
+  const shot = (args.nodes ? findChainShot(args.shotId, args.nodes) : undefined) ?? doc.storyboard.shots.find((s) => s.id === args.shotId);
   if (!shot) return { ok: false };
   const event = {
     id: `review-${shot.id}-${Date.now()}`,
@@ -507,6 +550,9 @@ function buildShotPrompt(
   if (shot.lighting?.trim()) craft.push(`lighting: ${shot.lighting.trim()}`);
   if (shot.colorGrade?.trim()) craft.push(`color grade: ${shot.colorGrade.trim()}`);
   if (shot.cameraMove?.trim()) craft.push(`camera move: ${shot.cameraMove.trim()}`);
+  // F-018: 3D 机位预设的相机方向提示词
+  const cameraPromptText = shot.director3dGuide?.cameraPrompt?.trim();
+  if (cameraPromptText) craft.push(`3D camera direction: ${cameraPromptText}`);
   if (craft.length) prompt = `${prompt}\n${craft.join(', ')}`;
 
   // P2 风格锁
@@ -561,6 +607,34 @@ function buildShotPrompt(
   }
   if (prefer3d && d3) {
     prompt = `${prompt}\n\n[Match 3D blocking camera composition and staging]`;
+  }
+
+  // F-017/F-032: 参考板约束注入 + 构图模板
+  const constraint = opts.referenceConstraint ?? undefined;
+  const template =
+    opts.compositionTemplate ??
+    (shot ? resolveCompositionTemplate(shot, BUILTIN_COMPOSITION_TEMPLATES) : undefined);
+  if (constraint) {
+    const checked = buildConstrainedPrompt(prompt, constraint, template);
+    if (checked.blocked) {
+      return {
+        prompt,
+        referenceImageUrl: primaryRef,
+        referenceImageUrls,
+        styleImageUrl,
+        usedRefs,
+        missingForced: [
+          ...missingForced,
+          `参考板约束阻塞：${checked.reason ?? '约束检查未通过'}`,
+        ],
+      };
+    }
+    prompt = checked.prompt;
+  } else if (template) {
+    prompt = `${prompt}\n\n[Composition: ${template.name}]\n${template.promptSuffix}`;
+  } else if (opts.enforceComposition) {
+    // F-017: 强约束开启且无模板时记入缺失强制项
+    missingForced.push('构图强约束已开启，但未指定构图模板。请在分镜台为当前镜头选择构图模板。');
   }
 
   return {

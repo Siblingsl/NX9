@@ -17,15 +17,16 @@ model User {
 }
 
 model Workspace {
-  id        String   @id
+  id        String    @id
   title     String
   ownerId   String
-  owner     User     @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  owner     User      @relation(fields: [ownerId], references: [id], onDelete: Cascade)
   payload   String
-  blockCount Int     @default(0)
-  shotCount  Int     @default(0)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  blockCount Int      @default(0)
+  shotCount  Int      @default(0)
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime? // F-010: 软删除时间戳，非空表示已移入回收站
 
   @@index([ownerId])
 }

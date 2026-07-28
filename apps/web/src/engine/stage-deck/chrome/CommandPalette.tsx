@@ -8,6 +8,8 @@ import {
 } from '@nx9/shared';
 import { Search } from 'lucide-react';
 import { useFlowCommands } from '../../../stores/flow-commands';
+import { useCredentialVault } from '../../../stores/credential-vault';
+import { useAssetTrashModalUi } from '../../../stores/asset-trash-modal-ui';
 import { useFlowRuntime } from '../../../stores/flow-runtime';
 import { useViewMode } from '../stores/view-mode';
 import { useWorkspaceDocument } from '../../../stores/workspace-document';
@@ -96,6 +98,8 @@ export function CommandPalette({ open, onClose, onAlign }: CommandPaletteProps) 
   const requestLoadTemplate = useFlowCommands((s) => s.requestLoadTemplate);
   const runtime = useFlowRuntime((s) => s.runtime);
   const setMode = useViewMode((s) => s.setMode);
+  const openSettingsTo = useCredentialVault((s) => s.openSettingsTo);
+  const openAssetTrash = useAssetTrashModalUi((s) => s.setOpen);
 
   const commands = useMemo<CommandItem[]>(() => {
     const dockKinds = new Set(getDockBlocks().map((b) => b.kind));
@@ -208,6 +212,20 @@ export function CommandPalette({ open, onClose, onAlign }: CommandPaletteProps) 
         section: 'action',
         run: () => void runtime?.runBatch(),
       },
+      {
+        id: 'open-usage',
+        label: '用量查看',
+        keywords: ['usage', '用量', 'token', '配额'],
+        section: 'action',
+        run: () => openSettingsTo('usage'),
+      },
+      {
+        id: 'open-asset-trash',
+        label: '资产回收站',
+        keywords: ['trash', '回收站', '恢复', '软删除', '删除'],
+        section: 'action',
+        run: () => openAssetTrash(true),
+      },
     ];
 
     return [...playbookCommands, ...recipeCommands, ...moduleCommands, ...alignCommands, ...actionCommands].filter(
@@ -224,6 +242,8 @@ export function CommandPalette({ open, onClose, onAlign }: CommandPaletteProps) 
     runtime,
     setMode,
     onAlign,
+    openSettingsTo,
+    openAssetTrash,
   ]);
 
   const filtered = useMemo(() => {
@@ -283,7 +303,7 @@ export function CommandPalette({ open, onClose, onAlign }: CommandPaletteProps) 
   return createPortal(
     <div className="fixed inset-0 z-[100] flex items-start justify-center pt-[12vh] bg-ink/20 backdrop-blur-[2px]">
       <button type="button" className="absolute inset-0" aria-label="关闭" onClick={onClose} />
-      <div className="nx9-command-palette relative w-full max-w-xl rounded-2xl border border-line bg-white shadow-panel overflow-hidden">
+      <div className="nx9-command-palette relative w-full max-w-xl rounded-2xl border border-line bg-surface shadow-panel overflow-hidden">
         <div className="flex items-center gap-2 px-4 py-3 border-b border-line">
           <Search size={16} className="text-ink/40" />
           <input

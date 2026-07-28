@@ -41,7 +41,7 @@ export function PromptBarGenFooter({ blockId, kind, layout = 'inline' }: PromptB
         <select
           value={modelId}
           onChange={(e) => patch({ model: e.target.value })}
-          className={`rounded-lg border border-line bg-white px-2 py-1 text-[10px] truncate nodrag nopan ${
+          className={`rounded-lg border border-line bg-surface px-2 py-1 text-[10px] truncate nodrag nopan ${
             stacked ? 'w-full' : 'max-w-[120px]'
           }`}
         >

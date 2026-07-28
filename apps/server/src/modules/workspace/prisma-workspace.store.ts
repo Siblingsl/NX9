@@ -33,7 +33,10 @@ export class PrismaWorkspaceStore {
 
   async list(ownerId?: string): Promise<WorkspaceSummary[]> {
     const rows = await this.prisma.workspace.findMany({
-      where: ownerId ? { ownerId } : undefined,
+      where: {
+        deletedAt: null,
+        ...(ownerId ? { ownerId } : {}),
+      },
       orderBy: { createdAt: 'asc' },
     });
     return rows.map((r) => this.toSummary(r));
@@ -108,6 +111,68 @@ export class PrismaWorkspaceStore {
   }
 
   async remove(id: string): Promise<void> {
+    // F-010: 软删除
+    await this.prisma.workspace.update({
+      where: { id },
+      data: { deletedAt: new Date() },
+    }).catch(() => {
+      throw new NotFoundException(`Workspace ${id} not found`);
+    });
+  }
+
+  async listTrash(): Promise<WorkspaceSummary[]> {
+    const THIRTY_DAYS = 30 * 24 * 60 * 60 * 1000;
+    const cutoff = new Date(Date.now() - THIRTY_DAYS);
+    const items = await this.prisma.workspace.findMany({
+      where: {
+        deletedAt: { not: null, gte: cutoff },
+      },
+      orderBy: { deletedAt: 'desc' },
+    });
+    return items.map((w) => ({
+      id: w.id,
+      title: w.title,
+      blockCount: w.blockCount,
+      shotCount: w.shotCount,
+      visibility: 'private' as const,
+      createdAt: w.createdAt.getTime(),
+      updatedAt: w.updatedAt.getTime(),
+      deletedAt: w.deletedAt?.getTime(),
+    }));
+  }
+
+  /** F-010: 清理过期回收站项目（≥30天） */
+  async purgeExpiredTrash(): Promise<number> {
+    const THIRTY_DAYS = 30 * 24 * 60 * 60 * 1000;
+    const cutoff = new Date(Date.now() - THIRTY_DAYS);
+    const expired = await this.prisma.workspace.findMany({
+      where: { deletedAt: { not: null, lt: cutoff } },
+      select: { id: true },
+    });
+    if (expired.length === 0) return 0;
+    await this.prisma.workspace.deleteMany({
+      where: { id: { in: expired.map((w) => w.id) } },
+    });
+    return expired.length;
+  }
+
+  async restore(id: string): Promise<WorkspaceSummary> {
+    const w = await this.prisma.workspace.update({
+      where: { id },
+      data: { deletedAt: null },
+    });
+    return {
+      id: w.id,
+      title: w.title,
+      blockCount: w.blockCount,
+      shotCount: w.shotCount,
+      visibility: 'private',
+      createdAt: w.createdAt.getTime(),
+      updatedAt: w.updatedAt.getTime(),
+    };
+  }
+
+  async purge(id: string): Promise<void> {
     await this.prisma.workspace.delete({ where: { id } }).catch(() => {
       throw new NotFoundException(`Workspace ${id} not found`);
     });

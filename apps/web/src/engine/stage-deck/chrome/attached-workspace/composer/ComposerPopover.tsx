@@ -74,7 +74,7 @@ export function ComposerPopover({
       />
       <div
         ref={panelRef}
-        className={`nx9-composer-popover fixed z-[321] rounded-xl border border-line/60 bg-white shadow-panel py-1 nodrag nopan ${
+        className={`nx9-composer-popover fixed z-[321] rounded-xl border border-line/60 bg-surface shadow-panel py-1 nodrag nopan ${
           tone === 'desk' ? 'is-picture-desk' : ''
         }`}
         style={{

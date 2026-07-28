@@ -1,17 +1,17 @@
 import type { Edge, Node } from '@xyflow/react';
-import { WORKFLOW_TEMPLATES } from '@nx9/shared';
+import { WORKFLOW_TEMPLATES, normalizeDataEdgeHandlesAwayFromExec } from '@nx9/shared';
 
 /**
  * 核心成片节点（含导演台批出关键帧与台内审阅）
- * 剧本 → 设定检查 → 分镜台 ← 出图/3D → 导演台 → 视频 → 导出
+ * 编剧台 → 分镜台 ←出图(能力口) → 导演台 → 视频 → 智能剪辑 → 导出
  */
 export const CORE_PIPELINE_KINDS = [
   'script-desk',
-  'asset-gate',
   'storyboard-desk',
   'picture-gen',
   'director-desk',
   'clip-gen',
+  'clip-editor',
   'export-pack',
 ] as const;
 
@@ -60,14 +60,12 @@ export function auditCorePipeline(nodes: Node[], edges: Edge[]): CorePipelineAud
   const presentCount = CORE_PIPELINE_KINDS.filter((kind) => byKind.has(kind)).length;
   const missingKinds = CORE_PIPELINE_KINDS.filter((kind) => !byKind.has(kind));
   const requiredLinks: CoreLinkSpec[] = [
-    { source: 'script-desk', target: 'asset-gate', targetHandle: 'asset-gate' },
-    { source: 'asset-gate', target: 'storyboard-desk', sourceHandle: 'asset-gate' },
+    { source: 'script-desk', target: 'storyboard-desk', sourceHandle: 'prompt', targetHandle: 'prompt' },
     { source: 'picture-gen', target: 'storyboard-desk', sourceHandle: 'exec-picture', targetHandle: 'exec-picture' },
-    { source: 'director-desk', target: 'storyboard-desk', sourceHandle: 'exec-picture', targetHandle: 'exec-picture' },
-    { source: 'picture-gen', target: 'director-desk' },
-    { source: 'storyboard-desk', target: 'director-desk' },
-    { source: 'director-desk', target: 'clip-gen' },
-    { source: 'clip-gen', target: 'export-pack' },
+    { source: 'storyboard-desk', target: 'director-desk', sourceHandle: 'prompt', targetHandle: 'prompt' },
+    { source: 'director-desk', target: 'clip-gen', sourceHandle: 'picture', targetHandle: 'picture' },
+    { source: 'clip-gen', target: 'clip-editor', sourceHandle: 'clip', targetHandle: 'clip' },
+    { source: 'clip-editor', target: 'export-pack', sourceHandle: 'clip', targetHandle: 'clip' },
   ];
   const missingLinkCount = requiredLinks.filter(
     (link) =>
@@ -104,14 +102,14 @@ export function repairCorePipeline(
     ?? byKind.get('storyboard-preview')?.position
     ?? byKind.get('story-grid')?.position
     ?? { x: 700, y: 340 };
-  const offsets: Record<CoreKind, { x: number; y: number }> = {
+  const offsets: Partial<Record<CoreKind, { x: number; y: number }>> = {
     'script-desk': { x: -700, y: 0 },
-    'asset-gate': { x: -450, y: 0 },
     'storyboard-desk': { x: 0, y: 0 },
     'picture-gen': { x: -150, y: -240 },
     'director-desk': { x: 320, y: 0 },
-    'clip-gen': { x: 820, y: 0 },
-    'export-pack': { x: 1080, y: 0 },
+    'clip-gen': { x: 620, y: 0 },
+    'clip-editor': { x: 920, y: 0 },
+    'export-pack': { x: 1220, y: 0 },
   };
 
   let addedNodeCount = 0;
@@ -124,11 +122,13 @@ export function repairCorePipeline(
         : undefined);
     if (!source) continue;
     const offset = offsets[kind];
+    if (!offset) continue;
     const node: Node = {
       id: kind === 'storyboard-desk' ? `desk-${source.id}` : source.id,
       type: kind,
       position: { x: previewPosition.x + offset.x, y: previewPosition.y + offset.y },
-      data: { ...source.data, showExecPorts: true },
+      // F-006: 尊重模板的 showExecPorts 设置（默认由 BlockShell ?? false 控制）
+      data: { ...source.data },
     };
     nextNodes.push(node);
     byKind.set(kind, node);
@@ -151,16 +151,20 @@ export function repairCorePipeline(
   });
 
   const definitions: CoreLinkSpec[] = [
-    { source: 'script-desk', target: 'asset-gate', targetHandle: 'asset-gate' },
-    { source: 'asset-gate', target: 'storyboard-desk', sourceHandle: 'asset-gate' },
+    { source: 'script-desk', target: 'storyboard-desk', sourceHandle: 'prompt', targetHandle: 'prompt' },
     { source: 'picture-gen', target: 'storyboard-desk', sourceHandle: 'exec-picture', targetHandle: 'exec-picture' },
-    { source: 'director-desk', target: 'storyboard-desk', sourceHandle: 'exec-picture', targetHandle: 'exec-picture' },
-    { source: 'picture-gen', target: 'director-desk' },
-    { source: 'storyboard-desk', target: 'director-desk' },
-    { source: 'director-desk', target: 'clip-gen' },
-    { source: 'clip-gen', target: 'export-pack' },
+    { source: 'storyboard-desk', target: 'director-desk', sourceHandle: 'prompt', targetHandle: 'prompt' },
+    { source: 'director-desk', target: 'clip-gen', sourceHandle: 'picture', targetHandle: 'picture' },
+    { source: 'clip-gen', target: 'clip-editor', sourceHandle: 'clip', targetHandle: 'clip' },
+    { source: 'clip-editor', target: 'export-pack', sourceHandle: 'clip', targetHandle: 'clip' },
   ];
   let addedLinkCount = 0;
+  // F-006: 数据边改回左右口；拆除出图→导演旁路
+  const beforeCount = nextEdges.length;
+  const repairedEdges = normalizeDataEdgeHandlesAwayFromExec(nextNodes, nextEdges);
+  removedBypassCount += Math.max(0, beforeCount - repairedEdges.length);
+  nextEdges.length = 0;
+  nextEdges.push(...repairedEdges);
   for (const link of definitions) {
     const source = byKind.get(link.source);
     const target = byKind.get(link.target);

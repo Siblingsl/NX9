@@ -115,7 +115,7 @@ export function CharacterDetailFields({
   return (
     <div className="max-w-2xl space-y-3">
       <ScreenplaySupportPanel kind="character" name={c.name} />
-      <div className="rounded-2xl border border-line bg-white p-3">
+      <div className="rounded-2xl border border-line bg-surface p-3">
         <div className="flex items-start gap-3">
           <div className="h-16 w-12 overflow-hidden rounded-xl border border-line bg-surface">
             {(c.referenceImageUrl || ext.fullSheetUrl || ext.frontViewUrl) ? (
@@ -339,7 +339,7 @@ export function CharacterDetailFields({
       <DetailSection title="绑定服装库">
         <Field label="当前套装">
           <select
-            className="w-full rounded-lg border border-line bg-white px-2 py-1.5 text-xs"
+            className="w-full rounded-lg border border-line bg-surface px-2 py-1.5 text-xs"
             value={ext.costumeId ?? ''}
             onChange={(e) => {
               const id = e.target.value;
@@ -439,7 +439,7 @@ export function SceneDetailFields({
   return (
     <div className="max-w-2xl space-y-3">
       <ScreenplaySupportPanel kind="scene" name={item.label} />
-      <div className="rounded-2xl border border-line bg-white p-3">
+      <div className="rounded-2xl border border-line bg-surface p-3">
         <div className="flex items-start gap-3">
           <div className="h-14 w-20 overflow-hidden rounded-xl border border-line bg-surface">
             {(refs[0] || ext.sheetUrl) ? (
@@ -882,7 +882,7 @@ export function CostumeDetailFields({
 
   return (
     <div className="max-w-2xl space-y-3">
-      <div className="rounded-2xl border border-line bg-white p-3">
+      <div className="rounded-2xl border border-line bg-surface p-3">
         <div className="flex items-start gap-3">
           <div className="h-14 w-20 overflow-hidden rounded-xl border border-line bg-surface">
             {cover ? (

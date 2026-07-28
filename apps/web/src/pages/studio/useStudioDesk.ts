@@ -1,19 +1,37 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   activeEpisodeShots,
   applyStudioPromptsToShot,
   createEpisodeMeta,
+  extractReferenceConstraints,
   listEpisodeMetas,
   parseChineseScript,
+  resolveCompositionTemplate,
   scenesToStoryboardShots,
   type CharacterProfile,
+  type CompositionTemplate,
   type EnvironmentProfile,
   type EpisodeMeta,
+  type ReferenceConstraint,
   type ScriptPlanPayload,
   type StoryboardShot,
   type VoiceLine,
 } from '@nx9/shared';
 import { useWorkspaceDocument } from '../../stores/workspace-document';
+import { useFlowGraphMirror } from '../../stores/flow-graph-mirror';
+import { schedulePersistMirroredWorkspace } from '../../stores/persist-mirrored-workspace';
+import { api } from '../../api/client';
+import { fromPayload } from '../../engine/flow-payload';
+import {
+  resolveStudioBinding,
+  patchStudioShot,
+  getScriptPackage,
+  setScriptPackage,
+  getChainShots,
+  setChainShots,
+  listStoryboardDesks,
+  type StudioBinding,
+} from '../../engine/studio-parity';
 import { useActivityLog } from '../../stores/activity-log';
 import { useExecutionQueue } from '../../stores/execution-queue';
 import { useFlowCommands } from '../../stores/flow-commands';
@@ -29,6 +47,84 @@ import { STUDIO_STEPS, type StepStatus, type StudioHub, type StudioStepId } from
 
 export function useStudioDesk() {
   const storyboard = useWorkspaceDocument((s) => s.storyboard);
+  const workspaceId = useWorkspaceDocument((s) => s.workspaceId);
+  // F-002: 制作台不依赖 ReactFlow（画布卸载后不可用），读写 flow-graph-mirror
+  const canvasNodes = useFlowGraphMirror((s) => s.nodes);
+  const canvasEdges = useFlowGraphMirror((s) => s.edges);
+  const mirrorRevision = useFlowGraphMirror((s) => s.revision);
+  const lastFocusedDeskId = useFlowGraphMirror((s) => s.lastFocusedStoryboardDeskId);
+  const updateNodeData = useFlowGraphMirror((s) => s.updateNodeData);
+  const syncGraph = useFlowGraphMirror((s) => s.syncGraph);
+  const setLastFocusedDeskId = useFlowGraphMirror((s) => s.setLastFocusedStoryboardDeskId);
+
+  // 无镜像时从服务端灌入（首次进制作台 / 刷新后）
+  useEffect(() => {
+    if (!workspaceId) return;
+    if (canvasNodes.length > 0 && useFlowGraphMirror.getState().workspaceId === workspaceId) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const payload = await api.loadWorkspace(workspaceId);
+        if (cancelled) return;
+        const parsed = fromPayload(payload);
+        syncGraph(workspaceId, parsed.nodes, parsed.edges);
+      } catch (err) {
+        console.warn('[F-002] 制作台加载画布镜像失败', err);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [workspaceId, canvasNodes.length, syncGraph]);
+
+  const [bindingOverrideId, setBindingOverrideId] = useState<string | null>(null);
+
+  const studioBinding = useMemo(
+    () =>
+      resolveStudioBinding(
+        workspaceId ?? '',
+        canvasNodes,
+        canvasEdges,
+        bindingOverrideId ?? lastFocusedDeskId,
+      ),
+    [workspaceId, canvasNodes, canvasEdges, bindingOverrideId, lastFocusedDeskId, mirrorRevision],
+  );
+
+  const deskOptions = useMemo(() => listStoryboardDesks(canvasNodes), [canvasNodes, mirrorRevision]);
+
+  const selectDeskBinding = useCallback(
+    (deskId: string) => {
+      setBindingOverrideId(deskId);
+      setLastFocusedDeskId(deskId);
+    },
+    [setLastFocusedDeskId],
+  );
+
+  // F-017/F-032: 从上游 reference-board 节点提取约束
+  const referenceConstraints: ReferenceConstraint | null = useMemo(() => {
+    if (!studioBinding) return null;
+    const deskNode = canvasNodes.find((n) => n.id === studioBinding.chainRootNodeId);
+    if (!deskNode) return null;
+    // 遍历入边找 reference-board 节点
+    const incoming = canvasEdges.filter((e) => e.target === deskNode.id);
+    for (const edge of incoming) {
+      const src = canvasNodes.find((n) => n.id === edge.source && n.type === 'reference-board');
+      if (src) {
+        const c = extractReferenceConstraints(src.data as Record<string, unknown>);
+        if (c) return c;
+      }
+    }
+    return null;
+  }, [studioBinding, canvasNodes, canvasEdges]);
+
+  // F-017/F-032: 从 storyboard-desk data 读取构图模板
+  const compositionTemplates: CompositionTemplate[] | undefined = useMemo(() => {
+    if (!studioBinding) return undefined;
+    const deskNode = canvasNodes.find((n) => n.id === studioBinding.chainRootNodeId);
+    if (!deskNode) return undefined;
+    const templates = (deskNode.data as Record<string, unknown>)?.compositionTemplates as CompositionTemplate[] | undefined;
+    return templates;
+  }, [studioBinding, canvasNodes]);
   const characters = useWorkspaceDocument((s) => s.characters);
   const environments = useWorkspaceDocument((s) => s.environments);
   const soundLibrary = useWorkspaceDocument((s) => s.soundLibrary);
@@ -64,9 +160,25 @@ export function useStudioDesk() {
 
   const [hub, setHub] = useState<StudioHub>('produce');
   const [step, setStep] = useState<StudioStepId>('script');
-  const [sourceText, setSourceText] = useState(
-    () => scriptPlan?.sourceText ?? scriptPlan?.screenplayMd ?? '',
+  // F-028: 优先读取绑定 script-desk 的剧本包（SSOT），降级到 workspace scriptPlan
+  const scriptPkg = studioBinding ? getScriptPackage(studioBinding, canvasNodes ?? []) : undefined;
+  const initialSourceText = useMemo(
+    () => scriptPkg?.sourceText ?? scriptPlan?.sourceText ?? scriptPlan?.screenplayMd ?? '',
+    [scriptPkg?.sourceText, scriptPlan?.sourceText, scriptPlan?.screenplayMd],
   );
+  const [sourceText, setSourceText] = useState(initialSourceText);
+
+  // F-028: 当 SSOT 源文本变化时，同步到本地工作副本（仅当本地为空或 SSOT 非空时更新）
+  useEffect(() => {
+    if (initialSourceText && !sourceText) {
+      setSourceText(initialSourceText);
+    }
+  }, [initialSourceText, sourceText]);
+
+  /** F-028: 同步写入 workspace store 作为缓存（仅用于读加速） */
+  const syncToWorkspace = useCallback((plan: ScriptPlanPayload) => {
+    setScriptPlan(plan);
+  }, [setScriptPlan]);
   const [seriesTitle, setSeriesTitle] = useState(() => storyboard.title || '');
   const [busy, setBusy] = useState<string | null>(null);
   const [exportUrl, setExportUrl] = useState<string | null>(null);
@@ -85,7 +197,18 @@ export function useStudioDesk() {
   const activeEpisodeId = storyboard.activeEpisodeId ?? episodes[0]?.id ?? null;
   const activeEpisode = episodes.find((e) => e.id === activeEpisodeId) ?? episodes[0] ?? null;
 
-  const shots = useMemo(() => activeEpisodeShots(storyboard), [storyboard]);
+  // F-002: 绑定链优先；无绑定时空数组（禁止制作台专用全局镜表真相源）
+  const chainShotsAll = useMemo(() => {
+    if (!studioBinding) return [] as StoryboardShot[];
+    return getChainShots(studioBinding, canvasNodes);
+  }, [studioBinding, canvasNodes, mirrorRevision]);
+
+  const shots = useMemo(() => {
+    if (!studioBinding) return [] as StoryboardShot[];
+    if (!activeEpisodeId) return chainShotsAll;
+    const scoped = chainShotsAll.filter((s) => s.episodeId === activeEpisodeId || !s.episodeId);
+    return scoped.length > 0 ? scoped : chainShotsAll;
+  }, [studioBinding, chainShotsAll, activeEpisodeId]);
   const envList = environments?.environments ?? [];
 
   const stats = useMemo(() => {
@@ -96,7 +219,7 @@ export function useStudioDesk() {
     ).length;
     const withVideo = shots.filter((s) => s.videoAssetId).length;
     const voiceLines = voice.lines.filter((l) => !l.shotId || shots.some((s) => s.id === l.shotId));
-    const hasScript = Boolean(sourceText.trim() || scriptPlan?.sourceText || total > 0);
+    const hasScript = Boolean(sourceText.trim() || scriptPkg?.sourceText || scriptPlan?.sourceText || total > 0);
     const completedEps = episodes.filter((e) => e.status === 'completed' || e.status === 'archived');
     return {
       total,
@@ -212,6 +335,10 @@ export function useStudioDesk() {
         return;
       }
       addShots(nextShots, 'replace');
+      if (studioBinding) {
+        setChainShots(updateNodeData, studioBinding, canvasNodes, nextShots);
+        schedulePersistMirroredWorkspace();
+      }
       const t = seriesTitle.trim() || background.title || storyboard.title || '未命名剧';
       setStoryboard({
         ...useWorkspaceDocument.getState().storyboard,
@@ -225,14 +352,19 @@ export function useStudioDesk() {
           status: 'in_progress',
         });
       }
-      setScriptPlan({
+      const plan: ScriptPlanPayload = {
         version: 2,
         sourceText: text,
         screenplayMd: text,
         storyboardTable: scriptPlan?.storyboardTable ?? [],
         skeleton: scriptPlan?.skeleton ?? null,
         adaptation: scriptPlan?.adaptation ?? null,
-      });
+      };
+      // F-028: 以 script-desk 节点为 SSOT
+      if (studioBinding && updateNodeData) {
+        setScriptPackage(updateNodeData, studioBinding, plan as any);
+      }
+      syncToWorkspace(plan);
       toastSuccess(`规则拆镜 · ${nextShots.length} 镜（本集）`);
       flash(`规则拆镜 ${nextShots.length} 镜`);
       setStep('storyboard');
@@ -281,14 +413,19 @@ export function useStudioDesk() {
         });
       }
       if (payload.episodes[0]?.id) setActiveEpisodeId(payload.episodes[0].id);
-      setScriptPlan({
+      const aiPlan: ScriptPlanPayload = {
         version: 2,
         sourceText: text,
         screenplayMd: text,
         storyboardTable: scriptPlan?.storyboardTable ?? [],
         skeleton: scriptPlan?.skeleton ?? null,
         adaptation: scriptPlan?.adaptation ?? null,
-      });
+      };
+      // F-028: 以 script-desk 节点为 SSOT
+      if (studioBinding && updateNodeData) {
+        setScriptPackage(updateNodeData, studioBinding, aiPlan as any);
+      }
+      syncToWorkspace(aiPlan);
       if (payload.title) {
         setSeriesTitle(payload.title);
         setStoryboard({ ...useWorkspaceDocument.getState().storyboard, title: payload.title });
@@ -331,13 +468,20 @@ export function useStudioDesk() {
       skeleton: scriptPlan?.skeleton ?? null,
       adaptation: scriptPlan?.adaptation ?? null,
     };
-    setScriptPlan(plan);
+    // F-028: 以 script-desk 节点为 SSOT，同步写入 workspace 做缓存
+    if (studioBinding && updateNodeData) {
+      setScriptPackage(updateNodeData, studioBinding, plan as any);
+    }
+    syncToWorkspace(plan);
     if (seriesTitle.trim()) {
       setStoryboard({ ...useWorkspaceDocument.getState().storyboard, title: seriesTitle.trim() });
     }
     toastSuccess('剧本已保存');
     flash('剧本已保存');
-  }, [sourceText, seriesTitle, scriptPlan, setScriptPlan, setStoryboard, ensureEpisodeBootstrapped, flash]);
+  }, [sourceText, seriesTitle, scriptPlan, studioBinding, updateNodeData, syncToWorkspace, setStoryboard, ensureEpisodeBootstrapped, flash]);
+
+  /** 是否为制作台私有模式（无画布绑定） */
+  const isStandalone = !studioBinding;
 
   const resolveShotContext = useCallback(
     (shot: StoryboardShot) => {
@@ -360,37 +504,58 @@ export function useStudioDesk() {
     [characters.characters, envList, activeEpisode, storyboard.globalArtDirection],
   );
 
+  // F-002/F-003: 只写链 SSOT，并防抖存盘供画布回载
+  const patchShot = useCallback(
+    (id: string, patch: Partial<StoryboardShot>) => {
+      if (!studioBinding) {
+        toastError('未绑定分镜台：请先前往画布创建/选中分镜台');
+        return;
+      }
+      patchStudioShot(studioBinding, canvasNodes, updateNodeData, id, patch);
+      schedulePersistMirroredWorkspace();
+    },
+    [studioBinding, canvasNodes, updateNodeData],
+  );
+
   const regenerateShotPrompts = useCallback(
     (shotId: string, force = true) => {
-      const shot = useWorkspaceDocument.getState().storyboard.shots.find((s) => s.id === shotId);
+      const shot = shots.find((s) => s.id === shotId);
       if (!shot) return;
-      const patch = applyStudioPromptsToShot(shot, resolveShotContext(shot), { force });
-      updateShot(shotId, patch);
+      // F-017/F-032: 传入约束与构图模板
+      const patch = applyStudioPromptsToShot(shot, resolveShotContext(shot), {
+        force,
+        constraints: referenceConstraints,
+        templates: compositionTemplates,
+      });
+      patchShot(shotId, patch);
       flash('已生成专业提示词');
     },
-    [resolveShotContext, updateShot, flash],
+    [resolveShotContext, patchShot, flash, referenceConstraints, compositionTemplates, shots],
   );
 
   const regenerateAllPrompts = useCallback(
     (force = true) => {
-      for (const shot of activeEpisodeShots(useWorkspaceDocument.getState().storyboard)) {
-        const patch = applyStudioPromptsToShot(shot, resolveShotContext(shot), { force });
-        updateShot(shot.id, patch);
+      for (const shot of shots) {
+        const patch = applyStudioPromptsToShot(shot, resolveShotContext(shot), {
+          force,
+          constraints: referenceConstraints,
+          templates: compositionTemplates,
+        });
+        patchShot(shot.id, patch);
       }
       toastSuccess('已为本集全部镜头生成专业提示词');
       flash('批量专业提示词完成');
     },
-    [resolveShotContext, updateShot, flash],
-  );
-
-  const patchShot = useCallback(
-    (id: string, patch: Partial<StoryboardShot>) => updateShot(id, patch),
-    [updateShot],
+    [resolveShotContext, patchShot, flash, referenceConstraints, compositionTemplates, shots],
   );
 
   const addEmptyShot = useCallback(() => {
+    if (!studioBinding) {
+      toastError('未绑定分镜台：请先前往画布创建分镜台');
+      return;
+    }
     ensureEpisodeBootstrapped();
-    const list = activeEpisodeShots(useWorkspaceDocument.getState().storyboard);
+    const list = shots;
     const ep = activeEpisode;
     const shot: StoryboardShot = {
       id: `shot-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
@@ -408,18 +573,38 @@ export function useStudioDesk() {
       lighting: '',
       audioDirection: '',
     };
-    addShots([shot], 'append');
+    setChainShots(updateNodeData, studioBinding, canvasNodes, [...list, shot]);
+    schedulePersistMirroredWorkspace();
     setSelectedShotId(shot.id);
     flash('已添加空镜头');
-  }, [ensureEpisodeBootstrapped, activeEpisode, storyboard.globalArtDirection, addShots, flash]);
+  }, [
+    studioBinding,
+    ensureEpisodeBootstrapped,
+    activeEpisode,
+    storyboard.globalArtDirection,
+    shots,
+    updateNodeData,
+    canvasNodes,
+    flash,
+  ]);
 
   const deleteShot = useCallback(
     (id: string) => {
-      removeShot(id);
+      if (!studioBinding) {
+        toastError('未绑定分镜台');
+        return;
+      }
+      setChainShots(
+        updateNodeData,
+        studioBinding,
+        canvasNodes,
+        shots.filter((s) => s.id !== id),
+      );
+      schedulePersistMirroredWorkspace();
       if (selectedShotId === id) setSelectedShotId(null);
       flash('已删除镜头');
     },
-    [removeShot, selectedShotId, flash],
+    [studioBinding, updateNodeData, canvasNodes, shots, selectedShotId, flash],
   );
 
   const runKeyframes = useCallback(
@@ -454,15 +639,15 @@ export function useStudioDesk() {
 
   const approveOne = useCallback(
     (id: string) => {
-      updateShot(id, { keyframeStatus: 'approved', status: 'approved', keyframeReviewNote: null });
+      patchShot(id, { keyframeStatus: 'approved', status: 'approved', keyframeReviewNote: null });
       flash('预览图已通过');
     },
-    [updateShot, flash],
+    [patchShot, flash],
   );
 
   const rejectOne = useCallback(
     (id: string) => {
-      updateShot(id, {
+      patchShot(id, {
         keyframeStatus: 'review',
         status: 'review',
         keyframeReviewNote: '需修改构图/一致性',
@@ -473,10 +658,24 @@ export function useStudioDesk() {
   );
 
   const runVideos = useCallback(async (force = false) => {
+    if (!studioBinding) {
+      toastError('未绑定分镜台：请先前往画布连接分镜台');
+      return;
+    }
+    if (shots.length === 0) {
+      toastError('当前链无镜头，无法批出视频');
+      return;
+    }
     setBusy('video');
     try {
       regenerateAllPrompts(false);
-      const res = await batchGenerateVideosFromShots(undefined, force);
+      // F-004: 强制传入 chainShots，禁止回退全局
+      const res = await batchGenerateVideosFromShots(
+        shots.map((s) => s.id),
+        force,
+        undefined,
+        shots as any,
+      );
       toastSuccess(`镜头视频 · 成功 ${res.ok} · 失败 ${res.fail}`);
       if (res.ok > 0) setStep('voice');
     } catch (e) {
@@ -484,7 +683,7 @@ export function useStudioDesk() {
     } finally {
       setBusy(null);
     }
-  }, [regenerateAllPrompts]);
+  }, [regenerateAllPrompts, studioBinding, shots]);
 
   const seedVoiceLinesFromShots = useCallback(() => {
     const lines: VoiceLine[] = [];
@@ -553,7 +752,7 @@ export function useStudioDesk() {
             voiceProfileId: char?.id ?? line.voiceProfileId,
           });
           if (line.shotId) {
-            updateShot(line.shotId, { audioAssetId: res.url });
+            patchShot(line.shotId, { audioAssetId: res.url });
           }
           ok++;
           flash(`TTS 完成 · ${line.speaker}: ${line.text.slice(0, 24)}…`);
@@ -569,25 +768,24 @@ export function useStudioDesk() {
     [shots, characters.characters, updateVoiceLine, updateShot, flash],
   );
 
-  /** 本集镜头上下移动（重排 index） */
   const moveShot = useCallback(
     (id: string, dir: -1 | 1) => {
-      const sb = useWorkspaceDocument.getState().storyboard;
-      const scoped = activeEpisodeShots(sb)
-        .slice()
-        .sort((a, b) => a.index - b.index);
+      if (!studioBinding) {
+        toastError('未绑定分镜台');
+        return;
+      }
+      const scoped = shots.slice().sort((a, b) => a.index - b.index);
       const i = scoped.findIndex((s) => s.id === id);
       const j = i + dir;
       if (i < 0 || j < 0 || j >= scoped.length) return;
       const next = [...scoped];
       [next[i], next[j]] = [next[j], next[i]];
       const reindexed = next.map((s, idx) => ({ ...s, index: idx + 1 }));
-      const scopedIds = new Set(reindexed.map((s) => s.id));
-      const rest = sb.shots.filter((s) => !scopedIds.has(s.id));
-      setStoryboard({ ...sb, shots: [...rest, ...reindexed] });
+      setChainShots(updateNodeData, studioBinding, canvasNodes, reindexed);
+      schedulePersistMirroredWorkspace();
       flash(dir < 0 ? '镜头已上移' : '镜头已下移');
     },
-    [setStoryboard, flash],
+    [studioBinding, shots, updateNodeData, canvasNodes, flash],
   );
 
   const runExport = useCallback(async () => {
@@ -682,6 +880,10 @@ export function useStudioDesk() {
   ]);
 
   return {
+    studioBinding,
+    isStandalone,
+    deskOptions,
+    selectDeskBinding,
     hub,
     setHub,
     step,

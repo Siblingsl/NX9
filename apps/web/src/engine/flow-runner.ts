@@ -32,27 +32,84 @@ import {
   filterStoryboardGuideOverlay,
   resolveStoryboardGuideOverlay,
   buildVideoGuidePromptSuffix,
+  resolveMentionsForPrompt,
+  type MentionRef,
 } from '@nx9/shared';
 import { buildCameraPrompt, normalizeDirectorProject } from '@nx9/director3d';
 import { api } from '../api/client';
 import { runClipChain } from './clip-chain-runner';
 import { pollVideoUntilDone } from './poll-task';
 import { useWorkspaceDocument } from '../stores/workspace-document';
+import { patchUpstreamShot } from './chain-storyboard-utils';
 import {
   enabledGuideKinds,
   readStoryboardGuidePrefs,
 } from '../stores/storyboard-guide-prefs';
 import { composeStoryboardGuideFrameDataUrl } from './storyboard-guide-compose';
 
-function linkedShotForBlock(blockId: string, data: Record<string, unknown>): StoryboardShot | undefined {
-  const shots = useWorkspaceDocument.getState().storyboard.shots;
-  const linkedShotId = data.linkedShotId as string | undefined;
-  return shots.find((s) => s.id === linkedShotId || s.linkedBlockId === blockId);
+/** F-003/F-004: 双写——先写上游链，再写全局 store */
+function patchFlowShot(
+  blockId: string,
+  shotId: string,
+  patch: Partial<StoryboardShot>,
+  updateNodeData?: (id: string, data: Record<string, unknown>) => void,
+  nodes?: import('@xyflow/react').Node[],
+  edges?: Array<{ source: string; target: string }>,
+): void {
+  // F-003: 仅写链镜表，禁止回退全局
+  if (updateNodeData && nodes && edges) {
+    patchUpstreamShot(updateNodeData, blockId, nodes, edges, shotId, patch);
+  }
 }
 
+/**
+ * F-017: 查找上游分镜台是否开启了构图强约束。
+ */
+function upstreamDeskEnforcesComposition(
+  blockId: string,
+  nodes?: import('@xyflow/react').Node[],
+  edges?: Array<{ source: string; target: string }>,
+): boolean {
+  if (!nodes || !edges) return false;
+  const incoming = edges.filter((e) => e.target === blockId);
+  for (const edge of incoming) {
+    const src = nodes.find((n) => n.id === edge.source);
+    if (!src) continue;
+    const data = src.data as Record<string, unknown>;
+    if (data?.enforceComposition === true) return true;
+    // 递归上游（分镜台可能隔着其他节点）
+    if (upstreamDeskEnforcesComposition(src.id, nodes, edges)) return true;
+  }
+  return false;
+}
+
+function linkedShotForBlock(blockId: string, data: Record<string, unknown>, nodes?: import('@xyflow/react').Node[], edges?: Array<{ source: string; target: string }>): StoryboardShot | undefined {
+  // F-004: 优先从上游 chainStoryboard 读取
+  if (nodes && edges) {
+    const incoming = edges.filter((e) => e.target === blockId);
+    for (const edge of incoming) {
+      const sourceNode = nodes.find((n) => n.id === edge.source);
+      if (!sourceNode) continue;
+      const chain = (sourceNode.data as Record<string, unknown>)?.chainStoryboard as { shots?: StoryboardShot[] } | undefined;
+      if (chain?.shots) {
+        const linkedShotId = data.linkedShotId as string | undefined;
+        return chain.shots.find((s) => s.id === linkedShotId || (s as any).linkedBlockId === blockId);
+      }
+    }
+  }
+  // F-003: 无上游链时不降级全局
+  return undefined;
+}
+
+/** @deprecated F-003: 使用 applyDeskBreakdown 写入链镜表代替全局 storyboard.shots。 */
 function syncBreakdownToStoryboard(
   payload: import('@nx9/shared').ScriptBreakdownPayload,
 ): void {
+  if (process.env.NODE_ENV === 'development') {
+    console.warn(
+      '[F-003] syncBreakdownToStoryboard 已废弃：全局 storyboard.shots 写将由 chainStoryboard 替代。',
+    );
+  }
   const doc = useWorkspaceDocument.getState();
   const previousById = new Map(doc.storyboard.shots.map((shot) => [shot.id, shot]));
   const rawShots = storyboardShotsFromScriptBreakdown(payload).map((base) => {
@@ -143,7 +200,6 @@ export const RUNNABLE_BLOCKS = new Set([
   'reference-board',
   'script-desk',
   'dialogue-sheet',
-  'asset-gate',
   'voice-cast',
   'bridge-clip',
   'caption-asr',
@@ -292,69 +348,6 @@ async function executeBlock(
     return;
   }
 
-  if (kind === 'asset-gate') {
-    const screenplayPkg =
-      upstream.screenplayPackages?.[0]
-      ?? (d.package as import('@nx9/shared').ScreenplayPackage | undefined);
-    const {
-      syncBibleAssets,
-      syncBreakdownAssets,
-    } = await import('./asset-gate-runner');
-    const { isScreenplayPackage } = await import('@nx9/shared');
-    if (isScreenplayPackage(screenplayPkg)) {
-      const result = syncBibleAssets(block.id, screenplayPkg, { autoIngest: false });
-      updateNodeData(block.id, {
-        status: 'success',
-        package: screenplayPkg,
-        assetGate: {
-          missingCharacters: result.missingCharacters,
-          missingScenes: result.missingScenes,
-          requiredCharacters: result.requiredCharacters,
-          requiredScenes: result.requiredScenes,
-          syncedCharacters: result.syncedCharacters,
-          syncedScenes: result.syncedScenes,
-          checkedAt: new Date().toISOString(),
-          source: 'bible',
-        },
-        content: `设定检查完成 · 角色 ${result.requiredCharacters.length} / 场景 ${result.requiredScenes.length}`,
-        output: result.requiredCharacters.join('、'),
-        meta: {
-          requiredCharacters: result.requiredCharacters.length,
-          requiredScenes: result.requiredScenes.length,
-          missingCharacters: result.missingCharacters.length,
-          missingScenes: result.missingScenes.length,
-        },
-      });
-      return;
-    }
-    const payload =
-      upstream.scriptBreakdowns?.[0] ??
-      (d.scriptBreakdown as import('@nx9/shared').ScriptBreakdownPayload | undefined);
-    if (!payload) throw new Error('设定检查缺少编剧台 Bible / 成稿数据');
-    const result = syncBreakdownAssets(block.id, payload);
-    updateNodeData(block.id, {
-      status: 'success',
-      scriptBreakdown: payload,
-      assetGate: {
-        missingCharacters: result.missingCharacters,
-        missingScenes: result.missingScenes,
-        syncedCharacters: result.syncedCharacters,
-        syncedScenes: result.syncedScenes,
-        checkedAt: new Date().toISOString(),
-        source: 'breakdown',
-      },
-      content: `设定检查完成 · 角色 ${result.requiredCharacters.length} / 场景 ${result.requiredScenes.length}`,
-      output: payload.episodes.flatMap((episode) => episode.shots.map((shot) => shot.imagePrompt)).join('\n\n'),
-      meta: {
-        requiredCharacters: result.requiredCharacters.length,
-        requiredScenes: result.requiredScenes.length,
-        missingCharacters: result.missingCharacters.length,
-        missingScenes: result.missingScenes.length,
-      },
-    });
-    return;
-  }
-
   if (kind === 'storyboard-desk' || kind === 'storyboard-preview' || kind === 'story-grid') {
     // P0：若有 confirmed package 且无本地表 → 拆镜；不默认全量关键帧批出
     const screenplayPkg = upstream.screenplayPackages?.[0];
@@ -379,6 +372,8 @@ async function executeBlock(
       upstream.scriptBreakdowns?.[0] ??
       (d.scriptBreakdown as import('@nx9/shared').ScriptBreakdownPayload | undefined);
     if (rawPayload) {
+      // F-003: syncBreakdownToStoryboard 已废弃（写全局 store），
+      // applyDeskBreakdown 已负责写入节点 chainStoryboard。
       syncBreakdownToStoryboard(rawPayload);
       applyDeskBreakdown(block.id, rawPayload, updateNodeData, {
         content: `${rawPayload.title} · ${rawPayload.episodes.length} 集 · ${flattenScriptBreakdownShots(rawPayload).length} 镜`,
@@ -406,7 +401,8 @@ async function executeBlock(
     let envPromptSuffix = '';
     let envRefUrl: string | undefined;
     if (linkedShotId && environments?.environments) {
-      const shot = useWorkspaceDocument.getState().storyboard.shots.find((s) => s.id === linkedShotId);
+      // F-003: 链优先读取上游镜表
+      const shot = linkedShotForBlock(block.id, d, ctx?.nodes, ctx?.edges);
       if (shot?.sceneCode) {
         const env = environments.environments.find((e) => e.sceneCode === shot.sceneCode);
         if (env) {
@@ -417,6 +413,12 @@ async function executeBlock(
       }
     }
 
+    // F-024: 解析 @block-id 引用
+    const mentionRefs: MentionRef[] = [];
+    upstream.pictures.forEach((url, i) => mentionRefs.push({ id: `pic-${i}`, kind: 'picture', url, label: `图 ${i+1}` }));
+    upstream.clips.forEach((url, i) => mentionRefs.push({ id: `clip-${i}`, kind: 'clip', url, label: `视频 ${i+1}` }));
+    upstream.sounds.forEach((url, i) => mentionRefs.push({ id: `sound-${i}`, kind: 'sound', url, label: `音频 ${i+1}` }));
+
     const jobs = resolvePromptBatch(
       upstream.prompts,
       upstream.pictures,
@@ -424,10 +426,26 @@ async function executeBlock(
       prompt,
       upstream.promptDispatch,
     );
+    for (const job of jobs) {
+      const resolved = resolveMentionsForPrompt(job.prompt, mentionRefs);
+      job.prompt = resolved.resolved;
+    }
     const finalJobs = jobs.length > 0 ? jobs : [{ prompt: prompt || 'a scenic landscape' }];
     const composeAction = upstream.promptDispatch?.composeAction ?? 'generate';
     const modelId = (d.model as string) || 'gemini-2.5-flash-image';
-    const { resolveImageRequestSize } = await import('@nx9/shared');
+    const { resolveImageRequestSize, extractReferenceConstraints } = await import('@nx9/shared');
+    // F-017/F-032: 从上游 reference-board 提取约束
+    const referenceConstraint = (() => {
+      if (!ctx?.nodes || !ctx?.edges) return extractReferenceConstraints(d);
+      const incoming = ctx.edges.filter((e) => e.target === block.id);
+      for (const edge of incoming) {
+        const src = ctx.nodes.find((n) => n.id === edge.source && n.type === 'reference-board');
+        if (!src) continue;
+        const c = extractReferenceConstraints((src.data ?? {}) as Record<string, unknown>);
+        if (c) return c;
+      }
+      return extractReferenceConstraints(d);
+    })();
     const quality = (d.quality as string) || 'auto';
     const aspectRatio = (d.aspectRatio as string) || '1:1';
     const imageCount = (d.imageCount as number) || 1;
@@ -452,10 +470,9 @@ async function executeBlock(
       snapToStep,
     });
     const size = resolvedSize.size;
-    const shotRef = linkedShotId
-      ? useWorkspaceDocument.getState().storyboard.shots.find((s) => s.id === linkedShotId)
-          ?.firstFrameAssetId
-      : undefined;
+    // F-003: 链优先读取上游镜表
+    const linkedShot = linkedShotForBlock(block.id, d, ctx?.nodes, ctx?.edges);
+    const shotRef = linkedShot?.firstFrameAssetId;
     const nodeRef = (d.referenceImageUrl as string | undefined)?.trim();
     const charRef =
       enhancedCtx.referenceImageUrl ?? upstreamPics[0] ?? envRefUrl ?? shotRef;
@@ -470,8 +487,32 @@ async function executeBlock(
     );
     const proAction = lookupPictureProAction(d.pictureProAction as string | undefined);
 
+    // F-017/F-032: 约束注入 + enforce 检查
+    if (referenceConstraint) {
+      const { buildConstrainedPrompt } = await import('@nx9/shared');
+      for (let i = 0; i < finalJobs.length; i++) {
+        const job = finalJobs[i];
+        const checked = buildConstrainedPrompt(job.prompt, referenceConstraint, undefined);
+        if (checked.blocked) {
+          throw new Error(`参考板约束阻塞：${checked.reason ?? '未通过约束检查'}`);
+        }
+        // 注入约束文本到 prompt
+        if (checked.prompt !== job.prompt) {
+          finalJobs[i] = { ...job, prompt: checked.prompt };
+        }
+      }
+    }
+
     const urls: string[] = [];
     let lastPrompt = '';
+
+    const { BUILTIN_COMPOSITION_TEMPLATES, resolveCompositionTemplate } = await import('@nx9/shared');
+    const compositionTemplate = linkedShot ? resolveCompositionTemplate(linkedShot, BUILTIN_COMPOSITION_TEMPLATES) : undefined;
+
+    // F-017: 强约束检查 — 上游分镜台开启 enforceComposition 且无模板时阻断
+    if (upstreamDeskEnforcesComposition(block.id, ctx?.nodes, ctx?.edges) && !compositionTemplate) {
+      throw new Error('构图强约束：上游分镜台已开启强约束，但未指定构图模板，出图被阻断。请在分镜台为当前镜头选择构图模板。');
+    }
 
     const { runPictureGenJob } = await import('./picture-gen-runner');
 
@@ -490,6 +531,10 @@ async function executeBlock(
       for (const job of finalJobs) {
         let finalPrompt = enrichPromptWithCharacters(job.prompt, enhancedCtx.characters);
         if (envPromptSuffix) finalPrompt = `${finalPrompt}\n${envPromptSuffix}`;
+        // F-017: 构图模板注入
+        if (compositionTemplate) {
+          finalPrompt = `${finalPrompt}\n\n[Composition: ${compositionTemplate.name}]\n${compositionTemplate.promptSuffix}`;
+        }
         finalPrompt = composePictureProPrompt(finalPrompt, proAction);
         const neg = (d.negativePrompt as string | undefined)?.trim();
         if (neg) finalPrompt = `${finalPrompt}\n\nNegative: ${neg}`;
@@ -555,11 +600,11 @@ async function executeBlock(
 
     const linkedPicShot = linkedShotForBlock(block.id, d);
     if (linkedPicShot && urls[0]) {
-      useWorkspaceDocument.getState().updateShot(linkedPicShot.id, {
+      patchFlowShot(block.id, linkedPicShot.id, {
         firstFrameAssetId: urls[0],
         keyframeStatus: 'review',
         status: 'review',
-      });
+      }, updateNodeData, ctx?.nodes, ctx?.edges);
     }
 
     updateNodeData(block.id, {
@@ -689,11 +734,35 @@ async function executeBlock(
         if (modelId.startsWith('grok-imagine-video') && !imageUrl) {
           throw new Error('Grok Imagine 当前需要首图，请先连接图像生成节点或使用分镜预览生成首图');
         }
-        const boardShot = useWorkspaceDocument.getState().storyboard.shots.find(
-          (s) => s.id === shot.id || s.index === i,
-        );
+        // F-003: 链优先读取上游镜表
+        const chainShots = ctx?.nodes && ctx?.edges
+          ? (() => {
+              const upstreamPolicy = (block.data as Record<string, unknown>)?.upstreamPolicy as import('@nx9/shared').UpstreamPolicy | undefined;
+              const primarySourceId = (block.data as Record<string, unknown>)?.primarySourceId as string | null | undefined;
+              const upstream = gatherUpstream(block.id, ctx!.nodes as any, ctx!.edges as any, upstreamPolicy, primarySourceId);
+              const upstreamChain = upstream.shotIds;
+              if (upstreamChain.length > 0) {
+                const inc = ctx!.edges.filter((e) => e.target === block.id);
+                for (const e of inc) {
+                  const src = ctx!.nodes.find((n) => n.id === e.source);
+                  if (!src) continue;
+                  const ch = (src.data as Record<string, unknown>)?.chainStoryboard as { shots?: any[] } | undefined;
+                  if (ch?.shots) return ch.shots.find((s) => s.id === shot.id || s.index === i);
+                }
+              }
+              return undefined;
+            })()
+          : undefined;
+        // F-003: 链优先，不再回退全局镜表
+        const boardShot = chainShots;
+        // F-024: 解析 @mention 引用
+        const clipMentionRefs: import('@nx9/shared').MentionRef[] = [];
+        upstream.pictures.forEach((url, i) => clipMentionRefs.push({ id: `pic-${i}`, kind: 'picture', url, label: `图 ${i+1}` }));
+        upstream.clips.forEach((url, i) => clipMentionRefs.push({ id: `clip-${i}`, kind: 'clip', url, label: `视频 ${i+1}` }));
+        const rawClipPrompt = shot.videoPrompt || shot.imagePrompt || prompt || 'cinematic scene';
+        const resolvedClip = (await import('@nx9/shared')).resolveMentionsForPrompt(rawClipPrompt, clipMentionRefs);
         let finalPrompt = enrichPromptWithCharacters(
-          shot.videoPrompt || shot.imagePrompt || prompt || 'cinematic scene',
+          resolvedClip.resolved,
           charCtx.characters,
         );
         if (boardShot && imageUrl) {
@@ -732,11 +801,11 @@ async function executeBlock(
         clips.push(videoUrl);
         // 写回故事板 SSOT
         if (boardShot) {
-          useWorkspaceDocument.getState().updateShot(boardShot.id, {
+          patchFlowShot(block.id, boardShot.id, {
             videoAssetId: videoUrl,
             videoStatus: 'review',
             status: 'review',
-          });
+          }, updateNodeData, ctx?.nodes, ctx?.edges);
         }
       }
       updateNodeData(block.id, {
@@ -751,8 +820,14 @@ async function executeBlock(
       return;
     }
 
+    // F-024: 解析 @mention 引用
+    const rawSinglePrompt = breakdownShots[0]?.videoPrompt || prompt || 'cinematic scene';
+    const singleMentionRefs: import('@nx9/shared').MentionRef[] = [];
+    upstream.pictures.forEach((url, i) => singleMentionRefs.push({ id: `pic-${i}`, kind: 'picture', url, label: `图 ${i+1}` }));
+    upstream.clips.forEach((url, i) => singleMentionRefs.push({ id: `clip-${i}`, kind: 'clip', url, label: `视频 ${i+1}` }));
+    const resolvedSingle = (await import('@nx9/shared')).resolveMentionsForPrompt(rawSinglePrompt, singleMentionRefs);
     const finalPrompt = enrichPromptWithCharacters(
-      breakdownShots[0]?.videoPrompt || prompt || 'cinematic scene',
+      resolvedSingle.resolved,
       charCtx.characters,
     );
     const imageUrl = upstream.pictures[0] ?? charCtx.referenceImageUrl;
@@ -793,11 +868,11 @@ async function executeBlock(
     // 单镜绑定写回
     const linkedClipShot = linkedShotForBlock(block.id, d);
     if (linkedClipShot) {
-      useWorkspaceDocument.getState().updateShot(linkedClipShot.id, {
+      patchFlowShot(block.id, linkedClipShot.id, {
         videoAssetId: videoUrl,
         videoStatus: 'review',
         status: 'review',
-      });
+      }, updateNodeData, ctx?.nodes, ctx?.edges);
     }
     return;
   }
@@ -1358,6 +1433,15 @@ async function executeBlock(
       input: { image_url: img, mask_url: mask || undefined, prompt: inpaintPrompt.trim() },
     })) as { ok?: boolean; url?: string };
     if (!res.url) throw new Error('重绘失败');
+    // F-036: 写回 shot 状态
+    const linkedShotId = d.linkedShotId as string | undefined;
+    if (linkedShotId && ctx?.nodes && ctx?.edges) {
+      patchUpstreamShot(updateNodeData, block.id, ctx.nodes, ctx.edges, linkedShotId, {
+        firstFrameAssetId: res.url,
+        keyframeStatus: 'review',
+        status: 'review',
+      });
+    }
     updateNodeData(block.id, { status: 'success', previewUrl: res.url, output: res.url });
     return;
   }
@@ -1379,11 +1463,25 @@ async function executeBlock(
 
   if (kind === 'seedance-chain') {
     const linkedIds = (d.linkedShotIds as string[]) ?? [];
-    const allShots = useWorkspaceDocument.getState().storyboard.shots;
+    // F-003: 链优先
+    const chainShots = ctx?.nodes && ctx?.edges
+      ? (() => {
+          const inc = ctx!.edges.filter((e) => e.target === block.id);
+          for (const e of inc) {
+            const src = ctx!.nodes.find((n) => n.id === e.source);
+            if (!src) continue;
+            const ch = (src.data as Record<string, unknown>)?.chainStoryboard as { shots?: any[] } | undefined;
+            if (ch?.shots) return ch.shots;
+          }
+          return undefined;
+        })()
+      : undefined;
+    // F-003: 仅使用链镜表，禁止回退全局
+    const allShots = chainShots ?? [];
     const targetShots = linkedIds.length > 0
       ? allShots.filter((s) => linkedIds.includes(s.id)).sort((a, b) => a.index - b.index)
       : allShots.filter((s) => s.videoPromptEn).sort((a, b) => a.index - b.index);
-    if (targetShots.length === 0) throw new Error('Seedance Chain：无可处理的镜头');
+    if (targetShots.length === 0) throw new Error('Seedance Chain：无可处理的镜头（无上游链镜表）');
     const projectGoal = (d.projectGoal as string) || '';
     const chain = shotsToClipChain(targetShots, projectGoal);
     updateNodeData(block.id, {
@@ -1398,6 +1496,19 @@ async function executeBlock(
 
   if (kind === 'caption-asr') {
     const captionMode = (d.captionMode as string) ?? 'asr';
+    const shotIds = (upstream.shotIds ?? []) as string[];
+
+    // F-036: 写回 subtitle 到 shot
+    const writeBackSubtitle = (subtitle: string) => {
+      if (shotIds.length > 0 && ctx?.nodes && ctx?.edges) {
+        for (const shotId of shotIds) {
+          patchUpstreamShot(updateNodeData, block.id, ctx.nodes, ctx.edges, shotId, {
+            subtitleText: subtitle.trim(),
+          });
+        }
+      }
+    };
+
     if (captionMode === 'burn') {
       const clip = upstream.clips?.[0];
       const subtitle = (d.subtitle as string) || (d.srtContent as string) || prompt || upstream.prompts?.[0] || '';
@@ -1410,6 +1521,7 @@ async function executeBlock(
         skipReview: true,
       });
       if (!res.ok || !res.url) throw new Error(res.message ?? '字幕烧录失败');
+      writeBackSubtitle(subtitle);
       updateNodeData(block.id, {
         status: 'success',
         outputClip: res.url,
@@ -1422,6 +1534,7 @@ async function executeBlock(
     if (!src) throw new Error('语音转字幕：需要上游音频或视频');
     const language = (d.language as string) || 'zh';
     const res = await api.transcribeAudio(src, language);
+    if (res.srtContent) writeBackSubtitle(res.srtContent);
     updateNodeData(block.id, {
       status: 'success',
       srtContent: res.srtContent,
@@ -1484,6 +1597,9 @@ async function executeBlock(
   if (kind === 'continuity-check') {
     const images = upstream.pictures ?? [];
     if (images.length < 2) throw new Error('至少需要 2 张上游图像');
+
+    // F-036: 从上游获取目标 shotIds
+    const targetShotIds = (upstream.shotIds ?? []) as string[];
     const res = await api.proxyLlm({
       model: 'gpt-4o-mini',
       messages: [
@@ -1502,10 +1618,33 @@ async function executeBlock(
       ],
     });
     const raw = (res as { content?: string }).content ?? JSON.stringify(res);
+    
+    // F-036: 将连续性检查结果写回 shot 状态
+    if (targetShotIds.length > 0 && ctx?.nodes && ctx?.edges) {
+      try {
+        const parsed = JSON.parse(typeof raw === 'string' ? raw : JSON.stringify(raw));
+        const issues = Array.isArray(parsed.issues) ? parsed.issues : [];
+        if (issues.length > 0) {
+          const { applyShotReviewFromReport } = await import('@nx9/shared');
+          // 找上游 chain 的 shots 并 patch
+          for (const shotId of targetShotIds) {
+            patchUpstreamShot(updateNodeData, block.id, ctx.nodes, ctx.edges, shotId, {
+              keyframeStatus: 'failed',
+              keyframeReviewNote: `连续性: ${issues.slice(0, 3).join('; ')}`,
+              status: 'failed',
+            });
+          }
+        }
+      } catch {
+        // JSON 解析失败不阻碍主流程
+      }
+    }
+
     updateNodeData(block.id, {
       status: 'success',
       continuityReport: raw,
       content: raw,
+      continuityIssues: targetShotIds.length > 0 ? targetShotIds : undefined,
     });
     return;
   }
@@ -1513,9 +1652,26 @@ async function executeBlock(
   if (kind === 'export-pack') {
     const shots = activeEpisodeShots(useWorkspaceDocument.getState().storyboard);
     const { runExportPack } = await import('./export-pack-runner');
+    const { hasEffectiveTimeline, parseTimelineDraft } = await import('@nx9/shared');
     const mode = (d.exportMode as string) || 'zip';
     const prefix = (d.exportPrefix as string) || 'nx9-shot';
     const audioUrl = (d.episodeAudioUrl as string) || '';
+    // F-011: 解析本节点或上游智能剪辑时间线；失败不得标 success
+    let timeline = parseTimelineDraft(d.timelineDraft as string | object | undefined);
+    if (!hasEffectiveTimeline(timeline)) {
+      const incoming = ctx.edges.filter((e) => e.target === block.id);
+      for (const edge of incoming) {
+        const src = ctx.nodes.find((n) => n.id === edge.source);
+        if (src?.type !== 'clip-editor') continue;
+        const parsed = parseTimelineDraft(
+          (src.data as Record<string, unknown> | undefined)?.timelineDraft as string | object | undefined,
+        );
+        if (hasEffectiveTimeline(parsed)) {
+          timeline = parsed;
+          break;
+        }
+      }
+    }
     try {
       const res = await runExportPack({
         mode: mode as 'zip' | 'ffmpeg-episode' | 'hyperframes-episode' | 'remotion-bundle',
@@ -1526,16 +1682,28 @@ async function executeBlock(
         sounds: upstream.sounds ?? [],
         prompts: upstream.prompts ?? [],
         shots,
+        timeline,
       });
+      if (!res.ok) {
+        updateNodeData(block.id, {
+          status: 'error',
+          exportReady: false,
+          message: res.message,
+          error: res.message,
+        });
+        throw new Error(res.message ?? '导出未通过');
+      }
       updateNodeData(block.id, {
         status: 'success',
         exportReady: true,
         episodeUrl: res.url,
         exportCount: res.exportCount ?? 0,
         message: res.message,
+        hfTaskId: res.taskId,
       });
     } catch (e) {
       updateNodeData(block.id, { status: 'error', error: String(e), exportReady: false });
+      throw e;
     }
     return;
   }
@@ -1925,8 +2093,22 @@ async function executeBlock(
     const projectGoal =
       (d.projectGoal as string) || useWorkspaceDocument.getState().storyboard.title || '';
     if (chain.items.length === 0) {
-      const allShots = useWorkspaceDocument.getState().storyboard.shots;
-      if (allShots.length === 0) throw new Error('故事板无镜头');
+      // F-003: 链优先
+      const chainShots = ctx?.nodes && ctx?.edges
+        ? (() => {
+            const inc = ctx!.edges.filter((e) => e.target === block.id);
+            for (const e of inc) {
+              const src = ctx!.nodes.find((n) => n.id === e.source);
+              if (!src) continue;
+              const ch = (src.data as Record<string, unknown>)?.chainStoryboard as { shots?: any[] } | undefined;
+              if (ch?.shots) return ch.shots;
+            }
+            return undefined;
+          })()
+        : undefined;
+      // F-003: 仅使用链镜表，禁止回退全局
+      const allShots = chainShots ?? [];
+      if (allShots.length === 0) throw new Error('故事板无镜头（无上游链镜表）');
       const linkedShotId = d.linkedShotId as string | undefined;
       const shots = linkedShotId ? allShots.filter((s) => s.id === linkedShotId) : allShots;
       if (shots.length === 0) throw new Error('未找到绑定的镜头');
@@ -1938,10 +2120,10 @@ async function executeBlock(
       (next) => updateNodeData(block.id, { clipChain: next, projectGoal }),
       (item, url) => {
         if (item.shotId) {
-          useWorkspaceDocument.getState().updateShot(item.shotId, {
+          patchFlowShot(block.id, item.shotId, {
             videoAssetId: url,
             videoStatus: 'review',
-          });
+          }, updateNodeData, ctx?.nodes, ctx?.edges);
         }
       },
       () => {},
@@ -2089,7 +2271,10 @@ export async function runFlowBatch(
         const block = blockMap.get(id)!;
         onProgress({ phase: 'running', current: completed, total, currentId: id });
         try {
-          const upstream = gatherUpstream(id, [...blockMap.values()], links);
+          const blockData = blockMap.get(id)?.data ?? {};
+          const upstreamPolicy = blockData.upstreamPolicy as import('@nx9/shared').UpstreamPolicy | undefined;
+          const primarySourceId = blockData.primarySourceId as string | null | undefined;
+          const upstream = gatherUpstream(id, [...blockMap.values()], links, upstreamPolicy, primarySourceId);
           await executeBlock(
             block,
             upstream,

@@ -56,6 +56,28 @@ export class WorkspaceController {
     return { ok: true };
   }
 
+  // F-010: 回收站
+  @Get('trash/list')
+  listTrash() {
+    return this.workspaces.listTrash();
+  }
+
+  @Post(':id/restore')
+  async restore(@Param('id') id: string) {
+    return this.workspaces.restore(id);
+  }
+
+  @Post('trash/purge-expired')
+  async purgeExpiredTrash() {
+    return this.workspaces.purgeExpiredTrash();
+  }
+
+  @Delete(':id/purge')
+  async purge(@Param('id') id: string) {
+    await this.workspaces.purge(id);
+    return { ok: true };
+  }
+
   @Post(':id/voice/generate')
   generateVoice(
     @Param('id') id: string,

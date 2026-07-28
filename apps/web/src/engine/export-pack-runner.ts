@@ -1,9 +1,10 @@
 import JSZip from 'jszip';
+import { hasEffectiveTimeline, type TimelinePayload } from '@nx9/shared';
 import { api } from '../api/client';
-import type { StoryboardShot, TimelinePayload } from '@nx9/shared';
+import type { StoryboardShot } from '@nx9/shared';
 
 export interface ExportPackInput {
-  mode: 'zip' | 'ffmpeg-episode' | 'hyperframes-episode' | 'remotion-bundle';
+  mode: 'zip' | 'ffmpeg-episode' | 'hyperframes-episode' | 'remotion-bundle' | 'ecom-pack';
   prefix: string;
   audioUrl?: string;
   multiEpisode?: boolean;
@@ -14,6 +15,7 @@ export interface ExportPackInput {
   shots: StoryboardShot[];
   /** 来自本节点或上游智能剪辑的时间线（节点实例级，不读全局） */
   timeline?: TimelinePayload | null;
+  selectedSpecs?: string[];
 }
 
 export interface ExportPackResult {
@@ -23,6 +25,8 @@ export interface ExportPackResult {
   message?: string;
   exportCount?: number;
 }
+
+const NO_TIMELINE_MSG = '无有效时间线（请先在智能剪辑编排并同步，clips≥1）';
 
 async function fetchBlob(url: string): Promise<Blob> {
   if (url.startsWith('/media/')) {
@@ -50,17 +54,26 @@ export async function runExportPack(input: ExportPackInput): Promise<ExportPackR
   }
 
   if (input.mode === 'hyperframes-episode') {
-    const timeline = input.timeline ?? null;
-    if (!timeline) return { ok: false, message: '无时间线数据（请先从已连接的智能剪辑同步）' };
-    const res = await api.renderHyperframes({ timeline, templateId: 'nx9-vertical-episode' });
+    // F-011: 无有效时间线不得假装成功
+    if (!hasEffectiveTimeline(input.timeline)) {
+      return { ok: false, message: NO_TIMELINE_MSG };
+    }
+    const res = await api.renderHyperframes({
+      timeline: input.timeline,
+      templateId: 'nx9-vertical-episode',
+    });
+    if (!res.ok || !res.taskId) {
+      return { ok: false, message: res.status || 'HyperFrames 提交失败' };
+    }
     return { ok: true, taskId: res.taskId, message: res.status };
   }
 
   if (input.mode === 'remotion-bundle') {
+    if (!hasEffectiveTimeline(input.timeline)) {
+      return { ok: false, message: NO_TIMELINE_MSG };
+    }
     const { timelineToRemotionStudioBundle } = await import('@nx9/shared');
-    const timeline = input.timeline ?? null;
-    if (!timeline) return { ok: false, message: '无时间线数据（请先从已连接的智能剪辑同步）' };
-    const bundle = timelineToRemotionStudioBundle(timeline);
+    const bundle = timelineToRemotionStudioBundle(input.timeline!);
     const zip = new JSZip();
     for (const file of bundle.files) {
       zip.file(file.name, file.content);
@@ -72,6 +85,36 @@ export async function runExportPack(input: ExportPackInput): Promise<ExportPackR
     a.click();
     URL.revokeObjectURL(a.href);
     return { ok: true, exportCount: bundle.files.length };
+  }
+
+  if (input.mode === 'ecom-pack') {
+    const { ECOM_ALL_SPECS } = await import('@nx9/shared');
+    const selected = input.selectedSpecs ?? [];
+    if (selected.length === 0) return { ok: false, message: '请选择至少一个电商规格' };
+    const ecomZip = new JSZip();
+    const baseImages = input.pictures.length > 0 ? input.pictures : [];
+    for (const specId of selected) {
+      const spec = ECOM_ALL_SPECS.find((s) => s.specId === specId);
+      if (!spec) continue;
+      const label = spec.label.replace(/[\\/:*?"<>|]/g, '_');
+      for (let idx = 0; idx < Math.max(baseImages.length, 1); idx++) {
+        const ext = spec.category === 'video' ? 'mp4' : 'jpg';
+        const name = `${label}/${input.prefix}-${String(idx + 1).padStart(2, '0')}.${ext}`;
+        try {
+          if (baseImages[idx]) {
+            const blob = await fetchBlob(baseImages[idx]);
+            ecomZip.file(name, blob);
+          }
+        } catch { /* skip single failure */ }
+      }
+    }
+    const blob = await ecomZip.generateAsync({ type: 'blob' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `${input.prefix}-ecom-pack.zip`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+    return { ok: true, exportCount: selected.length };
   }
 
   const zip = new JSZip();

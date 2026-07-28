@@ -18,8 +18,7 @@ const blockLoaders: Record<string, () => Promise<{ default: ComponentType<NodePr
 
   'storyboard-desk': () =>
     import('./craft/StoryboardDeskBlock').then((m) => ({ default: m.default })),
-  'asset-gate': () => import('./craft/AssetGateBlock').then((m) => ({ default: m.default })),
-
+  // F-005: asset-gate 已由 stripAssetGateFromGraph + migrateBlockKinds 迁移为 script-desk
   'asset-import': () => import('./input/AssetImportBlock').then((m) => ({ default: m.default })),
   'link-parser': () => import('./utility/LinkParserBlock').then((m) => ({ default: m.default })),
   /** 内部钉图：不进 BLOCK_CATALOG，仅拖出创建 */

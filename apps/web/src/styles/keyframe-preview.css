@@ -14,7 +14,7 @@
   --kp-ok: var(--desk-ok, #8fb89a);
   --kp-warn: var(--desk-warn, #d4a574);
   --kp-btn-ink: var(--desk-btn-primary-ink, #1a1610);
-  --kp-input-bg: color-mix(in srgb, var(--desk-ink, #fff) 4%, transparent);
+  --kp-input-bg: color-mix(in srgb, var(--desk-ink, var(--nx9-bg)) 4%, transparent);
   display: flex;
   flex-direction: column;
   width: 100%;
@@ -676,7 +676,7 @@
   --sheet-ink: #1a1a1a;
   --sheet-line: #2a241c;
   --sheet-paper: #f3f1ec;
-  --sheet-cell: #ffffff;
+  --sheet-cell: var(--nx9-bg);
   display: grid;
   gap: 10px;
   padding: 12px;
@@ -723,7 +723,7 @@
   gap: 5px;
   padding: 4px 7px 3px;
   border-bottom: 1px solid color-mix(in srgb, var(--sheet-line) 50%, transparent);
-  background: #fff;
+  background: var(--nx9-bg);
   min-height: 22px;
 }
 

@@ -1,4 +1,4 @@
-import { memo, useCallback, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useMemo, useState, useRef } from 'react';
 import { type NodeProps, useEdges, useNodes, useReactFlow } from '@xyflow/react';
 import {
   CLIP_GEN_ASPECTS,
@@ -13,6 +13,7 @@ import {
   gatherUpstream,
   pickReferenceImage,
   resolveBlockCharacters,
+  resolveRunLabel,
   bridgePromptSuffix,
   validateSClassReferences,
   SCLASS_MAX_REF_IMAGES,
@@ -26,6 +27,9 @@ import {
   filterStoryboardGuideOverlay,
   resolveStoryboardGuideOverlay,
   buildVideoGuidePromptSuffix,
+  readChainStoryboard,
+  resolveMentionsForPrompt,
+  type MentionRef,
 } from '@nx9/shared';
 import { BlockShell } from '../shared/BlockShell';
 import { CharacterBadge, CharacterSelect } from '../shared/CharacterSelect';
@@ -43,17 +47,21 @@ import { pollClipTask } from '../../engine/picture-gen-runner';
 import { composeStoryboardGuideFrameDataUrl } from '../../engine/storyboard-guide-compose';
 import GenSettingsPills from '../shared/GenSettingsPills';
 
+/**
+ * ClipGenBlock — 视频生成节点。
+ * F-004: 卡面仅保留单镜生成；批量生成（episode-queue）移至 VideoWorkspace。
+ * 只消费上游 chainStoryboard 中的镜头（F-003），不再直接读全局镜表。
+ */
 function ClipGenBlock(props: NodeProps) {
   const { updateNodeData, fitView } = useReactFlow();
   const nodes = useNodes();
   const edges = useEdges();
   const appendLog = useActivityLog((s) => s.append);
   const characters = useWorkspaceDocument((s) => s.characters.characters);
-  const shots = useWorkspaceDocument((s) => s.storyboard.shots);
   const rawVideoMode = (props.data?.videoMode as string) ?? 'single';
   const videoMode =
     rawVideoMode === 'bridge' ? 'bridge'
-    : rawVideoMode === 'episode-queue' ? 'episode-queue'
+    : rawVideoMode === 'seedance' ? 'seedance'
     : 'single';
   const model = (props.data?.model as string) ?? 'veo';
   const aspect = (props.data?.aspect as string) ?? '16:9';
@@ -61,8 +69,6 @@ function ClipGenBlock(props: NodeProps) {
   const resolution = (props.data?.resolution as string) ?? '720';
   const orientation = (props.data?.orientation as string) ?? 'landscape';
   const generateAudio = (props.data?.generateAudio as boolean | undefined) ?? false;
-  const clipConcurrency = (props.data?.concurrency as number | undefined) ?? 2;
-  const clipMaxRetry = (props.data?.maxRetry as number | undefined) ?? 1;
   const status = props.data?.status as string | undefined;
   const videoUrl = props.data?.videoUrl as string | undefined;
   const taskId = props.data?.taskId as string | undefined;
@@ -72,27 +78,27 @@ function ClipGenBlock(props: NodeProps) {
   const localContent = (props.data?.content as string) ?? '';
   const { hasUpstream, preview: upstreamPreview } = useUpstreamPrompt(props.id);
 
-  /** 仅展示已闭环能力；chain/motion 元数据未真出片，已从 UI 下线 */
+  /** F-004/F-049: 单镜 + Bridge 续拍 + Seedance 模式 */
   const VIDEO_MODES = [
     { id: 'single', label: '单镜' },
     { id: 'bridge', label: 'Bridge 续拍' },
-    { id: 'episode-queue', label: '本集批出' },
+    { id: 'seedance', label: 'Seedance' },
   ] as const;
 
-  // 本集队列统计（仅 episode-queue 模式使用）
-  const storyboard = useWorkspaceDocument((s) => s.storyboard);
-  const updateShot = useWorkspaceDocument((s) => s.updateShot);
-  const queueInfo = useMemo(() => {
-    if (videoMode !== 'episode-queue') return { total: 0, eligible: 0, done: 0, eligibleShots: [] as typeof shots };
-    const activeId = storyboard.activeEpisodeId;
-    const episodeShots = activeId ? shots.filter((s) => s.episodeId === activeId) : shots;
-    const eligible = episodeShots.filter((s) => Boolean(s.firstFrameAssetId) && !s.videoAssetId);
-    const done = episodeShots.filter((s) => Boolean(s.videoAssetId)).length;
-    return { total: episodeShots.length, eligible: eligible.length, done, eligibleShots: eligible };
-  }, [videoMode, storyboard.activeEpisodeId, shots]);
-  const [queueRunning, setQueueRunning] = useState(false);
-  const [queueProgress, setQueueProgress] = useState({ current: 0, total: 0 });
-  const abortRef = useRef(false);
+  // F-003/F-004: 从上游 chainStoryboard 读取镜头。
+  // 无上游链时返回空数组（禁止回退全局镜表批出）。
+  const shots = useMemo(() => {
+    const incomingEdges = edges.filter((e) => e.target === props.id);
+    for (const edge of incomingEdges) {
+      const sourceNode = nodes.find((n) => n.id === edge.source);
+      if (!sourceNode) continue;
+      const chain = readChainStoryboard(sourceNode.data as Record<string, unknown>);
+      if (chain && chain.shots.length > 0) {
+        return chain.shots;
+      }
+    }
+    return [];
+  }, [props.id, nodes, edges]);
 
   const activeCharacters = useMemo(() => {
     const shot = shots.find((s) => s.id === linkedShotId);
@@ -113,8 +119,11 @@ function ClipGenBlock(props: NodeProps) {
       sourceHandle: e.sourceHandle ?? undefined,
       targetHandle: e.targetHandle ?? undefined,
     }));
-    return gatherUpstream(props.id, flowBlocks, flowLinks);
-  }, [props.id, nodes, edges]);
+    const data = props.data as Record<string, unknown>;
+    const policy = data.upstreamPolicy as import('@nx9/shared').UpstreamPolicy | undefined;
+    const primarySourceId = data.primarySourceId as string | null | undefined;
+    return gatherUpstream(props.id, flowBlocks, flowLinks, policy, primarySourceId);
+  }, [props.id, nodes, edges, props.data]);
 
   const linkedShot = useMemo(
     () => shots.find((s) => s.id === linkedShotId),
@@ -181,6 +190,15 @@ function ClipGenBlock(props: NodeProps) {
         const publicItems = BUILTIN_BACKLOT_TEMPLATES.map((tpl) => templateToAsset(tpl as any, 'public', true));
         prompt = enrichPromptWithAssetMentions(prompt, privateItems, publicItems);
       }
+      // F-024: 解析 @block-id 引用为上游输出 URL
+      {
+        const refs: MentionRef[] = [];
+        upstreamMedia.pictures.forEach((url, i) => refs.push({ id: `pic-${i}`, kind: 'picture', url, label: `上游图片 ${i+1}` }));
+        upstreamMedia.clips.forEach((url, i) => refs.push({ id: `clip-${i}`, kind: 'clip', url, label: `上游视频 ${i+1}` }));
+        upstreamMedia.sounds.forEach((url, i) => refs.push({ id: `sound-${i}`, kind: 'sound', url, label: `上游音频 ${i+1}` }));
+        const { resolved } = resolveMentionsForPrompt(prompt, refs);
+        prompt = resolved;
+      }
       let refImageUrl = imageUrl;
       if (linkedShot && imageUrl) {
         const guidePrefs = readStoryboardGuidePrefs();
@@ -222,13 +240,25 @@ function ClipGenBlock(props: NodeProps) {
         characterInjected: activeCharacters.map((c) => c.id),
         lastResult: res,
       });
-      // 写回故事板：闭环视频状态
+      // F-003/F-004: 写回上游 desk 的 chainStoryboard；无上游则拒绝写全局
       if (res.url && linkedShot) {
-        useWorkspaceDocument.getState().updateShot(linkedShot.id, {
-          videoAssetId: res.url,
-          videoStatus: 'review',
-          status: 'review',
-        });
+        const deskId = findUpstreamDeskId(props.id, nodes, edges);
+        if (deskId) {
+          const deskNode = nodes.find((n) => n.id === deskId);
+          if (deskNode) {
+            const chain = readChainStoryboard(deskNode.data as Record<string, unknown>);
+            if (chain) {
+              const newShots = chain.shots.map((s) =>
+                s.id === linkedShot.id
+                  ? { ...s, videoAssetId: res.url, videoStatus: 'review' as const, status: 'review' as const }
+                  : s,
+              );
+              updateNodeData(deskId, { chainStoryboard: { ...chain, shots: newShots } } as Record<string, unknown>);
+            }
+          }
+        } else {
+          appendLog('无上游分镜台，已跳过镜表写回（F-004 禁止写全局）');
+        }
       }
       appendLog(
         res.status === 'success'
@@ -240,23 +270,9 @@ function ClipGenBlock(props: NodeProps) {
       appendLog(`视频生成失败 · ${String(e)}`);
     }
   }, [
-    appendLog,
-    model,
-    aspect,
-    durationSec,
-    resolution,
-    imageUrl,
-    linkedShot,
-    orientation,
-    generateAudio,
-    localContent,
-    props.data,
-    props.id,
-    updateNodeData,
-    activeCharacters,
-    upstreamMedia,
-    edges,
-    nodes,
+    appendLog, model, aspect, durationSec, resolution, imageUrl, linkedShot,
+    orientation, generateAudio, localContent, props.data, props.id,
+    updateNodeData, activeCharacters, upstreamMedia, edges, nodes,
   ]);
 
   const poll = useCallback(async () => {
@@ -267,11 +283,23 @@ function ClipGenBlock(props: NodeProps) {
       if (url) {
         updateNodeData(props.id, { status: 'success', videoUrl: url, message: undefined });
         if (linkedShot) {
-          useWorkspaceDocument.getState().updateShot(linkedShot.id, {
-            videoAssetId: url,
-            videoStatus: 'review',
-            status: 'review',
-          });
+          const deskId = findUpstreamDeskId(props.id, nodes, edges);
+          if (deskId) {
+            const deskNode = nodes.find((n) => n.id === deskId);
+            if (deskNode) {
+              const chain = readChainStoryboard(deskNode.data as Record<string, unknown>);
+              if (chain) {
+                const newShots = chain.shots.map((s) =>
+                  s.id === linkedShot.id
+                    ? { ...s, videoAssetId: url, videoStatus: 'review' as const, status: 'review' as const }
+                    : s,
+                );
+                updateNodeData(deskId, { chainStoryboard: { ...chain, shots: newShots } } as Record<string, unknown>);
+              }
+            }
+          } else {
+            appendLog('无上游分镜台，轮询结果未写回全局（F-004）');
+          }
         }
         appendLog('视频轮询完成');
       } else {
@@ -280,83 +308,9 @@ function ClipGenBlock(props: NodeProps) {
     } catch (e) {
       updateNodeData(props.id, { status: 'error', error: String(e) });
     }
-  }, [taskId, props.id, updateNodeData, appendLog, linkedShot]);
+  }, [taskId, props.id, updateNodeData, appendLog, linkedShot, nodes, edges]);
 
   const nodesAll = useNodes();
-  // 本集队列批出（并发 + 重试 + 去智能剪辑深链）
-  const processOneShot = useCallback(async (shot: typeof shots[0], _retryCount = 0): Promise<boolean> => {
-    const maxRetry = clipMaxRetry;
-    try {
-      updateNodeData(props.id, { linkedShotId: shot.id, status: 'running' });
-      const videoParams = resolveVideoGenParams({ resolution, orientation, aspect, durationSec });
-      const base = [localContent.trim() || linkedShot?.videoPromptPro || linkedShot?.videoPromptEn || ''].filter(Boolean).join('\n');
-      const motionLocks = [videoParams.aspect !== '16:9' ? `aspect ratio ${videoParams.aspect}` : '', `${videoParams.durationSec}s continuous clip`, 'identity-locked motion, no jump cuts, no text overlay'].filter(Boolean).join(', ');
-      const prompt = enrichPromptWithCharacters(`${base}${motionLocks ? `\n${motionLocks}` : ''}`.trim(), characters);
-      const body: Record<string, unknown> = { prompt, model, resolution: videoParams.resolution, size: videoParams.size, orientation, duration: videoParams.durationSec };
-      if (shot.firstFrameAssetId) body.imageUrl = shot.firstFrameAssetId;
-      const res = await api.proxyVideo(body);
-      if (!res.ok || !res.taskId) throw new Error(res.message || '失败');
-      const url = await pollClipTask(res.taskId as string);
-      if (url) {
-        updateShot(shot.id, { videoAssetId: url, videoStatus: 'review', status: 'review' });
-        appendLog(`镜 ${shot.index} 完成 · ${url.slice(-16)}`);
-      }
-      return true;
-    } catch (e) {
-      if (_retryCount < maxRetry) {
-        appendLog(`镜 ${shot.index} 失败，重试中…`);
-        return processOneShot(shot, _retryCount + 1);
-      }
-      appendLog(`镜 ${shot.index} 失败: ${String(e)}`);
-      return false;
-    }
-  }, [appendLog, aspect, characters, clipMaxRetry, durationSec, localContent, linkedShot?.videoPromptPro, linkedShot?.videoPromptEn, model, orientation, props.id, resolution, updateNodeData, updateShot]);
-
-  const runQueue = useCallback(async () => {
-    const eligibleShots = shots.filter((s) => Boolean(s.firstFrameAssetId) && !s.videoAssetId && (storyboard.activeEpisodeId ? s.episodeId === storyboard.activeEpisodeId : true));
-    if (eligibleShots.length === 0) { appendLog('本集无可生成视频的镜头（需有关键帧且无视频）'); return; }
-    abortRef.current = false;
-    setQueueRunning(true);
-    setQueueProgress({ current: 0, total: eligibleShots.length });
-    const MAX_CONCURRENCY = clipConcurrency;
-    let completed = 0;
-    let succeeded = 0;
-    const slots = Array.from({ length: Math.min(MAX_CONCURRENCY, eligibleShots.length) }, (_, i) => i);
-    const initialBatch = eligibleShots.slice(0, slots.length);
-    const rest = eligibleShots.slice(slots.length);
-    const processBatch = async () => {
-      const promises = initialBatch.map(async (shot) => {
-        if (abortRef.current) return;
-        const ok = await processOneShot(shot);
-        completed++;
-        succeeded += ok ? 1 : 0;
-        setQueueProgress({ current: completed, total: eligibleShots.length });
-        if (!abortRef.current) {
-          const next = rest.shift();
-          if (next) {
-            const okNext = await processOneShot(next);
-            completed++;
-            succeeded += okNext ? 1 : 0;
-            setQueueProgress({ current: completed, total: eligibleShots.length });
-          }
-        }
-      });
-      await Promise.allSettled(promises);
-    };
-    await processBatch();
-    // Continue with remaining shots in the rest array
-    while (rest.length > 0 && !abortRef.current) {
-      const shot = rest.shift()!;
-      const ok = await processOneShot(shot);
-      completed++;
-      succeeded += ok ? 1 : 0;
-      setQueueProgress({ current: completed, total: eligibleShots.length });
-    }
-    setQueueRunning(false);
-    updateNodeData(props.id, { status: succeeded > 0 ? 'success' : 'error', linkedShotId: props.data?.linkedShotId });
-    appendLog(`本集批出完成 · 成功 ${succeeded}/${eligibleShots.length}`);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [appendLog, clipConcurrency, processOneShot, props.data?.linkedShotId, props.id, updateNodeData, shots, storyboard.activeEpisodeId]);
 
   const focusSmartEdit = useCallback(() => {
     const outgoing = edges.filter((e) => e.source === props.id).map((e) => e.target);
@@ -387,41 +341,6 @@ function ClipGenBlock(props: NodeProps) {
             </button>
           ))}
         </div>
-        {videoMode === 'episode-queue' && (
-          <div className="flex flex-col gap-1 text-[10px] border border-line rounded-lg p-2 bg-surface/50">
-            <div className="flex justify-between text-ink/60">
-              <span>本集 {queueInfo.total} 镜 · 已有视频 {queueInfo.done} · 待出 {queueInfo.eligible}</span>
-              {queueRunning && <span>{queueProgress.current}/{queueProgress.total}</span>}
-            </div>
-            <div className="flex gap-2 text-ink/50 items-center">
-              <span>并发</span>
-              {[1, 2, 3].map((n) => (
-                <button key={n} type="button" className={`px-1.5 py-0.5 rounded-full border ${clipConcurrency === n ? 'border-brand text-brand bg-brand/10' : 'border-line'} text-[9px]`} onClick={() => updateNodeData(props.id, { concurrency: n })}>{n}</button>
-              ))}
-              <span className="ml-1">重试</span>
-              {[0, 1, 2].map((n) => (
-                <button key={n} type="button" className={`px-1.5 py-0.5 rounded-full border ${clipMaxRetry === n ? 'border-brand text-brand bg-brand/10' : 'border-line'} text-[9px]`} onClick={() => updateNodeData(props.id, { maxRetry: n })}>{n}</button>
-              ))}
-            </div>
-            {queueRunning && (
-              <div style={{ height: 4, borderRadius: 2, background: 'var(--desk-line)' }}>
-                <div style={{ width: `${queueProgress.total > 0 ? (queueProgress.current / queueProgress.total) * 100 : 0}%`, height: '100%', borderRadius: 2, background: 'var(--desk-accent)' }} />
-              </div>
-            )}
-            <div className="flex gap-2 flex-wrap">
-              <button type="button" disabled={queueRunning || queueInfo.eligible === 0} onClick={() => void runQueue()}
-                className="flex-1 rounded-lg bg-brand text-white text-[10px] py-1.5 disabled:opacity-50">
-                {queueRunning ? `批出中 ${queueProgress.current}/${queueProgress.total}` : `批出本集缺片 · ${queueInfo.eligible}`}
-              </button>
-              {queueRunning && <button type="button" disabled={!queueRunning} onClick={() => { abortRef.current = true; }} className="rounded-lg border border-line px-2 text-[10px]">停止</button>}
-            </div>
-            {!queueRunning && queueInfo.done > 0 && (
-              <button type="button" className="text-[10px] text-brand underline" onClick={focusSmartEdit}>
-                去智能剪辑编排时间线
-              </button>
-            )}
-          </div>
-        )}
         {videoMode === 'bridge' && (
           <p className="text-[10px] text-ink/45">Bridge 续拍：上游视频尾帧 + 本镜 Prompt</p>
         )}
@@ -429,6 +348,11 @@ function ClipGenBlock(props: NodeProps) {
           <p className="text-[10px] text-ink/45">将使用关联镜头关键帧作为图生视频参考</p>
         )}
         <GenUpstreamHint hasUpstream={hasUpstream} />
+        {shots.length === 0 && (
+          <p className="text-[10px] text-warn/80 rounded-lg border border-warn/30 bg-warn/5 px-2 py-1.5">
+            无上游链镜表：请连接分镜台或导演台。已禁止批出全局镜表（F-004）。
+          </p>
+        )}
         {(upstreamPrompt || upstreamPreview) && (
           <p className="text-[10px] text-ink/50 line-clamp-2" title={upstreamPrompt || upstreamPreview}>
             上游: {upstreamPrompt || upstreamPreview}
@@ -460,33 +384,33 @@ function ClipGenBlock(props: NodeProps) {
           placeholder="视频 Prompt… 输入 @ 引用上游"
           className="w-full min-h-[64px] rounded-xl border border-line bg-surface px-2 py-1.5 text-sm resize-y focus:outline-none focus:border-brand/40"
         />
-          {model === 'seedance' && (
-            <div className="rounded-lg bg-surface p-2 space-y-1.5">
-              <p className="text-[10px] text-brand font-medium">Seedance 模式</p>
-              <label className="flex items-center gap-2 text-[10px]">
-                <input
-                  type="checkbox"
-                  checked={generateAudio}
-                  onChange={(e) => updateNodeData(props.id, { generateAudio: e.target.checked })}
-                />
-                生成音频
-              </label>
-            </div>
-          )}
-          <select
-            value={model}
-            onChange={(e) => updateNodeData(props.id, { model: e.target.value })}
-            className="w-full rounded-lg border border-line bg-white px-2 py-1.5 text-xs"
-          >
-            {CLIP_GEN_MODELS.map((m) => (
-              <option key={m.id} value={m.id}>
-                {m.label}
-              </option>
-            ))}
-          </select>
-          <p className="text-[10px] text-ink/40">
-            {resolution}p · {orientation === 'landscape' ? '16:9' : orientation === 'portrait' ? '9:16' : '1:1'} · {durationSec}s · {generateAudio ? '有声' : '无声'}
-          </p>
+        {model === 'seedance' && (
+          <div className="rounded-lg bg-surface p-2 space-y-1.5">
+            <p className="text-[10px] text-brand font-medium">Seedance 模式</p>
+            <label className="flex items-center gap-2 text-[10px]">
+              <input
+                type="checkbox"
+                checked={generateAudio}
+                onChange={(e) => updateNodeData(props.id, { generateAudio: e.target.checked })}
+              />
+              生成音频
+            </label>
+          </div>
+        )}
+        <select
+          value={model}
+          onChange={(e) => updateNodeData(props.id, { model: e.target.value })}
+          className="w-full rounded-lg border border-line bg-surface px-2 py-1.5 text-xs"
+        >
+          {CLIP_GEN_MODELS.map((m) => (
+            <option key={m.id} value={m.id}>
+              {m.label}
+            </option>
+          ))}
+        </select>
+        <p className="text-[10px] text-ink/40">
+          {resolution}p · {orientation === 'landscape' ? '16:9' : orientation === 'portrait' ? '9:16' : '1:1'} · {durationSec}s · {generateAudio ? '有声' : '无声'}
+        </p>
         <p className="text-[10px] text-ink/40">
           {CLIP_GEN_MODELS.find((m) => m.id === model)?.hint}
         </p>
@@ -550,6 +474,31 @@ function ClipGenBlock(props: NodeProps) {
             />
             生成音频
           </label>
+          {/* F-048: 并发/重试配置 */}
+          <div className="flex gap-2 mt-1">
+            <label className="flex items-center gap-1 text-[9px] text-ink/40">
+              并发
+              <input
+                type="number"
+                min={1}
+                max={8}
+                value={(props.data?.concurrency as number) ?? 2}
+                onChange={(e) => updateNodeData(props.id, { concurrency: Math.max(1, Math.min(8, Number(e.target.value))) })}
+                className="w-10 rounded border border-line/30 px-1 py-0.5 text-[9px] bg-surface text-center"
+              />
+            </label>
+            <label className="flex items-center gap-1 text-[9px] text-ink/40">
+              重试
+              <input
+                type="number"
+                min={0}
+                max={5}
+                value={(props.data?.maxRetries as number) ?? 1}
+                onChange={(e) => updateNodeData(props.id, { maxRetries: Math.max(0, Math.min(5, Number(e.target.value))) })}
+                className="w-10 rounded border border-line/30 px-1 py-0.5 text-[9px] bg-surface text-center"
+              />
+            </label>
+          </div>
         </div>
         <p className="text-[10px] text-ink/40">
           {resolution}p · {orientation === 'landscape' ? '16:9' : orientation === 'portrait' ? '9:16' : '1:1'} · {durationSec}s · {generateAudio ? '有声' : '无声'}
@@ -576,7 +525,7 @@ function ClipGenBlock(props: NodeProps) {
             disabled={status === 'running' || Boolean(refError)}
             className="flex-1 rounded-xl bg-brand text-white text-sm py-2 disabled:opacity-50"
           >
-            {status === 'running' ? '生成中…' : '运行生成'}
+            {status === 'running' ? '生成中…' : (resolveRunLabel('clip-gen').primary || '运行生成')}
           </button>
           {taskId && !videoUrl && (
             <button
@@ -591,6 +540,28 @@ function ClipGenBlock(props: NodeProps) {
       </div>
     </BlockShell>
   );
+}
+
+/** Find the upstream storyboard-desk node id for a given block. */
+function findUpstreamDeskId(
+  blockId: string,
+  nodes: ReturnType<typeof useNodes>,
+  edges: ReturnType<typeof useEdges>,
+): string | null {
+  const incoming = edges.filter((e) => e.target === blockId);
+  for (const edge of incoming) {
+    const sourceNode = nodes.find((n) => n.id === edge.source);
+    if (!sourceNode) continue;
+    const data = sourceNode.data as Record<string, unknown>;
+    if (sourceNode.type === 'storyboard-desk' && data.chainStoryboard) {
+      return sourceNode.id;
+    }
+    if (sourceNode.type === 'director-desk') {
+      // Director desk may also have chain data
+      return sourceNode.id;
+    }
+  }
+  return null;
 }
 
 export default memo(ClipGenBlock);

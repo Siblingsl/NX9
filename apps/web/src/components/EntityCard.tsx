@@ -32,7 +32,7 @@ export function EntityCard({
   };
 
   return (
-    <div className="rounded-xl border border-line bg-white overflow-hidden">
+    <div className="rounded-xl border border-line bg-surface overflow-hidden">
       <div className="flex items-start gap-3 p-4">
         {avatar && (
           <img src={avatar} alt="" className="w-12 h-12 rounded-lg object-cover border border-line shrink-0" />

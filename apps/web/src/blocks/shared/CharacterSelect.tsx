@@ -19,7 +19,7 @@ export function CharacterSelect({
       <select
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="mt-0.5 w-full rounded-lg border border-line bg-white px-2 py-1.5 text-xs text-ink"
+        className="mt-0.5 w-full rounded-lg border border-line bg-surface px-2 py-1.5 text-xs text-ink"
       >
         <option value="">自动（关联镜头角色）</option>
         {characters.map((c) => (

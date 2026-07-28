@@ -112,6 +112,8 @@ export const BLOCK_KIND_MIGRATIONS: Record<string, string> = {
   'asset-watch': 'asset-import',
   'text-chunker': 'script-desk',
   'dialogue-sheet': 'script-desk',
+  // F-005: asset-gate 能力拆并到编剧台（设定就绪）和分镜台（预检）
+  'asset-gate': 'script-desk',
 
   // ── 角色/场景设定 → 素材导入（主路径改走素材库） ──
   'character-sheet': 'asset-import',
@@ -127,6 +129,8 @@ export const BLOCK_KIND_MIGRATION_PATCHES: Record<string, Record<string, unknown
   'photo-speak': { videoMode: 'photo-speak' },
   'frame-endpoints': { videoMode: 'frame-endpoints' },
   'frame-sampler': { videoMode: 'frame-endpoints' },
+
+  // F-005: asset-gate → 由 migrateBlockKinds 动态注入（根据原 gate.passed 决定 readiness）
 
   'voice-cast': { soundMode: 'cast' },
   'music-gen': { soundMode: 'music' },
@@ -262,6 +266,38 @@ export function migrateBlockKinds<T extends MigratableNode>(
     // 审阅关卡：由 stripReviewGateFromGraph 物理拆除并改线，此处不改成第二个导演台
     if (kind === 'review-gate') {
       return node;
+    }
+
+    // F-005: asset-gate 迁移——根据原 gate.passed 决定 readiness
+    if (kind === 'asset-gate') {
+      migratedCount += 1;
+      const gateData = data as { assetGate?: { passed?: boolean; releasedAt?: string }; passed?: boolean };
+      const wasPassed = gateData.assetGate?.passed || gateData.passed || false;
+      const nextData: Record<string, unknown> = {
+        ...data,
+        assetReadiness: {
+          ready: wasPassed,
+          checkedAt: gateData.assetGate?.releasedAt || new Date().toISOString(),
+          source: 'bible' as const,
+          requiredCharacters: [],
+          requiredScenes: [],
+          missingCharacters: wasPassed ? [] : ['（迁移：旧关卡未放行，请在编剧台检查设定）'],
+          missingScenes: [],
+        },
+        migratedFrom: 'asset-gate',
+        migrationNote: wasPassed
+          ? '设定检查节点已升级为编剧台设定就绪'
+          : '设定检查节点未放行，请在编剧台「设定就绪」Tab 检查并标记',
+      };
+      // 迁移失败保护：保留原数据，标记 migrationError
+      if (!wasPassed) {
+        nextData.migrationError = 'asset-gate 未放行，已迁移为待检查状态';
+      }
+      return {
+        ...node,
+        type: 'script-desk',
+        data: migrateScriptDeskNodeData(nextData),
+      } as T;
     }
 
     const target = BLOCK_KIND_MIGRATIONS[kind];
@@ -433,6 +469,118 @@ export function stripReviewGateFromGraph<T extends MigratableNode, L extends Mig
     nodes: nodesOut,
     links: [...keptLinks, ...bridged],
     strippedCount: removeIds.size,
+    rewiredCount,
+  };
+}
+
+/**
+ * F-005: 物理拆除 asset-gate 节点，桥接入边/出边并迁移 readiness 到上游 script-desk。
+ * - 发现 asset-gate → 入边(script-desk→gate) 和出边(gate→storyboard-desk)
+ * - 桥接 script-desk → storyboard-desk
+ * - 若 gate.passed → 写上游 script-desk.data.assetReadiness.ready=true
+ * - 删除 gate 节点
+ */
+export function stripAssetGateFromGraph<T extends MigratableNode, L extends MigratableLink>(
+  nodes: T[],
+  links: L[],
+): { nodes: T[]; links: L[]; strippedCount: number; rewiredCount: number } {
+  const gates = nodes.filter((n) => String(n.type ?? '') === 'asset-gate');
+  if (gates.length === 0) {
+    return { nodes, links, strippedCount: 0, rewiredCount: 0 };
+  }
+
+  const gateIds = new Set(gates.map((n) => n.id));
+  const incoming = links.filter((l) => gateIds.has(l.target) && !gateIds.has(l.source));
+  const outgoing = links.filter((l) => gateIds.has(l.source) && !gateIds.has(l.target));
+
+  const keptLinks = links.filter((l) => !gateIds.has(l.source) && !gateIds.has(l.target));
+  const linkKey = (l: Pick<L, 'source' | 'target' | 'sourceHandle' | 'targetHandle'>) =>
+    `${l.source}|${l.target}|${l.sourceHandle ?? ''}|${l.targetHandle ?? ''}`;
+  const seen = new Set(keptLinks.map(linkKey));
+  const bridged: L[] = [];
+  let rewiredCount = 0;
+
+  const pushBridge = (
+    source: string,
+    target: string,
+    handles?: { sourceHandle?: string | null; targetHandle?: string | null },
+  ) => {
+    if (!source || !target || source === target) return;
+    const next = {
+      id: `ag-bridge-${source}-${target}-${rewiredCount}`,
+      source,
+      target,
+      sourceHandle: handles?.sourceHandle ?? undefined,
+      targetHandle: handles?.targetHandle ?? undefined,
+    } as L;
+    const key = linkKey(next);
+    if (seen.has(key)) return;
+    seen.add(key);
+    bridged.push(next);
+    rewiredCount += 1;
+  };
+
+  for (const gate of gates) {
+    const gateIns = incoming.filter((l) => l.target === gate.id);
+    const gateOuts = outgoing.filter((l) => l.source === gate.id);
+    for (const inn of gateIns) {
+      for (const out of gateOuts) {
+        pushBridge(inn.source, out.target, {
+          sourceHandle: inn.sourceHandle,
+          targetHandle: out.targetHandle,
+        });
+      }
+      // 无出边：不桥接（gate 将被删除；入边源端保留在图中即可）
+    }
+  }
+
+  // 迁移 gate.passed → 上游 script-desk（入边 source），禁止写到下游
+  const readinessByUpstream = new Map<string, Record<string, unknown>>();
+  for (const gate of gates) {
+    const gateData = (gate.data ?? {}) as Record<string, unknown>;
+    const assetGate = gateData.assetGate as { passed?: boolean; releasedAt?: string } | undefined;
+    const wasPassed = Boolean(assetGate?.passed || gateData.passed);
+    const gateIns = incoming.filter((l) => l.target === gate.id);
+    for (const inn of gateIns) {
+      const upstream = nodes.find((n) => n.id === inn.source);
+      if (!upstream) continue;
+      const upType = String(upstream.type ?? '');
+      // 优先写 script-desk；若上游已是其他 kind（极端旧图），仍写入该节点以保留放行语义
+      if (upType !== 'script-desk' && upType !== 'script' && readinessByUpstream.has(inn.source)) {
+        continue;
+      }
+      readinessByUpstream.set(inn.source, {
+        ready: wasPassed,
+        checkedAt: assetGate?.releasedAt || new Date().toISOString(),
+        source: 'bible' as const,
+        requiredCharacters: [],
+        requiredScenes: [],
+        missingCharacters: wasPassed ? [] : ['（迁移：旧关卡未放行，请在编剧台检查设定）'],
+        missingScenes: [],
+      });
+    }
+  }
+
+  const nodesOut = nodes
+    .filter((n) => !gateIds.has(n.id))
+    .map((n) => {
+      const readiness = readinessByUpstream.get(n.id);
+      if (!readiness) return n;
+      const ready = Boolean(readiness.ready);
+      return {
+        ...n,
+        data: {
+          ...(n.data ?? {}),
+          assetReadiness: readiness,
+          ...(ready ? {} : { migrationError: 'asset-gate 未放行，已迁移为待检查状态' }),
+        },
+      } as T;
+    });
+
+  return {
+    nodes: nodesOut,
+    links: [...keptLinks, ...bridged],
+    strippedCount: gateIds.size,
     rewiredCount,
   };
 }

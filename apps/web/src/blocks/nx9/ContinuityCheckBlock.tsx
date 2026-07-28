@@ -1,11 +1,12 @@
-import { memo, useCallback, useState } from 'react';
-import { type NodeProps, useReactFlow } from '@xyflow/react';
+import { memo, useCallback, useMemo, useState } from 'react';
+import { type NodeProps, useEdges, useNodes, useReactFlow } from '@xyflow/react';
 import { Wand2 } from 'lucide-react';
 import { BlockShell } from '../shared/BlockShell';
 import { NodeSummaryBody } from '../shared/NodeSummaryBody';
 import { ScreenModal } from '../../components/ui/ScreenModal';
 import { api } from '../../api/client';
 import { autoFixContinuityIssue } from '../../engine/inpaint-repair';
+import { resolveShotsForBlock } from '../../engine/chain-storyboard-utils';
 import { useActivityLog } from '../../stores/activity-log';
 import { useFlowRuntime, useStoryboardUi } from '../../stores/flow-runtime';
 import { useWorkspaceDocument } from '../../stores/workspace-document';
@@ -16,7 +17,13 @@ function ContinuityCheckBlock(props: NodeProps) {
   const appendLog = useActivityLog((s) => s.append);
   const runtime = useFlowRuntime((s) => s.runtime);
   const runCascade = runtime?.runCascade;
-  const storyboardShots = useWorkspaceDocument((s) => s.storyboard.shots);
+  const nodes = useNodes();
+  const edges = useEdges();
+  // F-003: 链优先读取上游镜表
+  const storyboardShots = useMemo(
+    () => resolveShotsForBlock(props.id, nodes, edges, true),
+    [props.id, nodes, edges],
+  );
   const updateShot = useWorkspaceDocument((s) => s.updateShot);
   const selectShot = useStoryboardUi((s) => s.selectShot);
   const [reportOpen, setReportOpen] = useState(false);

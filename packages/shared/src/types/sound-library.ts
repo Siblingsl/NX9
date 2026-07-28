@@ -7,6 +7,8 @@ export interface SoundAssetProfile {
   durationSec?: number;
   /** Creative Asset Center 扩展数据 */
   creative?: import('./creative-asset-center').VoiceCreativeExtension;
+  /** F-010: 软删除时间戳，非空表示已移入回收站 */
+  deletedAt?: number;
 }
 
 export interface SoundLibraryPayload {

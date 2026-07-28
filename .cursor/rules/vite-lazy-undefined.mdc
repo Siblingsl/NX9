@@ -1,0 +1,19 @@
+---
+description: React lazy resolves to undefined — check Vite empty chunk before changing exports
+alwaysApply: true
+---
+
+# Dev：`lazy` → `undefined` 排障
+
+若控制台出现：
+
+`Element type is invalid. Received a promise that resolves to: undefined. Lazy element type must resolve to a class or function.`
+
+**口诀：`lazy → undefined` 先查 Vite 空 chunk，再查 export。**
+
+1. 忽略浏览器扩展噪声（如 Immersive Translate `token invalid`）。
+2. 先硬刷新 → 重启 `pnpm run dev` → 删 `apps/web/node_modules/.vite` 再重启；**禁止**一上来改业务代码。
+3. 用 Vite 直接拉嫌疑模块（如 `/src/blocks/.../Foo.tsx`）：若返回极短空模块、无 `export default`，是 transform 缓存损坏，触碰文件或清缓存即可。
+4. 仅当变换结果确认缺 `default` / lazy 映射指到 `undefined` 时，才改 export 或 `lazy(() => import(...).then(...))`。
+
+巨型 Desk（如 `StoryboardDeskBlock`）在 HMR 后最易中招。

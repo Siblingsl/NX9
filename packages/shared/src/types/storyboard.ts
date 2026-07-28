@@ -138,6 +138,8 @@ export interface StoryboardShot {
    * 关键帧像素保持干净；出视频时可用合成导引图加强意图，但成片不得画出箭头。
    */
   guideOverlay?: StoryboardGuideOverlay | null;
+  /** F-017: 构图模板 id */
+  compositionTemplateId?: string | null;
   /** 声音方向：对白/旁白/SFX/BGM 提示 */
   audioDirection?: string | null;
   /** 专业成图提示词（可自动生成后手改） */
@@ -352,6 +354,52 @@ export function adoptStoryboardVideoVersion(
     videoStatus: 'approved',
     status: 'approved',
   };
+}
+
+/** F-008: 单镜批准（有 videoAssetId 时；优先采用当前/末版） */
+export function approveStoryboardVideoShot(shot: StoryboardShot): Partial<StoryboardShot> | null {
+  if (!shot.videoAssetId && resolveStoryboardVideoVersions(shot).length === 0) return null;
+  const versions = resolveStoryboardVideoVersions(shot);
+  const selected =
+    versions.find((version) => version.url === shot.videoAssetId) ??
+    versions.at(-1);
+  if (selected) return adoptStoryboardVideoVersion(shot, selected.id);
+  return {
+    videoStatus: 'approved',
+    status: 'approved',
+  };
+}
+
+/** F-008: 打回必填原因；写入 reviewHistory，videoStatus=failed */
+export function rejectStoryboardVideoShot(
+  shot: StoryboardShot,
+  reason: string,
+): Partial<StoryboardShot> | null {
+  const comment = reason.trim();
+  if (!comment) return null;
+  if (!shot.videoAssetId) return null;
+  const event: StoryboardReviewEvent = {
+    id: `video-reject-${shot.id}-${Date.now()}`,
+    stage: 'video',
+    decision: 'rejected',
+    comment,
+    createdAt: new Date().toISOString(),
+  };
+  return {
+    videoStatus: 'failed',
+    status: 'failed',
+    reviewHistory: appendStoryboardReviewEvent(shot, event),
+  };
+}
+
+/** F-008: 徽章色 — pending 灰 / approved 绿 / rejected 红 */
+export function resolveVideoStatusBadge(videoStatus?: string | null): {
+  tone: 'pending' | 'approved' | 'rejected';
+  label: string;
+} {
+  if (videoStatus === 'approved') return { tone: 'approved', label: '已批准' };
+  if (videoStatus === 'failed') return { tone: 'rejected', label: '已打回' };
+  return { tone: 'pending', label: '待审核' };
 }
 
 export function appendStoryboardReviewEvent(

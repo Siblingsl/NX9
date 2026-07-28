@@ -5,13 +5,11 @@ import {
   Loader2,
   MessageSquareText,
   Plus,
+  Send,
   Sparkles,
 } from 'lucide-react';
 import { type NodeProps, useReactFlow } from '@xyflow/react';
 import {
-  normalizeScriptDeskPrompts,
-  DEFAULT_SCRIPT_DESK_SKILL_PROMPTS,
-  type ScriptDeskSkillPromptPack,
   type ScreenplayPackage,
   type ScriptDeskAgentSession,
   type ScriptDeskSkillId,
@@ -24,10 +22,12 @@ import {
 import { enrichPromptWithAssetMentions } from '@nx9/shared';
 import { api } from '../../api/client';
 import { useAllAssetLibraryItems } from '../../hooks/use-asset-library-items';
-import { isDevPromptEnabled, useDevPromptOverrides } from '../../stores/dev-prompt-overrides';
+import { isDevPromptEnabled } from '../../stores/dev-prompt-overrides';
 import { BlockShell } from '../shared/BlockShell';
 import { ScreenModal } from '../../components/ui/ScreenModal';
 import { useActivityLog } from '../../stores/activity-log';
+import { useFlowCommands } from '../../stores/flow-commands';
+import { useFlowRuntime } from '../../stores/flow-runtime';
 import {
   appendAgentMessage,
   applyPendingMessagePatch,
@@ -37,14 +37,19 @@ import {
   packageSummaryLine,
   persistScriptDeskPackage,
   readScriptDeskPackage,
+  runConsistencyCheck,
+  applyConsistencyFixes,
   runGenerateScreenplaySkill,
   runScriptDeskSkill,
 } from '../../engine/script-desk-runner';
+import { inspectBibleAssets, type AssetReadinessState } from '../../engine/asset-readiness';
+import { AssetReadinessPanel } from '../../components/asset/AssetReadinessPanel';
+import { ScriptDeskDevPackOverlay } from './script-desk/script-desk-dev-pack-overlay';
 import './script-desk.css';
 import './script-desk.v2.css';
 
 type EntryMode = 'agent' | 'ingest';
-type RightTab = 'screenplay' | 'bible' | 'diagnostics';
+type RightTab = 'screenplay' | 'bible' | 'readiness' | 'diagnostics';
 
 const SKILL_CHIPS: Array<{ id: ScriptDeskSkillId; label: string }> = [
   { id: 'topic', label: '选题' },
@@ -95,6 +100,7 @@ function ScriptDeskBlock(props: NodeProps) {
   const [tip, setTip] = useState('');
   const [rightDrawerOpen, setRightDrawerOpen] = useState(true);
   const [showMoreMenu, setShowMoreMenu] = useState(false);
+  const [highlightedBibleId, setHighlightedBibleId] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const { privateItems, publicItems, allItems } = useAllAssetLibraryItems();
@@ -174,10 +180,74 @@ function ScriptDeskBlock(props: NodeProps) {
       savePkg(next);
       return;
     }
-    savePkg(next);
-    setTip('成稿已确认，可送设定检查 / 分镜台');
+    const readiness = inspectBibleAssets(next);
+    savePkg(next, { assetReadiness: readiness });
+    setRightTab('readiness');
+    setTip(
+      readiness.ready
+        ? '成稿已确认，设定已就绪'
+        : `成稿已确认 · 设定缺口：角色 ${readiness.missingCharacters.length} / 场景 ${readiness.missingScenes.length}`,
+    );
     appendLog(`编剧台：确认成稿 · ${packageSummaryLine(next)}`);
   }, [appendLog, pkg, savePkg]);
+
+  const handleHandoffToStoryboard = useCallback(() => {
+    const runtime = useFlowRuntime.getState().runtime;
+    const nodes = runtime?.getNodes() ?? [];
+    const storyboardDesk = nodes.find((n) => n.type === 'storyboard-desk');
+    if (storyboardDesk) {
+      runtime?.focusBlock(storyboardDesk.id);
+      setTip('已聚焦分镜台 · 请在交接页签确认');
+      appendLog(`编剧台：打开分镜台 · 交接本集成稿`);
+    } else {
+      const handoffData = {
+        connectToSource: props.id,
+        handoff: {
+          from: 'script-desk',
+          to: 'storyboard-desk',
+          fromId: props.id,
+          at: new Date().toISOString(),
+        },
+      };
+      useFlowCommands.getState().requestSpawn('storyboard-desk', undefined, handoffData);
+      setTip('已创建分镜台 · 编剧台已连线分镜台');
+      appendLog(`编剧台：送至分镜 · 一键创建并连线分镜台`);
+    }
+  }, [appendLog, props.id]);
+
+  const handleReadinessChange = useCallback((state: AssetReadinessState) => {
+    updateNodeData(props.id, { assetReadiness: state });
+    if (state.ready) {
+      setTip('设定已就绪，可交分镜台');
+      appendLog('编剧台：已标记设定就绪');
+    }
+  }, [appendLog, props.id, updateNodeData]);
+
+  const handleManualConsistencyCheck = useCallback(() => {
+    const next = runConsistencyCheck(pkg);
+    savePkg(next);
+    setRightTab('diagnostics');
+    setTip(`一致性检查完成 · 诊断 ${next.diagnostics?.length ?? 0} 条`);
+    appendLog(`编剧台：手动一致性检查 · ${next.diagnostics?.length ?? 0} 条`);
+  }, [appendLog, pkg, savePkg]);
+
+  const handleAutoFix = useCallback(() => {
+    const { package: next, fixedCount } = applyConsistencyFixes(pkg);
+    if (fixedCount === 0) {
+      setTip('未发现可自动修复的缺失字段');
+      return;
+    }
+    savePkg(next);
+    setTip(`已一键填充 ${fixedCount} 个缺失字段`);
+    appendLog(`编剧台：一键修复 ${fixedCount} 个字段`);
+  }, [appendLog, pkg, savePkg]);
+
+  const handleDiagClick = useCallback((entityId?: string) => {
+    if (entityId) {
+      setHighlightedBibleId(entityId);
+      setRightTab('bible');
+    }
+  }, []);
 
   const toggleSkill = useCallback((id: ScriptDeskSkillId) => {
     setActiveSkills([id]);
@@ -332,18 +402,23 @@ function ScriptDeskBlock(props: NodeProps) {
     });
   }, [props.id, updateNodeData]);
 
-  const footerHint = pkg.status === 'confirmed'
-    ? '可送设定检查 / 可送分镜台'
-    : pkg.status === 'drafting'
-      ? '待确认成稿'
-      : '待输入成稿';
-
   const skillName = activeSkills[0] ? SKILL_CHIPS.find((s) => s.id === activeSkills[0])?.label : '';
 
   return (
     <BlockShell {...props}>
-      <div className="sd2-card">
-        <button type="button" className="sd2-card__clickable" onClick={() => setStudioOpen(true)}>
+      <div className="sd2-card nodrag nopan">
+        <div
+          className="sd2-card__clickable"
+          role="button"
+          tabIndex={0}
+          onClick={() => setStudioOpen(true)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault();
+              setStudioOpen(true);
+            }
+          }}
+        >
           <div className="sd2-card__header">
             <span className="sd2-card__eyebrow">编剧台 · 成稿</span>
             <span className={`sd2-card__badge ${pkg.status === 'confirmed' ? 'is-ok' : ''}`}>
@@ -356,7 +431,7 @@ function ScriptDeskBlock(props: NodeProps) {
           <div className="sd2-card__actions">
             <button type="button" className="sd2-btn sd2-btn--ghost" onClick={(e) => { e.stopPropagation(); setStudioOpen(true); }}>打开编剧台</button>
           </div>
-        </button>
+        </div>
       </div>
 
       <ScreenModal
@@ -572,6 +647,7 @@ function ScriptDeskBlock(props: NodeProps) {
                 <div className="sd2-drawer__tabs">
                   <button type="button" className={rightTab === 'screenplay' ? 'is-on' : ''} onClick={() => setRightTab('screenplay')}>成稿</button>
                   <button type="button" className={rightTab === 'bible' ? 'is-on' : ''} onClick={() => setRightTab('bible')}>Bible</button>
+                  <button type="button" className={rightTab === 'readiness' ? 'is-on' : ''} onClick={() => setRightTab('readiness')}>设定就绪</button>
                   <button type="button" className={rightTab === 'diagnostics' ? 'is-on' : ''} onClick={() => setRightTab('diagnostics')}>诊断</button>
                 </div>
                 <div className="sd2-drawer__body">
@@ -613,7 +689,7 @@ function ScriptDeskBlock(props: NodeProps) {
                       <div className="sd2-section-label">人物 draft（叙事层 · 不入库）</div>
                       {pkg.bible.characters.length === 0 && <div className="sd2-empty">暂无人物</div>}
                       {pkg.bible.characters.map((c) => (
-                        <div key={c.id} className="sd2-bible-card">
+                        <div key={c.id} className={`sd2-bible-card${highlightedBibleId === c.name ? ' sd2-bible-card--highlight' : ''}`}>
                           <div className="sd2-bible-card__name">{c.name}</div>
                           <div className="sd2-bible-card__meta">{c.identity || c.personality || c.appearance ? [c.identity, c.personality, c.appearance].filter(Boolean).join(' · ') : '—'}</div>
                           <div className="sd2-bible-card__tag">{c.libraryStatus ?? 'draft'}</div>
@@ -622,7 +698,7 @@ function ScriptDeskBlock(props: NodeProps) {
                       <div className="sd2-section-label">场景 draft</div>
                       {pkg.bible.scenes.length === 0 && <div className="sd2-empty">暂无场景</div>}
                       {pkg.bible.scenes.map((s) => (
-                        <div key={s.id} className="sd2-bible-card">
+                        <div key={s.id} className={`sd2-bible-card${(highlightedBibleId === s.name || highlightedBibleId === s.code) ? ' sd2-bible-card--highlight' : ''}`}>
                           <div className="sd2-bible-card__name">{s.name}</div>
                           <div className="sd2-bible-card__meta">{s.location || s.summary ? [s.location, s.summary].filter(Boolean).join(' · ') : '—'}</div>
                           <div className="sd2-bible-card__tag">{s.libraryStatus ?? 'draft'}</div>
@@ -638,11 +714,38 @@ function ScriptDeskBlock(props: NodeProps) {
                       )}
                     </>
                   )}
+                  {rightTab === 'readiness' && (
+                    <AssetReadinessPanel
+                      blockId={props.id}
+                      pkg={pkg}
+                      onReadinessChange={handleReadinessChange}
+                    />
+                  )}
                   {rightTab === 'diagnostics' && (
                     <>
+                      <div className="sd2-diag-actions">
+                        <button type="button" className="sd2-btn sd2-btn--ghost" disabled={busy} onClick={handleManualConsistencyCheck}>
+                          运行手动一致性检查
+                        </button>
+                        {(pkg.diagnostics ?? []).length > 0 && (
+                          <button type="button" className="sd2-btn sd2-btn--ghost" onClick={handleAutoFix}>
+                            一键修复缺失字段
+                          </button>
+                        )}
+                      </div>
                       {(pkg.diagnostics ?? []).length === 0 && <div className="sd2-empty">暂无诊断</div>}
                       {(pkg.diagnostics ?? []).map((d, i) => (
-                        <div key={`${d.code}-${i}`} className={`sd2-diag sd2-diag--${d.level}`}><b>{d.level}</b> {d.message}</div>
+                        <div
+                          key={`${d.code}-${i}`}
+                          className={`sd2-diag sd2-diag--${d.level}${d.entityId ? ' sd2-diag--clickable' : ''}`}
+                          title={d.entityId ? `点击定位到 Bible「${d.entityId}」` : undefined}
+                          onClick={() => handleDiagClick(d.entityId)}
+                          role={d.entityId ? 'button' : undefined}
+                          tabIndex={d.entityId ? 0 : undefined}
+                          onKeyDown={d.entityId ? (e) => { if (e.key === 'Enter') handleDiagClick(d.entityId); } : undefined}
+                        >
+                          <b>{d.level}</b> {d.message}
+                        </div>
                       ))}
                     </>
                   )}
@@ -656,120 +759,26 @@ function ScriptDeskBlock(props: NodeProps) {
               <Sparkles size={13} /> 抽取 Bible
             </button>
             <span className="sd2-bottom__diag">诊断 {diagCount}</span>
-            <button type="button" className="sd2-btn sd2-btn--primary" disabled={busy || !screenplayFullText(pkg).trim()} onClick={handleConfirm}>
-              <Check size={14} /> 确认成稿
-            </button>
+            {pkg.status === 'confirmed' ? (
+              <>
+                <button type="button" className="sd2-btn sd2-btn--ghost" disabled={busy} onClick={handleConfirm}>
+                  <Check size={14} /> 确认成稿
+                </button>
+                <button type="button" className="sd2-btn sd2-btn--primary" disabled={busy} onClick={handleHandoffToStoryboard}>
+                  <Send size={14} /> 送到分镜台
+                </button>
+              </>
+            ) : (
+              <button type="button" className="sd2-btn sd2-btn--primary" disabled={busy || !screenplayFullText(pkg).trim()} onClick={handleConfirm}>
+                <Check size={14} /> 确认成稿
+              </button>
+            )}
           </div>
 
           {tip ? <div className="sd2-tip">{tip}</div> : null}
         </div>
       </ScreenModal>
     </BlockShell>
-  );
-}
-
-function ScriptDeskDevPackOverlay({ pkg: _pkg, session: _session, savePkg }: {
-  pkg: ScreenplayPackage;
-  session: ScriptDeskAgentSession;
-  savePkg: (pkg: ScreenplayPackage, extra?: Record<string, unknown>) => void;
-}) {
-  const { values: _globalValues } = useDevPromptOverrides();
-  const [pack, setPack] = useState<ScriptDeskSkillPromptPack>(() => normalizeScriptDeskPrompts({ version: 1, skills: {} }));
-  const [tip, setTip] = useState('');
-  const fileRef = useRef<HTMLInputElement>(null);
-  void _pkg; void _session; void savePkg;
-
-  const full = useMemo(() => {
-    const out: Record<string, string> = {};
-    for (const [id, val] of Object.entries(DEFAULT_SCRIPT_DESK_SKILL_PROMPTS)) {
-      const override = pack.skills[id as ScriptDeskSkillId];
-      out[id] = override ?? val ?? '';
-    }
-    return out;
-  }, [pack.skills]);
-
-  const updateSkill = useCallback((id: ScriptDeskSkillId, value: string) => {
-    setPack((prev) => {
-      const skills = { ...prev.skills, [id]: value.trim() || undefined };
-      return { version: 1, skills };
-    });
-  }, []);
-
-  const reset = useCallback(() => {
-    setPack({ version: 1, skills: {} });
-    setTip('已恢复默认');
-  }, []);
-
-  const save = useCallback(() => {
-    setPack((current) => current);
-    setTip('已保存到节点（保存后关闭重开生效）');
-  }, []);
-
-  const exportJson = useCallback(() => {
-    const blob = new Blob([JSON.stringify({ kind: 'nx9-script-desk-prompt-pack', version: 1, skills: pack.skills }, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a'); a.href = url; a.download = 'script-desk-prompt-pack.json'; a.click();
-    URL.revokeObjectURL(url);
-  }, [pack.skills]);
-
-  const importJson = useCallback(async (file: File) => {
-    try {
-      const text = await file.text();
-      const parsed = JSON.parse(text);
-      if (parsed.kind !== 'nx9-script-desk-prompt-pack' || parsed.version !== 1) {
-        setTip('非法 Pack 格式，拒绝导入');
-        return;
-      }
-      const skills: Partial<Record<ScriptDeskSkillId, string>> = {};
-      if (parsed.skills && typeof parsed.skills === 'object') {
-        for (const [k, v] of Object.entries(parsed.skills)) {
-          if (typeof v === 'string' && v.trim()) skills[k as ScriptDeskSkillId] = v.trim();
-        }
-      }
-      setPack({ version: 1, skills });
-      setTip('导入成功');
-    } catch {
-      setTip('导入失败：JSON 解析错误');
-    }
-  }, []);
-
-  return (
-    <div className="sd-legacy-note" style={{ borderColor: 'var(--desk-warn)', marginTop: 8 }}>
-      <div className="sd-section-label" style={{ color: 'var(--desk-warn)', margin: '4px 0' }}>
-        Dev · 技能 Prompt Pack
-      </div>
-      <div className="flex flex-col gap-1" style={{ maxHeight: 260, overflow: 'auto' }}>
-        {Object.entries(full).map(([id, val]) => (
-          <div key={id} className="flex flex-col gap-1">
-            <label className="text-[9px] font-bold opacity-60">{id}</label>
-            <textarea
-              className="w-full border border-line rounded text-[9px] p-1 bg-surface resize-none font-mono"
-              rows={2}
-              value={val}
-              onChange={(e) => updateSkill(id as ScriptDeskSkillId, e.target.value)}
-            />
-            <div className="flex justify-between text-[8px] text-ink/40">
-              <span>
-                {pack.skills[id as ScriptDeskSkillId]
-                  ? '来源：节点 Pack'
-                  : `全局${_globalValues[`scriptDesk.skill.${id}`] ? ' Override' : ' DEFAULT'}`}
-              </span>
-            </div>
-          </div>
-        ))}
-      </div>
-      <div className="flex flex-wrap gap-1 mt-2">
-        <button type="button" className="sd-btn" onClick={reset}>恢复默认</button>
-        <button type="button" className="sd-btn" onClick={exportJson}>导出</button>
-        <button type="button" className="sd-btn" onClick={() => fileRef.current?.click()}>导入</button>
-        <input ref={fileRef} type="file" accept=".json" hidden onChange={(e) => {
-          const f = e.target.files?.[0];
-          if (f) void importJson(f);
-          e.target.value = '';
-        }} />
-      </div>
-      {tip ? <p className="text-[9px] mt-1" style={{ color: 'var(--desk-ok)' }}>{tip}</p> : null}
-    </div>
   );
 }
 
