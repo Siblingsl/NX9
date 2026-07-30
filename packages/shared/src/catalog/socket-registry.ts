@@ -24,7 +24,7 @@ export const SOCKET_REGISTRY: Record<string, SocketProfile> = {
   'local-enhance': { accepts: ['picture', 'clip'], emits: ['picture', 'clip'] },
   'model-market': { accepts: ['prompt', 'picture', 'clip', 'sound'], emits: ['prompt', 'picture', 'clip', 'sound', 'mesh'] },
   'shot-script': { accepts: ['prompt'], emits: ['prompt', 'meta'] },
-  'reference-board': { accepts: ['prompt', 'picture'], emits: ['prompt', 'picture'] },
+  'reference-board': { accepts: ['prompt', 'picture', 'clip'], emits: ['prompt', 'picture', 'clip'] },
   'continuity-check': { accepts: ['prompt', 'picture', 'clip'], emits: ['prompt', 'meta'] },
   'script-desk': { accepts: ['prompt'], emits: ['prompt', 'meta'] },
   'dialogue-sheet': { accepts: ['prompt'], emits: ['prompt', 'meta'] },

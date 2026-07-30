@@ -14,6 +14,7 @@ import {
   type ReferenceConstraint,
   type CompositionTemplate,
 } from './constraint-assembler';
+import type { GenPromptPack } from './gen-skill-pack';
 
 export interface StudioPromptContext {
   shot: StoryboardShot;
@@ -24,6 +25,13 @@ export interface StudioPromptContext {
   globalArtDirection?: string;
   /** 画风补充，如 anime cel-shading / cinematic live-action */
   artStyle?: string;
+}
+
+/** Gen Skill 拼装包覆盖（来自 skills/gen-studio-*） */
+export interface StudioPromptPackOverrides {
+  image?: GenPromptPack | null;
+  video?: GenPromptPack | null;
+  sketch?: GenPromptPack | null;
 }
 
 const CAMERA_MOVE_EN: Record<string, string> = {
@@ -68,14 +76,20 @@ function translateCamera(move?: string | null): string {
   return CAMERA_MOVE_EN[key] || CAMERA_MOVE_EN[key.toLowerCase()] || `camera move: ${key}`;
 }
 
+const LEGACY_STUDIO_IMAGE_QUALITY =
+  'Professional storyboard keyframe, single cinematic still frame, high narrative clarity, production quality, locked character/environment continuity.';
+const LEGACY_STUDIO_IMAGE_CONSTRAINTS =
+  'Constraints: consistent character identity across franchise bible, coherent environment continuity, keep environment realistic, single frame only, no watermark, no UI chrome, no multi-panel grid, no text overlay, no arrows, no colored guide lines, no annotation labels, no timestamps.';
+
 /**
  * 专业分镜预览图（关键帧 / storyboard still）提示词
+ * @param pack 来自 gen-studio-image 的拼装包；缺省用 legacy 常量兜底
  */
-export function buildStudioImagePrompt(ctx: StudioPromptContext): string {
+export function buildStudioImagePrompt(ctx: StudioPromptContext, pack?: GenPromptPack | null): string {
   const { shot, characters = [], environment, episode, globalArtDirection, artStyle } = ctx;
   const lines: string[] = [];
 
-  lines.push('Professional storyboard keyframe, single cinematic still frame, high narrative clarity, production quality, locked character/environment continuity.');
+  lines.push(pack?.quality?.trim() || LEGACY_STUDIO_IMAGE_QUALITY);
   lines.push(shotSizeEn(shot.shotType));
 
   const cam = translateCamera(shot.cameraMove);
@@ -101,19 +115,26 @@ export function buildStudioImagePrompt(ctx: StudioPromptContext): string {
   if (characters.length) prompt = enrichPromptWithCharacters(prompt, characters);
   if (environment) prompt = enrichPromptWithEnvironment(prompt, environment);
 
-  prompt +=
-    '\nConstraints: consistent character identity across franchise bible, coherent environment continuity, keep environment realistic, single frame only, no watermark, no UI chrome, no multi-panel grid, no text overlay, no arrows, no colored guide lines, no annotation labels, no timestamps.';
+  const constraints = pack?.constraints?.trim() || LEGACY_STUDIO_IMAGE_CONSTRAINTS;
+  prompt += constraints.startsWith('\n') ? constraints : `\n${constraints}`;
+  if (pack?.overlay?.trim()) prompt += `\n${pack.overlay.trim()}`;
   return prompt.trim();
 }
 
+const LEGACY_STUDIO_VIDEO_QUALITY =
+  'Cinematic continuous shot, natural motion, production-ready short clip, identity-locked from first frame.';
+const LEGACY_STUDIO_VIDEO_CONSTRAINTS =
+  'Constraints: maintain character identity and costume from first frame, continuous motivated camera, no jump cuts, no text overlay, filmic motion blur only when motivated, keep spatial continuity, keep environment realistic.\nGuide policy: reference may include colored director arrows/marks (red=action, blue=camera, orange=light, green=compose, purple=emotion). Use them only as motion/staging intent. Never render arrows, guide lines, labels, or timestamps in any video frame.';
+
 /**
  * 专业镜头视频提示词（运镜 + 表演 + 光色）
+ * @param pack 来自 gen-studio-video
  */
-export function buildStudioVideoPrompt(ctx: StudioPromptContext): string {
+export function buildStudioVideoPrompt(ctx: StudioPromptContext, pack?: GenPromptPack | null): string {
   const { shot, characters = [], environment, episode, globalArtDirection, artStyle } = ctx;
   const lines: string[] = [];
 
-  lines.push('Cinematic continuous shot, natural motion, production-ready short clip, identity-locked from first frame.');
+  lines.push(pack?.quality?.trim() || LEGACY_STUDIO_VIDEO_QUALITY);
   lines.push(`Duration intent: about ${shot.durationSec || 4} seconds.`);
   lines.push(shotSizeEn(shot.shotType));
 
@@ -140,20 +161,25 @@ export function buildStudioVideoPrompt(ctx: StudioPromptContext): string {
   if (characters.length) prompt = enrichPromptWithCharacters(prompt, characters);
   if (environment) prompt = enrichPromptWithEnvironment(prompt, environment);
 
-  prompt +=
-    '\nConstraints: maintain character identity and costume from first frame, continuous motivated camera, no jump cuts, no text overlay, filmic motion blur only when motivated, keep spatial continuity, keep environment realistic.';
-  prompt +=
-    '\nGuide policy: reference may include colored director arrows/marks (red=action, blue=camera, orange=light, green=compose, purple=emotion). Use them only as motion/staging intent. Never render arrows, guide lines, labels, or timestamps in any video frame.';
+  const constraints = pack?.constraints?.trim() || LEGACY_STUDIO_VIDEO_CONSTRAINTS;
+  prompt += constraints.startsWith('\n') ? constraints : `\n${constraints}`;
+  if (pack?.overlay?.trim()) prompt += `\n${pack.overlay.trim()}`;
   return prompt.trim();
 }
+
+const LEGACY_STUDIO_SKETCH_CONSTRAINTS =
+  'Constraints: composition draft only; preserve character identity via silhouette, hairline and costume landmarks; no color, no shading fill, no polished render, no photoreal skin, no watermark, no multi-panel collage.';
 
 /**
  * 分镜线稿提示词：用于草图确认、构图预览、手绘画板参考。
  * 不替代正式关键帧出图；它故意去掉色彩、材质和最终渲染词，避免污染成图 Prompt。
+ * @param pack 来自 gen-studio-sketch
  */
-export function buildStudioLineArtPrompt(ctx: StudioPromptContext): string {
+export function buildStudioLineArtPrompt(ctx: StudioPromptContext, pack?: GenPromptPack | null): string {
   const { shot, characters = [], environment, episode, globalArtDirection } = ctx;
+  const qualityPrefix = pack?.quality?.trim();
   const base = [
+    qualityPrefix,
     shot.sketchPrompt?.trim(),
     shot.descriptionZh?.trim(),
     shot.sceneName ? `location: ${shot.sceneName}` : '',
@@ -166,7 +192,10 @@ export function buildStudioLineArtPrompt(ctx: StudioPromptContext): string {
   let prompt = buildLineArtShotPrompt(base, shot.shotType);
   if (characters.length) prompt = enrichPromptWithCharacters(prompt, characters);
   if (environment) prompt = enrichPromptWithEnvironment(prompt, environment);
-  return `${prompt}\nConstraints: composition draft only; preserve character identity via silhouette, hairline and costume landmarks; no color, no shading fill, no polished render, no photoreal skin, no watermark, no multi-panel collage.`.trim();
+  const constraints = pack?.constraints?.trim() || LEGACY_STUDIO_SKETCH_CONSTRAINTS;
+  prompt = `${prompt}\n${constraints}`;
+  if (pack?.overlay?.trim()) prompt += `\n${pack.overlay.trim()}`;
+  return prompt.trim();
 }
 
 /** 一键为镜头写入专业提示词字段（不覆盖用户非空手写时可选 force） */
@@ -177,13 +206,14 @@ export function applyStudioPromptsToShot(
     force?: boolean;
     constraints?: ReferenceConstraint | null;
     templates?: CompositionTemplate[];
+    packs?: StudioPromptPackOverrides | null;
   },
 ): Partial<StoryboardShot> {
   const force = opts?.force ?? false;
   const full: StudioPromptContext = { ...ctx, shot };
-  const image = buildStudioImagePrompt(full);
-  const video = buildStudioVideoPrompt(full);
-  const sketch = buildStudioLineArtPrompt(full);
+  const image = buildStudioImagePrompt(full, opts?.packs?.image);
+  const video = buildStudioVideoPrompt(full, opts?.packs?.video);
+  const sketch = buildStudioLineArtPrompt(full, opts?.packs?.sketch);
 
   // F-017/F-032: 构图模板与参考板约束注入
   let imageFinal = force || !shot.imagePromptPro?.trim() ? image : shot.imagePromptPro;

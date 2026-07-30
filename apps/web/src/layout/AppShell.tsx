@@ -5,6 +5,7 @@ import { SettingsModal } from '../panels/SettingsModal';
 import { ShortcutsModal } from '../panels/ShortcutsModal';
 import { LogPanel } from '../panels/LogPanel';
 import { ToastHost } from '../components/ToastHost';
+import { ConfirmHost } from '../components/ConfirmHost';
 import { toastSuccess, toastError } from '../stores/toast';
 import { useUserSession } from '../stores/user-session';
 import { useTaskStream } from '../hooks/use-task-stream';
@@ -15,6 +16,7 @@ import { useFlowCommands } from '../stores/flow-commands';
 import { useFlowRuntime } from '../stores/flow-runtime';
 import { useExecutionQueue } from '../stores/execution-queue';
 import { useAssetLibraryModalUi } from '../stores/asset-library-modal-ui';
+import { useSkillLibraryModalUi } from '../stores/skill-library-modal-ui';
 import { useAssetTrashModalUi } from '../stores/asset-trash-modal-ui';
 import { useCreateWorkspaceDialogUi } from '../stores/create-workspace-dialog-ui';
 import { isSurfaceEnabled } from '../config/product-surface';
@@ -30,6 +32,9 @@ const StageDeckSurface = lazy(() =>
 
 const AssetLibraryModal = lazy(() =>
   import('../panels/AssetLibraryModal').then((m) => ({ default: m.AssetLibraryModal })),
+);
+const SkillLibraryModal = lazy(() =>
+  import('../panels/SkillLibraryModal').then((m) => ({ default: m.SkillLibraryModal })),
 );
 const AssetTrashModal = lazy(() =>
   import('../panels/AssetTrashModal').then((m) => ({ default: m.AssetTrashModal })),
@@ -63,6 +68,7 @@ export default function AppShell() {
   const [flowKey, setFlowKey] = useState(0);
   const [createSubmitting, setCreateSubmitting] = useState(false);
   const toggleAssetLibModal = useAssetLibraryModalUi((s) => s.toggle);
+  const toggleSkillLibModal = useSkillLibraryModalUi((s) => s.toggle);
   const openAssetTrash = useAssetTrashModalUi((s) => s.setOpen);
   const createDialogOpen = useCreateWorkspaceDialogUi((s) => s.open);
   const openCreateDialog = useCreateWorkspaceDialogUi((s) => s.openDialog);
@@ -206,6 +212,7 @@ export default function AppShell() {
                 onRedo={() => runtime?.redo()}
                 onBatchRun={() => void handleBatchRun()}
                 onOpenAssets={() => toggleAssetLibModal()}
+                onOpenSkills={() => toggleSkillLibModal()}
                 onOpenTrash={() => openAssetTrash(true)}
                 onOpenSettings={() => toggleSettings(true)}
               >
@@ -234,6 +241,7 @@ export default function AppShell() {
 
           <Suspense fallback={null}>
             {isSurfaceEnabled('assetLibraryModal') && <AssetLibraryModal />}
+            {isSurfaceEnabled('skillLibraryModal') && <SkillLibraryModal />}
             <AssetTrashModal />
             <CreateWorkspaceDialog
               open={createDialogOpen}
@@ -257,6 +265,7 @@ export default function AppShell() {
       </Suspense>
       {isCanvas && isSurfaceEnabled('logPanel') && <LogPanel />}
       <ToastHost />
+      <ConfirmHost />
     </div>
   );
 }

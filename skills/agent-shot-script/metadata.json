@@ -1,0 +1,32 @@
+{
+  "name": "agent-shot-script",
+  "title": "分镜脚本改写",
+  "description": "将小说/章节改写为分镜脚本行；默认禁止镜头技术堆砌，保持可演叙事。",
+  "version": "2.0.0",
+  "entry": "SKILL.md",
+  "author": "nx9",
+  "status": "stable",
+  "language": "zh-CN",
+  "updated_at": "2026-07-30T08:00:00Z",
+  "tags": [
+    "agent",
+    "shot-script"
+  ],
+  "compatibility": {
+    "nx9": ">=0.1.0"
+  },
+  "dependencies": [],
+  "resources": {
+    "examples": "examples/",
+    "references": "references/",
+    "templates": "templates/",
+    "scripts": "scripts/",
+    "tests": "tests/"
+  },
+  "nx9": {
+    "promptId": "sys.agent.shot-script",
+    "category": "agent",
+    "priority": "P0",
+    "lane": "builtin"
+  }
+}

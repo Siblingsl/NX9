@@ -1,0 +1,488 @@
+[
+  {
+    "id": "script-skill-hooks",
+    "name": "爆点构建",
+    "description": "产出可落画面的钩子列表；区分集末钩子与付费卡点；禁止镜头表。",
+    "version": "2.0.0",
+    "status": "stable",
+    "tags": [
+      "script",
+      "hooks",
+      "brief"
+    ],
+    "promptId": "sys.script.skill.hooks",
+    "category": "script-desk",
+    "priority": "P0",
+    "lane": "builtin"
+  },
+  {
+    "id": "agent-scene-split",
+    "name": "场次拆分",
+    "description": "将剧本/小说按场次拆分，输出稳定场景头与正文块。",
+    "version": "2.0.0",
+    "status": "stable",
+    "tags": [
+      "agent",
+      "scenes"
+    ],
+    "promptId": "sys.agent.scene-split",
+    "category": "agent",
+    "priority": "P0",
+    "lane": "builtin"
+  },
+  {
+    "id": "script-skill-ingest",
+    "name": "成稿解析入库",
+    "description": "将用户粘贴文本保真整理为分集正文；sourceType=pasted；禁止镜头表。",
+    "version": "2.0.0",
+    "status": "stable",
+    "tags": [
+      "script",
+      "ingest",
+      "screenplay"
+    ],
+    "promptId": "sys.script.skill.ingest",
+    "category": "script-desk",
+    "priority": "P0",
+    "lane": "builtin"
+  },
+  {
+    "id": "breakdown-episode-shots",
+    "name": "单集分镜拆解",
+    "description": "将指定单集拆成场景与可生产镜头；三层 Prompt；audiovisualLanguage 完整叙事句；禁标签罗列。",
+    "version": "2.0.0",
+    "status": "stable",
+    "tags": [
+      "breakdown",
+      "shots",
+      "storyboard"
+    ],
+    "promptId": "sys.breakdown.episode-shots",
+    "category": "storyboard-desk",
+    "priority": "P0",
+    "lane": "builtin"
+  },
+  {
+    "id": "agent-director-plan",
+    "name": "导演规划",
+    "description": "根据剧本草拟导演规划：风格、节奏、重点场、视觉母题。",
+    "version": "2.0.0",
+    "status": "stable",
+    "tags": [
+      "agent",
+      "director"
+    ],
+    "promptId": "sys.agent.director-plan",
+    "category": "agent",
+    "priority": "P0",
+    "lane": "builtin"
+  },
+  {
+    "id": "gen-director-batch-shot",
+    "name": "导演批量镜头约束",
+    "description": "批量镜头生成时叠加 3D camera / 构图约束与连续性规则的提示词包。",
+    "version": "2.0.0",
+    "status": "stable",
+    "tags": [
+      "gen",
+      "director",
+      "batch"
+    ],
+    "promptId": "gen.director.batch-shot",
+    "category": "gen",
+    "priority": "P0",
+    "lane": "builtin"
+  },
+  {
+    "id": "script-skill-dialogue",
+    "name": "对白构建",
+    "description": "改写成稿对白层：说话人、情绪、可演口语；不写镜头语言。",
+    "version": "2.0.0",
+    "status": "stable",
+    "tags": [
+      "script",
+      "dialogue",
+      "screenplay"
+    ],
+    "promptId": "sys.script.skill.dialogue",
+    "category": "script-desk",
+    "priority": "P0",
+    "lane": "builtin"
+  },
+  {
+    "id": "agent-dialogue-extract",
+    "name": "对白提取",
+    "description": "从剧本/小说提取全部对白行并标注说话人与情绪，供配音与校对。",
+    "version": "2.0.0",
+    "status": "stable",
+    "tags": [
+      "agent",
+      "dialogue"
+    ],
+    "promptId": "sys.agent.dialogue-extract",
+    "category": "agent",
+    "priority": "P0",
+    "lane": "builtin"
+  },
+  {
+    "id": "breakdown-episode-planner",
+    "name": "多集项目蓝图规划",
+    "description": "把原文规划为可进入分镜生产的多集项目蓝图：戏剧弧、角色档案、场景复用；仅 JSON。",
+    "version": "2.0.0",
+    "status": "stable",
+    "tags": [
+      "breakdown",
+      "planner",
+      "episodes"
+    ],
+    "promptId": "sys.breakdown.episode-planner",
+    "category": "storyboard-desk",
+    "priority": "P0",
+    "lane": "builtin"
+  },
+  {
+    "id": "script-skill-generate",
+    "name": "分集成稿生成",
+    "description": "根据 brief/bible 生成场次+动作+对白分集正文；禁 imagePrompt/镜头表；对齐 bible。",
+    "version": "2.0.0",
+    "status": "stable",
+    "tags": [
+      "script",
+      "generate",
+      "screenplay"
+    ],
+    "promptId": "sys.script.skill.generate",
+    "category": "script-desk",
+    "priority": "P0",
+    "lane": "builtin"
+  },
+  {
+    "id": "agent-screenplay",
+    "name": "分集剧本写作",
+    "description": "根据改编策略与原文写出分集剧本；场次+动作+对白；禁镜头表。",
+    "version": "2.0.0",
+    "status": "stable",
+    "tags": [
+      "agent",
+      "screenplay"
+    ],
+    "promptId": "sys.agent.screenplay",
+    "category": "agent",
+    "priority": "P0",
+    "lane": "builtin"
+  },
+  {
+    "id": "production-storyboard-table",
+    "name": "分镜表",
+    "description": "根据导演规划或剧本生成可执行分镜表，每行一镜，含景别运镜时长与描述。",
+    "version": "2.0.0",
+    "status": "stable",
+    "tags": [
+      "storyboard",
+      "table"
+    ],
+    "promptId": "sys.production.storyboard-table",
+    "category": "storyboard-desk",
+    "priority": "P0",
+    "lane": "builtin"
+  },
+  {
+    "id": "agent-shot-script",
+    "name": "分镜脚本改写",
+    "description": "将小说/章节改写为分镜脚本行；默认禁止镜头技术堆砌，保持可演叙事。",
+    "version": "2.0.0",
+    "status": "stable",
+    "tags": [
+      "agent",
+      "shot-script"
+    ],
+    "promptId": "sys.agent.shot-script",
+    "category": "agent",
+    "priority": "P0",
+    "lane": "builtin"
+  },
+  {
+    "id": "agent-adaptation",
+    "name": "改编策略",
+    "description": "分析小说/大纲并输出改编策略：删改重点、集数、受众与风险。",
+    "version": "2.0.0",
+    "status": "stable",
+    "tags": [
+      "agent",
+      "adaptation"
+    ],
+    "promptId": "sys.agent.adaptation",
+    "category": "agent",
+    "priority": "P0",
+    "lane": "builtin"
+  },
+  {
+    "id": "script-skeleton",
+    "name": "故事骨架",
+    "description": "分析文本输出三幕结构、分集数与付费/悬念卡点，供改编前置。",
+    "version": "2.0.0",
+    "status": "stable",
+    "tags": [
+      "script",
+      "structure"
+    ],
+    "promptId": "sys.script.skill.skeleton",
+    "category": "agent",
+    "priority": "P0",
+    "lane": "builtin"
+  },
+  {
+    "id": "agent-environments",
+    "name": "环境卡生成",
+    "description": "为场次生成环境卡：空间、光色、道具锚点与可复用视觉规则。",
+    "version": "2.0.0",
+    "status": "stable",
+    "tags": [
+      "agent",
+      "environment"
+    ],
+    "promptId": "sys.agent.environments",
+    "category": "agent",
+    "priority": "P0",
+    "lane": "builtin"
+  },
+  {
+    "id": "gen-character-sheet-master",
+    "name": "角色设定板 Master",
+    "description": "高精度角色 ID 锁定设定板：多格布局、表情系统、配色与禁改项；生产级骨架。",
+    "version": "2.0.0",
+    "status": "stable",
+    "tags": [
+      "gen",
+      "character-sheet"
+    ],
+    "promptId": "gen.character.sheet.master",
+    "category": "gen",
+    "priority": "P0",
+    "lane": "builtin"
+  },
+  {
+    "id": "script-skill-pacing",
+    "name": "节奏构建",
+    "description": "定义 balanced/slow/fast 与单集目标时长；对齐平台；禁止镜头表。",
+    "version": "2.0.0",
+    "status": "stable",
+    "tags": [
+      "script",
+      "pacing",
+      "brief"
+    ],
+    "promptId": "sys.script.skill.pacing",
+    "category": "script-desk",
+    "priority": "P0",
+    "lane": "builtin"
+  },
+  {
+    "id": "script-skill-plot",
+    "name": "剧情构建",
+    "description": "产出起承转合大纲与分集数；对齐 brief 契约；禁止镜头表。",
+    "version": "2.0.0",
+    "status": "stable",
+    "tags": [
+      "script",
+      "plot",
+      "brief"
+    ],
+    "promptId": "sys.script.skill.plot",
+    "category": "script-desk",
+    "priority": "P0",
+    "lane": "builtin"
+  },
+  {
+    "id": "script-skill-character",
+    "name": "人物构建",
+    "description": "产出角色六层设定与英文 fixedVisualKeywords；同名唯一；叙事层 draft only。",
+    "version": "2.0.0",
+    "status": "stable",
+    "tags": [
+      "script",
+      "character",
+      "bible"
+    ],
+    "promptId": "sys.script.skill.character",
+    "category": "script-desk",
+    "priority": "P0",
+    "lane": "builtin"
+  },
+  {
+    "id": "gen-depth-action-replica",
+    "name": "深度视频动作复刻",
+    "description": "用深度视频锁定动作走位节奏，用人物图锁定外貌服装，用场景图替换环境；装配可直接送视频模型的提示词。",
+    "version": "1.0.0",
+    "status": "stable",
+    "tags": [
+      "gen",
+      "video",
+      "depth",
+      "playbook",
+      "reference-board"
+    ],
+    "promptId": "gen.depth.action.replica",
+    "category": "gen",
+    "priority": "P0",
+    "lane": "builtin"
+  },
+  {
+    "id": "script-skill-world",
+    "name": "世界观构建",
+    "description": "产出时代、地点、世界观与可复用视觉规则列表；禁止一句话一新世界与镜头表。",
+    "version": "2.0.0",
+    "status": "stable",
+    "tags": [
+      "script",
+      "world",
+      "bible"
+    ],
+    "promptId": "sys.script.skill.world",
+    "category": "script-desk",
+    "priority": "P0",
+    "lane": "builtin"
+  },
+  {
+    "id": "script-skill-consistency",
+    "name": "叙事一致性审稿",
+    "description": "只诊断不改正文；输出 diagnostics 分级与 code 枚举；禁止镜头表。",
+    "version": "2.0.0",
+    "status": "stable",
+    "tags": [
+      "script",
+      "consistency",
+      "qa"
+    ],
+    "promptId": "sys.script.skill.consistency",
+    "category": "script-desk",
+    "priority": "P0",
+    "lane": "builtin"
+  },
+  {
+    "id": "script-skill-topic",
+    "name": "选题策划",
+    "description": "撰写选题标题、logline、目标平台与一句话卖点；禁止镜头表与视觉提示词。",
+    "version": "2.0.0",
+    "status": "stable",
+    "tags": [
+      "script",
+      "topic",
+      "brief"
+    ],
+    "promptId": "sys.script.skill.topic",
+    "category": "script-desk",
+    "priority": "P0",
+    "lane": "builtin"
+  },
+  {
+    "id": "agent-novel-events",
+    "name": "章节事件提取",
+    "description": "分析长篇文本，提取每章关键事件、人物与因果，供分集规划。",
+    "version": "2.0.0",
+    "status": "stable",
+    "tags": [
+      "agent",
+      "events"
+    ],
+    "promptId": "sys.agent.novel-events",
+    "category": "agent",
+    "priority": "P0",
+    "lane": "builtin"
+  },
+  {
+    "id": "gen-studio-image",
+    "name": "制作台关键帧提示词",
+    "description": "专业分镜关键帧英文提示词：景别运镜、角色/环境一致性、质量句与约束；单帧可执行。",
+    "version": "2.0.0",
+    "status": "stable",
+    "tags": [
+      "gen",
+      "image",
+      "studio"
+    ],
+    "promptId": "gen.studio.image",
+    "category": "gen",
+    "priority": "P0",
+    "lane": "builtin"
+  },
+  {
+    "id": "gen-studio-video",
+    "name": "制作台视频提示词",
+    "description": "图生/文生视频提示词：起幅、动作过程、运镜动机、情绪曲线与连续性约束。",
+    "version": "2.0.0",
+    "status": "stable",
+    "tags": [
+      "gen",
+      "video",
+      "studio"
+    ],
+    "promptId": "gen.studio.video",
+    "category": "gen",
+    "priority": "P0",
+    "lane": "builtin"
+  },
+  {
+    "id": "gen-studio-sketch",
+    "name": "制作台线稿提示词",
+    "description": "黑白线稿分镜构图提示词：站位、层次、轮廓；禁止色彩与最终渲染。",
+    "version": "2.0.0",
+    "status": "stable",
+    "tags": [
+      "gen",
+      "sketch",
+      "studio"
+    ],
+    "promptId": "gen.studio.sketch",
+    "category": "gen",
+    "priority": "P0",
+    "lane": "builtin"
+  },
+  {
+    "id": "agent-extract-assets",
+    "name": "资产抽取",
+    "description": "从文本提取角色与场景，并为角色填写六层设定与视觉锚点。",
+    "version": "2.0.0",
+    "status": "stable",
+    "tags": [
+      "agent",
+      "assets"
+    ],
+    "promptId": "sys.agent.extract-assets",
+    "category": "agent",
+    "priority": "P0",
+    "lane": "builtin"
+  },
+  {
+    "id": "gen-bible-scene",
+    "name": "Bible 场景概念图",
+    "description": "资产库场景一键概念图：宽景、气氛光、建立镜头级环境提示词。",
+    "version": "2.0.0",
+    "status": "stable",
+    "tags": [
+      "gen",
+      "bible",
+      "scene"
+    ],
+    "promptId": "gen.bible.scene",
+    "category": "gen",
+    "priority": "P0",
+    "lane": "builtin"
+  },
+  {
+    "id": "gen-bible-character",
+    "name": "Bible 角色定妆图",
+    "description": "资产库角色一键定妆：正面全身、干净背景、身份一致的概念设定图提示词。",
+    "version": "2.0.0",
+    "status": "stable",
+    "tags": [
+      "gen",
+      "bible",
+      "character"
+    ],
+    "promptId": "gen.bible.character",
+    "category": "gen",
+    "priority": "P0",
+    "lane": "builtin"
+  }
+]

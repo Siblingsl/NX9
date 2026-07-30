@@ -1,0 +1,33 @@
+{
+  "name": "gen-studio-sketch",
+  "title": "制作台线稿提示词",
+  "description": "黑白线稿分镜构图提示词：站位、层次、轮廓；禁止色彩与最终渲染。",
+  "version": "2.0.0",
+  "entry": "SKILL.md",
+  "author": "nx9",
+  "status": "stable",
+  "language": "zh-CN",
+  "updated_at": "2026-07-30T08:00:00Z",
+  "tags": [
+    "gen",
+    "sketch",
+    "studio"
+  ],
+  "compatibility": {
+    "nx9": ">=0.1.0"
+  },
+  "dependencies": [],
+  "resources": {
+    "examples": "examples/",
+    "references": "references/",
+    "templates": "templates/",
+    "scripts": "scripts/",
+    "tests": "tests/"
+  },
+  "nx9": {
+    "promptId": "gen.studio.sketch",
+    "category": "gen",
+    "priority": "P0",
+    "lane": "builtin"
+  }
+}

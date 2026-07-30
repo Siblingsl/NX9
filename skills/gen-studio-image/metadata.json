@@ -1,0 +1,33 @@
+{
+  "name": "gen-studio-image",
+  "title": "制作台关键帧提示词",
+  "description": "专业分镜关键帧英文提示词：景别运镜、角色/环境一致性、质量句与约束；单帧可执行。",
+  "version": "2.0.0",
+  "entry": "SKILL.md",
+  "author": "nx9",
+  "status": "stable",
+  "language": "zh-CN",
+  "updated_at": "2026-07-30T08:00:00Z",
+  "tags": [
+    "gen",
+    "image",
+    "studio"
+  ],
+  "compatibility": {
+    "nx9": ">=0.1.0"
+  },
+  "dependencies": [],
+  "resources": {
+    "examples": "examples/",
+    "references": "references/",
+    "templates": "templates/",
+    "scripts": "scripts/",
+    "tests": "tests/"
+  },
+  "nx9": {
+    "promptId": "gen.studio.image",
+    "category": "gen",
+    "priority": "P0",
+    "lane": "builtin"
+  }
+}

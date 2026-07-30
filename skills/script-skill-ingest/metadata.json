@@ -1,0 +1,33 @@
+{
+  "name": "script-skill-ingest",
+  "title": "成稿解析入库",
+  "description": "将用户粘贴文本保真整理为分集正文；sourceType=pasted；禁止镜头表。",
+  "version": "2.0.0",
+  "entry": "SKILL.md",
+  "author": "nx9",
+  "status": "stable",
+  "language": "zh-CN",
+  "updated_at": "2026-07-30T08:00:00Z",
+  "tags": [
+    "script",
+    "ingest",
+    "screenplay"
+  ],
+  "compatibility": {
+    "nx9": ">=0.1.0"
+  },
+  "dependencies": [],
+  "resources": {
+    "examples": "examples/",
+    "references": "references/",
+    "templates": "templates/",
+    "scripts": "scripts/",
+    "tests": "tests/"
+  },
+  "nx9": {
+    "promptId": "sys.script.skill.ingest",
+    "category": "script-desk",
+    "priority": "P0",
+    "lane": "builtin"
+  }
+}

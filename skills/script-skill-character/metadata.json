@@ -1,0 +1,33 @@
+{
+  "name": "script-skill-character",
+  "title": "人物构建",
+  "description": "产出角色六层设定与英文 fixedVisualKeywords；同名唯一；叙事层 draft only。",
+  "version": "2.0.0",
+  "entry": "SKILL.md",
+  "author": "nx9",
+  "status": "stable",
+  "language": "zh-CN",
+  "updated_at": "2026-07-30T08:00:00Z",
+  "tags": [
+    "script",
+    "character",
+    "bible"
+  ],
+  "compatibility": {
+    "nx9": ">=0.1.0"
+  },
+  "dependencies": [],
+  "resources": {
+    "examples": "examples/",
+    "references": "references/",
+    "templates": "templates/",
+    "scripts": "scripts/",
+    "tests": "tests/"
+  },
+  "nx9": {
+    "promptId": "sys.script.skill.character",
+    "category": "script-desk",
+    "priority": "P0",
+    "lane": "builtin"
+  }
+}

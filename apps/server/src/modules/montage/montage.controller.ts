@@ -153,6 +153,14 @@ export class MontageController {
     return this.montage.generateDepthPass(body);
   }
 
+  /** 源视频 → 深度视频（参考板深度槽 / 可复用） */
+  @Post('depth-video')
+  depthVideo(
+    @Body() body: { sourceUrl: string; maxDurationSec?: number },
+  ) {
+    return this.montage.convertDepthVideo(body);
+  }
+
   @Post('transcribe')
   transcribe(@Body() body: { sourceUrl: string; language?: string }) {
     return this.montage.transcribeAudio(body.sourceUrl ?? '', body.language);

@@ -1,0 +1,33 @@
+{
+  "name": "script-skill-hooks",
+  "title": "爆点构建",
+  "description": "产出可落画面的钩子列表；区分集末钩子与付费卡点；禁止镜头表。",
+  "version": "2.0.0",
+  "entry": "SKILL.md",
+  "author": "nx9",
+  "status": "stable",
+  "language": "zh-CN",
+  "updated_at": "2026-07-30T08:00:00Z",
+  "tags": [
+    "script",
+    "hooks",
+    "brief"
+  ],
+  "compatibility": {
+    "nx9": ">=0.1.0"
+  },
+  "dependencies": [],
+  "resources": {
+    "examples": "examples/",
+    "references": "references/",
+    "templates": "templates/",
+    "scripts": "scripts/",
+    "tests": "tests/"
+  },
+  "nx9": {
+    "promptId": "sys.script.skill.hooks",
+    "category": "script-desk",
+    "priority": "P0",
+    "lane": "builtin"
+  }
+}

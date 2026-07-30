@@ -645,10 +645,14 @@ export interface CharacterSheetPromptInput {
   hasReferenceImage?: boolean;
 }
 
-export function buildCharacterMasterSheetPrompt(input: CharacterSheetPromptInput): string {
+export function buildCharacterMasterSheetPrompt(
+  input: CharacterSheetPromptInput,
+  pack?: import('./gen-skill-pack').GenPromptPack | null,
+): string {
   const styleMode = input.styleMode ?? 'semi-realistic';
   const lockedLayout = buildCharacterSheetLockedLayoutPrompt();
-  const filled = CHARACTER_SHEET_MASTER_PROMPT_TEMPLATE
+  const masterTpl = pack?.template?.trim() || CHARACTER_SHEET_MASTER_PROMPT_TEMPLATE;
+  const filled = masterTpl
     .replace('{styleLabel}', CHARACTER_SHEET_STYLE_LABELS[styleMode] || styleMode)
     .replace('{characterDescription}', input.characterDescription?.trim() || 'Use the provided character description and reference identity.')
     .replace('{gender}', input.gender?.trim() || 'as specified by character design')
@@ -667,8 +671,11 @@ export function buildCharacterMasterSheetPrompt(input: CharacterSheetPromptInput
   const refRule = input.hasReferenceImage
     ? '\n【参考图规则】Must match the uploaded reference identity exactly. Do not redesign the face. Treat reference as absolute character ID lock.'
     : '';
-
-  return `${filled}${refRule}`;
+  let out = `${filled}${refRule}`.trim();
+  if (pack?.quality?.trim()) out = `${pack.quality.trim()}\n${out}`;
+  if (pack?.constraints?.trim()) out = `${out}\n${pack.constraints.trim()}`;
+  if (pack?.overlay?.trim()) out = `${out}\n${pack.overlay.trim()}`;
+  return out;
 }
 
 /** 归一化矩形 → 像素裁切框（略内缩，避开格子白边） */

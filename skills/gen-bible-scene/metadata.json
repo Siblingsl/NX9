@@ -1,0 +1,33 @@
+{
+  "name": "gen-bible-scene",
+  "title": "Bible 场景概念图",
+  "description": "资产库场景一键概念图：宽景、气氛光、建立镜头级环境提示词。",
+  "version": "2.0.0",
+  "entry": "SKILL.md",
+  "author": "nx9",
+  "status": "stable",
+  "language": "zh-CN",
+  "updated_at": "2026-07-30T08:00:00Z",
+  "tags": [
+    "gen",
+    "bible",
+    "scene"
+  ],
+  "compatibility": {
+    "nx9": ">=0.1.0"
+  },
+  "dependencies": [],
+  "resources": {
+    "examples": "examples/",
+    "references": "references/",
+    "templates": "templates/",
+    "scripts": "scripts/",
+    "tests": "tests/"
+  },
+  "nx9": {
+    "promptId": "gen.bible.scene",
+    "category": "gen",
+    "priority": "P0",
+    "lane": "builtin"
+  }
+}

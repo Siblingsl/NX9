@@ -1,0 +1,33 @@
+{
+  "name": "gen-studio-video",
+  "title": "制作台视频提示词",
+  "description": "图生/文生视频提示词：起幅、动作过程、运镜动机、情绪曲线与连续性约束。",
+  "version": "2.0.0",
+  "entry": "SKILL.md",
+  "author": "nx9",
+  "status": "stable",
+  "language": "zh-CN",
+  "updated_at": "2026-07-30T08:00:00Z",
+  "tags": [
+    "gen",
+    "video",
+    "studio"
+  ],
+  "compatibility": {
+    "nx9": ">=0.1.0"
+  },
+  "dependencies": [],
+  "resources": {
+    "examples": "examples/",
+    "references": "references/",
+    "templates": "templates/",
+    "scripts": "scripts/",
+    "tests": "tests/"
+  },
+  "nx9": {
+    "promptId": "gen.studio.video",
+    "category": "gen",
+    "priority": "P0",
+    "lane": "builtin"
+  }
+}

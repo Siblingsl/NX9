@@ -1,0 +1,33 @@
+{
+  "name": "breakdown-episode-planner",
+  "title": "多集项目蓝图规划",
+  "description": "把原文规划为可进入分镜生产的多集项目蓝图：戏剧弧、角色档案、场景复用；仅 JSON。",
+  "version": "2.0.0",
+  "entry": "SKILL.md",
+  "author": "nx9",
+  "status": "stable",
+  "language": "zh-CN",
+  "updated_at": "2026-07-30T08:00:00Z",
+  "tags": [
+    "breakdown",
+    "planner",
+    "episodes"
+  ],
+  "compatibility": {
+    "nx9": ">=0.1.0"
+  },
+  "dependencies": [],
+  "resources": {
+    "examples": "examples/",
+    "references": "references/",
+    "templates": "templates/",
+    "scripts": "scripts/",
+    "tests": "tests/"
+  },
+  "nx9": {
+    "promptId": "sys.breakdown.episode-planner",
+    "category": "storyboard-desk",
+    "priority": "P0",
+    "lane": "builtin"
+  }
+}

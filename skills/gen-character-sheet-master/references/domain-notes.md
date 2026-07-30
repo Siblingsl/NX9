@@ -1,0 +1,3 @@
+# 模型适配
+部分模型对中英混排敏感；可降级为英文主导但保留模块。
+负面词：watermark, logo, extra limbs, identity change...

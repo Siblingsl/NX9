@@ -6,6 +6,7 @@
 import { useCallback, useState } from 'react';
 import { buildBibleImagePrompt, type AssetBibleImageRequest } from '@nx9/shared';
 import { api } from '../api/client';
+import { getGenPack } from './gen-skill-runtime';
 
 export function useBibleImageGen() {
   const [generating, setGenerating] = useState(false);
@@ -15,7 +16,9 @@ export function useBibleImageGen() {
     setGenerating(true);
     setError(null);
     try {
-      const prompt = buildBibleImagePrompt(request);
+      const skillId = request.kind === 'character' ? 'gen-bible-character' : 'gen-bible-scene';
+      const pack = await getGenPack(skillId);
+      const prompt = buildBibleImagePrompt(request, pack);
       const res = await api.proxyImage({ prompt, size: '1024x1024' }) as { url?: string; message?: string };
       if (res.url) {
         return res.url;

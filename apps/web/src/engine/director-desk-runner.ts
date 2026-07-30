@@ -20,11 +20,13 @@ import {
   type ReferenceConstraint,
   type CompositionTemplate,
   type StoryboardShot,
+  type GenPromptPack,
 } from '@nx9/shared';
 import { useWorkspaceDocument } from '../stores/workspace-document';
 import { resolvePictureGenSettings } from './storyboard-preview-runner';
 import { runPictureGenJob } from './picture-gen-runner';
 import { batchGenerateKeyframesFromShots } from './core-pipeline-runner';
+import { getGenPack } from './gen-skill-runtime';
 import {
   collectPendingKeyframeIndices,
   openReviewGateSession,
@@ -516,6 +518,7 @@ function buildShotPrompt(
   shot: StoryboardShot,
   characters: CharacterProfile[],
   opts: DirectorDeskBatchOptions,
+  pack?: GenPromptPack | null,
 ): BuiltShotPrompt {
   const doc = useWorkspaceDocument.getState();
   const environments = doc.environments?.environments ?? [];
@@ -563,7 +566,8 @@ function buildShotPrompt(
     const custom = opts.stylePrompt?.trim() || (opts.blockData?.stylePrompt as string | undefined)?.trim();
     const styleBits = [globalStyle, epStyle, custom].filter(Boolean);
     if (styleBits.length) {
-      prompt = `${prompt}\n\n[Style lock — keep consistent across shots]\n${styleBits.join('\n')}`;
+      const stylePrefix = pack?.styleLockPrefix?.trim() || '[Style lock — keep consistent across shots]';
+      prompt = `${prompt}\n\n${stylePrefix}\n${styleBits.join('\n')}`;
     }
   }
 
@@ -603,10 +607,18 @@ function buildShotPrompt(
 
   // 强提示：有参考时写进 prompt
   if (primaryRef && forceChar && characters.length) {
-    prompt = `${prompt}\n\n[Use character reference likeness; keep face/costume consistent]`;
+    const charHint =
+      pack?.characterRefHint?.trim() ||
+      '[Use character reference likeness; keep face/costume consistent]';
+    prompt = `${prompt}\n\n${charHint}`;
   }
   if (prefer3d && d3) {
-    prompt = `${prompt}\n\n[Match 3D blocking camera composition and staging]`;
+    const camHint =
+      pack?.camera3dHint?.trim() || '[Match 3D blocking camera composition and staging]';
+    prompt = `${prompt}\n\n${camHint}`;
+  }
+  if (pack?.overlay?.trim()) {
+    prompt = `${prompt}\n\n${pack.overlay.trim()}`;
   }
 
   // F-017/F-032: 参考板约束注入 + 构图模板
@@ -658,7 +670,12 @@ async function attemptGenerate(
     shot,
     doc.characters.characters,
   );
-  const built = buildShotPrompt(shot, characters, opts);
+  const built = buildShotPrompt(
+    shot,
+    characters,
+    opts,
+    await getGenPack('gen-director-batch-shot'),
+  );
 
   if (opts.allowWithout3d === false && !shot.director3dGuide?.captureUrl) {
     doc.updateShot(shot.id, { status: 'failed', keyframeStatus: 'failed' });

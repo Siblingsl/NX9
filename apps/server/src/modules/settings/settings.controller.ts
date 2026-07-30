@@ -1,5 +1,5 @@
 import { Body, Controller, Get, Post } from '@nestjs/common';
-import type { AppSettings } from '@nx9/shared';
+import type { AppSettings, ConnectionStatus } from '@nx9/shared';
 import { SettingsService } from './settings.service';
 
 @Controller('api/settings')
@@ -14,6 +14,11 @@ export class SettingsController {
   @Get('raw')
   getRaw() {
     return this.settings.getRaw();
+  }
+
+  @Get('connection-status')
+  getConnectionStatus(): ConnectionStatus {
+    return this.settings.getConnectionStatus();
   }
 
   @Post()

@@ -27,10 +27,13 @@ export const useCredentialVault = create<CredentialVaultState>((set) => ({
 
   toggleSettings: (open) =>
     set((s) => ({ settingsOpen: open ?? !s.settingsOpen })),
-  /** 打开设置并跳转到指定 Tab */
+  /** 打开设置并跳转到指定 Tab；技能已迁出设置，改开技能库 */
   openSettingsTo: (section: string) => {
+    if (section === 'skills') {
+      window.dispatchEvent(new CustomEvent('nx9:openSkillLibrary'));
+      return;
+    }
     set({ settingsOpen: true });
-    // 通过 window 自定事件传递 section
     window.dispatchEvent(new CustomEvent('nx9:openSettingsSection', { detail: { section } }));
   },
 }));

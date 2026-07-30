@@ -157,6 +157,24 @@ export {
   DEFAULT_SCRIPT_DESK_SKILL_PROMPTS,
   normalizeScriptDeskPrompts,
 } from './types/screenplay-package';
+export {
+  SCRIPT_DESK_CHIP_TO_SKILL,
+  AGENT_CAPABILITY_TO_SKILL,
+  resolveScriptDeskSkillName,
+  resolveAgentSkillName,
+  skillBodyForInjection,
+  isSkillStubContent,
+  BUILTIN_SKILL_IDS,
+  BUILTIN_GEN_SKILL_IDS,
+  resolveSkillLane,
+} from './utils/skill-runtime';
+export type { AgentCapabilityId } from './utils/skill-runtime';
+export {
+  parseGenPromptPack,
+  fillGenTemplate,
+  isGenPromptPackEmpty,
+} from './utils/gen-skill-pack';
+export type { GenPromptPack } from './utils/gen-skill-pack';
 export type {
   SmartEditNodeData,
   SmartEditProfile,
@@ -354,11 +372,13 @@ export type {
   AppPreferences,
   AppSettings,
   LuxTtsNoGpuFallback,
+  ModelConnection,
 } from './types/settings';
+export { BUILTIN_CONNECTION_PRESETS } from './types/settings';
 
 export type { BlockCategory, BlockDefinition, SocketKind, SocketProfile } from './types/block';
 
-export type { SkillSummary, SkillDetail } from './types/skills';
+export type { SkillSummary, SkillDetail, SkillMetadata, SkillValidationResult, SkillLane, ConnectionChannelStatus, ConnectionStatus } from './types/skills';
 
 export {
   BLOCK_CATALOG,
@@ -592,6 +612,7 @@ export {
   buildStudioLineArtPrompt,
   applyStudioPromptsToShot,
   type StudioPromptContext,
+  type StudioPromptPackOverrides,
 } from './utils/studio-prompt-builder';
 export { parseChineseScript, scenesToStoryboardShots } from './utils/script-import';
 export type { ParsedScriptBackground, ParsedScriptScene } from './utils/script-import';
@@ -638,6 +659,26 @@ export {
   type CompositionTemplate,
   BUILTIN_COMPOSITION_TEMPLATES,
 } from './utils/constraint-assembler';
+export {
+  BUILTIN_REFERENCE_PLAYBOOKS,
+  lookupReferencePlaybook,
+  createSlotsFromPlaybook,
+  migrateLegacyBoardData,
+  switchPlaybook,
+  validateReferenceSlots,
+  assembleReferencePrompt,
+  buildReferencePack,
+  extractReferencePack,
+  syncReferenceBoardEmitFields,
+  type ReferenceSlotRole,
+  type ReferenceSlotMediaType,
+  type DepthConvertStatus,
+  type ReferenceSlot,
+  type ReferenceSlotTemplate,
+  type ReferencePlaybookDef,
+  type ReferenceBoardData,
+  type ReferencePack,
+} from './utils/reference-playbook';
 export {
   runConsistencyChecks,
   type ConsistencyCheckItem,

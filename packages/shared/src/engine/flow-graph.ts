@@ -256,6 +256,34 @@ export function gatherUpstream(
       mergeShotIds(out, collectLinkedShotIdsFromData(d));
       continue;
     }
+    if (kind === 'reference-board') {
+      const assembled =
+        (d.assembledPrompt as string) ||
+        (d.content as string) ||
+        (d.styleNotes as string) ||
+        '';
+      if (assembled.trim()) out.prompts.push(assembled.trim());
+      const pics =
+        (Array.isArray(d.pictures) ? (d.pictures as string[]) : null) ??
+        (Array.isArray(d.boardImages) ? (d.boardImages as string[]) : null) ??
+        [];
+      if (pics.length) out.pictures.push(...pics.filter(Boolean));
+      const clips = Array.isArray(d.clips) ? (d.clips as string[]) : [];
+      if (clips.length) out.clips.push(...clips.filter(Boolean));
+      const pack = d.referencePack as
+        | { depthVideoUrl?: string; imageUrls?: string[]; videoUrls?: string[]; characterUrls?: string[]; sceneUrl?: string }
+        | undefined;
+      if (pack) {
+        if (pack.depthVideoUrl) out.clips.push(pack.depthVideoUrl);
+        if (pack.videoUrls?.length) out.clips.push(...pack.videoUrls);
+        if (pack.imageUrls?.length) out.pictures.push(...pack.imageUrls);
+        else {
+          if (pack.characterUrls?.length) out.pictures.push(...pack.characterUrls);
+          if (pack.sceneUrl) out.pictures.push(pack.sceneUrl);
+        }
+      }
+      continue;
+    }
     if (kind === 'picture-gen') {
       const urls = (d.previewUrls as string[]) ?? [];
       if (urls.length) out.pictures.push(...urls);

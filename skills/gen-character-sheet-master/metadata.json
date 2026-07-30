@@ -1,0 +1,32 @@
+{
+  "name": "gen-character-sheet-master",
+  "title": "角色设定板 Master",
+  "description": "高精度角色 ID 锁定设定板：多格布局、表情系统、配色与禁改项；生产级骨架。",
+  "version": "2.0.0",
+  "entry": "SKILL.md",
+  "author": "nx9",
+  "status": "stable",
+  "language": "zh-CN",
+  "updated_at": "2026-07-30T08:00:00Z",
+  "tags": [
+    "gen",
+    "character-sheet"
+  ],
+  "compatibility": {
+    "nx9": ">=0.1.0"
+  },
+  "dependencies": [],
+  "resources": {
+    "examples": "examples/",
+    "references": "references/",
+    "templates": "templates/",
+    "scripts": "scripts/",
+    "tests": "tests/"
+  },
+  "nx9": {
+    "promptId": "gen.character.sheet.master",
+    "category": "gen",
+    "priority": "P0",
+    "lane": "builtin"
+  }
+}

@@ -1,36 +1,40 @@
 ---
 name: 分镜表
-description: 根据导演规划/剧本生成可执行分镜表，每行对应一个镜头
+title: 分镜表
+description: 根据导演规划或剧本生成可执行分镜表，每行一镜，含景别运镜时长与描述。
+version: 2.0.0
 ---
 
 # 分镜表
 
-## 输入
-导演规划或剧本文本。
+## 这个 skill 用来做什么
+输出生产用分镜表行，供审核与生成节点消费。
 
-## 输出格式
-JSON 数组，每行一个镜头：
+## 输入要求
+导演规划或剧本。
 
+## 输出要求
+JSON 数组行：id,group,shotSize,cameraMove,durationSec,descriptionZh,dialogue,sfx,videoDesc,associateAssetIds
+
+骨架：
 ```json
-{
-  "id": "唯一ID",
-  "group": "S01",
-  "shotSize": "CU",
-  "cameraMove": "推",
-  "durationSec": 4,
-  "descriptionZh": "画面描述",
-  "dialogue": "对白",
-  "sfx": "音效",
-  "videoDesc": "视频动态描述",
-  "associateAssetIds": []
-}
+[{"id":"1","group":"S01","shotSize":"CU","cameraMove":"推","durationSec":4,"descriptionZh":"…","dialogue":"","sfx":"","videoDesc":"","associateAssetIds":[]}]
 ```
 
-## 分镜规则
-1. **一个镜头一个动作**：不把多个动作塞进一镜
-2. **首镜定调**：第一镜确立空间、氛围、主体
-3. **情绪转折分镜**：每个情绪转折点断一次
-4. **运镜可执行**：只写能生成的运镜（推、拉、摇、移、跟、固定）
-5. **连续性**：相邻镜头的主体位置、光线、服装保持一致
-6. **时长合理**：对话 3-4s，动作 4-6s，环境 4-6s
-7. **S-Class 分组**：单组 ≤15s，场景变化处断开
+## 工作流程
+按情绪转折分镜 → 首镜定调 → 连续检查 → 控时长。
+
+## 约束与边界
+一镜一动作；运镜可执行；单组 ≤15s；相邻镜连续。
+
+## 示例
+正例与负例见 `examples/`：
+- `examples/input.md` — 黄金输入
+- `examples/output.md` — 期望输出（契约通过）
+- `examples/bad-output.md` — 禁止形态（契约失败）
+输出骨架见 `templates/`；片种与术语见 `references/`。
+
+## 检查清单
+- [ ] 行字段齐全
+- [ ] 时长合理
+- [ ] 连续性

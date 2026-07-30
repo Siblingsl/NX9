@@ -9,6 +9,7 @@ import { memo, useEffect, useState } from 'react';
 import { Trash2, RotateCcw, AlertTriangle, Loader2 } from 'lucide-react';
 import { api } from '../api/client';
 import { toastSuccess, toastError } from '../stores/toast';
+import { confirmDelete } from '../stores/confirm-dialog';
 
 interface TrashItem {
   id: string;
@@ -64,8 +65,7 @@ export const TrashPanel = memo(function TrashPanel({
     }
   };
 
-  const handlePurge = async (id: string) => {
-    if (!window.confirm('彻底删除后不可恢复，确认删除？')) return;
+  const purgeOne = async (id: string) => {
     setPurging(id);
     try {
       const res = await fetch(`/api/workspaces/${id}/purge`, { method: 'DELETE' });
@@ -79,10 +79,24 @@ export const TrashPanel = memo(function TrashPanel({
     }
   };
 
+  const handlePurge = async (id: string) => {
+    const ok = await confirmDelete({
+      title: '彻底删除此项目？',
+      description: '彻底删除后不可恢复，请确认。',
+    });
+    if (!ok) return;
+    await purgeOne(id);
+  };
+
   const handlePurgeAll = async () => {
-    if (!window.confirm(`将彻底删除 ${items.length} 个项目，不可恢复。确认？`)) return;
+    if (items.length === 0) return;
+    const ok = await confirmDelete({
+      title: `将彻底删除 ${items.length} 个项目？`,
+      description: '全部彻底删除后不可恢复，请确认。',
+    });
+    if (!ok) return;
     for (const item of [...items]) {
-      await handlePurge(item.id);
+      await purgeOne(item.id);
     }
   };
 
@@ -107,7 +121,7 @@ export const TrashPanel = memo(function TrashPanel({
         {items.length > 0 && (
           <button
             type="button"
-            onClick={handlePurgeAll}
+            onClick={() => void handlePurgeAll()}
             className="text-[9px] text-ink/40 hover:text-red-600 underline"
           >
             清空回收站

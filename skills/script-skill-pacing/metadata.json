@@ -1,0 +1,33 @@
+{
+  "name": "script-skill-pacing",
+  "title": "节奏构建",
+  "description": "定义 balanced/slow/fast 与单集目标时长；对齐平台；禁止镜头表。",
+  "version": "2.0.0",
+  "entry": "SKILL.md",
+  "author": "nx9",
+  "status": "stable",
+  "language": "zh-CN",
+  "updated_at": "2026-07-30T08:00:00Z",
+  "tags": [
+    "script",
+    "pacing",
+    "brief"
+  ],
+  "compatibility": {
+    "nx9": ">=0.1.0"
+  },
+  "dependencies": [],
+  "resources": {
+    "examples": "examples/",
+    "references": "references/",
+    "templates": "templates/",
+    "scripts": "scripts/",
+    "tests": "tests/"
+  },
+  "nx9": {
+    "promptId": "sys.script.skill.pacing",
+    "category": "script-desk",
+    "priority": "P0",
+    "lane": "builtin"
+  }
+}

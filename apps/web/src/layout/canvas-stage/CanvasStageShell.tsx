@@ -7,6 +7,7 @@ import {
 } from '@nx9/shared';
 import {
   Clapperboard,
+  BookMarked,
   FolderOpen,
   Home,
   Layers,
@@ -78,6 +79,7 @@ export interface CanvasStageShellProps {
   onRedo: () => void;
   onBatchRun: () => void;
   onOpenAssets: () => void;
+  onOpenSkills: () => void;
   onOpenTrash: () => void;
   onOpenSettings: () => void;
 }
@@ -104,6 +106,7 @@ export function CanvasStageShell({
   onRedo,
   onBatchRun,
   onOpenAssets,
+  onOpenSkills,
   onOpenTrash,
   onOpenSettings,
 }: CanvasStageShellProps) {
@@ -279,6 +282,10 @@ export function CanvasStageShell({
           <button type="button" className="cs-btn" onClick={onOpenAssets} title="素材库">
             <FolderOpen size={15} />
             <span className="hidden sm:inline">素材</span>
+          </button>
+          <button type="button" className="cs-btn" onClick={onOpenSkills} title="技能库">
+            <BookMarked size={15} />
+            <span className="hidden sm:inline">技能</span>
           </button>
           <button
             type="button"

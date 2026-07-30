@@ -7,6 +7,41 @@ export interface ProviderCredential {
   enabled?: boolean;
 }
 
+/** 一个保存的连接配置（可复用在各个模态下拉里选择） */
+export interface ModelConnection {
+  id: string;
+  label: string;
+  kind: 'llm' | 'image' | 'video' | 'audio';
+  provider: string;
+  apiKey?: string;
+  baseUrl?: string;
+  model?: string;
+  isActive?: boolean;
+  icon?: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+/** 内置主流官方模型连接预设 */
+export const BUILTIN_CONNECTION_PRESETS: Omit<ModelConnection, 'id' | 'apiKey' | 'isActive' | 'createdAt' | 'updatedAt'>[] = [
+  { label: 'OpenAI', kind: 'llm', provider: 'openai', baseUrl: 'https://api.openai.com/v1', model: 'gpt-4o-mini' },
+  { label: 'OpenAI (兼容出图)', kind: 'image', provider: 'openai', baseUrl: 'https://api.openai.com/v1', model: 'dall-e-3' },
+  { label: 'xAI Grok', kind: 'llm', provider: 'xai', baseUrl: 'https://api.x.ai/v1', model: 'grok-2' },
+  { label: 'xAI Grok Imagine', kind: 'video', provider: 'xai', baseUrl: 'https://api.x.ai/v1', model: 'grok-imagine-video' },
+  { label: 'Google Gemini', kind: 'llm', provider: 'gemini', baseUrl: 'https://generativelanguage.googleapis.com/v1beta', model: 'gemini-2.5-flash' },
+  { label: 'Google Gemini / Imagen', kind: 'image', provider: 'gemini', baseUrl: 'https://generativelanguage.googleapis.com/v1beta', model: 'imagen-4' },
+  { label: 'Anthropic Claude', kind: 'llm', provider: 'anthropic', baseUrl: 'https://api.anthropic.com/v1', model: 'claude-3-haiku' },
+  { label: 'DeepSeek', kind: 'llm', provider: 'deepseek', baseUrl: 'https://api.deepseek.com/v1', model: 'deepseek-chat' },
+  { label: 'Groq', kind: 'llm', provider: 'groq', baseUrl: 'https://api.groq.com/openai/v1', model: 'llama-3.1-8b-instant' },
+  { label: 'Together AI', kind: 'llm', provider: 'together', baseUrl: 'https://api.together.xyz/v1', model: 'meta-llama/Llama-3.1-8B-Instruct-Turbo' },
+  { label: 'OpenRouter', kind: 'llm', provider: 'openrouter', baseUrl: 'https://openrouter.ai/api/v1', model: 'openai/gpt-4o-mini' },
+  { label: 'Azure OpenAI', kind: 'llm', provider: 'azure', baseUrl: 'https://YOUR-RESOURCE.openai.azure.com', model: 'gpt-4o' },
+  { label: 'GrokGo 本地桥', kind: 'video', provider: 'grokgo', baseUrl: 'http://127.0.0.1:8787/v1', model: 'grok-imagine-video' },
+  { label: 'LocalAI', kind: 'llm', provider: 'localai', baseUrl: 'http://127.0.0.1:8080/v1', model: 'llama-3.1-8b' },
+  { label: 'Ollama', kind: 'llm', provider: 'ollama', baseUrl: 'http://127.0.0.1:11434/v1', model: 'qwen2.5:7b' },
+  { label: '通用 OpenAI 兼容 (TTS)', kind: 'audio', provider: 'openai', baseUrl: 'https://api.openai.com/v1', model: 'tts-1' },
+];
+
 export interface CloudTarget {
   id: string;
   label: string;
@@ -77,6 +112,8 @@ export interface AppSettings {
   assetLibraryPath?: string;
   advancedProviders?: ProviderCredential[];
   cloudTargets?: CloudTarget[];
+  /** 保存的连接配置列表（每个模态可以有多个连接，UI 下拉切换） */
+  connections?: ModelConnection[];
   preferences?: AppPreferences;
   /** Enable routing TTS to local Voicebox (http://127.0.0.1:17493) */
   voiceboxEnabled?: boolean;

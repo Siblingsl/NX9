@@ -297,89 +297,165 @@ export async function runCharacterSceneSkill(
   };
 }
 
+/** 将 LLM skill 返回的 patch 合并为 ScreenplayPackage 局部更新 */
+function coerceSkillPackagePatch(
+  pkg: ScreenplayPackage,
+  rawPatch: Record<string, unknown>,
+): Partial<ScreenplayPackage> {
+  const p = (
+    rawPatch.patch && typeof rawPatch.patch === 'object'
+      ? rawPatch.patch
+      : rawPatch
+  ) as Record<string, unknown>;
+
+  const out: Partial<ScreenplayPackage> = {};
+
+  if (p.brief && typeof p.brief === 'object') {
+    out.brief = { ...pkg.brief, ...(p.brief as ScreenplayPackage['brief']) };
+  } else {
+    const flatBrief: Record<string, unknown> = {};
+    for (const key of ['topic', 'logline', 'targetPlatforms', 'plotOutline', 'episodeCount', 'pacing', 'targetEpisodeDurationSec', 'hooks', 'title'] as const) {
+      if (key in p) flatBrief[key] = p[key];
+    }
+    if (Object.keys(flatBrief).length > 0) {
+      out.brief = { ...pkg.brief, ...flatBrief } as ScreenplayPackage['brief'];
+    }
+  }
+
+  if (p.bible && typeof p.bible === 'object') {
+    const b = p.bible as Record<string, unknown>;
+    out.bible = {
+      world: (b.world as ScreenplayPackage['bible']['world']) ?? pkg.bible.world,
+      characters: Array.isArray(b.characters)
+        ? (b.characters as ScreenplayPackage['bible']['characters'])
+        : pkg.bible.characters,
+      scenes: Array.isArray(b.scenes)
+        ? (b.scenes as ScreenplayPackage['bible']['scenes'])
+        : pkg.bible.scenes,
+    };
+  }
+
+  if (p.screenplay && typeof p.screenplay === 'object') {
+    out.screenplay = {
+      ...pkg.screenplay,
+      ...(p.screenplay as ScreenplayPackage['screenplay']),
+    };
+  }
+
+  if (Array.isArray(p.diagnostics)) {
+    out.diagnostics = p.diagnostics as ScreenplayPackage['diagnostics'];
+  }
+
+  return out;
+}
+
 export async function runScriptDeskSkill(
   skillId: ScriptDeskSkillId,
   pkg: ScreenplayPackage,
   userInstruction: string,
 ): Promise<{ assistantText: string; patch?: Partial<ScreenplayPackage> }> {
-  if (skillId === 'generate' || skillId === 'dialogue' || skillId === 'ingest') {
-    return runGenerateScreenplaySkill(pkg, userInstruction);
-  }
-  if (skillId === 'character' || skillId === 'world') {
-    return runCharacterSceneSkill(pkg, userInstruction);
-  }
-  // topic / plot / pacing / hooks / consistency → LLM skill endpoint
-  const llmSkills = new Set<ScriptDeskSkillId>(['topic', 'plot', 'pacing', 'hooks', 'consistency']);
-  if (llmSkills.has(skillId)) {
-    try {
-      const res = await api.scriptDeskChat({
-        skillId,
-        userInstruction: userInstruction.trim() || undefined,
-        package: pkg as unknown as Record<string, unknown>,
-      });
-      const rawPatch = (res.patch ?? {}) as Record<string, unknown>;
-      if (skillId === 'consistency') {
-        const llmDiags = (rawPatch.diagnostics ?? rawPatch) as Array<Record<string, unknown>> | undefined;
-        const localDiags = buildNarrativeConsistencyDiagnostics(pkg);
-        const checkItems = runConsistencyChecks(pkg);
-        const merged = [...localDiags];
-        for (const item of checkItems) {
-          const code = `consistency-${item.category}`;
-          if (!merged.some((d) => d.code === code && d.message === item.message)) {
-            merged.push({
-              level: item.severity === 'error' ? 'error' : 'warning',
-              code,
-              message: item.message,
-              entityId: item.target.id,
-            });
-          }
+  try {
+    const res = await api.scriptDeskChat({
+      skillId,
+      userInstruction: userInstruction.trim() || undefined,
+      package: pkg as unknown as Record<string, unknown>,
+    });
+    const rawPatch = (res.patch ?? {}) as Record<string, unknown>;
+
+    if (skillId === 'consistency') {
+      const llmDiags = (rawPatch.diagnostics
+        ?? (rawPatch as { patch?: { diagnostics?: unknown } }).patch?.diagnostics
+        ?? rawPatch) as Array<Record<string, unknown>> | undefined;
+      const localDiags = buildNarrativeConsistencyDiagnostics(pkg);
+      const checkItems = runConsistencyChecks(pkg);
+      const merged = [...localDiags];
+      for (const item of checkItems) {
+        const code = `consistency-${item.category}`;
+        if (!merged.some((d) => d.code === code && d.message === item.message)) {
+          merged.push({
+            level: item.severity === 'error' ? 'error' : 'warning',
+            code,
+            message: item.message,
+            entityId: item.target.id,
+          });
         }
-        if (Array.isArray(llmDiags)) {
-          for (const d of llmDiags) {
-            if (!merged.some((m) => m.code === d.code)) {
-              merged.push(d as unknown as import('@nx9/shared').ScreenplayDiagnostic);
-            }
-          }
-        }
-        return {
-          assistantText: res.explanation || `一致性检查完成（LLM + 规则 + 专检），诊断 ${merged.length} 条。`,
-          patch: { diagnostics: merged },
-        };
       }
-      // Merge into the existing package's brief so existing fields survive
-      return {
-        assistantText: res.explanation || 'LLM 已生成补丁，请确认后应用。',
-        patch: rawPatch ? { brief: { ...pkg.brief, ...((rawPatch.brief ?? rawPatch) as Record<string, unknown>) } } : undefined,
-      };
-    } catch (e) {
-      const fallback = String(e);
-      if (skillId === 'consistency') {
-        const localDiags = buildNarrativeConsistencyDiagnostics(pkg);
-        const checkItems = runConsistencyChecks(pkg);
-        const merged = [...localDiags];
-        for (const item of checkItems) {
-          const code = `consistency-${item.category}`;
-          if (!merged.some((d) => d.code === code && d.message === item.message)) {
-            merged.push({
-              level: item.severity === 'error' ? 'error' : 'warning',
-              code,
-              message: item.message,
-              entityId: item.target.id,
-            });
+      if (Array.isArray(llmDiags)) {
+        for (const d of llmDiags) {
+          if (d && typeof d === 'object' && 'message' in d && !merged.some((m) => m.code === d.code)) {
+            merged.push(d as unknown as import('@nx9/shared').ScreenplayDiagnostic);
           }
         }
-        return {
-          assistantText: `LLM 一致性检查失败，已降级为规则+专检：${fallback}`,
-          patch: { diagnostics: merged },
-        };
       }
       return {
-        assistantText: `LLM 调用失败，已降级为本地草稿：${fallback}`,
-        patch: userInstruction.trim()
-          ? { brief: { ...pkg.brief, topic: skillId === 'topic' ? userInstruction.trim() : pkg.brief.topic, plotOutline: skillId === 'plot' ? userInstruction.trim() : pkg.brief.plotOutline } }
-          : undefined,
+        assistantText: res.explanation || `一致性检查完成（LLM + 规则 + 专检），诊断 ${merged.length} 条。`,
+        patch: { diagnostics: merged },
       };
     }
+
+    const patch = coerceSkillPackagePatch(pkg, rawPatch);
+    return {
+      assistantText: res.explanation || 'LLM 已生成补丁，请确认后应用。',
+      patch: Object.keys(patch).length > 0 ? patch : undefined,
+    };
+  } catch (e) {
+    const fallback = String(e);
+    if (skillId === 'consistency') {
+      const localDiags = buildNarrativeConsistencyDiagnostics(pkg);
+      const checkItems = runConsistencyChecks(pkg);
+      const merged = [...localDiags];
+      for (const item of checkItems) {
+        const code = `consistency-${item.category}`;
+        if (!merged.some((d) => d.code === code && d.message === item.message)) {
+          merged.push({
+            level: item.severity === 'error' ? 'error' : 'warning',
+            code,
+            message: item.message,
+            entityId: item.target.id,
+          });
+        }
+      }
+      return {
+        assistantText: `LLM 一致性检查失败，已降级为规则+专检：${fallback}`,
+        patch: { diagnostics: merged },
+      };
+    }
+
+    // 生成类：旧路径兜底，避免完全不可用
+    if (skillId === 'generate' || skillId === 'dialogue' || skillId === 'ingest') {
+      try {
+        const local = await runGenerateScreenplaySkill(pkg, userInstruction);
+        return {
+          assistantText: `Skill 通道失败，已降级为成稿生成：${fallback}\n${local.assistantText}`,
+          patch: local.patch,
+        };
+      } catch {
+        /* fall through */
+      }
+    }
+    if (skillId === 'character' || skillId === 'world') {
+      try {
+        const local = await runCharacterSceneSkill(pkg, userInstruction);
+        return {
+          assistantText: `Skill 通道失败，已降级为资产抽取：${fallback}\n${local.assistantText}`,
+          patch: local.patch,
+        };
+      } catch {
+        /* fall through */
+      }
+    }
+
+    return {
+      assistantText: `LLM 调用失败，已降级为本地草稿：${fallback}`,
+      patch: userInstruction.trim()
+        ? {
+          brief: {
+            ...pkg.brief,
+            topic: skillId === 'topic' ? userInstruction.trim() : pkg.brief.topic,
+            plotOutline: skillId === 'plot' ? userInstruction.trim() : pkg.brief.plotOutline,
+          },
+        }
+        : undefined,
+    };
   }
-  return { assistantText: '未知技能' };
 }

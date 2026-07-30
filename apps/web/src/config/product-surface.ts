@@ -24,6 +24,7 @@ export const PRODUCT_SURFACE = {
   shortcuts: true,
   logPanel: true,
   assetLibraryModal: true,
+  skillLibraryModal: true,
 
   // —— 制作引导 ——
   /** 画布内步骤条：浮动玻璃 */

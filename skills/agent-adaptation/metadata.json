@@ -1,0 +1,32 @@
+{
+  "name": "agent-adaptation",
+  "title": "改编策略",
+  "description": "分析小说/大纲并输出改编策略：删改重点、集数、受众与风险。",
+  "version": "2.0.0",
+  "entry": "SKILL.md",
+  "author": "nx9",
+  "status": "stable",
+  "language": "zh-CN",
+  "updated_at": "2026-07-30T08:00:00Z",
+  "tags": [
+    "agent",
+    "adaptation"
+  ],
+  "compatibility": {
+    "nx9": ">=0.1.0"
+  },
+  "dependencies": [],
+  "resources": {
+    "examples": "examples/",
+    "references": "references/",
+    "templates": "templates/",
+    "scripts": "scripts/",
+    "tests": "tests/"
+  },
+  "nx9": {
+    "promptId": "sys.agent.adaptation",
+    "category": "agent",
+    "priority": "P0",
+    "lane": "builtin"
+  }
+}

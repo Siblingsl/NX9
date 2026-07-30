@@ -52,11 +52,13 @@ import { useWorkspaceCatalog } from '../stores/workspace-catalog';
 import { useWorkspaceDocument } from '../stores/workspace-document';
 import { useActivityLog } from '../stores/activity-log';
 import { toastSuccess } from '../stores/toast';
+import { confirmDelete } from '../stores/confirm-dialog';
 import { useFlowRuntime } from '../stores/flow-runtime';
 import { useAssetLibraryGenSettings } from '../stores/asset-library-gen-settings';
 import AssetLibraryGenSettings, { resolveAssetLibraryImageRequest } from './asset-library/AssetLibraryGenSettings';
 import { useLibraryAcl } from '../engine/use-library-acl';
 import { useBibleImageGen } from '../engine/use-bible-image-gen';
+import { getGenPack } from '../engine/gen-skill-runtime';
 import { runPictureGenJob } from '../engine/picture-gen-runner';
 import { cropCharacterSheetPanels } from '../engine/character-sheet-crop';
 import { AssetTrashPanel } from './AssetTrashPanel';
@@ -551,8 +553,12 @@ export function AssetLibraryModal() {
   );
 
   const handleDelete = useCallback(
-    (id: string) => {
-      if (!window.confirm('移入回收站？30 天内可恢复。')) return;
+    async (id: string) => {
+      const ok = await confirmDelete({
+        title: '移入回收站？',
+        description: '素材将移入回收站，30 天内可恢复。',
+      });
+      if (!ok) return;
       if (tab === 'character') {
         if (scope === 'private') removeCharacter(id);
         else publicRemoveCharacter(id);
@@ -785,7 +791,8 @@ export function AssetLibraryModal() {
 
       try {
         const refreshed = refreshCharacterPrompts(char);
-        const prompt = buildCharacterSheetGenerationPrompt(refreshed);
+        const masterPack = await getGenPack('gen-character-sheet-master');
+        const prompt = buildCharacterSheetGenerationPrompt(refreshed, masterPack);
         const { modelId, quality, aspectRatio, size, resolutionTier } = resolveAssetGenRequest('character-sheet', pictureNode);
         appendLog(`角色设定板参数 · 模型 ${modelId} · 清晰度 ${resolutionTier} · 质量 ${quality} · 比例 ${aspectRatio} · ${size}`);
         const refUrl =
@@ -1125,7 +1132,7 @@ export function AssetLibraryModal() {
                               type="button"
                               onClick={(e) => {
                                 e.stopPropagation();
-                                if (canDeleteItem) handleDelete(item.id);
+                                if (canDeleteItem) void handleDelete(item.id);
                               }}
                               className={`absolute right-1 top-1/2 -translate-y-1/2 p-1 rounded ${canDeleteItem ? 'text-ink/30 hover:text-red-600 opacity-0 group-hover:opacity-100' : 'text-ink/10 cursor-not-allowed'}`}
                             >

@@ -85,6 +85,11 @@ export class GatewayController {
     return this.gateway.probeProviders();
   }
 
+  @Post('models/list')
+  listModels(@Body() body: { baseUrl?: string; apiKey?: string; connectionId?: string }) {
+    return this.gateway.listConnectionModels(body?.baseUrl, body?.apiKey, body?.connectionId);
+  }
+
   @Post('fal')
   proxyFal(
     @Body() body: { model: string; input: Record<string, unknown> },

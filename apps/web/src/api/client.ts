@@ -1,8 +1,11 @@
 import type {
   AppSettings,
+  ConnectionStatus,
+  GenPromptPack,
   PublicLibraryPayload,
   SkillDetail,
   SkillSummary,
+  SkillValidationResult,
   StoryboardShot,
   UsageSummary,
   UserSummary,
@@ -85,6 +88,7 @@ export const api = {
 
   getSettings: () => request<AppSettings>('/api/settings'),
   getSettingsRaw: () => request<AppSettings>('/api/settings/raw'),
+  getConnectionStatus: () => request<ConnectionStatus>('/api/settings/connection-status'),
   saveSettings: (body: AppSettings) =>
     request<AppSettings>('/api/settings', { method: 'POST', body: JSON.stringify(body) }),
 
@@ -197,6 +201,20 @@ export const api = {
 
   listSkills: () => request<SkillSummary[]>('/api/skills'),
   readSkill: (id: string) => request<SkillDetail>(`/api/skills/${id}`),
+  listGenPacks: (ids?: string[]) =>
+    request<GenPromptPack[]>(
+      ids?.length ? `/api/skills/gen-packs?ids=${encodeURIComponent(ids.join(','))}` : '/api/skills/gen-packs',
+    ),
+  readGenPack: (id: string) => request<GenPromptPack>(`/api/skills/${id}/gen-pack`),
+  readSkillFile: (id: string, filePath: string) =>
+    request<{ content: string; path: string }>(
+      `/api/skills/${id}/files/${filePath.split('/').map(encodeURIComponent).join('/')}`,
+    ),
+  writeSkillFile: (id: string, filePath: string, content: string) =>
+    request<{ ok: boolean }>(
+      `/api/skills/${id}/files/${filePath.split('/').map(encodeURIComponent).join('/')}`,
+      { method: 'PUT', body: JSON.stringify({ content }) },
+    ),
   createSkill: (body: { id: string; name?: string; description?: string }) =>
     request<SkillSummary>('/api/skills', { method: 'POST', body: JSON.stringify(body) }),
   saveSkill: (id: string, content: string) =>
@@ -204,8 +222,19 @@ export const api = {
       method: 'PUT',
       body: JSON.stringify({ content }),
     }),
+  updateSkillMeta: (id: string, metadata: Record<string, unknown>) =>
+    request<{ ok: boolean }>(`/api/skills/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify({ metadata }),
+    }),
   deleteSkill: (id: string) =>
     request<{ ok: boolean }>(`/api/skills/${id}`, { method: 'DELETE' }),
+  validateSkill: (id: string) =>
+    request<SkillValidationResult>(`/api/skills/${id}/validate`, { method: 'POST' }),
+  resetSkill: (id: string) =>
+    request<{ ok: boolean }>(`/api/skills/${id}/reset`, { method: 'POST' }),
+  reindexSkills: () =>
+    request<{ ok: boolean }>('/api/skills/reindex', { method: 'POST' }),
 
   agentShotScript: (text: string) =>
     request<{
@@ -562,6 +591,17 @@ export const api = {
       method?: string;
     }>('/api/montage/depth-pass', { method: 'POST', body: JSON.stringify(body) }),
 
+  convertDepthVideo: (body: { sourceUrl: string; maxDurationSec?: number }) =>
+    request<{
+      ok: boolean;
+      status: 'done' | 'failed';
+      depthVideoUrl?: string;
+      sourceUrl?: string;
+      message?: string;
+      method?: string;
+      meta?: { durationSec: number; maxDurationSec: number; truncated: boolean };
+    }>('/api/montage/depth-video', { method: 'POST', body: JSON.stringify(body) }),
+
   ffmpegStatus: () => request<{ available: boolean }>('/api/montage/ffmpeg'),
 
   listAssets: () =>
@@ -753,6 +793,12 @@ export const api = {
         message?: string;
       }[];
     }>('/api/gateway/providers/probe', { method: 'POST' }),
+
+  listConnectionModels: (baseUrl: string, apiKey: string, connectionId?: string) =>
+    request<{ models: string[]; baseUrl: string }>('/api/gateway/models/list', {
+      method: 'POST',
+      body: JSON.stringify({ baseUrl, apiKey, connectionId }),
+    }),
 
   listUsers: () => request<UserSummary[]>('/api/users'),
   bootstrapUser: () => request<UserSummary>('/api/users/bootstrap'),

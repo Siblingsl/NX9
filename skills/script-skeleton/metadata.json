@@ -1,0 +1,32 @@
+{
+  "name": "script-skeleton",
+  "title": "故事骨架",
+  "description": "分析文本输出三幕结构、分集数与付费/悬念卡点，供改编前置。",
+  "version": "2.0.0",
+  "entry": "SKILL.md",
+  "author": "nx9",
+  "status": "stable",
+  "language": "zh-CN",
+  "updated_at": "2026-07-30T08:00:00Z",
+  "tags": [
+    "script",
+    "structure"
+  ],
+  "compatibility": {
+    "nx9": ">=0.1.0"
+  },
+  "dependencies": [],
+  "resources": {
+    "examples": "examples/",
+    "references": "references/",
+    "templates": "templates/",
+    "scripts": "scripts/",
+    "tests": "tests/"
+  },
+  "nx9": {
+    "promptId": "sys.script.skill.skeleton",
+    "category": "agent",
+    "priority": "P0",
+    "lane": "builtin"
+  }
+}

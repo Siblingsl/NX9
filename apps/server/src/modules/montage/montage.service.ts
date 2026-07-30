@@ -716,6 +716,122 @@ export class MontageService {
     };
   }
 
+  /**
+   * 源动作视频 → 灰度深度视频（动作锁）。
+   * 可复用 API：本版由参考板深度槽调用；日后 depth-video 节点须共用。
+   */
+  async convertDepthVideo(body: {
+    sourceUrl: string;
+    maxDurationSec?: number;
+  }): Promise<{
+    ok: boolean;
+    status: 'done' | 'failed';
+    depthVideoUrl?: string;
+    sourceUrl?: string;
+    message?: string;
+    method?: string;
+    meta?: {
+      durationSec: number;
+      maxDurationSec: number;
+      truncated: boolean;
+    };
+  }> {
+    const maxDurationSec = Math.min(Math.max(Number(body.maxDurationSec) || 60, 1), 60);
+    const sourcePath = resolveMediaUrl(body.sourceUrl);
+    if (!sourcePath || !existsSync(sourcePath)) {
+      return { ok: false, status: 'failed', message: '无法读取源视频，请重新上传' };
+    }
+
+    const hasFfmpeg = await this.checkFfmpeg();
+    if (!hasFfmpeg) {
+      return {
+        ok: false,
+        status: 'failed',
+        message: '未检测到 FFmpeg，无法转换深度视频。请安装 FFmpeg 后重试。',
+      };
+    }
+
+    const probed = await this.probeDuration(body.sourceUrl);
+    const durationSec = probed.ok ? probed.durationSec : 0;
+    if (durationSec > 0 && durationSec > maxDurationSec + 0.5) {
+      // 仍允许转换，但截断到上限并告知
+    }
+
+    if (!existsSync(PATHS.exports)) mkdirSync(PATHS.exports, { recursive: true });
+    const stamp = Date.now();
+    const outName = `depth-video-${stamp}.mp4`;
+    const outPath = join(PATHS.exports, outName);
+
+    try {
+      await this.runDepthVideoFfmpeg(sourcePath, outPath, maxDurationSec);
+    } catch (e) {
+      return {
+        ok: false,
+        status: 'failed',
+        message: `深度视频转换失败：${String(e).slice(0, 240)}`,
+      };
+    }
+
+    const truncated = durationSec > maxDurationSec;
+    return {
+      ok: true,
+      status: 'done',
+      depthVideoUrl: `/media/exports/${outName}`,
+      sourceUrl: body.sourceUrl,
+      method: 'ffmpeg-luma-depth',
+      meta: {
+        durationSec: truncated ? maxDurationSec : durationSec || maxDurationSec,
+        maxDurationSec,
+        truncated,
+      },
+      message: truncated
+        ? `已截断至 ${maxDurationSec}s（源片约 ${Math.round(durationSec)}s）`
+        : undefined,
+    };
+  }
+
+  private runDepthVideoFfmpeg(
+    sourcePath: string,
+    outPath: string,
+    maxDurationSec: number,
+  ): Promise<void> {
+    return new Promise((resolve, reject) => {
+      // 灰度 + 对比度提升，近似「深度/轮廓」动作控制片；去音频
+      const vf = 'format=gray,eq=contrast=1.35:brightness=0.02,hqdn3d=1.5:1.5:3:3';
+      const args = [
+        '-y',
+        '-i',
+        sourcePath,
+        '-t',
+        String(maxDurationSec),
+        '-vf',
+        vf,
+        '-an',
+        '-c:v',
+        'libx264',
+        '-preset',
+        'veryfast',
+        '-crf',
+        '23',
+        '-pix_fmt',
+        'yuv420p',
+        '-movflags',
+        '+faststart',
+        outPath,
+      ];
+      const proc = spawn('ffmpeg', args);
+      let stderr = '';
+      proc.stderr.on('data', (d) => {
+        stderr += String(d);
+      });
+      proc.on('error', reject);
+      proc.on('close', (code) => {
+        if (code === 0) resolve();
+        else reject(new Error(stderr.slice(-500) || `ffmpeg depth exit ${code}`));
+      });
+    });
+  }
+
   async transcribeAudio(
     sourceUrl: string,
     language?: string,

@@ -1,0 +1,33 @@
+{
+  "name": "script-skill-generate",
+  "title": "分集成稿生成",
+  "description": "根据 brief/bible 生成场次+动作+对白分集正文；禁 imagePrompt/镜头表；对齐 bible。",
+  "version": "2.0.0",
+  "entry": "SKILL.md",
+  "author": "nx9",
+  "status": "stable",
+  "language": "zh-CN",
+  "updated_at": "2026-07-30T08:00:00Z",
+  "tags": [
+    "script",
+    "generate",
+    "screenplay"
+  ],
+  "compatibility": {
+    "nx9": ">=0.1.0"
+  },
+  "dependencies": [],
+  "resources": {
+    "examples": "examples/",
+    "references": "references/",
+    "templates": "templates/",
+    "scripts": "scripts/",
+    "tests": "tests/"
+  },
+  "nx9": {
+    "promptId": "sys.script.skill.generate",
+    "category": "script-desk",
+    "priority": "P0",
+    "lane": "builtin"
+  }
+}

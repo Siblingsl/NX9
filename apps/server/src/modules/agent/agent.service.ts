@@ -1,6 +1,7 @@
-import { Injectable, StreamableFile } from '@nestjs/common';
+import { Injectable, Logger, StreamableFile } from '@nestjs/common';
 import { BadRequestException, InternalServerErrorException, ServiceUnavailableException } from '@nestjs/common';
 import { GatewayService } from '../gateway/gateway.service';
+import { SkillsService } from '../skills/skills.service';
 import * as zlib from 'zlib';
 import type {
   ScreenplayPackage,
@@ -20,6 +21,7 @@ import type {
   ScriptBreakdownStoryAnalysis,
   ScriptBreakdownCharacterProfile,
   ScriptBreakdownAct,
+  ScriptDeskSkillId,
 } from '@nx9/shared';
 import {
   scenesToStoryboardShots,
@@ -32,6 +34,10 @@ import {
   splitLongEpisodeText,
   splitSourceIntoEpisodeChunks,
   validateScriptBreakdownPayload,
+  resolveScriptDeskSkillName,
+  resolveAgentSkillName,
+  DEFAULT_SCRIPT_DESK_SKILL_PROMPTS,
+  DEFAULT_SCRIPT_BREAKDOWN_PROMPTS,
 } from '@nx9/shared';
 
 export interface AgentShotScriptRow {
@@ -335,7 +341,17 @@ export function normalizeProductionEpisode(args: {
 
 @Injectable()
 export class AgentService {
-  constructor(private readonly gateway: GatewayService) {}
+  private readonly logger = new Logger(AgentService.name);
+
+  constructor(
+    private readonly gateway: GatewayService,
+    private readonly skills: SkillsService,
+  ) {}
+
+  /** 统一从独立 Skill 项目加载 system；骨架占位时叠加 legacy 兼容契约 */
+  private systemFrom(skillName: string, legacyFallback: string): string {
+    return this.skills.resolveSystemPrompt(skillName, legacyFallback);
+  }
 
   private async llmJsonObject(system: string, user: string, userId?: string) {
     const res = (await this.gateway.proxyLlm({
@@ -360,12 +376,15 @@ export class AgentService {
       throw new BadRequestException('请输入至少 20 字的剧本/对白文本');
     }
 
-    const system = [
-      '你是剧本对白提取器。将用户提供的剧本/小说文本中所有对白行提取出来，标注说话人。',
-      '输出 JSON 数组：[{"speaker":"角色名","text":"对白内容","emotion":" optional情感标签"}]',
-      'speaker 和 text 字段必须非空。不包含旁白/叙述。至少提取 3 行。',
-      '只输出 JSON，不要 markdown。',
-    ].join('\n');
+    const system = this.systemFrom(
+      resolveAgentSkillName('dialogue-extract'),
+      [
+        '你是剧本对白提取器。将用户提供的剧本/小说文本中所有对白行提取出来，标注说话人。',
+        '输出 JSON 数组：[{"speaker":"角色名","text":"对白内容","emotion":" optional情感标签"}]',
+        'speaker 和 text 字段必须非空。不包含旁白/叙述。至少提取 3 行。',
+        '只输出 JSON，不要 markdown。',
+      ].join('\n'),
+    );
 
     const res = (await this.gateway.proxyLlm(
       {
@@ -421,13 +440,16 @@ export class AgentService {
       throw new BadRequestException('请输入至少 20 字的小说/章节文本');
     }
 
-    const system = [
-      '你是短剧分镜编剧。将用户提供的小说/章节改写为分镜脚本行。',
-      '遵循：保留核心情节与角色关系；将叙述转为可视化画面描写；用对白推动情节；不写镜头语言（景别/运镜由系统决定）。',
-      '每行一个镜头，时长优先 2-3 秒，一般不超过 4 秒。',
-      '仅输出 JSON 对象：{"rows":[{"action":"画面/动作描述","dialogue":"对白，无则空串","durationSec":数字(2-30),"shotType":"ECU|CU|MS|FS|WS|OTS"}]}。',
-      '至少生成 3 行。不要输出任何解释文字。',
-    ].join('\n');
+    const system = this.systemFrom(
+      resolveAgentSkillName('shot-script'),
+      [
+        '你是短剧分镜编剧。将用户提供的小说/章节改写为分镜脚本行。',
+        '遵循：保留核心情节与角色关系；将叙述转为可视化画面描写；用对白推动情节；不写镜头语言（景别/运镜由系统决定）。',
+        '每行一个镜头，时长优先 2-3 秒，一般不超过 4 秒。',
+        '仅输出 JSON 对象：{"rows":[{"action":"画面/动作描述","dialogue":"对白，无则空串","durationSec":数字(2-30),"shotType":"ECU|CU|MS|FS|WS|OTS"}]}。',
+        '至少生成 3 行。不要输出任何解释文字。',
+      ].join('\n'),
+    );
 
     const res = (await this.gateway.proxyLlm(
       {
@@ -471,12 +493,15 @@ export class AgentService {
     sourceText: string,
     userId?: string,
   ): Promise<{ ok: true; skeleton: StorySkeleton }> {
-    const system = [
-      '你是故事结构分析师。分析用户提供的文本，输出 JSON 格式的故事骨架。',
-      'JSON 格式: {"title":"故事标题","logline":"一句话梗概","acts":[{"name":"第一幕","beats":["情节点1","情节点2"]}],"episodeCount":数字,"hookPoints":["卡点1","卡点2"]}',
-      'episodeCount 根据内容长度推断，短篇≤3，中篇 6-12，长篇 12-24。',
-      '每幕 2-5 个节拍。只输出 JSON。',
-    ].join('\n');
+    const system = this.systemFrom(
+      resolveAgentSkillName('skeleton'),
+      [
+        '你是故事结构分析师。分析用户提供的文本，输出 JSON 格式的故事骨架。',
+        'JSON 格式: {"title":"故事标题","logline":"一句话梗概","acts":[{"name":"第一幕","beats":["情节点1","情节点2"]}],"episodeCount":数字,"hookPoints":["卡点1","卡点2"]}',
+        'episodeCount 根据内容长度推断，短篇≤3，中篇 6-12，长篇 12-24。',
+        '每幕 2-5 个节拍。只输出 JSON。',
+      ].join('\n'),
+    );
 
     const res = (await this.gateway.proxyLlm(
       {
@@ -506,13 +531,16 @@ export class AgentService {
     sourceText: string,
     userId?: string,
   ): Promise<{ ok: true; table: StoryboardTableRow[] }> {
-    const system = [
-      '你是分镜表生成器。将用户提供的文本转换为分镜表。',
-      '输出 JSON 数组，每行一个镜头。',
-      '格式: [{"id":"唯一ID","group":"S01","shotSize":"CU|MS|FS|WS","cameraMove":"推|拉|摇|移|固定","durationSec":2-4,"descriptionZh":"画面描述","dialogue":"对白","sfx":"音效","videoDesc":"视频动态描述","associateAssetIds":[]}]',
-      '每个镜头 durationSec 优先 2-3 秒（默认 3），一般不超过 4 秒；单组 ≤12 秒。',
-      '至少生成 5 个镜头。只输出 JSON 数组。',
-    ].join('\n');
+    const system = this.systemFrom(
+      resolveAgentSkillName('storyboard-table'),
+      [
+        '你是分镜表生成器。将用户提供的文本转换为分镜表。',
+        '输出 JSON 数组，每行一个镜头。',
+        '格式: [{"id":"唯一ID","group":"S01","shotSize":"CU|MS|FS|WS","cameraMove":"推|拉|摇|移|固定","durationSec":2-4,"descriptionZh":"画面描述","dialogue":"对白","sfx":"音效","videoDesc":"视频动态描述","associateAssetIds":[]}]',
+        '每个镜头 durationSec 优先 2-3 秒（默认 3），一般不超过 4 秒；单组 ≤12 秒。',
+        '至少生成 5 个镜头。只输出 JSON 数组。',
+      ].join('\n'),
+    );
 
     const res = (await this.gateway.proxyLlm(
       {
@@ -565,7 +593,21 @@ export class AgentService {
     const sourceText = String(body.sourceText ?? '').trim();
     if (sourceText.length < 20) throw new BadRequestException('请输入至少 20 字的小说、剧本或大纲');
     const config = normalizeScriptBreakdownConfig(body.config);
-    const prompts = normalizeScriptBreakdownPrompts(body.prompts);
+    const clientPrompts = normalizeScriptBreakdownPrompts(body.prompts);
+    const prompts: ScriptBreakdownPromptTemplates = {
+      episodePlannerSystem: body.prompts?.episodePlannerSystem?.trim()
+        ? clientPrompts.episodePlannerSystem
+        : this.systemFrom(
+          resolveAgentSkillName('breakdown-planner'),
+          DEFAULT_SCRIPT_BREAKDOWN_PROMPTS.episodePlannerSystem,
+        ),
+      episodeBreakdownSystem: body.prompts?.episodeBreakdownSystem?.trim()
+        ? clientPrompts.episodeBreakdownSystem
+        : this.systemFrom(
+          resolveAgentSkillName('breakdown-shots'),
+          DEFAULT_SCRIPT_BREAKDOWN_PROMPTS.episodeBreakdownSystem,
+        ),
+    };
     const chunks = splitSourceIntoEpisodeChunks(sourceText, config);
     if (chunks.length === 0) throw new BadRequestException('无法从原文规划分集');
     const diagnostics: ScriptBreakdownDiagnostic[] = [];
@@ -731,11 +773,14 @@ export class AgentService {
     sourceText: string,
     userId?: string,
   ): Promise<{ ok: true; adaptation: AdaptationStrategy }> {
-    const system = [
-      '你是改编策略师。分析用户提供的小说/大纲文本，输出改编策略。',
-      'JSON 格式: {"sourceType":"novel|outline|script","tone":"保留/轻松/悬疑/热血","pacing":"fast|medium|slow","omitRules":["可省略的支线"],"emphasis":["需要强化的情节"]}',
-      '只输出 JSON。',
-    ].join('\n');
+    const system = this.systemFrom(
+      resolveAgentSkillName('adaptation'),
+      [
+        '你是改编策略师。分析用户提供的小说/大纲文本，输出改编策略。',
+        'JSON 格式: {"sourceType":"novel|outline|script","tone":"保留/轻松/悬疑/热血","pacing":"fast|medium|slow","omitRules":["可省略的支线"],"emphasis":["需要强化的情节"]}',
+        '只输出 JSON。',
+      ].join('\n'),
+    );
     const res = (await this.gateway.proxyLlm({
       model: 'gpt-4o-mini',
       response_format: { type: 'json_object' },
@@ -754,11 +799,14 @@ export class AgentService {
     sourceText: string,
     userId?: string,
   ): Promise<{ ok: true; script: string }> {
-    const system = [
-      '你是编剧。根据改编策略和原文，写出分集剧本。',
-      '格式：每集标注 "第 X 集"，每场标注场景标题和内容。包含对白和动作描写。',
-      '输出纯文本，不要 JSON。',
-    ].join('\n');
+    const system = this.systemFrom(
+      resolveAgentSkillName('screenplay'),
+      [
+        '你是编剧。根据改编策略和原文，写出分集剧本。',
+        '格式：每集标注 "第 X 集"，每场标注场景标题和内容。包含对白和动作描写。',
+        '输出纯文本，不要 JSON。',
+      ].join('\n'),
+    );
     const res = (await this.gateway.proxyLlm({
       model: 'gpt-4o-mini',
       messages: [
@@ -775,11 +823,14 @@ export class AgentService {
     sourceText: string,
     userId?: string,
   ): Promise<{ ok: true; plan: string }> {
-    const system = [
-      '你是导演。根据剧本制定导演规划。',
-      '包含：场景安排、镜头风格、角色走位、关键视觉元素。',
-      '输出纯文本 markdown。',
-    ].join('\n');
+    const system = this.systemFrom(
+      resolveAgentSkillName('director-plan'),
+      [
+        '你是导演。根据剧本制定导演规划。',
+        '包含：场景安排、镜头风格、角色走位、关键视觉元素。',
+        '输出纯文本 markdown。',
+      ].join('\n'),
+    );
     const res = (await this.gateway.proxyLlm({
       model: 'gpt-4o-mini',
       messages: [
@@ -796,11 +847,14 @@ export class AgentService {
     sourceText: string,
     userId?: string,
   ): Promise<{ ok: true; assets: { characters: (Partial<CharacterProfile> & { bible?: import('@nx9/shared').CharacterBible })[]; locations: string[] } }> {
-    const system = [
-      '你是剧本资产抽取器。从剧本/小说文本中提取角色和场景，并为每个角色填写六层设定。',
-      'JSON 格式: {"characters":[{"name":"角色名","archetype":"主角/配角/反派","traits":"性格特征","description":"外观描述","bible":{"identity":"身份","appearance":"外貌","personality":"性格","background":"背景","voice":"声音","relationships":"关系"}}],"locations":["场景1","场景2"]}',
-      'bible 六层字段必须填写。只输出 JSON。',
-    ].join('\n');
+    const system = this.systemFrom(
+      resolveAgentSkillName('extract-assets'),
+      [
+        '你是剧本资产抽取器。从剧本/小说文本中提取角色和场景，并为每个角色填写六层设定。',
+        'JSON 格式: {"characters":[{"name":"角色名","archetype":"主角/配角/反派","traits":"性格特征","description":"外观描述","bible":{"identity":"身份","appearance":"外貌","personality":"性格","background":"背景","voice":"声音","relationships":"关系"}}],"locations":["场景1","场景2"]}',
+        'bible 六层字段必须填写。只输出 JSON。',
+      ].join('\n'),
+    );
     const res = (await this.gateway.proxyLlm({
       model: 'gpt-4o-mini',
       response_format: { type: 'json_object' },
@@ -819,11 +873,14 @@ export class AgentService {
     sourceText: string,
     userId?: string,
   ): Promise<{ ok: true; events: { chapter: number; title: string; summary: string; characters: string[] }[] }> {
-    const system = [
-      '你是章节事件提取器。分析长篇小说文本，提取每章关键事件。',
-      'JSON 格式: [{"chapter":1,"title":"章节标题","summary":"事件摘要","characters":["出场角色"]}]',
-      '只输出 JSON 数组。每章不超过 100 字摘要。',
-    ].join('\n');
+    const system = this.systemFrom(
+      resolveAgentSkillName('novel-events'),
+      [
+        '你是章节事件提取器。分析长篇小说文本，提取每章关键事件。',
+        'JSON 格式: [{"chapter":1,"title":"章节标题","summary":"事件摘要","characters":["出场角色"]}]',
+        '只输出 JSON 数组。每章不超过 100 字摘要。',
+      ].join('\n'),
+    );
     const res = (await this.gateway.proxyLlm({
       model: 'gpt-4o-mini',
       response_format: { type: 'json_object' },
@@ -863,12 +920,15 @@ export class AgentService {
       return { ok: true, scenes: records };
     }
 
-    const system = [
-      '你是剧本场次拆分器。将用户提供的剧本/小说文本按场次拆分输出。',
-      '输出 JSON 数组，每个元素对应一场。',
-      '格式: [{"id":"唯一ID","sceneCode":"1-1","episode":1,"location":"地点","interior":"内|外","timeOfDay":"日|夜","characters":["角色名"],"summary":"本场摘要","beatCount":3}]',
-      '至少输出 2 场。只输出 JSON 数组。',
-    ].join('\n');
+    const system = this.systemFrom(
+      resolveAgentSkillName('scene-split'),
+      [
+        '你是剧本场次拆分器。将用户提供的剧本/小说文本按场次拆分输出。',
+        '输出 JSON 数组，每个元素对应一场。',
+        '格式: [{"id":"唯一ID","sceneCode":"1-1","episode":1,"location":"地点","interior":"内|外","timeOfDay":"日|夜","characters":["角色名"],"summary":"本场摘要","beatCount":3}]',
+        '至少输出 2 场。只输出 JSON 数组。',
+      ].join('\n'),
+    );
 
     const res = (await this.gateway.proxyLlm({
       model: 'gpt-4o-mini',
@@ -913,11 +973,14 @@ export class AgentService {
       ? input.scenes.map((s) => `[${s.sceneCode}] ${s.location}（${s.interior} ${s.timeOfDay}）- ${s.summary}`).join('\n')
       : input.sourceText ?? '';
 
-    const system = [
-      '你是场景环境设定师。为每个场次生成环境卡。',
-      '输出 JSON 数组，每个元素: {"id":"唯一ID","sceneCode":"1-1","name":"场景名","descriptionZh":"中文描述","lighting":"光线描述","props":["道具1","道具2"],"era":"时代"}',
-      '至少生成 1 条。只输出 JSON 数组。',
-    ].join('\n');
+    const system = this.systemFrom(
+      resolveAgentSkillName('environments'),
+      [
+        '你是场景环境设定师。为每个场次生成环境卡。',
+        '输出 JSON 数组，每个元素: {"id":"唯一ID","sceneCode":"1-1","name":"场景名","descriptionZh":"中文描述","lighting":"光线描述","props":["道具1","道具2"],"era":"时代"}',
+        '至少生成 1 条。只输出 JSON 数组。',
+      ].join('\n'),
+    );
 
     const res = (await this.gateway.proxyLlm({
       model: 'gpt-4o-mini',
@@ -981,10 +1044,23 @@ export class AgentService {
     body: { skillId: string; userInstruction?: string; package: Record<string, unknown> },
     userId?: string,
   ): Promise<{ ok: true; patch: Record<string, unknown>; explanation: string }> {
-    const system = this.scriptSkillSystem(body.skillId, body.package);
+    const chipId = (body.skillId ?? '').trim();
+    const skillName = resolveScriptDeskSkillName(chipId);
+    const title = String((body.package?.brief as Record<string, unknown> | undefined)?.title ?? '').trim();
+    const legacy =
+      DEFAULT_SCRIPT_DESK_SKILL_PROMPTS[chipId as ScriptDeskSkillId]
+      ?? '输出 JSON：{ "patch": {}, "explanation": "" }';
+    const system = [
+      this.systemFrom(skillName, legacy),
+      title ? `当前剧本标题：${title}` : '',
+      '必须输出 JSON 对象，含 patch 与 explanation 字段；patch 仅包含需要更新的 ScreenplayPackage 片段。',
+    ].filter(Boolean).join('\n\n');
+
+    this.logger.debug(`scriptSkill chip=${chipId} → skill=${skillName}`);
+
     const userParts = [
       body.userInstruction ? `用户指令：${body.userInstruction}` : '',
-      `当前剧本包：${JSON.stringify(body.package, null, 2).slice(0, 4000)}`,
+      `当前剧本包：${JSON.stringify(body.package, null, 2).slice(0, 8000)}`,
     ].filter(Boolean).join('\n\n');
     const res = (await this.gateway.proxyLlm({
       model: 'gpt-4o-mini',
@@ -1127,36 +1203,5 @@ export class AgentService {
     chunks.push(eocd);
 
     return Buffer.concat(chunks);
-  }
-
-  private scriptSkillSystem(skillId: string, pkg: Record<string, unknown>): string {
-    const title = String((pkg?.brief as Record<string, unknown> | undefined)?.title ?? '').trim();
-    const maps: Record<string, string> = {
-      topic: `你是选题策划专家。分析当前剧本包（标题：${title}）和用户指令，输出 JSON：
-{
-  "patch": { "brief": { "topic": "选题方向", "logline": "一句话梗概", "targetPlatforms": ["平台"] } },
-  "explanation": "说明"
-}
-要求：topic 有深度、logline 精炼。不要输出镜头表。`,
-      plot: `你是剧情构建专家。分析当前剧本包和用户指令，输出 JSON：
-{
-  "patch": { "brief": { "plotOutline": "情节大纲", "episodeCount": 集数 } },
-  "explanation": "说明"
-}
-要求：plotOutline 有起承转合。不要输出镜头表。`,
-      pacing: `你是节奏构建专家。分析当前剧本包，输出 JSON：
-{
-  "patch": { "brief": { "pacing": "balanced|slow|fast", "targetEpisodeDurationSec": 90 } },
-  "explanation": "说明推荐的节奏及理由"
-}
-不要输出镜头表。`,
-      hooks: `你是爆点构建专家。分析当前剧本包和用户指令，输出 JSON：
-{
-  "patch": { "brief": { "hooks": ["爆点1", "爆点2"] } },
-  "explanation": "说明每个钩子的作用"
-}
-要求：hooks 有冲击力、具体、可落成画面。不要输出镜头表。`,
-    };
-    return maps[skillId] ?? '输出 JSON：{ "patch": {}, "explanation": "" }';
   }
 }

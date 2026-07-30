@@ -96,7 +96,7 @@ export function buildConstrainedPrompt(
   constraints: ReferenceConstraint | null,
   template: CompositionTemplate | undefined,
 ): { prompt: string; blocked: boolean; reason?: string } {
-  if (constraints?.enforce && !constraints.style && !constraints.palette) {
+  if (constraints?.enforce && !constraints.style && !constraints.palette && !(constraints.assetUrls?.length)) {
     return { prompt: basePrompt, blocked: true, reason: '参考板为强约束模式，但未设置任何约束条件' };
   }
   let prompt = basePrompt;

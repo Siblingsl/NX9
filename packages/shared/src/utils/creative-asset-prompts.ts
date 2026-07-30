@@ -1,4 +1,5 @@
 import { buildCharacterMasterSheetPrompt, CHARACTER_SHEET_MASTER_PROMPT_TEMPLATE } from './character-sheet-master';
+import type { GenPromptPack } from './gen-skill-pack';
 import type { BacklotWorkspaceItem } from '../data/backlot-templates';
 import type { CharacterProfile } from '../types/character';
 import type {
@@ -120,28 +121,34 @@ export function buildCharacterVideoPrompt(c: CharacterProfile): string {
   );
 }
 
-export function buildCharacterSheetGenerationPrompt(c: CharacterProfile): string {
+export function buildCharacterSheetGenerationPrompt(
+  c: CharacterProfile,
+  pack?: GenPromptPack | null,
+): string {
   const ext = getCharacterCreative(c);
   const refHint = [ext.fullSheetUrl, c.referenceImageUrl, ext.frontViewUrl].find((u) => u?.trim());
   const personality = ext.personalityText || c.bible?.personality || '';
   const role = ext.identityRole || ext.occupation || c.bible?.identity || '';
   const appearance = c.bible?.appearance || ext.appearanceDetails?.specialMarks || c.consistencyPrompt || '';
-  return buildCharacterMasterSheetPrompt({
-    characterName: c.name,
-    characterDescription: c.descriptionZh || c.consistencyPrompt || appearance,
-    styleMode: (ext.sheetStyleMode as any) || 'semi-realistic',
-    gender: ext.gender || undefined,
-    age: ext.age || undefined,
-    bodyType: ext.bodyType || undefined,
-    styleKeywords: ext.styleKeywords || undefined,
-    role,
-    personality,
-    coreTheme: ext.coreTheme || undefined,
-    costumeLock: ext.costumePrompt || ext.costumeLabel || undefined,
-    appearanceLock: appearance,
-    forbidden: ext.consistency?.negativePrompt || undefined,
-    hasReferenceImage: Boolean(refHint),
-  });
+  return buildCharacterMasterSheetPrompt(
+    {
+      characterName: c.name,
+      characterDescription: c.descriptionZh || c.consistencyPrompt || appearance,
+      styleMode: (ext.sheetStyleMode as any) || 'semi-realistic',
+      gender: ext.gender || undefined,
+      age: ext.age || undefined,
+      bodyType: ext.bodyType || undefined,
+      styleKeywords: ext.styleKeywords || undefined,
+      role,
+      personality,
+      coreTheme: ext.coreTheme || undefined,
+      costumeLock: ext.costumePrompt || ext.costumeLabel || undefined,
+      appearanceLock: appearance,
+      forbidden: ext.consistency?.negativePrompt || undefined,
+      hasReferenceImage: Boolean(refHint),
+    },
+    pack,
+  );
 }
 
 export function buildCharacterNegativePrompt(c: CharacterProfile): string {

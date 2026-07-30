@@ -29,7 +29,8 @@ function ImageUploadSlot({
   const [uploading, setUploading] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
   const isAudio = accept.startsWith('audio');
-  const isImage = Boolean(url && !isAudio);
+  const isVideo = accept.startsWith('video') || Boolean(url && /\.(mp4|webm|mov)(\?|$)/i.test(url));
+  const isImage = Boolean(url && !isAudio && !isVideo);
   const items = useMemo<ImageLightboxItem[]>(() => {
     if (gallery?.length) return gallery.filter((g) => g.url);
     if (url && isImage) return [{ url, label }];
@@ -77,6 +78,16 @@ function ImageUploadSlot({
               disabled={uploading}
             >
               音频已上传
+            </button>
+          ) : isVideo ? (
+            <button
+              type="button"
+              className="absolute inset-0"
+              onClick={() => inputRef.current?.click()}
+              title={`更换：${label}`}
+              disabled={uploading}
+            >
+              <video src={url} className="h-full w-full object-cover" muted playsInline />
             </button>
           ) : (
             <button

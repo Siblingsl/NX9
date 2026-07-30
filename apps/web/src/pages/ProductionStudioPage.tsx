@@ -3,6 +3,7 @@ import {
   Archive,
   ArrowLeft,
   Bell,
+  BookMarked,
   Check,
   ChevronDown,
   ChevronUp,
@@ -37,6 +38,7 @@ import {
 import { useAppSurface } from '../stores/app-surface';
 import { useWorkspaceCatalog } from '../stores/workspace-catalog';
 import { useCredentialVault } from '../stores/credential-vault';
+import { useSkillLibraryModalUi } from '../stores/skill-library-modal-ui';
 import ImageUploadSlot from '../blocks/shared/ImageUploadSlot';
 import {
   CAMERA_MOVE_PRESETS,
@@ -86,6 +88,7 @@ export function ProductionStudioPage() {
   const goHome = useAppSurface((s) => s.goHome);
   const goCanvas = useAppSurface((s) => s.goCanvas);
   const toggleSettings = useCredentialVault((s) => s.toggleSettings);
+  const openSkillLibrary = useSkillLibraryModalUi((s) => s.setOpen);
   const activeId = useWorkspaceCatalog((s) => s.activeId);
   const items = useWorkspaceCatalog((s) => s.items);
   const selectWorkspace = useWorkspaceCatalog((s) => s.selectWorkspace);
@@ -541,6 +544,14 @@ export function ProductionStudioPage() {
           >
             <Film size={16} />
             素材库
+          </button>
+          <button
+            type="button"
+            className="atelier__dock-btn"
+            onClick={() => openSkillLibrary(true)}
+          >
+            <BookMarked size={16} />
+            技能库
           </button>
           <button
             type="button"

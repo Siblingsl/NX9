@@ -1,0 +1,32 @@
+{
+  "name": "agent-novel-events",
+  "title": "章节事件提取",
+  "description": "分析长篇文本，提取每章关键事件、人物与因果，供分集规划。",
+  "version": "2.0.0",
+  "entry": "SKILL.md",
+  "author": "nx9",
+  "status": "stable",
+  "language": "zh-CN",
+  "updated_at": "2026-07-30T08:00:00Z",
+  "tags": [
+    "agent",
+    "events"
+  ],
+  "compatibility": {
+    "nx9": ">=0.1.0"
+  },
+  "dependencies": [],
+  "resources": {
+    "examples": "examples/",
+    "references": "references/",
+    "templates": "templates/",
+    "scripts": "scripts/",
+    "tests": "tests/"
+  },
+  "nx9": {
+    "promptId": "sys.agent.novel-events",
+    "category": "agent",
+    "priority": "P0",
+    "lane": "builtin"
+  }
+}

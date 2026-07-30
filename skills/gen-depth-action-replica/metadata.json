@@ -1,0 +1,36 @@
+{
+  "name": "gen-depth-action-replica",
+  "title": "深度视频动作复刻",
+  "description": "用深度视频锁定动作走位节奏，用人物图锁定外貌服装，用场景图替换环境；装配可直接送视频模型的提示词。",
+  "version": "1.0.0",
+  "entry": "SKILL.md",
+  "author": "nx9",
+  "status": "stable",
+  "language": "zh-CN",
+  "updated_at": "2026-07-30T08:00:00Z",
+  "tags": [
+    "gen",
+    "video",
+    "depth",
+    "playbook",
+    "reference-board"
+  ],
+  "compatibility": {
+    "nx9": ">=0.1.0"
+  },
+  "dependencies": [],
+  "resources": {
+    "examples": "examples/",
+    "references": "references/",
+    "templates": "templates/",
+    "scripts": "scripts/",
+    "tests": "tests/"
+  },
+  "nx9": {
+    "promptId": "gen.depth.action.replica",
+    "category": "gen",
+    "priority": "P0",
+    "lane": "builtin",
+    "playbookId": "depth-action-replica"
+  }
+}

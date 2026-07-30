@@ -1,0 +1,33 @@
+{
+  "name": "script-skill-world",
+  "title": "世界观构建",
+  "description": "产出时代、地点、世界观与可复用视觉规则列表；禁止一句话一新世界与镜头表。",
+  "version": "2.0.0",
+  "entry": "SKILL.md",
+  "author": "nx9",
+  "status": "stable",
+  "language": "zh-CN",
+  "updated_at": "2026-07-30T08:00:00Z",
+  "tags": [
+    "script",
+    "world",
+    "bible"
+  ],
+  "compatibility": {
+    "nx9": ">=0.1.0"
+  },
+  "dependencies": [],
+  "resources": {
+    "examples": "examples/",
+    "references": "references/",
+    "templates": "templates/",
+    "scripts": "scripts/",
+    "tests": "tests/"
+  },
+  "nx9": {
+    "promptId": "sys.script.skill.world",
+    "category": "script-desk",
+    "priority": "P0",
+    "lane": "builtin"
+  }
+}

@@ -29,7 +29,9 @@ import {
   buildVideoGuidePromptSuffix,
   readChainStoryboard,
   resolveMentionsForPrompt,
+  extractReferencePack,
   type MentionRef,
+  type ReferencePack,
 } from '@nx9/shared';
 import { BlockShell } from '../shared/BlockShell';
 import { CharacterBadge, CharacterSelect } from '../shared/CharacterSelect';
@@ -37,11 +39,13 @@ import { GenUpstreamHint } from '../shared/upstream-hints';
 import { useUpstreamPrompt } from '../shared/use-upstream-prompt';
 import { useActivityLog } from '../../stores/activity-log';
 import { MentionEditor } from '../../engine/stage-deck/chrome/MentionEditor';
+import { getGenPack } from '../../engine/gen-skill-runtime';
 import { useWorkspaceDocument } from '../../stores/workspace-document';
 import {
   enabledGuideKinds,
   readStoryboardGuidePrefs,
 } from '../../stores/storyboard-guide-prefs';
+import { useCredentialVault } from '../../stores/credential-vault';
 import { api } from '../../api/client';
 import { pollClipTask } from '../../engine/picture-gen-runner';
 import { composeStoryboardGuideFrameDataUrl } from '../../engine/storyboard-guide-compose';
@@ -57,6 +61,7 @@ function ClipGenBlock(props: NodeProps) {
   const nodes = useNodes();
   const edges = useEdges();
   const appendLog = useActivityLog((s) => s.append);
+  const openSettingsTo = useCredentialVault((s) => s.openSettingsTo);
   const characters = useWorkspaceDocument((s) => s.characters.characters);
   const rawVideoMode = (props.data?.videoMode as string) ?? 'single';
   const videoMode =
@@ -125,18 +130,39 @@ function ClipGenBlock(props: NodeProps) {
     return gatherUpstream(props.id, flowBlocks, flowLinks, policy, primarySourceId);
   }, [props.id, nodes, edges, props.data]);
 
+  /** 上游参考板结构化引用包（深度动作复刻等） */
+  const upstreamReferencePack = useMemo((): ReferencePack | null => {
+    const incoming = edges.filter((e) => e.target === props.id);
+    for (const edge of incoming) {
+      const src = nodes.find((n) => n.id === edge.source);
+      if (!src || src.type !== 'reference-board') continue;
+      const pack = extractReferencePack((src.data ?? {}) as Record<string, unknown>);
+      if (pack) return pack;
+    }
+    return null;
+  }, [props.id, nodes, edges]);
+
   const linkedShot = useMemo(
     () => shots.find((s) => s.id === linkedShotId),
     [shots, linkedShotId],
   );
   const directorDeskRefs = (props.data?.directorDeskRefs as string[] | undefined) ?? [];
+  const packImages = upstreamReferencePack?.imageUrls ?? [];
   const imageUrl =
+    packImages[0] ||
     linkedShot?.firstFrameAssetId ||
     directorDeskRefs[0] ||
     pickReferenceImage(activeCharacters, upstreamMedia.pictures);
   const hasAudioUpstream = (upstreamMedia.sounds?.length ?? 0) > 0;
-  const refImageCount = Math.max(upstreamMedia.pictures?.length ?? 0, imageUrl ? 1 : 0);
-  const refVideoCount = upstreamMedia.clips?.length ?? 0;
+  const refImageCount = Math.max(
+    upstreamMedia.pictures?.length ?? 0,
+    packImages.length,
+    imageUrl ? 1 : 0,
+  );
+  const refVideoCount = Math.max(
+    upstreamMedia.clips?.length ?? 0,
+    upstreamReferencePack?.videoUrls?.length ?? 0,
+  );
   const refError = validateSClassReferences(refImageCount, refVideoCount);
   const overRefImages = refImageCount > 9;
   const overRefVideos = refVideoCount > 3;
@@ -145,6 +171,16 @@ function ClipGenBlock(props: NodeProps) {
     updateNodeData(props.id, { status: 'running' });
     appendLog(`视频生成启动 · ${props.id}`);
     try {
+      if (upstreamReferencePack?.enforce) {
+        if (upstreamReferencePack.blockReason || !upstreamReferencePack.ready) {
+          const reason =
+            upstreamReferencePack.blockReason || '参考板强约束未就绪：请补齐槽位并确认装配提示词';
+          updateNodeData(props.id, { status: 'error', error: reason });
+          appendLog(`视频生成已阻断 · ${reason}`);
+          return;
+        }
+      }
+
       const bridgeRefs: string[] = [];
       const incomingEdges = edges.filter((e) => e.target === props.id);
       for (const e of incomingEdges) {
@@ -152,14 +188,24 @@ function ClipGenBlock(props: NodeProps) {
         const refs = (up?.data?.bridgeRefs as string[] | undefined);
         if (refs) bridgeRefs.push(...refs);
       }
-      const videoParams = resolveVideoGenParams({ resolution, orientation, aspect, durationSec });
+      const videoParams = resolveVideoGenParams({
+        resolution,
+        orientation,
+        aspect: upstreamReferencePack?.aspect || aspect,
+        durationSec,
+      });
+      const videoPack = await getGenPack('gen-studio-video');
       const studioVideo = linkedShot
-        ? buildStudioVideoPrompt({
-            shot: linkedShot,
-            characters: activeCharacters,
-          })
+        ? buildStudioVideoPrompt(
+            {
+              shot: linkedShot,
+              characters: activeCharacters,
+            },
+            videoPack,
+          )
         : '';
       const base =
+        upstreamReferencePack?.assembledPrompt?.trim() ||
         upstreamMedia.prompts.filter(Boolean).join('\n\n') ||
         localContent ||
         linkedShot?.videoPromptPro ||
@@ -190,12 +236,37 @@ function ClipGenBlock(props: NodeProps) {
         const publicItems = BUILTIN_BACKLOT_TEMPLATES.map((tpl) => templateToAsset(tpl as any, 'public', true));
         prompt = enrichPromptWithAssetMentions(prompt, privateItems, publicItems);
       }
-      // F-024: 解析 @block-id 引用为上游输出 URL
+      // F-024 + 参考板槽位：解析 @block / @人物 / @深度视频
       {
         const refs: MentionRef[] = [];
-        upstreamMedia.pictures.forEach((url, i) => refs.push({ id: `pic-${i}`, kind: 'picture', url, label: `上游图片 ${i+1}` }));
-        upstreamMedia.clips.forEach((url, i) => refs.push({ id: `clip-${i}`, kind: 'clip', url, label: `上游视频 ${i+1}` }));
-        upstreamMedia.sounds.forEach((url, i) => refs.push({ id: `sound-${i}`, kind: 'sound', url, label: `上游音频 ${i+1}` }));
+        const pics = [
+          ...(upstreamReferencePack?.imageUrls ?? []),
+          ...upstreamMedia.pictures,
+        ];
+        const uniquePics = [...new Set(pics.filter(Boolean))];
+        uniquePics.forEach((url, i) => refs.push({ id: `pic-${i}`, kind: 'picture', url, label: `上游图片 ${i + 1}` }));
+        if (upstreamReferencePack?.characterUrls) {
+          upstreamReferencePack.characterUrls.forEach((url, i) => {
+            refs.push({ id: `char-${i}`, kind: 'picture', url, label: `人物${i + 1}` });
+          });
+        }
+        if (upstreamReferencePack?.sceneUrl) {
+          refs.push({ id: 'scene', kind: 'picture', url: upstreamReferencePack.sceneUrl, label: '场景' });
+        }
+        const clips = [
+          ...(upstreamReferencePack?.videoUrls ?? []),
+          ...upstreamMedia.clips,
+        ];
+        const uniqueClips = [...new Set(clips.filter(Boolean))];
+        uniqueClips.forEach((url, i) => refs.push({ id: `clip-${i}`, kind: 'clip', url, label: i === 0 ? '深度视频' : `上游视频 ${i + 1}` }));
+        if (upstreamReferencePack?.depthVideoUrl) {
+          refs.push({
+            id: 'depth',
+            kind: 'clip',
+            url: upstreamReferencePack.depthVideoUrl,
+            label: '深度视频',
+          });
+        }
         const { resolved } = resolveMentionsForPrompt(prompt, refs);
         prompt = resolved;
       }
@@ -219,17 +290,37 @@ function ClipGenBlock(props: NodeProps) {
         }
       }
       const audioUrl = hasAudioUpstream ? upstreamMedia.sounds[0] : undefined;
-      const res = await api.proxyVideo({
-        prompt,
-        model,
-        imageUrl: refImageUrl,
-        duration: videoParams.durationSec,
-        aspect_ratio: videoParams.aspect,
-        size: videoParams.size,
-        resolution: videoParams.resolution,
-        generateAudio,
-        ...(audioUrl ? { audioUrl } : {}),
-      });
+      const referenceImages = [
+        ...(upstreamReferencePack?.imageUrls ?? []),
+        ...upstreamMedia.pictures,
+      ].filter(Boolean);
+      const referenceVideos = [
+        ...(upstreamReferencePack?.videoUrls ?? []),
+        ...upstreamMedia.clips,
+      ].filter(Boolean);
+      let res;
+      try {
+        res = await api.proxyVideo({
+          prompt,
+          model,
+          imageUrl: refImageUrl,
+          duration: videoParams.durationSec,
+          aspect_ratio: videoParams.aspect,
+          size: videoParams.size,
+          resolution: videoParams.resolution,
+          generateAudio,
+          referenceImages: [...new Set(referenceImages)].slice(0, SCLASS_MAX_REF_IMAGES),
+          referenceVideos: [...new Set(referenceVideos)].slice(0, SCLASS_MAX_REF_VIDEOS),
+          ...(audioUrl ? { audioUrl } : {}),
+        });
+      } catch (e) {
+        const err = String(e);
+        if (/API Key|未配置|401|Unauthorized/i.test(err)) {
+          openSettingsTo('connections');
+          throw new Error(`${err} · 已打开设置 → 连接（请配置视频连接）`);
+        }
+        throw e;
+      }
       updateNodeData(props.id, {
         status: res.status === 'success' ? 'success' : res.status === 'processing' ? 'running' : 'error',
         videoUrl: res.url,
@@ -237,6 +328,7 @@ function ClipGenBlock(props: NodeProps) {
         message: res.message,
         content: prompt,
         referenceImageUsed: imageUrl,
+        referencePackUsed: upstreamReferencePack?.playbookId,
         characterInjected: activeCharacters.map((c) => c.id),
         lastResult: res,
       });
@@ -273,6 +365,7 @@ function ClipGenBlock(props: NodeProps) {
     appendLog, model, aspect, durationSec, resolution, imageUrl, linkedShot,
     orientation, generateAudio, localContent, props.data, props.id,
     updateNodeData, activeCharacters, upstreamMedia, edges, nodes,
+    upstreamReferencePack, openSettingsTo,
   ]);
 
   const poll = useCallback(async () => {
@@ -512,6 +605,20 @@ function ClipGenBlock(props: NodeProps) {
         {videoUrl && (
           <video src={videoUrl} controls className="w-full rounded-lg max-h-36" />
         )}
+        {upstreamReferencePack && (
+          <p className="text-[10px] text-ink/55 bg-surface rounded px-1.5 py-1 border border-line/50">
+            参考板玩法：{upstreamReferencePack.playbookId}
+            {upstreamReferencePack.depthVideoUrl ? ' · 已含深度视频' : ''}
+            {upstreamReferencePack.characterUrls.length
+              ? ` · 人物×${upstreamReferencePack.characterUrls.length}`
+              : ''}
+            {upstreamReferencePack.enforce && !upstreamReferencePack.ready
+              ? ` · 未就绪：${upstreamReferencePack.blockReason || '请确认装配'}`
+              : upstreamReferencePack.assembledPrompt
+                ? ' · 已装配提示词'
+                : ''}
+          </p>
+        )}
         {refError && (
           <p className="text-[10px] text-red-600 bg-red-50 rounded px-1 py-0.5">{refError}</p>
         )}
@@ -522,7 +629,11 @@ function ClipGenBlock(props: NodeProps) {
           <button
             type="button"
             onClick={() => void run()}
-            disabled={status === 'running' || Boolean(refError)}
+            disabled={
+              status === 'running' ||
+              Boolean(refError) ||
+              Boolean(upstreamReferencePack?.enforce && !upstreamReferencePack.ready)
+            }
             className="flex-1 rounded-xl bg-brand text-white text-sm py-2 disabled:opacity-50"
           >
             {status === 'running' ? '生成中…' : (resolveRunLabel('clip-gen').primary || '运行生成')}

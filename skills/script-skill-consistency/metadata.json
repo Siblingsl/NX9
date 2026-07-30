@@ -1,0 +1,33 @@
+{
+  "name": "script-skill-consistency",
+  "title": "叙事一致性审稿",
+  "description": "只诊断不改正文；输出 diagnostics 分级与 code 枚举；禁止镜头表。",
+  "version": "2.0.0",
+  "entry": "SKILL.md",
+  "author": "nx9",
+  "status": "stable",
+  "language": "zh-CN",
+  "updated_at": "2026-07-30T08:00:00Z",
+  "tags": [
+    "script",
+    "consistency",
+    "qa"
+  ],
+  "compatibility": {
+    "nx9": ">=0.1.0"
+  },
+  "dependencies": [],
+  "resources": {
+    "examples": "examples/",
+    "references": "references/",
+    "templates": "templates/",
+    "scripts": "scripts/",
+    "tests": "tests/"
+  },
+  "nx9": {
+    "promptId": "sys.script.skill.consistency",
+    "category": "script-desk",
+    "priority": "P0",
+    "lane": "builtin"
+  }
+}

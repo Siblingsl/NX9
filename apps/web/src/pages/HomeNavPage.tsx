@@ -6,6 +6,7 @@ import { isPrivateWorkspace } from '@nx9/shared';
 import { useCreateWorkspaceDialogUi } from '../stores/create-workspace-dialog-ui';
 import { useCredentialVault } from '../stores/credential-vault';
 import { toastError, toastSuccess } from '../stores/toast';
+import { confirmDelete } from '../stores/confirm-dialog';
 import { TrashPanel } from '../panels/TrashPanel';
 
 /**
@@ -21,20 +22,22 @@ export function HomeNavPage() {
   const goCanvas = useAppSurface((s) => s.goCanvas);
   const openCreate = useCreateWorkspaceDialogUi((s) => s.openDialog);
   const toggleSettings = useCredentialVault((s) => s.toggleSettings);
-  const [pendingDelete, setPendingDelete] = useState<{ id: string; title: string } | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [trashOpen, setTrashOpen] = useState(false);
 
   const projects = items.filter(isPrivateWorkspace);
   const active = projects.find((p) => p.id === activeId) ?? projects[0];
 
-  const confirmDeleteProject = async () => {
-    if (!pendingDelete || deleting) return;
-    const { id, title } = pendingDelete;
+  const requestDeleteProject = async (id: string, title: string) => {
+    if (deleting) return;
+    const ok = await confirmDelete({
+      title: `移入回收站「${title}」？`,
+      description: '项目将移入回收站，30 天内可恢复。资产与数据在彻底删除前保留。',
+    });
+    if (!ok) return;
     setDeleting(true);
     try {
       await removeWorkspace(id);
-      setPendingDelete(null);
       toastSuccess(`已移入回收站「${title}」`);
     } catch (err) {
       toastError(err instanceof Error ? err.message : '删除项目失败');
@@ -114,7 +117,7 @@ export function HomeNavPage() {
                     type="button"
                     onClick={(e) => {
                       e.stopPropagation();
-                      setPendingDelete({ id: p.id, title: p.title });
+                      void requestDeleteProject(p.id, p.title);
                     }}
                     className="p-1 rounded-full text-ink/30 hover:text-red-600 hover:bg-red-50 opacity-70 group-hover:opacity-100"
                     title={`删除「${p.title}」`}
@@ -197,47 +200,6 @@ export function HomeNavPage() {
         </p>
       </div>
 
-      {pendingDelete && (
-        <div
-          className="fixed inset-0 z-[120] flex items-center justify-center p-6"
-          style={{ background: 'rgba(26, 24, 20, 0.72)' }}
-          onClick={() => {
-            if (!deleting) setPendingDelete(null);
-          }}
-        >
-          <div
-            className="w-[320px] rounded-2xl border border-line bg-surface p-5 shadow-2xl"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <p className="text-[15px] font-semibold text-ink mb-1">
-              移入回收站「{pendingDelete.title}」？
-            </p>
-            <p className="text-[12px] text-ink/55 mb-5 leading-relaxed">
-              项目将移入回收站，30 天内可恢复。资产与数据在彻底删除前保留。
-            </p>
-            <div className="flex items-center justify-end gap-2">
-              <button
-                type="button"
-                disabled={deleting}
-                onClick={() => setPendingDelete(null)}
-                className="px-3.5 py-2 rounded-xl text-[12px] text-ink/60 hover:bg-surface disabled:opacity-50"
-              >
-                取消
-              </button>
-              <button
-                type="button"
-                disabled={deleting}
-                onClick={() => void confirmDeleteProject()}
-                className="px-3.5 py-2 rounded-xl text-[12px] font-semibold text-white bg-rose-600 hover:bg-rose-500 disabled:opacity-50"
-              >
-                {deleting ? '删除中…' : '确认删除'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* F-010: 回收站弹窗 */}
       {trashOpen && (
         <div
           className="fixed inset-0 z-[120] flex items-center justify-center p-6"

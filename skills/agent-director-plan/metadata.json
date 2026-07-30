@@ -1,0 +1,32 @@
+{
+  "name": "agent-director-plan",
+  "title": "导演规划",
+  "description": "根据剧本草拟导演规划：风格、节奏、重点场、视觉母题。",
+  "version": "2.0.0",
+  "entry": "SKILL.md",
+  "author": "nx9",
+  "status": "stable",
+  "language": "zh-CN",
+  "updated_at": "2026-07-30T08:00:00Z",
+  "tags": [
+    "agent",
+    "director"
+  ],
+  "compatibility": {
+    "nx9": ">=0.1.0"
+  },
+  "dependencies": [],
+  "resources": {
+    "examples": "examples/",
+    "references": "references/",
+    "templates": "templates/",
+    "scripts": "scripts/",
+    "tests": "tests/"
+  },
+  "nx9": {
+    "promptId": "sys.agent.director-plan",
+    "category": "agent",
+    "priority": "P0",
+    "lane": "builtin"
+  }
+}

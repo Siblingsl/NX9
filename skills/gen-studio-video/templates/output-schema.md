@@ -1,0 +1,6 @@
+# 模板
+Cinematic continuous shot...
+Duration intent: about {n} seconds.
+Camera: {move}
+Action & performance: {action}
+Constraints: maintain character identity...

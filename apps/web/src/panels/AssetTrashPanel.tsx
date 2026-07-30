@@ -33,6 +33,7 @@ import {
 import { useWorkspaceDocument } from '../stores/workspace-document';
 import { usePublicAssetLibrary } from '../stores/public-asset-library';
 import { toastSuccess, toastError } from '../stores/toast';
+import { confirmDelete } from '../stores/confirm-dialog';
 
 type KindFilter = 'all' | AssetTrashKind;
 
@@ -289,28 +290,19 @@ export const AssetTrashPanel = memo(function AssetTrashPanel({
     ],
   );
 
-  const handlePurge = useCallback(
+  const purgeOne = useCallback(
     (entry: AssetTrashEntry) => {
-      if (!window.confirm(`彻底删除「${entry.label}」后不可恢复，确认？`)) return;
-      setPurging(`${entry.scope}:${entry.id}`);
-      try {
-        if (entry.scope === 'private') {
-          if (entry.kind === 'character') purgeCharacter(entry.id);
-          else if (entry.kind === 'sound') purgeSound(entry.id);
-          else if (backlotCustom.some((t) => t.id === entry.id)) purgeBacklotCustom(entry.id);
-          else purgeBacklotWorkspace(entry.id);
-        } else if (entry.kind === 'character') {
-          publicPurgeCharacter(entry.id);
-        } else if (entry.kind === 'sound') {
-          publicPurgeSound(entry.id);
-        } else {
-          publicPurgeTemplate(entry.id);
-        }
-        toastSuccess('已彻底删除');
-      } catch (err) {
-        toastError(err instanceof Error ? err.message : '删除失败');
-      } finally {
-        setPurging(null);
+      if (entry.scope === 'private') {
+        if (entry.kind === 'character') purgeCharacter(entry.id);
+        else if (entry.kind === 'sound') purgeSound(entry.id);
+        else if (backlotCustom.some((t) => t.id === entry.id)) purgeBacklotCustom(entry.id);
+        else purgeBacklotWorkspace(entry.id);
+      } else if (entry.kind === 'character') {
+        publicPurgeCharacter(entry.id);
+      } else if (entry.kind === 'sound') {
+        publicPurgeSound(entry.id);
+      } else {
+        publicPurgeTemplate(entry.id);
       }
     },
     [
@@ -325,35 +317,38 @@ export const AssetTrashPanel = memo(function AssetTrashPanel({
     ],
   );
 
-  const handlePurgeAll = useCallback(() => {
-    if (items.length === 0) return;
-    if (!window.confirm(`将彻底删除 ${items.length} 项资产，不可恢复。确认？`)) return;
-    for (const entry of [...items]) {
-      if (entry.scope === 'private') {
-        if (entry.kind === 'character') purgeCharacter(entry.id);
-        else if (entry.kind === 'sound') purgeSound(entry.id);
-        else if (backlotCustom.some((t) => t.id === entry.id)) purgeBacklotCustom(entry.id);
-        else purgeBacklotWorkspace(entry.id);
-      } else if (entry.kind === 'character') {
-        publicPurgeCharacter(entry.id);
-      } else if (entry.kind === 'sound') {
-        publicPurgeSound(entry.id);
-      } else {
-        publicPurgeTemplate(entry.id);
+  const handlePurge = useCallback(
+    async (entry: AssetTrashEntry) => {
+      const ok = await confirmDelete({
+        title: `彻底删除「${entry.label}」？`,
+        description: '彻底删除后不可恢复，请确认。',
+      });
+      if (!ok) return;
+      setPurging(`${entry.scope}:${entry.id}`);
+      try {
+        purgeOne(entry);
+        toastSuccess('已彻底删除');
+      } catch (err) {
+        toastError(err instanceof Error ? err.message : '删除失败');
+      } finally {
+        setPurging(null);
       }
+    },
+    [purgeOne],
+  );
+
+  const handlePurgeAll = useCallback(async () => {
+    if (items.length === 0) return;
+    const ok = await confirmDelete({
+      title: `将彻底删除 ${items.length} 项资产？`,
+      description: '全部彻底删除后不可恢复，请确认。',
+    });
+    if (!ok) return;
+    for (const entry of [...items]) {
+      purgeOne(entry);
     }
     toastSuccess('回收站已清空');
-  }, [
-    items,
-    purgeCharacter,
-    purgeSound,
-    purgeBacklotCustom,
-    purgeBacklotWorkspace,
-    publicPurgeCharacter,
-    publicPurgeSound,
-    publicPurgeTemplate,
-    backlotCustom,
-  ]);
+  }, [items, purgeOne]);
 
   const showTitle = variant === 'embedded';
 
@@ -373,7 +368,7 @@ export const AssetTrashPanel = memo(function AssetTrashPanel({
         {items.length > 0 && (
           <button
             type="button"
-            onClick={handlePurgeAll}
+            onClick={() => void handlePurgeAll()}
             className="text-[9px] text-ink/40 hover:text-red-600 underline"
           >
             清空回收站
@@ -469,7 +464,7 @@ export const AssetTrashPanel = memo(function AssetTrashPanel({
                       <button
                         type="button"
                         disabled={busy}
-                        onClick={() => handlePurge(item)}
+                        onClick={() => void handlePurge(item)}
                         className="pointer-events-auto flex flex-1 items-center justify-center gap-0.5 rounded-md bg-red-600/90 px-1.5 py-1 text-[9px] font-medium text-white hover:bg-red-600 disabled:opacity-50"
                       >
                         {purging === key ? (

@@ -1,0 +1,32 @@
+{
+  "name": "production-storyboard-table",
+  "title": "分镜表",
+  "description": "根据导演规划或剧本生成可执行分镜表，每行一镜，含景别运镜时长与描述。",
+  "version": "2.0.0",
+  "entry": "SKILL.md",
+  "author": "nx9",
+  "status": "stable",
+  "language": "zh-CN",
+  "updated_at": "2026-07-30T08:00:00Z",
+  "tags": [
+    "storyboard",
+    "table"
+  ],
+  "compatibility": {
+    "nx9": ">=0.1.0"
+  },
+  "dependencies": [],
+  "resources": {
+    "examples": "examples/",
+    "references": "references/",
+    "templates": "templates/",
+    "scripts": "scripts/",
+    "tests": "tests/"
+  },
+  "nx9": {
+    "promptId": "sys.production.storyboard-table",
+    "category": "storyboard-desk",
+    "priority": "P0",
+    "lane": "builtin"
+  }
+}

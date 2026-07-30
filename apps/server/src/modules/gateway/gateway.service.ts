@@ -564,6 +564,22 @@ export class GatewayService {
         payload.first_frame_url = { url: imageUrl };
       }
     }
+    const referenceImages = Array.isArray(body.referenceImages)
+      ? (body.referenceImages as string[]).filter((u) => typeof u === 'string' && u.trim())
+      : [];
+    const referenceVideos = Array.isArray(body.referenceVideos)
+      ? (body.referenceVideos as string[]).filter((u) => typeof u === 'string' && u.trim())
+      : [];
+    if (referenceImages.length) {
+      payload.reference_images = referenceImages.map((url) =>
+        this.imageUrlForOpenAiVideo(url, provider, model),
+      );
+      payload.image_urls = payload.reference_images;
+    }
+    if (referenceVideos.length) {
+      payload.reference_videos = referenceVideos;
+      payload.video_urls = referenceVideos;
+    }
     if (body.aspect_ratio) payload.aspect_ratio = body.aspect_ratio;
     if (body.duration) payload.duration = body.duration;
     const normalizedResolution = this.normalizeOpenAiVideoResolution(body.resolution);
@@ -1164,16 +1180,14 @@ export class GatewayService {
       providers.filter((p) => p.enabled !== false).map(async (p) => {
         if (p.protocol === 'openai-compat' && p.baseUrl && p.apiKey) {
           try {
-            const res = await fetch(`${p.baseUrl.replace(/\/+$/, '')}/v1/models`, {
-              headers: { Authorization: `Bearer ${p.apiKey}` },
-              signal: AbortSignal.timeout(8000),
-            });
-            if (!res.ok) {
-              return { id: p.id, label: p.label, available: false, message: `HTTP ${res.status}` };
-            }
-            const json = (await res.json()) as { data?: { id: string }[] };
-            const models = json.data?.map((m) => m.id) ?? [];
-            return { id: p.id, label: p.label, available: true, models, message: `可用模型: ${models.length} 个` };
+            const listed = await this.listConnectionModels(p.baseUrl, p.apiKey);
+            return {
+              id: p.id,
+              label: p.label,
+              available: true,
+              models: listed.models,
+              message: `可用模型: ${listed.models.length} 个`,
+            };
           } catch (e) {
             return { id: p.id, label: p.label, available: false, message: String(e) };
           }
@@ -1220,6 +1234,68 @@ export class GatewayService {
     }
 
     return { providers: results };
+  }
+
+  /** OpenAI 兼容：GET {baseUrl}/models → 模型 id 列表 */
+  async listConnectionModels(baseUrl?: string, apiKey?: string, connectionId?: string) {
+    const raw = (baseUrl ?? '').trim().replace(/\/+$/, '');
+    if (!raw) throw new BadRequestException('请先填写 Base URL');
+
+    let key = (apiKey ?? '').trim();
+    // 设置页下发的是脱敏密钥（****xxxx）；已保存连接用服务端明文密钥探测
+    if ((!key || key.startsWith('****')) && connectionId) {
+      const stored = this.settings.getRaw().connections?.find((c) => c.id === connectionId);
+      if (stored?.apiKey) key = stored.apiKey.trim();
+    }
+    if (!key) throw new BadRequestException('请先填写 API Key');
+    if (key.startsWith('****')) {
+      throw new BadRequestException('当前为脱敏密钥，请重新输入完整 API Key 后再获取');
+    }
+
+    const candidates = [raw];
+    if (!/\/v1$/i.test(raw) && !/\/v1beta$/i.test(raw)) {
+      candidates.push(`${raw}/v1`);
+    }
+
+    let lastError = '无法获取模型列表';
+    for (const root of candidates) {
+      try {
+        const res = await fetch(`${root}/models`, {
+          headers: {
+            Authorization: `Bearer ${key}`,
+            Accept: 'application/json',
+          },
+          signal: AbortSignal.timeout(12000),
+        });
+        if (!res.ok) {
+          lastError =
+            res.status === 401
+              ? '鉴权失败 (HTTP 401)，请检查 API Key 是否正确'
+              : res.status === 403
+                ? '无权限访问模型列表 (HTTP 403)'
+                : `HTTP ${res.status}`;
+          continue;
+        }
+        const json = (await res.json()) as {
+          data?: Array<{ id?: string } | string>;
+          models?: Array<{ name?: string; id?: string } | string>;
+        };
+        const fromData = (json.data ?? []).map((m) => (typeof m === 'string' ? m : m.id ?? '')).filter(Boolean);
+        const fromModels = (json.models ?? [])
+          .map((m) => (typeof m === 'string' ? m : m.id ?? m.name ?? ''))
+          .filter(Boolean);
+        const models = Array.from(new Set([...fromData, ...fromModels])).sort((a, b) => a.localeCompare(b));
+        if (models.length === 0) {
+          lastError = '接口已响应，但未返回模型';
+          continue;
+        }
+        return { models, baseUrl: root };
+      } catch (e) {
+        lastError = e instanceof Error ? e.message : String(e);
+      }
+    }
+
+    throw new BadRequestException(lastError);
   }
 
   private mediaUrlToDataUri(url: string): string {

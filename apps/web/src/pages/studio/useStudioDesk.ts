@@ -22,6 +22,7 @@ import { useFlowGraphMirror } from '../../stores/flow-graph-mirror';
 import { schedulePersistMirroredWorkspace } from '../../stores/persist-mirrored-workspace';
 import { api } from '../../api/client';
 import { fromPayload } from '../../engine/flow-payload';
+import { getStudioPackOverrides } from '../../engine/gen-skill-runtime';
 import {
   resolveStudioBinding,
   patchStudioShot,
@@ -521,30 +522,37 @@ export function useStudioDesk() {
     (shotId: string, force = true) => {
       const shot = shots.find((s) => s.id === shotId);
       if (!shot) return;
-      // F-017/F-032: 传入约束与构图模板
-      const patch = applyStudioPromptsToShot(shot, resolveShotContext(shot), {
-        force,
-        constraints: referenceConstraints,
-        templates: compositionTemplates,
-      });
-      patchShot(shotId, patch);
-      flash('已生成专业提示词');
+      void (async () => {
+        const packs = await getStudioPackOverrides();
+        const patch = applyStudioPromptsToShot(shot, resolveShotContext(shot), {
+          force,
+          constraints: referenceConstraints,
+          templates: compositionTemplates,
+          packs,
+        });
+        patchShot(shotId, patch);
+        flash('已生成专业提示词');
+      })();
     },
     [resolveShotContext, patchShot, flash, referenceConstraints, compositionTemplates, shots],
   );
 
   const regenerateAllPrompts = useCallback(
     (force = true) => {
-      for (const shot of shots) {
-        const patch = applyStudioPromptsToShot(shot, resolveShotContext(shot), {
-          force,
-          constraints: referenceConstraints,
-          templates: compositionTemplates,
-        });
-        patchShot(shot.id, patch);
-      }
-      toastSuccess('已为本集全部镜头生成专业提示词');
-      flash('批量专业提示词完成');
+      void (async () => {
+        const packs = await getStudioPackOverrides();
+        for (const shot of shots) {
+          const patch = applyStudioPromptsToShot(shot, resolveShotContext(shot), {
+            force,
+            constraints: referenceConstraints,
+            templates: compositionTemplates,
+            packs,
+          });
+          patchShot(shot.id, patch);
+        }
+        toastSuccess('已为本集全部镜头生成专业提示词');
+        flash('批量专业提示词完成');
+      })();
     },
     [resolveShotContext, patchShot, flash, referenceConstraints, compositionTemplates, shots],
   );

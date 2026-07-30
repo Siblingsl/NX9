@@ -1,0 +1,33 @@
+{
+  "name": "gen-director-batch-shot",
+  "title": "导演批量镜头约束",
+  "description": "批量镜头生成时叠加 3D camera / 构图约束与连续性规则的提示词包。",
+  "version": "2.0.0",
+  "entry": "SKILL.md",
+  "author": "nx9",
+  "status": "stable",
+  "language": "zh-CN",
+  "updated_at": "2026-07-30T08:00:00Z",
+  "tags": [
+    "gen",
+    "director",
+    "batch"
+  ],
+  "compatibility": {
+    "nx9": ">=0.1.0"
+  },
+  "dependencies": [],
+  "resources": {
+    "examples": "examples/",
+    "references": "references/",
+    "templates": "templates/",
+    "scripts": "scripts/",
+    "tests": "tests/"
+  },
+  "nx9": {
+    "promptId": "gen.director.batch-shot",
+    "category": "gen",
+    "priority": "P0",
+    "lane": "builtin"
+  }
+}

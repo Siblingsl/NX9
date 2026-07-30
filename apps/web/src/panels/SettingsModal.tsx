@@ -10,6 +10,11 @@ import {
   SlidersHorizontal,
   BarChart3,
   Loader2,
+  Plus,
+  Trash2,
+  Pencil,
+  MoreHorizontal,
+  ChevronDown,
 } from 'lucide-react';
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { createPortal } from 'react-dom';
@@ -21,10 +26,12 @@ import type {
   CanvasGridStyle,
   CanvasSocketStyle,
   CanvasThemeMode,
+  ModelConnection,
 } from '@nx9/shared';
 import { FLOW_EDGE_TYPES } from '../engine/flow-edge-types';
-import { perfTierLabel, resolvePerfTier, translate } from '@nx9/shared';
+import { perfTierLabel, resolvePerfTier, translate, BUILTIN_CONNECTION_PRESETS } from '@nx9/shared';
 import { useCredentialVault } from '../stores/credential-vault';
+import { confirmDelete } from '../stores/confirm-dialog';
 import { useStageDeckFlag } from '../stores/stage-deck-flag';
 import { useWorkspaceDocument } from '../stores/workspace-document';
 import { useFlowGraphMirror } from '../stores/flow-graph-mirror';
@@ -33,7 +40,7 @@ import { api } from '../api/client';
 import { getRuntime } from '../platform/runtime-bridge';
 import './settings-modal.css';
 
-type SettingsSection = 'connection' | 'canvas' | 'prefs' | 'usage';
+type SettingsSection = 'connection' | 'services' | 'canvas' | 'prefs' | 'usage';
 
 const SECTIONS: {
   id: SettingsSection;
@@ -41,7 +48,8 @@ const SECTIONS: {
   hint: string;
   icon: typeof Cable;
 }[] = [
-  { id: 'connection', label: '连接', hint: '模型与服务', icon: Cable },
+  { id: 'connection', label: '连接', hint: '模型供应商', icon: Cable },
+  { id: 'services', label: '服务', hint: '本地桥 · 诊断', icon: Radio },
   { id: 'canvas', label: '画布', hint: '主题与外观', icon: Palette },
   { id: 'prefs', label: '偏好', hint: '创作习惯', icon: SlidersHorizontal },
   { id: 'usage', label: '用量', hint: 'Token 使用统计', icon: BarChart3 },
@@ -59,13 +67,17 @@ export function SettingsModal() {
   useEffect(() => {
     const handler = (e: CustomEvent) => {
       const section = e.detail?.section;
-      if (section && ['connection','canvas','prefs','usage'].includes(section)) {
+      if (section && ['connection', 'services', 'canvas', 'prefs', 'usage'].includes(section)) {
         setSection(section as SettingsSection);
+      }
+      if (section === 'skills') {
+        window.dispatchEvent(new CustomEvent('nx9:openSkillLibrary'));
+        toggleSettings(false);
       }
     };
     window.addEventListener('nx9:openSettingsSection', handler as EventListener);
     return () => window.removeEventListener('nx9:openSettingsSection', handler as EventListener);
-  }, []);
+  }, [toggleSettings]);
 
   useEffect(() => {
     if (settingsOpen && !settings) void load();
@@ -166,7 +178,10 @@ export function SettingsModal() {
 
           <div className="nx9-settings__body nx9-scroll">
             {section === 'connection' && (
-              <ConnectionSettings
+              <ConnectionSettings draft={draft} setDraft={setDraft} />
+            )}
+            {section === 'services' && (
+              <ServicesSettings
                 draft={draft}
                 setDraft={setDraft}
                 vbStatus={vbStatus}
@@ -185,7 +200,7 @@ export function SettingsModal() {
           <p className="nx9-settings__footer-hint">
             {section === 'canvas'
               ? '画布外观立即生效，仅当前工作区'
-              : '连接与偏好需保存后生效'}
+              : '连接、服务与偏好需保存后生效'}
           </p>
           <div className="nx9-settings__footer-actions">
             <button type="button" className="nx9-settings__cancel" onClick={close}>
@@ -211,431 +226,699 @@ export function SettingsModal() {
 /** @deprecated 使用 SettingsModal；保留别名避免旧引用断裂 */
 export const SettingsDrawer = SettingsModal;
 
-/* ── 连接设置 ── */
+/* ── 连接设置：扁平单列表，点选即当前 ── */
+const MODALITY_LABELS: Record<string, string> = { llm: '文字', image: '图片', video: '视频', audio: '音频' };
+
+function makeConnId(): string {
+  return `conn_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+}
+
+function hostOf(url?: string): string {
+  if (!url) return '';
+  try {
+    return new URL(url).host;
+  } catch {
+    return url.replace(/^https?:\/\//, '').split('/')[0] ?? url;
+  }
+}
+
 function ConnectionSettings({
-  draft,
-  setDraft,
-  vbStatus,
-  setVbStatus,
-  luxStatus,
-  setLuxStatus,
+  draft, setDraft,
 }: {
-  draft: AppSettings;
-  setDraft: (v: AppSettings) => void;
-  vbStatus: string | null;
-  setVbStatus: (v: string | null) => void;
-  luxStatus: string | null;
-  setLuxStatus: (v: string | null) => void;
+  draft: AppSettings; setDraft: (v: AppSettings) => void;
 }) {
+  const [connections, setConnections] = useState<ModelConnection[]>(draft.connections ?? []);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [addingKind, setAddingKind] = useState<ModelConnection['kind'] | null>(null);
+  const [addMode, setAddMode] = useState<'preset' | 'custom'>('preset');
+  const [menuId, setMenuId] = useState<string | null>(null);
+  const [focusKind, setFocusKind] = useState<ModelConnection['kind']>('llm');
+
+  useEffect(() => {
+    setConnections(draft.connections ?? []);
+  }, [draft.connections]);
+
+  const syncToDraft = useCallback((conns: ModelConnection[]) => {
+    setConnections(conns);
+    const next = { ...draft, connections: conns };
+    for (const c of conns) {
+      if (!c.isActive) continue;
+      if (c.kind === 'llm') { next.llmApiKey = c.apiKey; next.llmBaseUrl = c.baseUrl; next.llmModel = c.model; }
+      if (c.kind === 'image') {
+        next.primaryApiKey = c.apiKey; next.primaryBaseUrl = c.baseUrl;
+        if (c.provider === 'gemini') { next.geminiApiKey = c.apiKey; next.geminiBaseUrl = c.baseUrl; }
+      }
+      if (c.kind === 'video') {
+        next.videoApiKey = c.apiKey; next.videoBaseUrl = c.baseUrl;
+        next.videoProvider = (['xai', 'grokgo', 'custom'].includes(c.provider) ? c.provider : 'custom') as AppSettings['videoProvider'];
+        if (c.provider === 'xai') next.xaiApiKey = c.apiKey;
+        if (c.provider === 'grokgo') next.grokGoApiKey = c.apiKey;
+      }
+      if (c.kind === 'audio') { next.ttsApiKey = c.apiKey; next.ttsBaseUrl = c.baseUrl; }
+    }
+    setDraft(next);
+  }, [draft, setDraft]);
+
+  const setActive = (connId: string) => {
+    const target = connections.find((c) => c.id === connId);
+    if (!target) return;
+    syncToDraft(connections.map((c) => (
+      c.kind === target.kind ? { ...c, isActive: c.id === connId } : c
+    )));
+    setMenuId(null);
+  };
+
+  const upsertConnection = (conn: ModelConnection, activate: boolean) => {
+    const now = new Date().toISOString();
+    const idx = connections.findIndex((c) => c.id === conn.id);
+    let conns: ModelConnection[];
+    if (idx >= 0) {
+      conns = [...connections];
+      conns[idx] = { ...conn, updatedAt: now };
+      if (activate) {
+        conns = conns.map((c) => (
+          c.kind === conn.kind ? { ...c, isActive: c.id === conn.id } : c
+        ));
+      }
+    } else {
+      const created = { ...conn, createdAt: now, updatedAt: now, isActive: activate };
+      conns = activate
+        ? [...connections.map((c) => (c.kind === conn.kind ? { ...c, isActive: false } : c)), created]
+        : [...connections, created];
+    }
+    syncToDraft(conns);
+    setEditingId(null);
+    setAddingKind(null);
+    setMenuId(null);
+  };
+
+  const deleteConnection = async (connId: string) => {
+    const target = connections.find((c) => c.id === connId);
+    if (!target) return;
+    const ok = await confirmDelete({
+      title: `删除连接「${target.label}」？`,
+      description: '删除后不可恢复，已保存的密钥与端点配置将一并移除。',
+    });
+    if (!ok) return;
+    let conns = connections.filter((c) => c.id !== connId);
+    if (target.isActive) {
+      const sibling = conns.find((c) => c.kind === target.kind);
+      if (sibling) {
+        conns = conns.map((c) => (
+          c.kind === target.kind ? { ...c, isActive: c.id === sibling.id } : c
+        ));
+      }
+    }
+    syncToDraft(conns);
+    setMenuId(null);
+    if (editingId === connId) setEditingId(null);
+  };
+
+  const addPreset = (preset: typeof BUILTIN_CONNECTION_PRESETS[number]) => {
+    upsertConnection({
+      id: makeConnId(),
+      label: preset.label,
+      kind: preset.kind,
+      provider: preset.provider,
+      baseUrl: preset.baseUrl,
+      model: preset.model,
+      isActive: true,
+    }, true);
+    setAddingKind(null);
+  };
+
+  const forKind = (kind: string) => connections.filter((c) => c.kind === kind);
+  const activeForKind = (kind: string) => forKind(kind).find((c) => c.isActive);
+
+  const items = forKind(focusKind);
+  const active = activeForKind(focusKind);
+  const others = items.filter((c) => !c.isActive);
+  const editingActive = Boolean(active && editingId === active.id);
+
+  const openAdd = (kind: ModelConnection['kind'] = focusKind) => {
+    setFocusKind(kind);
+    setAddingKind(kind);
+    setAddMode('preset');
+  };
+
   return (
-    <div className="space-y-4">
-      <div className="nx9-settings__hero">
-        <p className="nx9-settings__hero-title">模型与服务连接</p>
-        <p className="nx9-settings__hero-desc">
-          按生产流程拆开配置：文字负责剧本/提示词，图片负责出图，视频负责成片，音频负责配音。Magic Hour 的 Key 仍从{' '}
-          <code className="text-ink/70">apps/server/.env</code> 读取。
-        </p>
+    <div className="nx9-conn">
+      <div className="nx9-conn__tabs" role="tablist" aria-label="连接类型">
+        {(['llm', 'image', 'video', 'audio'] as const).map((kind) => {
+          const a = activeForKind(kind);
+          const n = forKind(kind).length;
+          return (
+            <button
+              key={kind}
+              type="button"
+              role="tab"
+              aria-selected={focusKind === kind}
+              className={`nx9-conn__tab ${focusKind === kind ? 'is-on' : ''} ${a ? 'has-active' : ''}`}
+              onClick={() => { setFocusKind(kind); setMenuId(null); setEditingId(null); }}
+            >
+              <span className="nx9-conn__tab-label">{MODALITY_LABELS[kind]}</span>
+              <span className="nx9-conn__tab-sub">{a ? a.label : n ? `${n}` : '—'}</span>
+            </button>
+          );
+        })}
       </div>
 
-      <SettingCard
-        title="对话 / 文字模型"
-        badge="剧本拆分 · 提示词 · 批审"
-        description="这里用于 AI 剧本拆解、分镜文案、导演提示词等文字任务。留空 LLM Key 时，会回退使用主 API Key。"
-      >
-        <div className="nx9-settings__field-grid">
-          <Field
-            label="LLM API Key（推荐单独填写）"
-            value={draft.llmApiKey ?? ''}
-            onChange={(v) => setDraft({ ...draft, llmApiKey: v })}
-          />
-          <Field
-            label="LLM 默认模型"
-            value={draft.llmModel ?? ''}
-            onChange={(v) => setDraft({ ...draft, llmModel: v })}
-            placeholder="gpt-4o-mini / auto / 供应商模型名"
-            plain
-          />
+      <div className="nx9-conn__stage" role="tabpanel">
+        <div className="nx9-conn__stage-bar">
+          <div>
+            <p className="nx9-conn__eyebrow">{MODALITY_LABELS[focusKind]}模型</p>
+            <p className="nx9-conn__stage-hint">切换不会删除已保存连接</p>
+          </div>
+          <button type="button" className="nx9-conn__add" onClick={() => openAdd()}>
+            <Plus size={13} strokeWidth={2.25} />
+            添加连接
+          </button>
         </div>
-        <Field
-          label="LLM Base URL（对话/文字模型）"
-          value={draft.llmBaseUrl ?? ''}
-          onChange={(v) => setDraft({ ...draft, llmBaseUrl: v })}
-          placeholder="https://api.openai.com/v1"
-          plain
-        />
-        <div className="nx9-settings__field-grid">
-          <Field
-            label="通用 / 图片 API Key（兼容旧主 Key）"
-            value={draft.primaryApiKey ?? ''}
-            onChange={(v) => setDraft({ ...draft, primaryApiKey: v })}
-          />
-          <Field
-            label="通用 Base URL"
-            value={draft.primaryBaseUrl ?? ''}
-            onChange={(v) => setDraft({ ...draft, primaryBaseUrl: v })}
-            placeholder="https://api.openai.com/v1"
-            plain
-          />
-        </div>
-      </SettingCard>
 
-      <SettingCard
-        title="图片模型"
-        badge="分镜图 · 角色图 · Gemini · 720° 全景图"
-        description="OpenAI 兼容图片模型用上面的通用 Key/Base URL；Gemini / Imagen 用本组 Key；Magic Hour 走 apps/server/.env 的 MAGIC_HOUR_API_KEY。"
-      >
-        <div className="nx9-settings__field-grid">
-          <Field
-            label="Gemini API Key（Google AI Studio）"
-            value={draft.geminiApiKey ?? ''}
-            onChange={(v) => setDraft({ ...draft, geminiApiKey: v })}
-          />
-          <Field
-            label="Gemini Base URL"
-            value={draft.geminiBaseUrl ?? ''}
-            onChange={(v) => setDraft({ ...draft, geminiBaseUrl: v })}
-            placeholder="https://generativelanguage.googleapis.com/v1beta"
-            plain
-          />
-        </div>
-        <p className="nx9-settings__hint">
-          Pro 会员可在 Google AI Studio 申请 Key（免费图片额度按 Google 当日策略）。图像节点/素材库可选手动选择模型：Gemini 3.1 Flash Image（Pro 推荐）、3 Pro Image、2.5 Flash Image、Imagen 4/Ultra/Fast。填 Key 后保存并重启 server；也可在 apps/server/.env 写 GEMINI_API_KEY。若报 fetch failed/无法连接，需给 Node 配 HTTPS_PROXY 或填可访问的 Base URL 中转。若报 429 配额不足：Google AI Studio 网页 Pro ≠ API 出图额度，需在 https://ai.dev/rate-limit 查看，并为项目开通 Billing。
-        </p>
-        <Field
-          label="RunningHub Key（可选）"
-          value={draft.rhApiKey ?? ''}
-          onChange={(v) => setDraft({ ...draft, rhApiKey: v })}
-        />
-        <p className="nx9-settings__hint">
-          后续如果接 ComfyUI、RunningHub 或专门的全景图服务，会放在这一组，不再混进视频配置里。
-        </p>
-      </SettingCard>
-
-      <SettingCard
-        title="视频模型"
-        badge="图生视频 · 文生视频 · Grok / xAI"
-        description="正式生产建议选 xAI 官方；本地 GrokGo 保留给测试流程。旧自定义视频配置仍然保留。"
-      >
-        <SelectField
-          label="当前视频通道"
-          value={draft.videoProvider ?? 'custom'}
-          onChange={(v) => setDraft({ ...draft, videoProvider: v as AppSettings['videoProvider'] })}
-          options={[
-            { value: 'xai', label: 'xAI 官方 Grok（正式）' },
-            { value: 'grokgo', label: '本地 GrokGo（测试）' },
-            { value: 'custom', label: '自定义兼容通道' },
-          ]}
-        />
-        <div className="nx9-settings__inset">
-          <p className="nx9-settings__inset-title">xAI 官方 Grok</p>
-          <div className="nx9-settings__field-grid">
-            <Field
-              label="xAI 官方 API Key"
-              value={draft.xaiApiKey ?? ''}
-              onChange={(v) => setDraft({ ...draft, xaiApiKey: v })}
-            />
-            <Field
-              label="xAI 官方 Base URL"
-              value={draft.xaiBaseUrl ?? ''}
-              onChange={(v) => setDraft({ ...draft, xaiBaseUrl: v })}
-              placeholder="https://api.x.ai/v1"
-              plain
+        {items.length === 0 ? (
+          <button type="button" className="nx9-conn__hero nx9-conn__hero--empty" onClick={() => openAdd()}>
+            <span className="nx9-conn__hero-kicker">尚未配置</span>
+            <span className="nx9-conn__hero-title">添加官方模型或自定义端点</span>
+            <span className="nx9-conn__hero-cta">从主流预设开始</span>
+          </button>
+        ) : editingActive && active ? (
+          <div className="nx9-conn__hero is-editing">
+            <ConnEditForm
+              conn={active}
+              onSave={(next) => upsertConnection(next, true)}
+              onCancel={() => setEditingId(null)}
             />
           </div>
-        </div>
-        <div className="nx9-settings__inset">
-          <p className="nx9-settings__inset-title">本地 GrokGo 测试桥</p>
-          <div className="nx9-settings__field-grid">
-            <Field
-              label="GrokGo Key"
-              value={draft.grokGoApiKey ?? ''}
-              onChange={(v) => setDraft({ ...draft, grokGoApiKey: v })}
-            />
-            <Field
-              label="GrokGo Base URL"
-              value={draft.grokGoBaseUrl ?? ''}
-              onChange={(v) => setDraft({ ...draft, grokGoBaseUrl: v })}
-              placeholder="http://127.0.0.1:8787/v1"
-              plain
-            />
-          </div>
-        </div>
-        <details className="nx9-settings__details">
-          <summary className="nx9-settings__details-summary">自定义兼容通道 / 旧配置</summary>
-          <div className="mt-3 space-y-2">
-            <div className="nx9-settings__field-grid">
-              <Field
-                label="自定义视频 API Key"
-                value={draft.videoApiKey ?? ''}
-                onChange={(v) => setDraft({ ...draft, videoApiKey: v })}
-              />
-              <Field
-                label="自定义视频 API Base URL"
-                value={draft.videoBaseUrl ?? ''}
-                onChange={(v) => setDraft({ ...draft, videoBaseUrl: v })}
-                placeholder="http://127.0.0.1:8787/v1"
-                plain
-              />
+        ) : active ? (
+          <div className="nx9-conn__hero">
+            <div className="nx9-conn__hero-body">
+              <div className="nx9-conn__hero-text">
+                <span className="nx9-conn__hero-kicker">当前使用</span>
+                <h3 className="nx9-conn__hero-title">{active.label}</h3>
+                <p className="nx9-conn__hero-meta">
+                  {[active.model || active.provider, hostOf(active.baseUrl) || '未设置 Base URL']
+                    .filter(Boolean)
+                    .join(' · ')}
+                </p>
+                {!active.apiKey && (
+                  <p className="nx9-conn__hero-warn">尚未填写 API Key — 点编辑完成配置</p>
+                )}
+              </div>
+              <div className="nx9-conn__hero-actions">
+                <button type="button" className="nx9-conn__ghost" onClick={() => setEditingId(active.id)}>编辑</button>
+                <button
+                  type="button"
+                  className="nx9-conn__ghost is-danger"
+                  onClick={() => void deleteConnection(active.id)}
+                >
+                  删除
+                </button>
+              </div>
             </div>
           </div>
-        </details>
-      </SettingCard>
+        ) : (
+          <div className="nx9-conn__hero nx9-conn__hero--empty" style={{ cursor: 'default' }}>
+            <span className="nx9-conn__hero-kicker">未选用</span>
+            <span className="nx9-conn__hero-title">从下方已保存连接中设为当前</span>
+          </div>
+        )}
 
-      <SettingCard
-        title="音频模型"
-        badge="AI 配音 · 旁白 · 声音克隆"
-        description="云端 TTS、Voicebox 本地桥、LuxTTS 克隆都集中在这里。"
-      >
+        {others.length > 0 && (
+          <div className="nx9-conn__alts">
+            <p className="nx9-conn__alts-label">已保存 · 可切换</p>
+            <ul className="nx9-conn__alts-list">
+              {others.map((c) => (
+                <li key={c.id} className={`nx9-conn__alt ${editingId === c.id ? 'is-editing' : ''}`}>
+                  {editingId === c.id ? (
+                    <ConnEditForm
+                      conn={c}
+                      onSave={(next) => upsertConnection(next, false)}
+                      onCancel={() => setEditingId(null)}
+                    />
+                  ) : (
+                    <>
+                      <div className="nx9-conn__alt-text">
+                        <span className="nx9-conn__alt-name">{c.label}</span>
+                        <span className="nx9-conn__alt-meta">{c.model || c.provider}</span>
+                      </div>
+                      <button type="button" className="nx9-conn__use" onClick={() => setActive(c.id)}>
+                        设为当前
+                      </button>
+                      <div className="nx9-conn__menu-wrap">
+                        <button
+                          type="button"
+                          className="nx9-conn__menu-btn"
+                          aria-label="更多"
+                          onClick={() => setMenuId((id) => (id === c.id ? null : c.id))}
+                        >
+                          <MoreHorizontal size={15} />
+                        </button>
+                        {menuId === c.id && (
+                          <ConnRowMenu
+                            isActive={false}
+                            onActivate={() => setActive(c.id)}
+                            onEdit={() => { setEditingId(c.id); setMenuId(null); }}
+                            onDelete={() => void deleteConnection(c.id)}
+                            onClose={() => setMenuId(null)}
+                          />
+                        )}
+                      </div>
+                    </>
+                  )}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+      </div>
+
+      {addingKind && (
+        <div className="nx9-settings__overlay" onClick={() => setAddingKind(null)}>
+          <div className="nx9-settings__preset-panel" onClick={(e) => e.stopPropagation()} role="dialog" aria-label="添加连接">
+            <div className="nx9-settings__preset-head">
+              <h4>添加{MODALITY_LABELS[addingKind]}连接</h4>
+              <button type="button" className="nx9-settings__close" onClick={() => setAddingKind(null)} aria-label="关闭">
+                <X size={14} />
+              </button>
+            </div>
+            <div className="nx9-settings__segment nx9-settings__preset-tabs">
+              <button type="button" className={`nx9-settings__segment-btn ${addMode === 'preset' ? 'is-on' : ''}`} onClick={() => setAddMode('preset')}>主流官方</button>
+              <button type="button" className={`nx9-settings__segment-btn ${addMode === 'custom' ? 'is-on' : ''}`} onClick={() => setAddMode('custom')}>自定义</button>
+            </div>
+            {addMode === 'preset' ? (
+              <div className="nx9-conn__preset-list">
+                {BUILTIN_CONNECTION_PRESETS.filter((p) => p.kind === addingKind).map((p, i) => (
+                  <button key={i} type="button" className="nx9-conn__preset-row" onClick={() => { addPreset(p); setFocusKind(p.kind); }}>
+                    <span className="nx9-conn__preset-text">
+                      <span className="nx9-conn__alt-name">{p.label}</span>
+                      <span className="nx9-conn__alt-meta">{[p.model, hostOf(p.baseUrl)].filter(Boolean).join(' · ')}</span>
+                    </span>
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <div className="nx9-settings__preset-body">
+                <ConnEditForm
+                  conn={{
+                    id: '',
+                    label: '',
+                    kind: addingKind,
+                    provider: 'custom',
+                    baseUrl: '',
+                    model: '',
+                    isActive: true,
+                  }}
+                  onSave={(c) => {
+                    upsertConnection({ ...c, id: makeConnId(), provider: c.provider || 'custom' }, true);
+                    setFocusKind(addingKind);
+                    setAddingKind(null);
+                  }}
+                  onCancel={() => setAddingKind(null)}
+                />
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ServicesSettings({
+  draft, setDraft, vbStatus, setVbStatus, luxStatus, setLuxStatus,
+}: {
+  draft: AppSettings; setDraft: (v: AppSettings) => void;
+  vbStatus: string | null; setVbStatus: (v: string | null) => void;
+  luxStatus: string | null; setLuxStatus: (v: string | null) => void;
+}) {
+  return (
+    <div className="nx9-services space-y-3">
+      <header className="nx9-conn__intro" style={{ marginBottom: 4 }}>
+        <h3 className="nx9-conn__intro-title">服务与诊断</h3>
+        <p className="nx9-conn__intro-desc">
+          本地音频桥、BGM、可选供应商与连通性探测。模型 Key 请到「连接」配置。
+        </p>
+      </header>
+
+      <SettingCard title="Voicebox 本地桥" badge="配音" description="本地 Voicebox 进程；启用后 TTS 可优先走本机。">
+        <label className="nx9-settings__check">
+          <input
+            type="checkbox"
+            checked={draft.voiceboxEnabled ?? false}
+            onChange={(e) => setDraft({ ...draft, voiceboxEnabled: e.target.checked })}
+          />
+          启用 Voicebox
+        </label>
         <div className="nx9-settings__field-grid">
-          <Field
-            label="TTS API Key（留空则用通用 Key）"
-            value={draft.ttsApiKey ?? ''}
-            onChange={(v) => setDraft({ ...draft, ttsApiKey: v })}
-          />
-          <Field
-            label="TTS Base URL"
-            value={draft.ttsBaseUrl ?? ''}
-            onChange={(v) => setDraft({ ...draft, ttsBaseUrl: v })}
-            placeholder="https://api.openai.com/v1"
-            plain
-          />
+          <Field label="Base URL" value={draft.voiceboxBaseUrl ?? 'http://127.0.0.1:17493'} onChange={(v) => setDraft({ ...draft, voiceboxBaseUrl: v })} placeholder="http://127.0.0.1:17493" plain />
+          <Field label="默认音色" value={draft.voiceboxDefaultProfile ?? ''} onChange={(v) => setDraft({ ...draft, voiceboxDefaultProfile: v })} placeholder="profile id" plain />
         </div>
+        <button
+          type="button"
+          onClick={() => void api.probeVoicebox(draft.voiceboxBaseUrl).then((r) => setVbStatus(r.message ?? (r.available ? '已连接' : '未连接'))).catch((e) => setVbStatus(String(e)))}
+          className="nx9-settings__link-btn"
+        >
+          探测
+        </button>
+        {vbStatus && <p className="nx9-settings__hint">{vbStatus}</p>}
+      </SettingCard>
 
-        <div className="nx9-settings__inset">
-          <div className="nx9-settings__inset-title">
-            <Radio size={16} className="text-accent" />
-            Voicebox 本地桥接
-          </div>
-          <label className="nx9-settings__check">
-            <input
-              type="checkbox"
-              checked={draft.voiceboxEnabled ?? false}
-              onChange={(e) =>
-                setDraft({
-                  ...draft,
-                  voiceboxEnabled: e.target.checked,
-                  voiceboxBaseUrl:
-                    draft.voiceboxBaseUrl ?? getRuntime().voiceboxBaseUrl ?? 'http://127.0.0.1:17493',
-                })
-              }
-            />
-            优先使用本地 Voicebox（需运行 Voicebox App）
-          </label>
-          <div className="nx9-settings__field-grid">
-            <Field
-              label="Voicebox Base URL"
-              value={draft.voiceboxBaseUrl ?? getRuntime().voiceboxBaseUrl ?? 'http://127.0.0.1:17493'}
-              onChange={(v) => setDraft({ ...draft, voiceboxBaseUrl: v })}
-              placeholder="http://127.0.0.1:17493"
-              plain
-            />
-            <Field
-              label="默认音色 Profile"
-              value={draft.voiceboxDefaultProfile ?? ''}
-              onChange={(v) => setDraft({ ...draft, voiceboxDefaultProfile: v })}
-              placeholder="音色名或 profile id"
-              plain
-            />
-          </div>
-          <button
-            type="button"
-            onClick={() =>
-              void api
-                .probeVoicebox(draft.voiceboxBaseUrl)
-                .then((r) => setVbStatus(r.message ?? (r.available ? '已连接' : '未连接')))
-                .catch((e) => setVbStatus(String(e)))
-            }
-            className="nx9-settings__link-btn"
-          >
-            探测连接
-          </button>
-          {vbStatus && <p className="nx9-settings__hint">{vbStatus}</p>}
-        </div>
-
-        <div className="nx9-settings__inset">
-          <div className="nx9-settings__inset-title">
-            <Radio size={16} className="text-brand" />
-            LuxTTS 本地克隆
-          </div>
-          <p className="nx9-settings__hint">
-            基于{' '}
-            <a
-              href="https://github.com/ysharma3501/LuxTTS"
-              target="_blank"
-              rel="noreferrer"
-              className="text-brand hover:underline"
-            >
-              LuxTTS
-            </a>
-            ，需先运行 <code>pnpm run luxtts:install</code> 与 <code>pnpm run luxtts:start</code>
-            。参考音频 ≥3 秒。
-          </p>
-          <label className="nx9-settings__check">
-            <input
-              type="checkbox"
-              checked={draft.luxTtsEnabled ?? false}
-              onChange={(e) =>
-                setDraft({
-                  ...draft,
-                  luxTtsEnabled: e.target.checked,
-                  luxTtsBaseUrl: draft.luxTtsBaseUrl ?? getRuntime().luxTtsBaseUrl ?? 'http://127.0.0.1:17880',
-                  luxTtsNoGpuFallback: draft.luxTtsNoGpuFallback ?? 'cloud',
-                })
-              }
-            />
-            优先使用 LuxTTS（有参考音频时）
-          </label>
-          <div className="nx9-settings__inset">
-            <p className="text-xs font-medium">无 GPU 时保底策略</p>
-            <p className="nx9-settings__hint">
-              探测到 LuxTTS 跑在 CPU（或未检测到 CUDA/MPS）时，按你的选择处理；可在设置里随时切换。
-            </p>
-            <label className="flex items-start gap-2 text-xs cursor-pointer">
-              <input
-                type="radio"
-                name="luxNoGpuFallback"
-                className="mt-0.5"
-                checked={(draft.luxTtsNoGpuFallback ?? 'cloud') === 'cloud'}
-                onChange={() => setDraft({ ...draft, luxTtsNoGpuFallback: 'cloud' })}
-              />
-              <span>
-                <span className="font-medium">改走云端 TTS</span>
-                <span className="block text-[10px] text-ink/45">
-                  跳过本地 LuxTTS，走 Voicebox 或云端 API（推荐，更快）
-                </span>
-              </span>
-            </label>
-            <label className="flex items-start gap-2 text-xs cursor-pointer">
-              <input
-                type="radio"
-                name="luxNoGpuFallback"
-                className="mt-0.5"
-                checked={draft.luxTtsNoGpuFallback === 'cpu'}
-                onChange={() => setDraft({ ...draft, luxTtsNoGpuFallback: 'cpu' })}
-              />
-              <span>
-                <span className="font-medium">继续 LuxTTS CPU</span>
-                <span className="block text-[10px] text-ink/45">完全离线克隆，速度较慢</span>
-              </span>
-            </label>
-          </div>
-          <Field
-            label="LuxTTS Base URL"
-            value={draft.luxTtsBaseUrl ?? getRuntime().luxTtsBaseUrl ?? 'http://127.0.0.1:17880'}
-            onChange={(v) => setDraft({ ...draft, luxTtsBaseUrl: v })}
-            placeholder="http://127.0.0.1:17880"
-            plain
+      <SettingCard title="LuxTTS 克隆" badge="本地" description="本机音色克隆；无 GPU 时可改走云端或继续 CPU。">
+        <label className="nx9-settings__check">
+          <input
+            type="checkbox"
+            checked={draft.luxTtsEnabled ?? false}
+            onChange={(e) => setDraft({
+              ...draft,
+              luxTtsEnabled: e.target.checked,
+              luxTtsNoGpuFallback: draft.luxTtsNoGpuFallback ?? 'cloud',
+            })}
           />
-          <Field
-            label="默认参考音频（/media/audio/...）"
-            value={draft.luxTtsDefaultReferenceAudio ?? ''}
-            onChange={(v) => setDraft({ ...draft, luxTtsDefaultReferenceAudio: v })}
-            placeholder="/media/uploads/ref-voice.wav"
-            plain
-          />
-          <div className="nx9-settings__field-grid">
-            <Field
-              label="num_steps"
-              value={String(draft.luxTtsNumSteps ?? 4)}
-              onChange={(v) => setDraft({ ...draft, luxTtsNumSteps: Number(v) || 4 })}
-              plain
-            />
-            <Field
-              label="speed"
-              value={String(draft.luxTtsSpeed ?? 1)}
-              onChange={(v) => setDraft({ ...draft, luxTtsSpeed: Number(v) || 1 })}
-              plain
-            />
-          </div>
-          <label className="nx9-settings__check">
-            <input
-              type="checkbox"
-              checked={draft.luxTtsReturnSmooth ?? false}
-              onChange={(e) => setDraft({ ...draft, luxTtsReturnSmooth: e.target.checked })}
-            />
-            return_smooth（金属感时可开启）
-          </label>
-          <button
-            type="button"
-            onClick={() =>
-              void api
-                .probeLuxTts(draft.luxTtsBaseUrl)
-                .then((r) => {
-                  const parts = [
-                    r.message ?? (r.available ? '已连接' : '未连接'),
-                    r.gpuAvailable === true
-                      ? `GPU 可用${r.cudaAvailable ? ' (CUDA)' : r.mpsAvailable ? ' (MPS)' : ''}`
-                      : r.available
-                        ? '未检测到 GPU'
-                        : '',
-                    r.effectiveStrategy,
-                    r.recommendation ? `提示：${r.recommendation}` : '',
-                  ].filter(Boolean);
-                  setLuxStatus(parts.join(' · '));
-                })
-                .catch((e) => setLuxStatus(String(e)))
-            }
-            className="nx9-settings__link-btn"
-          >
-            探测 LuxTTS
-          </button>
-          {luxStatus && (
-            <p
-              className={`nx9-settings__hint ${
-                luxStatus.includes('未检测到 GPU') ? 'text-amber-700' : ''
-              }`}
-            >
-              {luxStatus}
-            </p>
-          )}
-        </div>
+          启用 LuxTTS
+        </label>
+        <Field label="Base URL" value={draft.luxTtsBaseUrl ?? 'http://127.0.0.1:17880'} onChange={(v) => setDraft({ ...draft, luxTtsBaseUrl: v })} placeholder="http://127.0.0.1:17880" plain />
+        <Field label="参考音频" value={draft.luxTtsDefaultReferenceAudio ?? ''} onChange={(v) => setDraft({ ...draft, luxTtsDefaultReferenceAudio: v })} placeholder="/media/uploads/ref-voice.wav" plain />
+        <label className="flex items-center gap-2 text-xs">
+          <input type="radio" name="luxGpu" checked={(draft.luxTtsNoGpuFallback ?? 'cloud') === 'cloud'} onChange={() => setDraft({ ...draft, luxTtsNoGpuFallback: 'cloud' })} />
+          无 GPU 时改走云端
+        </label>
+        <label className="flex items-center gap-2 text-xs">
+          <input type="radio" name="luxGpu" checked={draft.luxTtsNoGpuFallback === 'cpu'} onChange={() => setDraft({ ...draft, luxTtsNoGpuFallback: 'cpu' })} />
+          无 GPU 时继续 CPU
+        </label>
+        <button
+          type="button"
+          onClick={() => void api.probeLuxTts(draft.luxTtsBaseUrl).then((r) => {
+            const parts = [r.message ?? (r.available ? '已连接' : '未连接'), r.gpuAvailable ? 'GPU 可用' : r.available ? '无 GPU' : '', r.recommendation].filter(Boolean);
+            setLuxStatus(parts.join(' · '));
+          }).catch((e) => setLuxStatus(String(e)))}
+          className="nx9-settings__link-btn"
+        >
+          探测
+        </button>
+        {luxStatus && <p className="nx9-settings__hint">{luxStatus}</p>}
+      </SettingCard>
 
-        {/* F-014: BGM 设置 */}
-        <div className="nx9-settings__inset">
-          <div className="nx9-settings__inset-title">BGM 音乐生成</div>
-          <div className="nx9-settings__field-grid">
-            <Field
-              label="BGM Provider"
-              value={draft.bgmProvider ?? 'suno'}
-              onChange={(v) => setDraft({ ...draft, bgmProvider: v })}
-              placeholder="suno / udio / elevenlabs"
-              plain
-            />
-            <Field
-              label="BGM API Key"
-              value={draft.bgmApiKey ?? ''}
-              onChange={(v) => setDraft({ ...draft, bgmApiKey: v })}
-            />
-          </div>
+      <SettingCard title="BGM" badge="配乐" description="背景音乐生成供应商；缺 Key 时 BGM 模式会明确报错。">
+        <div className="nx9-settings__field-grid">
+          <Field label="Provider" value={draft.bgmProvider ?? 'suno'} onChange={(v) => setDraft({ ...draft, bgmProvider: v })} plain />
+          <Field label="API Key" value={draft.bgmApiKey ?? ''} onChange={(v) => setDraft({ ...draft, bgmApiKey: v })} />
         </div>
       </SettingCard>
 
-      <SettingCard
-        title="维护 / 诊断"
-        badge="连接检测 · 数据迁移"
-        description="这些不是模型参数，只在排查问题或迁移数据时使用。"
-      >
-        <div className="nx9-settings__inset">
-          <p className="nx9-settings__inset-title">数据库（Prisma）</p>
-          <p className="nx9-settings__hint">
-            将 JSON 工作区迁移到 SQLite。迁移后设置环境变量 NX9_STORAGE=prisma 并重启服务。
-          </p>
-          <button
-            type="button"
-            onClick={() =>
-              void api
-                .migrateToPrisma()
-                .then((r) => alert(`已迁移 ${r.migrated} 个工作区，跳过 ${r.skipped}`))
-            }
-            className="nx9-settings__link-btn"
-          >
-            迁移 JSON → Prisma
-          </button>
-        </div>
+      <SettingCard title="RunningHub" badge="可选" description="预留字段；未接全时不影响主制片链路。">
+        <Field label="API Key" value={draft.rhApiKey ?? ''} onChange={(v) => setDraft({ ...draft, rhApiKey: v })} />
+      </SettingCard>
+
+      <SettingCard title="环境说明" badge="只读" description="部分能力仅通过服务端环境变量配置。">
+        <p className="nx9-settings__hint">
+          Magic Hour：在 <code>apps/server/.env</code> 配置 <code>MAGIC_HOUR_API_KEY</code> 后重启 server。
+        </p>
+        <p className="nx9-settings__hint">
+          代理：系统或 Node <code>HTTPS_PROXY</code> / <code>HTTP_PROXY</code>。
+        </p>
+      </SettingCard>
+
+      <SettingCard title="诊断与维护" badge="探测 · 迁移" description="排查供应商连通性，或执行本地数据迁移。">
         <ProbeProvidersBlock />
+        <div className="nx9-settings__inset mt-2">
+          <p className="nx9-settings__inset-title">数据库迁移</p>
+          <button
+            type="button"
+            onClick={() => void api.migrateToPrisma().then((r) => alert(`已迁移 ${r.migrated} 个，跳过 ${r.skipped}`))}
+            className="nx9-settings__link-btn"
+          >
+            JSON → Prisma
+          </button>
+        </div>
       </SettingCard>
+    </div>
+  );
+}
 
-      <div className="nx9-settings__note">Stage Deck Canvas 已作为默认画布，始终启用。</div>
+function ConnRowMenu({
+  isActive, onActivate, onEdit, onDelete, onClose,
+}: {
+  isActive: boolean;
+  onActivate: () => void;
+  onEdit: () => void;
+  onDelete: () => void;
+  onClose: () => void;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const onDoc = (e: MouseEvent) => {
+      if (!ref.current?.contains(e.target as Node)) onClose();
+    };
+    document.addEventListener('mousedown', onDoc);
+    return () => document.removeEventListener('mousedown', onDoc);
+  }, [onClose]);
+
+  return (
+    <div className="nx9-conn__menu" ref={ref} role="menu">
+      {!isActive && (
+        <button type="button" role="menuitem" onClick={onActivate}>设为当前</button>
+      )}
+      <button type="button" role="menuitem" onClick={onEdit}>
+        <Pencil size={12} /> 编辑
+      </button>
+      <button type="button" role="menuitem" className="is-danger" onClick={onDelete}>
+        <Trash2 size={12} /> 删除
+      </button>
+    </div>
+  );
+}
+
+function ConnEditForm({ conn, onSave, onCancel }: {
+  conn: ModelConnection;
+  onSave: (c: ModelConnection) => void;
+  onCancel: () => void;
+}) {
+  const [f, setF] = useState(conn);
+  const [modelOptions, setModelOptions] = useState<string[] | null>(null);
+  const [fetchingModels, setFetchingModels] = useState(false);
+  const [fetchError, setFetchError] = useState<string | null>(null);
+
+  const updateField = <K extends keyof ModelConnection>(key: K, value: ModelConnection[K]) => {
+    setF((prev) => ({ ...prev, [key]: value }));
+    if (key === 'baseUrl' || key === 'apiKey') {
+      setModelOptions(null);
+      setFetchError(null);
+    }
+  };
+
+  const fetchModels = async () => {
+    setFetchingModels(true);
+    setFetchError(null);
+    try {
+      const res = await api.listConnectionModels(
+        f.baseUrl ?? '',
+        f.apiKey ?? '',
+        f.id || undefined,
+      );
+      setModelOptions(res.models);
+      if (res.models.length > 0 && (!f.model || !res.models.includes(f.model))) {
+        setF((prev) => ({ ...prev, model: res.models[0] }));
+      }
+    } catch (e) {
+      setModelOptions(null);
+      setFetchError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setFetchingModels(false);
+    }
+  };
+
+  const selectModels = modelOptions
+    ? Array.from(new Set([...(f.model ? [f.model] : []), ...modelOptions]))
+    : null;
+
+  return (
+    <div className="nx9-conn__form">
+      <div className="nx9-settings__field-grid">
+        <Field label="标签" value={f.label} onChange={(v) => updateField('label', v)} plain />
+        <Field label="Provider" value={f.provider} onChange={(v) => updateField('provider', v)} plain />
+      </div>
+      <Field label="Base URL" value={f.baseUrl ?? ''} onChange={(v) => updateField('baseUrl', v)} placeholder="https://api.openai.com/v1" plain />
+      <Field label="API Key" value={f.apiKey ?? ''} onChange={(v) => updateField('apiKey', v)} />
+      <div className="nx9-conn__model-field">
+        <span className="nx9-settings__label">默认模型</span>
+        <div className="nx9-conn__model-row">
+          {selectModels ? (
+            <ConnModelPicker
+              value={f.model ?? ''}
+              options={selectModels}
+              onChange={(v) => updateField('model', v)}
+            />
+          ) : (
+            <input
+              type="text"
+              className="nx9-settings__input"
+              value={f.model ?? ''}
+              onChange={(e) => updateField('model', e.target.value)}
+              placeholder="gpt-4o-mini"
+            />
+          )}
+          <button
+            type="button"
+            className="nx9-conn__fetch-models"
+            disabled={fetchingModels}
+            onClick={() => void fetchModels()}
+          >
+            {fetchingModels ? <Loader2 size={13} className="animate-spin" /> : null}
+            {fetchingModels ? '获取中' : '自动获取'}
+          </button>
+        </div>
+        {fetchError && <p className="nx9-conn__fetch-error">{fetchError}</p>}
+        {selectModels && !fetchError && (
+          <p className="nx9-conn__fetch-ok">已获取 {modelOptions?.length ?? 0} 个模型，可下拉选择</p>
+        )}
+      </div>
+      <div className="nx9-conn__form-actions">
+        <button type="button" className="nx9-settings__link-btn" onClick={() => onSave(f)}>保存</button>
+        <button type="button" className="nx9-settings__link-btn" onClick={onCancel} style={{ color: 'var(--set-muted)' }}>取消</button>
+      </div>
+    </div>
+  );
+}
+
+function ConnModelPicker({
+  value,
+  options,
+  onChange,
+}: {
+  value: string;
+  options: string[];
+  onChange: (v: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState('');
+  const [pos, setPos] = useState<{ top: number; left: number; width: number; maxHeight: number } | null>(null);
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const dropRef = useRef<HTMLDivElement>(null);
+  const listRef = useRef<HTMLUListElement>(null);
+
+  const close = useCallback(() => {
+    setOpen(false);
+    setQuery('');
+    setPos(null);
+  }, []);
+
+  const updatePos = useCallback(() => {
+    const el = wrapRef.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    const gap = 6;
+    const preferred = 260;
+    const spaceBelow = window.innerHeight - rect.bottom - gap - 12;
+    const spaceAbove = rect.top - gap - 12;
+    const placeAbove = spaceBelow < 160 && spaceAbove > spaceBelow;
+    const maxHeight = Math.max(140, Math.min(preferred, placeAbove ? spaceAbove : spaceBelow));
+    setPos({
+      top: placeAbove ? Math.max(12, rect.top - gap - maxHeight) : rect.bottom + gap,
+      left: rect.left,
+      width: rect.width,
+      maxHeight,
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!open) return;
+    updatePos();
+    const onDoc = (e: MouseEvent) => {
+      const t = e.target as Node;
+      if (wrapRef.current?.contains(t) || dropRef.current?.contains(t)) return;
+      close();
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') close();
+    };
+    const onReposition = () => updatePos();
+    document.addEventListener('mousedown', onDoc);
+    document.addEventListener('keydown', onKey);
+    window.addEventListener('resize', onReposition);
+    window.addEventListener('scroll', onReposition, true);
+    return () => {
+      document.removeEventListener('mousedown', onDoc);
+      document.removeEventListener('keydown', onKey);
+      window.removeEventListener('resize', onReposition);
+      window.removeEventListener('scroll', onReposition, true);
+    };
+  }, [open, close, updatePos]);
+
+  useEffect(() => {
+    if (!open) return;
+    const el = listRef.current?.querySelector<HTMLElement>('[aria-selected="true"]');
+    el?.scrollIntoView({ block: 'nearest' });
+  }, [open, value]);
+
+  const filtered = query.trim()
+    ? options.filter((m) => m.toLowerCase().includes(query.trim().toLowerCase()))
+    : options;
+
+  return (
+    <div className={`nx9-conn__model-picker ${open ? 'is-open' : ''}`} ref={wrapRef}>
+      <button
+        type="button"
+        className="nx9-conn__model-trigger"
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        onClick={() => {
+          if (open) close();
+          else {
+            setOpen(true);
+            requestAnimationFrame(updatePos);
+          }
+        }}
+      >
+        <span className="nx9-conn__model-trigger-text">{value || '选择模型'}</span>
+        <ChevronDown size={14} strokeWidth={2} />
+      </button>
+      {open && pos && createPortal(
+        <div
+          ref={dropRef}
+          className="nx9-conn__model-dropdown"
+          role="presentation"
+          style={{
+            position: 'fixed',
+            top: pos.top,
+            left: pos.left,
+            width: pos.width,
+            maxHeight: pos.maxHeight,
+            zIndex: 10050,
+          }}
+        >
+          <input
+            type="text"
+            className="nx9-conn__model-search"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="筛选模型…"
+            autoFocus
+          />
+          <ul className="nx9-conn__model-options nx9-scroll" role="listbox" ref={listRef}>
+            {filtered.map((m) => (
+              <li key={m}>
+                <button
+                  type="button"
+                  role="option"
+                  aria-selected={m === value}
+                  className={m === value ? 'is-on' : ''}
+                  onClick={() => {
+                    onChange(m);
+                    close();
+                  }}
+                >
+                  {m}
+                </button>
+              </li>
+            ))}
+            {filtered.length === 0 && (
+              <li className="nx9-conn__model-empty">无匹配模型</li>
+            )}
+          </ul>
+        </div>,
+        document.body,
+      )}
     </div>
   );
 }
