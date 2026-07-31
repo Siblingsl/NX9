@@ -17,7 +17,7 @@ version: 2.0.0
 ```json
 {"patch":{"screenplay":{"episodes":[{"id":"保留或新id","index":1,"title":"","bodyMd":"含对白的正文"}],"sourceType":"generated"}}}
 ```
-bodyMd 使用场景头 + 动作 + `角色：（情绪）台词` 格式。
+bodyMd 使用标准体例：场景头 `## S01 | 内景/外景 · 地点 | 时间`；动作自然段；对白 `角色名：台词` 或 `角色名（情绪）：台词`（禁止引号与【场景：】）。
 
 ## 工作流程
 1. 读取角色 voiceNotes

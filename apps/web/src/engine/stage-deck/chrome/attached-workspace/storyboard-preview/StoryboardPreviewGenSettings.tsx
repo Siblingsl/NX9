@@ -63,11 +63,13 @@ function ParamChip({
 export interface StoryboardPreviewGenSettingsProps {
   settings: StoryboardPreviewPictureSettings;
   onChange: (patch: Partial<StoryboardPreviewPictureSettings>) => void;
+  hideModel?: boolean;
 }
 
 export function StoryboardPreviewGenSettings({
   settings,
   onChange,
+  hideModel = false,
 }: StoryboardPreviewGenSettingsProps) {
   const qualityLabel =
     IMAGE_QUALITY_OPTIONS.find((o) => o.id === settings.quality)?.label ?? settings.quality;
@@ -93,24 +95,28 @@ export function StoryboardPreviewGenSettings({
       className="sb-preview-gen shrink-0 flex flex-wrap items-center gap-2 px-3 py-1.5"
       onMouseDown={stop}
     >
-      <ComposerModelSelect
-        value={settings.model}
-        options={
-          pictureModelOptions.length > 0
-            ? pictureModelOptions
-            : [{ id: settings.model, label: '未配置图片连接 · 点此去设置' }]
-        }
-        onChange={(model: string) => {
-          if (!hasPictureConnections) {
-            openConnectionsSettings();
-            return;
-          }
-          void selectPictureModel(model, (id) => onChange({ model: id }));
-        }}
-        width={260}
-        tone="desk"
-      />
-      <span className="kp__sep" />
+      {!hideModel && (
+        <>
+          <ComposerModelSelect
+            value={settings.model}
+            options={
+              pictureModelOptions.length > 0
+                ? pictureModelOptions
+                : [{ id: settings.model, label: '未配置图片连接 · 点此去设置' }]
+            }
+            onChange={(model: string) => {
+              if (!hasPictureConnections) {
+                openConnectionsSettings();
+                return;
+              }
+              void selectPictureModel(model, (id) => onChange({ model: id }));
+            }}
+            width={260}
+            tone="desk"
+          />
+          <span className="kp__sep" />
+        </>
+      )}
       <PictureGenModeChip
         mode={settings.pictureGenMode as PictureGenMode}
         modes={['text-to-image', 'image-to-image']}

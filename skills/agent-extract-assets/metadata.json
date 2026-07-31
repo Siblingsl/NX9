@@ -1,13 +1,13 @@
 {
   "name": "agent-extract-assets",
   "title": "资产抽取",
-  "description": "从文本提取角色与场景，并为角色填写六层设定与视觉锚点。",
-  "version": "2.0.0",
+  "description": "从文本提取角色与场景；locations 必填；兼容 environments。",
+  "version": "2.1.0",
   "entry": "SKILL.md",
   "author": "nx9",
   "status": "stable",
   "language": "zh-CN",
-  "updated_at": "2026-07-30T08:00:00Z",
+  "updated_at": "2026-07-31T09:30:00Z",
   "tags": [
     "agent",
     "assets"

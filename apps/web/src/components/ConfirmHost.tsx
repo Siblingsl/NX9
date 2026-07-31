@@ -1,10 +1,12 @@
 import { memo, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { useConfirmDialog } from '../stores/confirm-dialog';
+import './confirm-host.css';
 
 export const ConfirmHost = memo(function ConfirmHost() {
   const pending = useConfirmDialog((s) => s.pending);
   const resolve = useConfirmDialog((s) => s.resolve);
+  const setOptionChecked = useConfirmDialog((s) => s.setOptionChecked);
 
   useEffect(() => {
     if (!pending) return;
@@ -23,33 +25,42 @@ export const ConfirmHost = memo(function ConfirmHost() {
 
   return createPortal(
     <div
-      className="fixed inset-0 z-[200] flex items-center justify-center p-6"
-      style={{ background: 'rgba(26, 24, 20, 0.72)' }}
+      className="nx9-confirm"
       role="presentation"
       onClick={() => resolve(false)}
     >
       <div
-        className="w-[320px] rounded-2xl border border-line bg-surface p-5 shadow-2xl"
+        className="nx9-confirm__panel"
         role="alertdialog"
         aria-modal="true"
         aria-labelledby="nx9-confirm-title"
         aria-describedby={pending.description ? 'nx9-confirm-desc' : undefined}
         onClick={(e) => e.stopPropagation()}
       >
-        <p id="nx9-confirm-title" className="text-[15px] font-semibold text-ink mb-1">
+        <p id="nx9-confirm-title" className="nx9-confirm__title">
           {pending.title}
         </p>
-        {pending.description && (
-          <p id="nx9-confirm-desc" className="text-[12px] text-ink/55 mb-5 leading-relaxed">
+        {pending.description ? (
+          <p id="nx9-confirm-desc" className="nx9-confirm__desc">
             {pending.description}
           </p>
+        ) : null}
+        {pending.option && (
+          <label className="nx9-confirm__option">
+            <input
+              type="checkbox"
+              checked={pending.optionChecked}
+              onChange={(e) => setOptionChecked(e.target.checked)}
+            />
+            <span>{pending.option.label}</span>
+          </label>
         )}
-        {!pending.description && <div className="mb-5" />}
-        <div className="flex items-center justify-end gap-2">
+        {!pending.description && !pending.option ? <div style={{ height: 12 }} /> : null}
+        <div className="nx9-confirm__acts">
           <button
             type="button"
             onClick={() => resolve(false)}
-            className="px-3.5 py-2 rounded-xl text-[12px] text-ink/60 hover:bg-surface"
+            className="nx9-confirm__btn nx9-confirm__btn--ghost"
           >
             {cancelLabel}
           </button>
@@ -57,11 +68,7 @@ export const ConfirmHost = memo(function ConfirmHost() {
             type="button"
             autoFocus
             onClick={() => resolve(true)}
-            className={
-              isDanger
-                ? 'px-3.5 py-2 rounded-xl text-[12px] font-semibold text-white bg-rose-600 hover:bg-rose-500'
-                : 'px-3.5 py-2 rounded-xl text-[12px] font-semibold text-white bg-brand hover:bg-brand/90'
-            }
+            className={`nx9-confirm__btn ${isDanger ? 'nx9-confirm__btn--danger' : 'nx9-confirm__btn--primary'}`}
           >
             {confirmLabel}
           </button>

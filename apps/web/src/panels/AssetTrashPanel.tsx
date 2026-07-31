@@ -18,6 +18,7 @@ import {
   Camera,
   Smile,
   Anchor,
+  FolderOpen,
 } from 'lucide-react';
 import type { AssetTrashEntry, AssetTrashKind } from '@nx9/shared';
 import {
@@ -42,6 +43,7 @@ const KIND_FILTERS: { id: KindFilter; label: string }[] = [
   { id: 'all', label: '全部' },
   { id: 'picture', label: '图片' },
   { id: 'video', label: '视频' },
+  { id: 'screenplay', label: '剧本' },
   ...ASSET_LIBRARY_TABS.map((t) => ({ id: t.key as AssetTrashKind, label: t.label })),
 ];
 
@@ -55,12 +57,14 @@ const KIND_ICONS: Record<AssetTrashKind, typeof User> = {
   sound: Volume2,
   picture: ImageIcon,
   video: Film,
+  screenplay: FolderOpen,
 };
 
 const KIND_LABEL: Record<AssetTrashKind, string> = {
   ...ASSET_KIND_MENTION_PREFIX,
   picture: '图片',
   video: '视频',
+  screenplay: '剧本',
 };
 
 function formatTime(ts: number) {
@@ -139,6 +143,7 @@ export const AssetTrashPanel = memo(function AssetTrashPanel({
   const backlotWorkspace = useWorkspaceDocument((s) => s.backlotWorkspace.items);
   const backlotCustom = useWorkspaceDocument((s) => s.backlotCustom.items);
   const mediaTrash = useWorkspaceDocument((s) => s.mediaTrash);
+  const scriptDeskTrash = useWorkspaceDocument((s) => s.scriptDeskTrash);
   const restoreCharacter = useWorkspaceDocument((s) => s.restoreCharacter);
   const purgeCharacter = useWorkspaceDocument((s) => s.purgeCharacter);
   const restoreSound = useWorkspaceDocument((s) => s.restoreSound);
@@ -149,6 +154,8 @@ export const AssetTrashPanel = memo(function AssetTrashPanel({
   const purgeBacklotCustom = useWorkspaceDocument((s) => s.purgeBacklotCustom);
   const takeMediaTrashItem = useWorkspaceDocument((s) => s.takeMediaTrashItem);
   const purgeMediaTrash = useWorkspaceDocument((s) => s.purgeMediaTrash);
+  const restoreScriptDeskTrashToDrafts = useWorkspaceDocument((s) => s.restoreScriptDeskTrashToDrafts);
+  const purgeScriptDeskTrash = useWorkspaceDocument((s) => s.purgeScriptDeskTrash);
   const purgeExpiredPrivate = useWorkspaceDocument((s) => s.purgeExpiredTrashedAssets);
 
   const publicPayload = usePublicAssetLibrary((s) => s.payload);
@@ -228,6 +235,17 @@ export const AssetTrashPanel = memo(function AssetTrashPanel({
       });
     }
 
+    for (const sd of filterTrashedAssets(scriptDeskTrash)) {
+      out.push({
+        id: sd.id,
+        kind: 'screenplay',
+        scope: 'private',
+        label: `${sd.title} · ${sd.episodeCount} 集`,
+        deletedAt: sd.deletedAt!,
+        sourceBlockId: sd.sourceBlockId,
+      });
+    }
+
     for (const c of filterTrashedAssets(publicPayload.characters)) {
       const item = characterToItem(c, 'public');
       out.push({
@@ -272,6 +290,7 @@ export const AssetTrashPanel = memo(function AssetTrashPanel({
     backlotWorkspace,
     backlotCustom,
     mediaTrash,
+    scriptDeskTrash,
     publicPayload,
     scopeFilter,
     kindFilter,
@@ -325,6 +344,10 @@ export const AssetTrashPanel = memo(function AssetTrashPanel({
                 : `已恢复「${entry.label}」到镜头素材`,
             );
           }
+        } else if (entry.kind === 'screenplay') {
+          const restored = restoreScriptDeskTrashToDrafts(entry.id);
+          if (!restored) throw new Error('剧本回收站项不存在');
+          toastSuccess(`已恢复「${restored.title}」到编剧台草稿箱`);
         } else if (entry.scope === 'private') {
           if (entry.kind === 'character') {
             conflict = restoreCharacter(entry.id).conflictRenamed;
@@ -354,6 +377,7 @@ export const AssetTrashPanel = memo(function AssetTrashPanel({
     },
     [
       takeMediaTrashItem,
+      restoreScriptDeskTrashToDrafts,
       restoreCharacter,
       restoreSound,
       restoreBacklotCustom,
@@ -371,6 +395,10 @@ export const AssetTrashPanel = memo(function AssetTrashPanel({
         purgeMediaTrash(entry.id);
         return;
       }
+      if (entry.kind === 'screenplay') {
+        purgeScriptDeskTrash(entry.id);
+        return;
+      }
       if (entry.scope === 'private') {
         if (entry.kind === 'character') purgeCharacter(entry.id);
         else if (entry.kind === 'sound') purgeSound(entry.id);
@@ -386,6 +414,7 @@ export const AssetTrashPanel = memo(function AssetTrashPanel({
     },
     [
       purgeMediaTrash,
+      purgeScriptDeskTrash,
       purgeCharacter,
       purgeSound,
       purgeBacklotCustom,

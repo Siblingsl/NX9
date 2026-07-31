@@ -1,5 +1,5 @@
 ﻿import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Clock, ImagePlus, Loader2, Pencil, Sparkles } from 'lucide-react';
+import { Clock, ImagePlus, Loader2, Pencil } from 'lucide-react';
 import { type NodeProps, useReactFlow } from '@xyflow/react';
 import {
   type AssetLibraryKind,
@@ -49,7 +49,6 @@ import {
   packageSourceHash,
   runBreakdownFromPackage,
   splitShotInBreakdown,
-  suggestedTrialCap,
   type ShotListFilter,
   type StoryboardDeskMode,
 } from '../../../engine/storyboard-desk-runner';
@@ -58,6 +57,8 @@ import { useToast } from '../../../stores/toast';
 import { getAllChainShots } from '../../../engine/chain-storyboard-aggregate';
 import { AssetMentionInput } from '../../../engine/stage-deck/chrome/asset-mention/AssetMentionInput';
 import { StoryboardPreviewWorkspace } from '../../../engine/stage-deck/chrome/attached-workspace/storyboard-preview/StoryboardPreviewWorkspace';
+import { ComposerModelSelect } from '../../../engine/stage-deck/chrome/attached-workspace/composer/ComposerModelSelect';
+import { useConnectedPictureModels } from '../../../hooks/use-connected-picture-models';
 import {
   createEpisodeQueue,
   queueNextEpisode,
@@ -141,8 +142,8 @@ export function useStoryboardDesk(props: NodeProps) {
   const [editingShotId, setEditingShotId] = useState<string | null>(null);
   /** 正在生成画面的 shot id */
   const [generatingShotId, setGeneratingShotId] = useState<string | null>(null);
-  /** 批量任务：逐镜线稿 / 宫格线稿 / 试出互斥 */
-  const [batchMode, setBatchMode] = useState<'line-art' | 'grid-line-art' | 'trial' | null>(null);
+  /** 批量任务：逐镜线稿 / 宫格线稿 互斥 */
+  const [batchMode, setBatchMode] = useState<'line-art' | 'grid-line-art' | null>(null);
   const [batchProgress, setBatchProgress] = useState<string | null>(null);
   const [sheetComposing, setSheetComposing] = useState(false);
   const batchRunning = batchMode !== null;
@@ -254,7 +255,36 @@ export function useStoryboardDesk(props: NodeProps) {
     [characterNameSet, previewPayloadEarly, sceneNameSet, shotFilter, storyboardUrlMapEarly, visibleShots],
   );
 
-  const trialCap = suggestedTrialCap(visibleShots.length || shots.length);
+  const composePictureModel = previewPayloadEarly?.pictureSettings?.model;
+  const {
+    options: composeModelOptions,
+    hasConnections: composeHasPictureConnections,
+    selectModel: composeSelectModel,
+    openConnectionsSettings: composeOpenConnections,
+  } = useConnectedPictureModels(composePictureModel);
+
+  const handleComposeModelChange = useCallback((model: string) => {
+    if (!composeHasPictureConnections) {
+      composeOpenConnections();
+      return;
+    }
+    void composeSelectModel(model, (id) => {
+      updateNodeData(props.id, (node) => {
+        const data = (node.data ?? {}) as Record<string, unknown>;
+        const raw = data.storyboardPreview as StoryboardPreviewPayload | undefined;
+        const current = raw?.version === 1
+          ? { ...emptyStoryboardPreview(), ...raw, pictureSettings: resolveStoryboardPreviewPictureSettings(raw) }
+          : emptyStoryboardPreview();
+        return {
+          ...data,
+          storyboardPreview: {
+            ...current,
+            pictureSettings: { ...current.pictureSettings, model: id },
+          },
+        };
+      });
+    });
+  }, [composeHasPictureConnections, composeOpenConnections, composeSelectModel, props.id, updateNodeData]);
 
   const readiness = useMemo(() => {
     try {
@@ -864,56 +894,6 @@ export function useStoryboardDesk(props: NodeProps) {
     appendLog(`已从关键帧预览回填镜表 · ${changed} 镜`);
   }, [appendLog, getNodes, props.id, studioOpen, updateNodeData, updateShot]);
 
-  const generateShotFrame = useCallback(
-    async (shot: ScriptBreakdownShot) => {
-      if (batchRunning) {
-        appendLog('分镜台：批量任务进行中，请稍候再单镜生成');
-        return;
-      }
-      const pictureId = resolveConnectedPictureGenId(props.id, getNodes(), getEdges());
-      if (!pictureId) {
-        appendLog('分镜台：请先用顶部能力口连接「图像生成」节点');
-        return;
-      }
-      const pictureNode = getNodes().find((n) => n.id === pictureId);
-      if (!pictureNode) return;
-
-      setGeneratingShotId(shot.id);
-      const frame: StoryboardPreviewFrame = {
-        id: `spf-${shot.id}`,
-        order: 1,
-        label: shot.sceneCode || `Shot${shot.index}`,
-        startSec: 0,
-        endSec: Math.max(1, shot.durationSec || 5),
-        sourceShotId: shot.id,
-        promptSummary: shot.imagePrompt || shot.scriptText || shot.title,
-        characterNames: shot.characters,
-        sceneAssetRef: shot.scene,
-        referenceImageUrl: shot.referenceImageUrl ?? shot.previewImageUrl ?? null,
-        status: 'generating',
-        locked: false,
-      };
-      try {
-        const nodeData = (getNodes().find((n) => n.id === props.id)?.data ?? {}) as Record<string, unknown>;
-        const previewRaw = nodeData.storyboardPreview as StoryboardPreviewPayload | undefined;
-        const pictureSettings = resolveStoryboardPreviewPictureSettings(previewRaw);
-        const imageUrl = await generateStoryboardFrameImage(
-          frame,
-          (pictureNode.data ?? {}) as Record<string, unknown>,
-          pictureSettings,
-        );
-        setShotFrameUrl(shot.id, imageUrl);
-        appendLog(`分镜画面已生成 · ${shot.sceneCode || shot.id}`);
-        toastSuccess(`已生成 ${shot.sceneCode || '分镜'} 画面`);
-      } catch (e) {
-        appendLog(`分镜画面生成失败: ${String(e)}`);
-      } finally {
-        setGeneratingShotId(null);
-      }
-    },
-    [appendLog, batchRunning, getEdges, getNodes, props.id, setShotFrameUrl],
-  );
-
   const referenceBoardData = useMemo(() => {
     // Find connected reference-board nodes
     const boardNodes = getNodes().filter((n) => n.type === 'reference-board');
@@ -1451,98 +1431,6 @@ export function useStoryboardDesk(props: NodeProps) {
     ],
   );
 
-  const generateBatchTrials = useCallback(
-    async (scope: 'visible' | 'all' | 'missing' = 'visible') => {
-      const pictureId = resolveConnectedPictureGenId(props.id, getNodes(), getEdges());
-      if (!pictureId) {
-        appendLog('分镜台：批量试出前请先连接「图像生成」节点');
-        return;
-      }
-      const pictureNode = getNodes().find((n) => n.id === pictureId);
-      if (!pictureNode) return;
-
-      const pool = (scope === 'all' ? shots : visibleShots).filter(Boolean);
-      const liveNow = (getNodes().find((n) => n.id === props.id)?.data as Record<string, unknown> | undefined)?.scriptBreakdown as ScriptBreakdownPayload | undefined;
-      const liveMap = new Map(flattenScriptBreakdownShots(liveNow).map((s) => [s.id, s]));
-      const targetShots = scope === 'missing'
-        ? pool.filter((shot) => {
-            const live = liveMap.get(shot.id) ?? shot;
-            return !live.previewImageUrl && !live.referenceImageUrl;
-          })
-        : pool;
-      if (targetShots.length === 0) {
-        appendLog(scope === 'missing' ? '分镜台：当前可见镜头均已有画面，无需补试出' : '分镜台：当前没有可试出的镜头');
-        return;
-      }
-
-      setBatchMode('trial');
-      setBatchProgress(`0/${targetShots.length}`);
-      appendLog(`开始批量试出 · ${targetShots.length} 镜（${scope === 'all' ? '全部' : scope === 'missing' ? '仅缺图' : '当前可见'}）`);
-
-      let ok = 0;
-      let fail = 0;
-      for (let i = 0; i < targetShots.length; i++) {
-        const shot = targetShots[i];
-        setBatchProgress(`${i + 1}/${targetShots.length}`);
-        setGeneratingShotId(shot.id);
-        try {
-          const livePayload = (getNodes().find((n) => n.id === props.id)?.data as Record<string, unknown> | undefined)?.scriptBreakdown as ScriptBreakdownPayload | undefined;
-          const liveShot = flattenScriptBreakdownShots(livePayload).find((s) => s.id === shot.id) ?? shot;
-          const promptSummary = (liveShot.imagePrompt || liveShot.scriptText || liveShot.visual || liveShot.title || '').trim();
-          if (!promptSummary) {
-            fail += 1;
-            appendLog(`批量试出跳过 · ${liveShot.sceneCode || liveShot.id}: 缺少 imagePrompt / 文案`);
-            continue;
-          }
-          const frame: StoryboardPreviewFrame = {
-            id: `spf-${liveShot.id}`,
-            order: i + 1,
-            label: liveShot.sceneCode || `Shot${liveShot.index}`,
-            startSec: 0,
-            endSec: Math.max(1, liveShot.durationSec || 5),
-            sourceShotId: liveShot.id,
-            promptSummary,
-            characterNames: liveShot.characters,
-            sceneAssetRef: liveShot.scene,
-            referenceImageUrl: liveShot.referenceImageUrl ?? liveShot.previewImageUrl ?? null,
-            status: 'generating',
-            locked: false,
-            stylePreset: null,
-          };
-          const nodeData = (getNodes().find((n) => n.id === props.id)?.data ?? {}) as Record<string, unknown>;
-          const previewRaw = nodeData.storyboardPreview as StoryboardPreviewPayload | undefined;
-          const pictureSettings = resolveStoryboardPreviewPictureSettings(previewRaw);
-          const imageUrl = await generateStoryboardFrameImage(
-            frame,
-            (pictureNode.data ?? {}) as Record<string, unknown>,
-            pictureSettings,
-          );
-          // setShotFrameUrl 会同步拆分结果 / 故事板 / 预览帧
-          setShotFrameUrl(liveShot.id, imageUrl);
-          ok += 1;
-        } catch (e) {
-          fail += 1;
-          appendLog(`批量试出失败 · ${shot.sceneCode || shot.id}: ${String(e)}`);
-        }
-      }
-
-      setGeneratingShotId(null);
-      setBatchMode(null);
-      setBatchProgress(null);
-      appendLog(`批量试出完成 · 成功 ${ok} · 失败 ${fail}`);
-      if (ok > 0) toastSuccess(`批量试出完成 ${ok}/${targetShots.length}`);
-    },
-    [
-      appendLog,
-      getEdges,
-      getNodes,
-      props.id,
-      setShotFrameUrl,
-      shots,
-      visibleShots,
-    ],
-  );
-
   const previewPayload = (props.data as Record<string, unknown>)?.storyboardPreview as
     | StoryboardPreviewPayload
     | undefined;
@@ -2025,7 +1913,7 @@ export function useStoryboardDesk(props: NodeProps) {
                           </button>
                         </div>
                       </div>
-                      <p className="sg3-hint">点画面可上传 · 卡片底栏：线稿 / 试出 / 编辑 · 整集关键帧请交导演台</p>
+                       <p className="sg3-hint">点画面可上传 · 卡片底栏：线稿 / 编辑 · 彩色关键帧请到导演台批出</p>
                       <div className="sg3-board sg-story-grid">
                         {visibleShots.map((shot) => (
                           <ShotStoryCell
@@ -2042,7 +1930,6 @@ export function useStoryboardDesk(props: NodeProps) {
                               setShotFrameUrl(shot.id, url);
                               appendLog(`分镜画面已上传 · ${shot.sceneCode || shot.id}`);
                             }}
-                            onGenerate={() => void generateShotFrame(shot)}
                             onGenerateLineArt={() => void generateShotLineArt(shot)}
                             onEdit={() => openEdit(shot.id)}
                           />
@@ -2063,9 +1950,7 @@ export function useStoryboardDesk(props: NodeProps) {
                           ? `批量线稿 ${batchProgress || ''}`.trim()
                           : batchMode === 'grid-line-art'
                             ? `宫格线稿 ${batchProgress || ''}`.trim()
-                          : batchMode === 'trial'
-                            ? `试出图 ${batchProgress || ''}`.trim()
-                            : `构图覆盖 ${Math.round(compositionStats.coverage * 100)}% · 试出建议 ≤ ${trialCap} 镜`}
+                            : `构图覆盖 ${Math.round(compositionStats.coverage * 100)}%`}
                     </div>
                     <div className="sg3-toolbar__acts">
                       <button
@@ -2098,26 +1983,18 @@ export function useStoryboardDesk(props: NodeProps) {
                       >
                         {sheetComposing ? '合成中…' : contactSheetUrl ? '重出故事板' : '生成故事板大图'}
                       </button>
-                      <button
-                        type="button"
-                        className="sg3-btn sg3-btn--ghost"
-                        disabled={!payload || batchRunning || sheetComposing || visibleShots.length === 0}
-                        onClick={() => {
-                          if (compositionStats.trial >= trialCap) {
-                            appendLog(`试出已达建议配额 ${trialCap}，完整批出去导演台`);
-                          }
-                          void generateBatchTrials('missing');
-                        }}
-                      >
-                        缺图补试出
-                      </button>
-                      <button
-                        type="button"
-                        className="sg3-btn sg3-btn--ghost"
-                        onClick={openDirectorDesk}
-                      >
-                        去导演台批出
-                      </button>
+                      <span className="sg3-toolbar__spacer" style={{ flex: 1, minWidth: 16 }} />
+                      <ComposerModelSelect
+                        value={composePictureModel ?? ''}
+                        options={
+                          composeModelOptions.length > 0
+                            ? composeModelOptions
+                            : [{ id: composePictureModel ?? '', label: '未配置图片连接 · 点此去设置' }]
+                        }
+                        onChange={handleComposeModelChange}
+                        width={220}
+                        tone="desk"
+                      />
                     </div>
                   </div>
                   <p className="sg3-hint">
@@ -2132,7 +2009,7 @@ export function useStoryboardDesk(props: NodeProps) {
                       className={`sg3-compose-tabs__btn ${composeViewTab === 'preview' ? 'is-on' : ''}`}
                       onClick={() => setComposeViewTab('preview')}
                     >
-                      关键帧预览
+                       线稿预览
                       {previewOk > 0 ? <em>{previewOk}</em> : null}
                     </button>
                     <button
@@ -2329,42 +2206,6 @@ export function useStoryboardDesk(props: NodeProps) {
               {currentEpisodeConfirmed ? ' · 已确认可交导演台' : ' · 确认后交导演台批出'}
             </p>
             <div className="sg3-foot__actions">
-              <button
-                type="button"
-                className="sg3-btn sg3-btn--ghost"
-                disabled={!payload || batchRunning || sheetComposing || visibleShots.length === 0}
-                onClick={() => void generateBatchLineArt('visible')}
-              >
-                {batchMode === 'line-art' ? `线稿 ${batchProgress}` : '批量线稿'}
-              </button>
-              <button
-                type="button"
-                className="sg3-btn sg3-btn--ghost"
-                disabled={!payload || batchRunning || sheetComposing || visibleShots.length === 0}
-                title="多镜提示词合成一张宫格再切回各镜，节省出图次数"
-                onClick={() => void generateBatchGridLineArt('visible')}
-              >
-                {batchMode === 'grid-line-art' ? `宫格 ${batchProgress}` : '宫格线稿'}
-              </button>
-              <button
-                type="button"
-                className="sg3-btn sg3-btn--ghost"
-                disabled={!payload || batchRunning || sheetComposing || visibleShots.length === 0}
-                onClick={() => {
-                  setStudioTab('compose');
-                  setComposeViewTab('sheet');
-                  void generateStoryboardSheet(true);
-                }}
-              >
-                {sheetComposing ? '合成中…' : '故事板大图'}
-              </button>
-              <button
-                type="button"
-                className="sg3-btn sg3-btn--ghost"
-                onClick={openDirectorDesk}
-              >
-                去导演台批出
-              </button>
               <button
                 type="button"
                 className="sg3-btn sg3-btn--primary"

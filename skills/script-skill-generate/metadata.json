@@ -1,13 +1,13 @@
 {
   "name": "script-skill-generate",
   "title": "分集成稿生成",
-  "description": "根据 brief/bible 生成场次+动作+对白分集正文；禁 imagePrompt/镜头表；对齐 bible。",
-  "version": "2.0.0",
+  "description": "根据 brief/bible 生成分集成稿 JSON patch；bodyMd 体例锁死；禁镜头表。",
+  "version": "2.1.0",
   "entry": "SKILL.md",
   "author": "nx9",
   "status": "stable",
   "language": "zh-CN",
-  "updated_at": "2026-07-30T08:00:00Z",
+  "updated_at": "2026-07-31T06:00:00Z",
   "tags": [
     "script",
     "generate",

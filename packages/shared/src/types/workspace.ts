@@ -123,6 +123,10 @@ export interface WorkspacePayloadV3 extends Omit<WorkspacePayloadV2, 'version'> 
   projectMeta?: ProjectMeta;
   /** F-010: 生成结果软删（图像/视频），进资产回收站 */
   mediaTrash?: import('../utils/asset-trash').MediaTrashItem[];
+  /** 编剧台草稿箱（活跃文件夹） */
+  scriptDeskDrafts?: import('../utils/script-desk-archives').ScriptDeskFolderSnapshot[];
+  /** 编剧台成稿进私有回收站 */
+  scriptDeskTrash?: import('../utils/script-desk-archives').ScriptDeskFolderSnapshot[];
 }
 
 /** Workspace on disk — v1/v2 legacy or v3 Stage Deck */
@@ -196,6 +200,14 @@ export function normalizeWorkspacePayload(raw: Partial<WorkspacePayload>): Works
     canvasAppearance: raw.canvasAppearance ?? DEFAULT_CANVAS_APPEARANCE,
   };
   const rawScriptPlan = (raw as any).scriptPlan as ScriptPlanPayload | undefined;
+  const mediaTrash = (raw as { mediaTrash?: import('../utils/asset-trash').MediaTrashItem[] }).mediaTrash;
+  const scriptDeskDrafts = (raw as {
+    scriptDeskDrafts?: import('../utils/script-desk-archives').ScriptDeskFolderSnapshot[];
+  }).scriptDeskDrafts;
+  const scriptDeskTrash = (raw as {
+    scriptDeskTrash?: import('../utils/script-desk-archives').ScriptDeskFolderSnapshot[];
+  }).scriptDeskTrash;
+
   if (raw.version === 3) {
     return {
       ...base,
@@ -208,7 +220,17 @@ export function normalizeWorkspacePayload(raw: Partial<WorkspacePayload>): Works
       scriptPlan: rawScriptPlan,
       environments: (raw as any).environments ?? undefined,
       playbookSession: (raw as any).playbookSession ?? null,
+      projectStatus: (raw as any).projectStatus,
+      projectMeta: (raw as any).projectMeta,
+      mediaTrash: Array.isArray(mediaTrash) ? mediaTrash : undefined,
+      scriptDeskDrafts: Array.isArray(scriptDeskDrafts) ? scriptDeskDrafts : undefined,
+      scriptDeskTrash: Array.isArray(scriptDeskTrash) ? scriptDeskTrash : undefined,
     };
   }
-  return base;
+  return {
+    ...base,
+    mediaTrash: Array.isArray(mediaTrash) ? mediaTrash : undefined,
+    scriptDeskDrafts: Array.isArray(scriptDeskDrafts) ? scriptDeskDrafts : undefined,
+    scriptDeskTrash: Array.isArray(scriptDeskTrash) ? scriptDeskTrash : undefined,
+  } as WorkspacePayload;
 }

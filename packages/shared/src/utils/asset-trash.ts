@@ -118,7 +118,9 @@ export type AssetTrashKind =
   | 'sound'
   /** 节点生成结果（图像生成 / 视频等）软删进回收站 */
   | 'picture'
-  | 'video';
+  | 'video'
+  /** 编剧台成稿快照（重置未存草稿 / 草稿箱删除） */
+  | 'screenplay';
 
 export interface AssetTrashEntry {
   id: string;

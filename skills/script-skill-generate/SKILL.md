@@ -1,47 +1,173 @@
 ---
 name: 分集成稿生成
 title: 分集成稿生成
-description: 根据 brief/bible 生成场次+动作+对白分集正文；禁 imagePrompt/镜头表；对齐 bible。
-version: 2.0.0
+description: 根据 brief/bible 生成分集成稿 JSON patch；bodyMd 体例与 agent-screenplay 锁死一致；禁镜头表。
+version: 2.1.0
 ---
 
 # 分集成稿生成
 
 ## 这个 skill 用来做什么
-生成或重写 `screenplay.episodes` 成稿：场景头、动作、对白，对齐 bible 与 brief，禁止视觉提示词与镜头表。
+
+根据 `brief` + `bible` + 用户集数/倾向，生成或重写 `screenplay.episodes` 成稿，并以 **JSON patch** 返回。  
+`episodes[].bodyMd` 的叙事体例必须与 `agent-screenplay` **完全一致**（场景头 + 动作 + 对白），本 skill 只多一层 JSON 容器。
+
+运行入口：编剧台「生成剧本」等芯片 → `scriptSkill(chipId=generate)`。
 
 ## 输入要求
-brief + bible + 用户集数/倾向。
+
+- 当前 `ScreenplayPackage`（至少 brief；有 bible 更佳）
+- 用户指令：目标集数、语气、禁区、是否续写/覆盖
+- 若已有 episodes：视为格式样例与剧情上下文，新写内容必须体例对齐、剧情衔接
 
 ## 输出要求
+
+### A. 外层容器（硬性）
+
+只输出一个 JSON 对象（可包在 markdown code fence 中），不要长篇解释：
+
 ```json
-{"patch":{"brief":{"title":""},"screenplay":{"sourceType":"generated","episodes":[{"index":1,"title":"第1集","bodyMd":"场次+动作+对白"}]}}}
+{
+  "patch": {
+    "brief": { "title": "剧名（可空则沿用）" },
+    "screenplay": {
+      "sourceType": "generated",
+      "episodes": [
+        {
+          "index": 1,
+          "title": "第1集 短标题",
+          "bodyMd": "见下方体例"
+        }
+      ]
+    }
+  },
+  "explanation": "一句话说明本步做了什么"
+}
 ```
 
+规则：
+
+- `episodes` 非空；`index` 从 1 连续或按用户指定集号。
+- `title`：`第N集 短标题`（短标题 ≤20 字），不要把剧情摘要整段塞进 title。
+- `bodyMd`：**不要**再包一层 JSON；不要把 `title`/`bodyMd` 字段名写进正文。
+- 禁止输出镜头表、imagePrompt、videoPrompt、sketchPrompt 字段。
+
+### B. bodyMd 体例（与 agent-screenplay 锁死，不可混用）
+
+`bodyMd` **不要**重复写 `第N集` 标题行（集号已在 `episodes[].index/title`）；直接从第一场场景头写起。
+
+#### 1) 场景头（唯一合法）
+
+```text
+## S01 | 内景 · 咖啡厅 | 白天
+## S02 | 外景 · 青水路 | 傍晚
+```
+
+- `## S` + 两位场号，本集从 `S01` 连续编号。
+- `内景/外景 · 地点 | 时间`；时间限 `白天/傍晚/夜晚/深夜/清晨`（可短修饰）。
+- **禁止**：`咖啡厅。白天。` / `【场景：…】` / `INT.` / 无 `## Sxx` 的自由场头。
+
+#### 2) 动作
+
+- 可见可拍的外部动作与空间关系；短句；少心理独白。
+- **禁止**景别/运镜/镜头/cut/分镜表。
+
+#### 3) 对白（唯一合法）
+
+```text
+李稳：红姨，我到了！
+红姨（电话）：怎么不靠谱？
+苏曼（冷）：坐下。
+```
+
+- `角色名：台词` 或 `角色名（状态）：台词`。
+- **禁止**引号对白、`某某说道：`、小说引号对话。
+
+### C. bodyMd 正例
+
+```text
+## S01 | 内景 · 咖啡厅 | 白天
+
+李稳坐在靠窗卡座，桌上是柠檬水和「人生规划表」。手机响起。
+
+李稳：红姨，我到了！你说的那个姑娘……靠谱吗？
+红姨（电话）：怎么不靠谱？规划表带了没？
+李稳：带着呢。
+
+门开。黑西装扫场后，苏曼落座，摘下墨镜。
+
+李稳：您是不是坐错了？
+苏曼：李稳？红姨介绍的？
+```
+
+### D. 负例（失败）
+
+- `bodyMd` 内出现 `【场景：出租屋外】` 或 `司机："上来"` 
+- `bodyMd` 内嵌 JSON 或 `\"bodyMd\":`
+- 输出纯文本不包 patch
+- 场与场之间体例漂移
+- 非终章 `（完）`
+- 角色名与 bible 不一致且无交代
 
 ## 工作流程
-1. 锁定集数与每集戏剧弧
-2. 按 bible 稳定角色名与世界规则
-3. 写 bodyMd（无镜头词）
-4. 输出 patch
+
+1. 读取 brief（title/logline/outline/集数）与 bible 角色名册。
+2. 锁定本轮集数：用户指定 > brief.episodeCount > 默认 1。
+3. 若已有成稿：提取上一集结尾做衔接；提取其场景头/对白形态做体例对齐（若旧稿不规范，改用本 skill 标准体例，但剧情仍衔接）。
+4. 为每一集规划：开场钩子 → 冲突升级 → 集末钩子；每集 2–5 场。
+5. 按标准体例写 `bodyMd`；组装 `patch`；`explanation` 一句话。
+6. 自检清单全部通过后再输出。
 
 ## 约束与边界
-- 禁止输出镜头表、imagePrompt、videoPrompt、sketchPrompt、景别/运镜指令
-- 仅输出约定 JSON（可包在 markdown code fence 中），不要长篇解释
-- 角色同名唯一；不得无依据新增主线事件
-- 禁止 imagePrompt / videoPrompt / sketchPrompt
-- 角色名必须与 bible 一致
-- 每集须有开场钩子与集末钩子（短剧）
+
+### 格式锁（最高优先级）
+
+- 全系列 `bodyMd` 体例必须一致；禁止一集标准场头、另一集 `【场景】`。
+- 续写/补集时不得换对白标点体系。
+
+### 叙事锁
+
+- 角色同名唯一，对齐 bible；别名须在故事内交代。
+- 不得无依据新增主线大事件或推翻已写事实。
+- 每集须有开场钩子与集末钩子（短剧缺省）。
+- 非终章禁止 `（完）` / `全文完` / `END`。
+
+### 场景覆盖
+
+| 情境 | 要求 |
+|------|------|
+| 首发 N 集 | 一次 patch 含 N 条 episodes，体例一致，集际因果相接 |
+| 只补第 K 集 | episodes 可只含第 K 集；开场衔接第 K-1 集 |
+| 覆盖重写第 K 集 | 保留核心剧情功能；不与 K-1 / K+1 矛盾 |
+| 群戏/饭局 | 关键说话人点名；避免无名群众长篇发言 |
+| 电话/画外 | 用 `（电话）`/`（画外）`，不用 OS/VO |
+| 时空跳切 | 必须新开 `## Sxx` |
+| 动作强场 | 短动作句 + 少量对白，不写镜头表 |
+| 信息不足 | 合理补场面，但姓名与主线冲突点不擅自改 |
+
+### 绝对禁止
+
+- 镜头表、imagePrompt、videoPrompt、sketchPrompt、景别/运镜指令
+- 在 JSON 外输出长说明代替 patch
+- 把多集剧情糊进单一 `bodyMd` 却只用一个 index（除非用户只要 1 集）
 
 ## 示例
+
 正例与负例见 `examples/`：
+
 - `examples/input.md` — 黄金输入
 - `examples/output.md` — 期望输出（契约通过）
 - `examples/bad-output.md` — 禁止形态（契约失败）
+
 输出骨架见 `templates/`；片种与术语见 `references/`。
 
 ## 检查清单
-- [ ] episodes 非空
-- [ ] bodyMd 含场次与对白
-- [ ] 无提示词字段
-- [ ] 对齐 bible
+
+- [ ] 输出含 `patch.screenplay.episodes`，且非空
+- [ ] 每集 `title` 形如 `第N集 短标题`
+- [ ] 每个 `bodyMd` 场景头均为 `## Sxx | 内景/外景 · 地点 | 时间`
+- [ ] 对白均为 `角色名：台词`（可带状态），无引号
+- [ ] 无提示词字段 / 无镜头词
+- [ ] 角色名对齐 bible；集际体例一致
+- [ ] 有开场钩子与集末钩子；非终章无 `（完）`
+- [ ] `sourceType` 为 `generated`

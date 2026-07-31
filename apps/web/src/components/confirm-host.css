@@ -1,0 +1,114 @@
+/* 全局确认框：须高于 ScreenModal(240)，并走 Desk 色板 */
+
+.nx9-confirm {
+  position: fixed;
+  inset: 0;
+  z-index: 280;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(8, 10, 14, 0.62);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+}
+
+.nx9-confirm__panel {
+  width: min(380px, calc(100vw - 32px));
+  padding: 20px;
+  border-radius: 16px;
+  background: var(--desk-bg-2, #1c1e21);
+  border: 1px solid var(--desk-line-strong, rgba(255, 255, 255, 0.12));
+  box-shadow: var(--desk-shadow, 0 16px 40px rgba(0, 0, 0, 0.5));
+  color: var(--desk-ink, rgba(236, 232, 224, 0.92));
+}
+
+.nx9-confirm__title {
+  margin: 0 0 6px;
+  font-size: 15px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  color: var(--desk-ink, rgba(236, 232, 224, 0.92));
+}
+
+.nx9-confirm__title:last-child {
+  margin-bottom: 0;
+}
+
+.nx9-confirm__desc {
+  margin: 0 0 16px;
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--desk-muted, rgba(236, 232, 224, 0.55));
+}
+
+.nx9-confirm__option {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 4px 0 16px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.nx9-confirm__option input {
+  margin-top: 2px;
+  accent-color: var(--desk-accent, #c4a574);
+  flex-shrink: 0;
+}
+
+.nx9-confirm__option span {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--desk-muted, rgba(236, 232, 224, 0.55));
+}
+
+.nx9-confirm__acts {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.nx9-confirm__btn {
+  height: 34px;
+  padding: 0 14px;
+  border-radius: 10px;
+  border: 1px solid transparent;
+  font-size: 12px;
+  font-weight: 650;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+}
+
+.nx9-confirm__btn--ghost {
+  background: transparent;
+  border-color: var(--desk-line, rgba(255, 255, 255, 0.08));
+  color: var(--desk-muted, rgba(236, 232, 224, 0.55));
+}
+
+.nx9-confirm__btn--ghost:hover {
+  color: var(--desk-ink, rgba(236, 232, 224, 0.92));
+  background: color-mix(in srgb, var(--desk-ink, #ece8e0) 7%, transparent);
+}
+
+.nx9-confirm__btn--danger {
+  background: color-mix(in srgb, #c97878 78%, #1a1212);
+  border-color: color-mix(in srgb, #e8a0a0 35%, transparent);
+  color: #f5e8e8;
+}
+
+.nx9-confirm__btn--danger:hover {
+  background: color-mix(in srgb, #d48888 85%, #1a1212);
+}
+
+.nx9-confirm__btn--primary {
+  background: color-mix(in srgb, var(--desk-accent, #c4a574) 88%, #1a1610);
+  border-color: color-mix(in srgb, var(--desk-accent, #c4a574) 40%, transparent);
+  color: #1a1610;
+}
+
+.nx9-confirm__btn--primary:hover {
+  filter: brightness(1.06);
+}

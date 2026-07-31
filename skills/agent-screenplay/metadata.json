@@ -1,13 +1,13 @@
 {
   "name": "agent-screenplay",
   "title": "分集剧本写作",
-  "description": "根据改编策略与原文写出分集剧本；场次+动作+对白；禁镜头表。",
-  "version": "2.0.0",
+  "description": "根据 brief/策略写出分集纯文本剧本；场景头+动作+对白体例锁死；禁 JSON/镜头表。",
+  "version": "2.1.0",
   "entry": "SKILL.md",
   "author": "nx9",
   "status": "stable",
   "language": "zh-CN",
-  "updated_at": "2026-07-30T08:00:00Z",
+  "updated_at": "2026-07-31T06:00:00Z",
   "tags": [
     "agent",
     "screenplay"

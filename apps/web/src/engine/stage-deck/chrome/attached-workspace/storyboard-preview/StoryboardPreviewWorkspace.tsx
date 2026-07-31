@@ -366,7 +366,7 @@ export function StoryboardPreviewWorkspace({
   /** 大图模式不自动进编辑器；点格会切到分格再编辑 */
   const allowFrameEditor = Boolean(selectedFrame) && (gridEditMode || payload.viewMode !== 'grid');
 
-  const stageBody = directorPanelOpen ? (
+  const stageBody = directorPanelOpen && !embedded ? (
     <StoryboardPreviewDirector3dPanel
       frames={payload.frames}
       selectedFrameId={payload.selectedFrameId}
@@ -397,7 +397,7 @@ export function StoryboardPreviewWorkspace({
     />
   ) : !hasFrames ? (
     <div className="kp__empty">
-      <h3>尚无关键帧</h3>
+      <h3>{embedded ? '线稿预览' : '尚无关键帧'}</h3>
       <p>
         {!pictureNode
           ? '请先在分镜台节点顶部能力口连接「图像生成」，再同步镜头并出图。'
@@ -468,7 +468,7 @@ export function StoryboardPreviewWorkspace({
               <GripVertical size={13} className="text-ink/25 nx9-prompt-bar-drag-handle cursor-grab shrink-0" />
             )}
             <p className="kp__title truncate">
-              {embedded ? '关键帧预览' : (meta?.label ?? '分镜预览')}
+              {embedded ? '线稿预览' : (meta?.label ?? '分镜预览')}
             </p>
             {!embedded && (
               <button type="button" onClick={handleCollapse} className="kp__btn is-ghost" style={{ padding: 4 }}>
@@ -476,7 +476,7 @@ export function StoryboardPreviewWorkspace({
               </button>
             )}
           </div>
-          <p className="kp__sub">Video Proof · 出图 / 导引 / 评分 · 提交批审</p>
+          <p className="kp__sub">{embedded ? '线稿构图 · 确认后交导演台批出彩图' : 'Video Proof · 出图 / 导引 / 评分 · 提交批审'}</p>
         </div>
 
         <div className="kp__chips">
@@ -488,7 +488,7 @@ export function StoryboardPreviewWorkspace({
           <span className={`kp__chip ${pictureNode ? 'is-ok' : 'is-warn'}`}>
             {pictureNode ? '图像已连' : '未连图像'}
           </span>
-          {director3dNode && <span className="kp__chip">3D 已连</span>}
+          {!embedded && director3dNode && <span className="kp__chip">3D 已连</span>}
           {(unboundCharacterShotCount > 0 || unboundSceneShotCount > 0) && (
             <span
               className="kp__chip is-warn"
@@ -513,7 +513,7 @@ export function StoryboardPreviewWorkspace({
             onClick={() => void handleGenerateAll()}
           >
             <Play size={11} fill="currentColor" />
-            {hasFrames && missingCount > 0 ? `补生成 · ${missingCount}` : '生成全部'}
+            {hasFrames && missingCount > 0 ? `${embedded ? '补线稿' : '补生成'} · ${missingCount}` : embedded ? '全出线稿' : '生成全部'}
           </button>
           <button
             type="button"
@@ -620,15 +620,17 @@ export function StoryboardPreviewWorkspace({
         <div className="kp__toolbar-spacer" />
 
         <div className="kp__toolbar-acts">
-          <button
-            type="button"
-            className={`kp__btn ${directorPanelOpen ? 'is-on' : ''}`}
-            onMouseDown={stop}
-            onClick={() => setDirectorPanelOpen((v) => !v)}
-          >
-            <Box size={12} />
-            3D
-          </button>
+          {!embedded && (
+            <button
+              type="button"
+              className={`kp__btn ${directorPanelOpen ? 'is-on' : ''}`}
+              onMouseDown={stop}
+              onClick={() => setDirectorPanelOpen((v) => !v)}
+            >
+              <Box size={12} />
+              3D
+            </button>
+          )}
           <button
             type="button"
             className={`kp__btn ${batchOpen ? 'is-on' : ''}`}
@@ -732,6 +734,7 @@ export function StoryboardPreviewWorkspace({
           <StoryboardPreviewGenSettings
             settings={payload.pictureSettings}
             onChange={actions.updatePictureSettings}
+            hideModel={embedded}
           />
         </div>
       )}

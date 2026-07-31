@@ -143,6 +143,9 @@ export {
   unconfirmIfEdited,
   buildScreenplayMeta,
   episodesFromIngestText,
+  cleanEpisodeTitle,
+  normalizeScreenplayEpisode,
+  normalizeScreenplayEpisodes,
   ingestTextToPackage,
   mergeCharacterDrafts,
   mergeSceneDrafts,
@@ -150,6 +153,8 @@ export {
   sceneDraftFromPartial,
   bibleDraftsFromExtract,
   bibleDraftsFromBreakdown,
+  sceneDraftsFromScreenplayText,
+  enrichBibleScenesFromPackage,
   migrateDialogueSheetDataToPackage,
   applyPackagePatch,
   extractScreenplayExcerpts,
@@ -600,6 +605,14 @@ export {
   type MediaTrashKind,
   type MediaTrashItem,
 } from './utils/asset-trash';
+export {
+  createScriptDeskFolderSnapshot,
+  scriptDeskFolderTitle,
+  isScriptDeskFolderEmpty,
+  trashScriptDeskFolder,
+  restoreScriptDeskFolderFromTrash,
+  type ScriptDeskFolderSnapshot,
+} from './utils/script-desk-archives';
 export {
   resolveBlockCharacters,
   enrichPromptWithCharacters,

@@ -5,6 +5,7 @@ import {
   buildScreenplayMeta,
   confirmScreenplayPackage,
   emptyScreenplayPackage,
+  enrichBibleScenesFromPackage,
   ingestTextToPackage,
   isScreenplayPackage,
   mergeCharacterDrafts,
@@ -38,6 +39,55 @@ export function packageSummaryLine(pkg: ScreenplayPackage): string {
       : pkg.status === 'drafting' ? '成稿草稿'
         : '待输入';
   return `${status} · ${title} · ${ep} 集 · ${chars} 角 · ${scenes} 场 · ${words} 字`;
+}
+
+/** 编剧台生成/续写/重写共用的正文体例锁（与 agent-screenplay / script-skill-generate 对齐） */
+const SCREENPLAY_FORMAT_LOCK = [
+  '【正文体例锁·必须遵守】',
+  '1. 只输出纯文本剧本，不要 JSON，不要前言后记。',
+  '2. 以「第N集 短标题」开头；续写/重写只写目标集。',
+  '3. 场景头唯一形态：## S01 | 内景/外景 · 地点 | 时间（本集从 S01 连续编号）。',
+  '4. 对白唯一形态：角色名：台词 或 角色名（状态）：台词；禁止引号包裹台词。',
+  '5. 禁止：【场景：】、咖啡厅。白天。、某某说道、特写/运镜/imagePrompt、非终章（完）。',
+  '6. 动作写可见可拍外部行为；每集有开场钩子与集末钩子。',
+].join('\n');
+
+function formatSampleFromEpisodes(episodes: ScreenplayPackage['screenplay']['episodes']): string {
+  const sorted = [...episodes].filter((ep) => ep.bodyMd.trim()).sort((a, b) => a.index - b.index);
+  const last = sorted[sorted.length - 1];
+  if (!last) {
+    return [
+      '【标准格式样例】',
+      '第1集 短标题',
+      '',
+      '## S01 | 内景 · 咖啡厅 | 白天',
+      '',
+      '角色坐在靠窗位置，桌上放着一杯水。',
+      '',
+      '角色名：台词内容。',
+      '角色名（电话）：另一句台词。',
+    ].join('\n');
+  }
+  const sample = last.bodyMd.trim().slice(0, 900);
+  return `【格式样例·第${last.index}集，续写必须沿用同一体例】\n第${last.index}集 ${last.title}\n\n${sample}`;
+}
+
+/** 成稿变更后，把场头解析出的场景 draft 一并写入 patch.bible */
+function withSceneDraftsFromEpisodes(
+  pkg: ScreenplayPackage,
+  patch: Partial<ScreenplayPackage>,
+): Partial<ScreenplayPackage> {
+  const merged = applyPackagePatch(pkg, patch);
+  const enriched = enrichBibleScenesFromPackage(merged);
+  if (enriched.bible.scenes === merged.bible.scenes) return patch;
+  return {
+    ...patch,
+    bible: {
+      world: enriched.bible.world ?? pkg.bible.world,
+      characters: enriched.bible.characters,
+      scenes: enriched.bible.scenes,
+    },
+  };
 }
 
 export function persistScriptDeskPackage(
@@ -83,9 +133,15 @@ export async function extractBibleFromPackage(
     ?? (raw.characters as Array<Record<string, unknown>> | undefined)
     ?? [];
   const locations = (assets.locations as string[] | undefined)
-    ?? ((raw.scenes as Array<{ name?: string }> | undefined)?.map((s) => s.name ?? '') ?? []);
-  const scenes = (raw.scenes as Array<Record<string, unknown>> | undefined) ?? [];
-  const drafts = bibleDraftsFromExtract({ characters, locations, scenes });
+    ?? (raw.locations as string[] | undefined)
+    ?? [];
+  const environments = (assets.environments as Array<string | Record<string, unknown>> | undefined)
+    ?? (raw.environments as Array<string | Record<string, unknown>> | undefined)
+    ?? [];
+  const scenes = (assets.scenes as Array<Record<string, unknown>> | undefined)
+    ?? (raw.scenes as Array<Record<string, unknown>> | undefined)
+    ?? [];
+  const drafts = bibleDraftsFromExtract({ characters, locations, environments, scenes });
   let next = touchScreenplayPackage(pkg, {
     bible: {
       world: pkg.bible.world,
@@ -93,6 +149,8 @@ export async function extractBibleFromPackage(
       scenes: mergeSceneDrafts(pkg.bible.scenes, drafts.scenes),
     },
   });
+  // 场头解析兜底：即使 LLM 漏返回 locations/environments，也能从成稿补场景 draft
+  next = enrichBibleScenesFromPackage(next);
   if (next.bible.characters.length === 0 && screenplayWordCount(next) > 200) {
     next = touchScreenplayPackage(next, {
       diagnostics: [
@@ -101,6 +159,18 @@ export async function extractBibleFromPackage(
           level: 'warning',
           code: 'bible-empty-characters',
           message: '抽取未得到人物 draft，可手工补全或重试',
+        },
+      ],
+    });
+  }
+  if (next.bible.scenes.length === 0 && screenplayWordCount(next) > 200) {
+    next = touchScreenplayPackage(next, {
+      diagnostics: [
+        ...(next.diagnostics ?? []).filter((d) => d.code !== 'bible-empty-scenes'),
+        {
+          level: 'warning',
+          code: 'bible-empty-scenes',
+          message: '抽取未得到场景 draft；请确认成稿含「## S01 | 内景 · 地点 | 时间」场头后重试',
         },
       ],
     });
@@ -202,6 +272,145 @@ export function applyPendingMessagePatch(
   };
 }
 
+/** 续写：追加一集到末尾（不替换已有集正文） */
+export async function runAppendEpisodeSkill(
+  pkg: ScreenplayPackage,
+  options: {
+    nextEpisodeIndex: number;
+    userInstruction?: string;
+  },
+): Promise<{ assistantText: string; patch: Partial<ScreenplayPackage> }> {
+  const sorted = [...pkg.screenplay.episodes]
+    .filter((ep) => ep.bodyMd.trim())
+    .sort((a, b) => a.index - b.index);
+  const prev = sorted[sorted.length - 1];
+
+  const context = [
+    SCREENPLAY_FORMAT_LOCK,
+    formatSampleFromEpisodes(pkg.screenplay.episodes),
+    pkg.brief.title ? `标题：${pkg.brief.title}` : '',
+    pkg.brief.logline ? `logline：${pkg.brief.logline}` : '',
+    pkg.brief.plotOutline ? `大纲：${pkg.brief.plotOutline}` : '',
+    pkg.bible.characters.length
+      ? `人物：${pkg.bible.characters.map((c) => `${c.name}${c.identity ? `（${c.identity}）` : ''}`).join('、')}`
+      : '',
+    prev
+      ? [
+          `任务：只续写第 ${options.nextEpisodeIndex} 集，不要重复已有集，不要输出其他集。`,
+          '硬约束：承接上一集人物状态/地点余波/未解悬念；体例必须与格式样例一致；集末留钩子；禁止（完）。',
+          `上一集（第${prev.index}集《${prev.title}》）结尾（必须衔接）：\n${prev.bodyMd.slice(-1200)}`,
+        ].join('\n\n')
+      : `任务：写第 ${options.nextEpisodeIndex} 集（当前尚无成稿）。`,
+    options.userInstruction?.trim()
+      || `请续写第 ${options.nextEpisodeIndex} 集。`,
+  ].filter(Boolean).join('\n\n');
+
+  const res = await api.scriptScreenplay({ sourceText: context });
+  const raw = res as { screenplay?: string; script?: string };
+  const text = String(raw.screenplay ?? raw.script ?? '').trim();
+  if (!text) throw new Error('剧本生成未返回正文');
+
+  const generated = ingestTextToPackage(emptyScreenplayPackage(), text, {
+    sourceType: 'generated',
+    title: pkg.brief.title,
+    episodeCount: 1,
+  });
+  const newEpisode = generated.screenplay.episodes[0];
+  if (!newEpisode) throw new Error('续写未返回有效集内容');
+
+  const episodes = [
+    ...pkg.screenplay.episodes,
+    {
+      ...newEpisode,
+      id: `ep-${Date.now()}-${options.nextEpisodeIndex}`,
+      index: options.nextEpisodeIndex,
+      title: newEpisode.title || `第${options.nextEpisodeIndex}集`,
+    },
+  ];
+
+  return {
+    assistantText: `已续写第 ${options.nextEpisodeIndex} 集（追加到末尾）。`,
+    patch: withSceneDraftsFromEpisodes(pkg, { screenplay: { ...pkg.screenplay, episodes } }),
+  };
+}
+
+/**
+ * 重写指定集：替换该集正文，但必须衔接上一集结尾，并与下一集开头不矛盾。
+ * 不改动其他集。
+ */
+export async function runRewriteEpisodeSkill(
+  pkg: ScreenplayPackage,
+  options: {
+    episodeIndex: number;
+    userInstruction?: string;
+  },
+): Promise<{ assistantText: string; patch: Partial<ScreenplayPackage> }> {
+  const sorted = [...pkg.screenplay.episodes].sort((a, b) => a.index - b.index);
+  const target = sorted.find((ep) => ep.index === options.episodeIndex);
+  if (!target) throw new Error(`第 ${options.episodeIndex} 集不存在`);
+
+  const prevEps = sorted.filter((ep) => ep.index < options.episodeIndex && ep.bodyMd.trim());
+  const prev = prevEps[prevEps.length - 1];
+  const next = sorted.find((ep) => ep.index > options.episodeIndex && ep.bodyMd.trim());
+
+  const context = [
+    SCREENPLAY_FORMAT_LOCK,
+    formatSampleFromEpisodes(pkg.screenplay.episodes),
+    pkg.brief.title ? `标题：${pkg.brief.title}` : '',
+    pkg.brief.logline ? `logline：${pkg.brief.logline}` : '',
+    pkg.brief.plotOutline ? `大纲：${pkg.brief.plotOutline}` : '',
+    pkg.bible.characters.length
+      ? `人物：${pkg.bible.characters.map((c) => `${c.name}${c.identity ? `（${c.identity}）` : ''}`).join('、')}`
+      : '',
+    '任务：重写【本集】正文。只输出本集纯文本剧本（以「第N集 标题」开头），不要 JSON，不要输出其他集。',
+    '硬约束：',
+    '1. 必须承接上一集结尾的人物状态、地点与未解悬念，禁止无故重置。',
+    '2. 若有下一集，本集结尾须能自然接到下一集开头，不得写出与下一集矛盾的结局。',
+    '3. 保留本集核心剧情功能与主要出场人物，允许重写对白、节奏与场面调度。',
+    '4. 不要改写或复述其他集全文；体例必须符合体例锁（即使原文不规范也按标准体重写）。',
+    '5. 非终章禁止（完）；集末留钩子。',
+    prev
+      ? `上一集（第${prev.index}集《${prev.title}》）结尾（必须衔接）：\n${prev.bodyMd.slice(-1000)}`
+      : '本集为第1集，无上一集；开场需符合 brief/logline。',
+    `本集原文（第${target.index}集《${target.title}》，供参考重写）：\n${target.bodyMd.slice(0, 4500)}`,
+    next
+      ? `下一集（第${next.index}集《${next.title}》）开头（结尾须可过渡到此，勿矛盾）：\n${next.bodyMd.slice(0, 800)}`
+      : '本集为当前最后一集；结尾请留可续写的钩子。',
+    options.userInstruction?.trim()
+      ? `用户补充要求：${options.userInstruction.trim()}`
+      : `请重写第 ${options.episodeIndex} 集。`,
+  ].filter(Boolean).join('\n\n');
+
+  const res = await api.scriptScreenplay({ sourceText: context });
+  const raw = res as { screenplay?: string; script?: string };
+  const text = String(raw.screenplay ?? raw.script ?? '').trim();
+  if (!text) throw new Error('重写未返回正文');
+
+  const generated = ingestTextToPackage(emptyScreenplayPackage(), text, {
+    sourceType: 'generated',
+    title: pkg.brief.title,
+    episodeCount: 1,
+  });
+  const replacement = generated.screenplay.episodes[0];
+  if (!replacement?.bodyMd.trim()) throw new Error('重写未返回有效集内容');
+
+  const episodes = pkg.screenplay.episodes.map((ep) =>
+    ep.index === options.episodeIndex
+      ? {
+          ...ep,
+          title: replacement.title?.trim() || ep.title,
+          bodyMd: replacement.bodyMd,
+          updatedAt: new Date().toISOString(),
+        }
+      : ep,
+  );
+
+  return {
+    assistantText: `已重写第 ${options.episodeIndex} 集（已考虑与前后集衔接）。`,
+    patch: withSceneDraftsFromEpisodes(pkg, { screenplay: { ...pkg.screenplay, episodes } }),
+  };
+}
+
 /** Agent 技能：生成/改写成稿（复用 screenplay API） */
 export async function runGenerateScreenplaySkill(
   pkg: ScreenplayPackage,
@@ -210,11 +419,13 @@ export async function runGenerateScreenplaySkill(
 ): Promise<{ assistantText: string; patch: Partial<ScreenplayPackage> }> {
   const existingText = screenplayFullText(pkg);
   const context = [
+    SCREENPLAY_FORMAT_LOCK,
+    formatSampleFromEpisodes(pkg.screenplay.episodes),
     pkg.brief.title ? `标题：${pkg.brief.title}` : '',
     pkg.brief.logline ? `logline：${pkg.brief.logline}` : '',
     pkg.brief.plotOutline ? `大纲：${pkg.brief.plotOutline}` : '',
     pkg.bible.characters.length
-      ? `人物：${pkg.bible.characters.map((c) => c.name).join('、')}`
+      ? `人物：${pkg.bible.characters.map((c) => `${c.name}${c.identity ? `（${c.identity}）` : ''}`).join('、')}`
       : '',
     userInstruction.trim() || (episodeIndex != null ? `请续写第${episodeIndex}集。` : '请根据以上信息生成分集剧本正文。'),
     episodeIndex != null
@@ -222,9 +433,9 @@ export async function runGenerateScreenplaySkill(
         ? `续写目标（第${episodeIndex}集）：\n${pkg.screenplay.episodes[episodeIndex - 1].bodyMd.slice(0, 3000)}`
         : `该集暂无内容，请生成第${episodeIndex}集。`
       : existingText
-        ? `现有成稿：\n${existingText.slice(0, 6000)}`
+        ? `现有成稿（供衔接与体例对齐，勿整段复述）：\n${existingText.slice(0, 6000)}`
         : '',
-  ].filter(Boolean).join('\n');
+  ].filter(Boolean).join('\n\n');
 
   const res = await api.scriptScreenplay({ sourceText: context });
   const raw = res as { screenplay?: string; script?: string };
@@ -246,7 +457,7 @@ export async function runGenerateScreenplaySkill(
     );
     return {
       assistantText: `已续写第 ${episodeIndex} 集，请确认后点「应用此步产出」。`,
-      patch: { screenplay: { ...pkg.screenplay, episodes } },
+      patch: withSceneDraftsFromEpisodes(pkg, { screenplay: { ...pkg.screenplay, episodes } }),
     };
   }
 
@@ -257,14 +468,14 @@ export async function runGenerateScreenplaySkill(
   });
   return {
     assistantText: `已生成 ${next.screenplay.episodes.length} 集成稿草稿，请确认后点「应用此步产出」。`,
-    patch: {
+    patch: withSceneDraftsFromEpisodes(pkg, {
       brief: {
         ...pkg.brief,
         title: pkg.brief.title || next.brief.title,
         episodeCount: next.screenplay.episodes.length,
       },
       screenplay: next.screenplay,
-    },
+    }),
   };
 }
 

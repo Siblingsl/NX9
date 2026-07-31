@@ -49,9 +49,15 @@ import {
   restoreAssetById,
   purgeAssetById,
   createMediaTrashItem,
+  createScriptDeskFolderSnapshot,
+  trashScriptDeskFolder,
+  restoreScriptDeskFolderFromTrash,
   type PlaybookReadinessContext,
   type EpisodeMeta,
   type MediaTrashItem,
+  type ScriptDeskFolderSnapshot,
+  type ScreenplayPackage,
+  type ScriptDeskAgentSession,
 } from '@nx9/shared';
 import { api } from '../api/client';
 
@@ -65,6 +71,10 @@ interface WorkspaceDocumentState {
   backlotWorkspace: BacklotWorkspacePayload;
   /** F-010: 生成结果软删列表 */
   mediaTrash: MediaTrashItem[];
+  /** 编剧台草稿箱 */
+  scriptDeskDrafts: ScriptDeskFolderSnapshot[];
+  /** 编剧台成稿回收站 */
+  scriptDeskTrash: ScriptDeskFolderSnapshot[];
   canvasAppearance: CanvasAppearance;
   scriptPlan: ScriptPlanPayload | null;
   environments: EnvironmentLibraryPayload | null;
@@ -120,6 +130,27 @@ interface WorkspaceDocumentState {
   /** F-010: 从回收站取出生成媒体（调用方负责写回节点） */
   takeMediaTrashItem: (id: string) => MediaTrashItem | null;
   purgeMediaTrash: (id: string) => void;
+  /** 编剧台：存入草稿箱 */
+  saveScriptDeskDraft: (input: {
+    package: ScreenplayPackage;
+    agentSession?: ScriptDeskAgentSession;
+    entryMode?: 'agent' | 'ingest';
+    sourceBlockId?: string;
+  }) => ScriptDeskFolderSnapshot;
+  /** 编剧台：进私有回收站 */
+  trashScriptDeskSnapshot: (input: {
+    package: ScreenplayPackage;
+    agentSession?: ScriptDeskAgentSession;
+    entryMode?: 'agent' | 'ingest';
+    sourceBlockId?: string;
+  } | ScriptDeskFolderSnapshot) => ScriptDeskFolderSnapshot;
+  /** 草稿箱删除 → 回收站 */
+  moveScriptDeskDraftToTrash: (id: string) => boolean;
+  /** 取出草稿（不删除；调用方负责写回节点） */
+  getScriptDeskDraft: (id: string) => ScriptDeskFolderSnapshot | null;
+  /** 回收站恢复 → 草稿箱 */
+  restoreScriptDeskTrashToDrafts: (id: string) => ScriptDeskFolderSnapshot | null;
+  purgeScriptDeskTrash: (id: string) => void;
   /** F-010: 清理过期资产（≥30天） */
   purgeExpiredTrashedAssets: () => number;
   setCanvasAppearance: (appearance: CanvasAppearance) => void;
@@ -143,6 +174,8 @@ interface WorkspaceDocumentState {
     backlotCustom: BacklotCustomPayload;
     backlotWorkspace: BacklotWorkspacePayload;
     mediaTrash: MediaTrashItem[];
+    scriptDeskDrafts: ScriptDeskFolderSnapshot[];
+    scriptDeskTrash: ScriptDeskFolderSnapshot[];
     canvasAppearance: CanvasAppearance;
     playbookSession?: PlaybookSession | null;
   };
@@ -174,6 +207,8 @@ export const useWorkspaceDocument = create<WorkspaceDocumentState>((set, get) =>
   backlotCustom: emptyBacklotCustom(),
   backlotWorkspace: emptyBacklotWorkspace(),
   mediaTrash: [],
+  scriptDeskDrafts: [],
+  scriptDeskTrash: [],
   canvasAppearance: DEFAULT_CANVAS_APPEARANCE,
   scriptPlan: null,
   environments: null,
@@ -204,6 +239,15 @@ export const useWorkspaceDocument = create<WorkspaceDocumentState>((set, get) =>
       }),
     );
     const mediaPurged = purgeExpiredAssets(mediaTrashRaw);
+    const draftsRaw = ((payload as { scriptDeskDrafts?: ScriptDeskFolderSnapshot[] }).scriptDeskDrafts ?? [])
+      .filter((d) => d && typeof d === 'object' && d.package);
+    const trashRaw = ((payload as { scriptDeskTrash?: ScriptDeskFolderSnapshot[] }).scriptDeskTrash ?? [])
+      .map((item) => ({
+        ...item,
+        deletedAt: item.deletedAt ?? Date.now(),
+      }))
+      .filter((d) => d && typeof d === 'object' && d.package);
+    const trashPurged = purgeExpiredAssets(trashRaw);
 
     set({
       workspaceId,
@@ -226,6 +270,8 @@ export const useWorkspaceDocument = create<WorkspaceDocumentState>((set, get) =>
         items: wsPurged.items,
       },
       mediaTrash: mediaPurged.items,
+      scriptDeskDrafts: draftsRaw,
+      scriptDeskTrash: trashPurged.items,
       canvasAppearance: (payload as any).canvasAppearance ?? DEFAULT_CANVAS_APPEARANCE,
       scriptPlan: (payload as any).scriptPlan ?? null,
       environments: (payload as any).environments
@@ -250,6 +296,8 @@ export const useWorkspaceDocument = create<WorkspaceDocumentState>((set, get) =>
       backlotCustom: emptyBacklotCustom(),
       backlotWorkspace: emptyBacklotWorkspace(),
       mediaTrash: [],
+      scriptDeskDrafts: [],
+      scriptDeskTrash: [],
       scriptPlan: null,
       environments: null,
       playbookSession: null,
@@ -653,6 +701,62 @@ export const useWorkspaceDocument = create<WorkspaceDocumentState>((set, get) =>
       mediaTrash: purgeAssetById(s.mediaTrash, id),
     })),
 
+  saveScriptDeskDraft: (input) => {
+    const folder = createScriptDeskFolderSnapshot(input);
+    set((s) => ({ scriptDeskDrafts: [folder, ...s.scriptDeskDrafts] }));
+    return folder;
+  },
+
+  trashScriptDeskSnapshot: (input) => {
+    const folder = 'package' in input && 'id' in input && 'savedAt' in input
+      ? trashScriptDeskFolder(input as ScriptDeskFolderSnapshot)
+      : trashScriptDeskFolder(createScriptDeskFolderSnapshot(input as {
+          package: ScreenplayPackage;
+          agentSession?: ScriptDeskAgentSession;
+          entryMode?: 'agent' | 'ingest';
+          sourceBlockId?: string;
+        }));
+    set((s) => ({ scriptDeskTrash: [folder, ...s.scriptDeskTrash] }));
+    return folder;
+  },
+
+  moveScriptDeskDraftToTrash: (id) => {
+    let moved = false;
+    set((s) => {
+      const hit = s.scriptDeskDrafts.find((d) => d.id === id);
+      if (!hit) return s;
+      moved = true;
+      return {
+        scriptDeskDrafts: s.scriptDeskDrafts.filter((d) => d.id !== id),
+        scriptDeskTrash: [trashScriptDeskFolder(hit), ...s.scriptDeskTrash],
+      };
+    });
+    return moved;
+  },
+
+  getScriptDeskDraft: (id) => {
+    return get().scriptDeskDrafts.find((d) => d.id === id) ?? null;
+  },
+
+  restoreScriptDeskTrashToDrafts: (id) => {
+    let restored: ScriptDeskFolderSnapshot | null = null;
+    set((s) => {
+      const hit = s.scriptDeskTrash.find((d) => d.id === id);
+      if (!hit) return s;
+      restored = restoreScriptDeskFolderFromTrash(hit);
+      return {
+        scriptDeskTrash: s.scriptDeskTrash.filter((d) => d.id !== id),
+        scriptDeskDrafts: [restored, ...s.scriptDeskDrafts],
+      };
+    });
+    return restored;
+  },
+
+  purgeScriptDeskTrash: (id) =>
+    set((s) => ({
+      scriptDeskTrash: purgeAssetById(s.scriptDeskTrash, id),
+    })),
+
   purgeExpiredTrashedAssets: () => {
     let total = 0;
     set((s) => {
@@ -661,18 +765,21 @@ export const useWorkspaceDocument = create<WorkspaceDocumentState>((set, get) =>
       const custom = purgeExpiredAssets(s.backlotCustom.items);
       const ws = purgeExpiredAssets(s.backlotWorkspace.items);
       const media = purgeExpiredAssets(s.mediaTrash);
+      const sdTrash = purgeExpiredAssets(s.scriptDeskTrash);
       total =
         chars.purgedCount +
         sounds.purgedCount +
         custom.purgedCount +
         ws.purgedCount +
-        media.purgedCount;
+        media.purgedCount +
+        sdTrash.purgedCount;
       return {
         characters: { ...s.characters, characters: chars.items },
         soundLibrary: { ...s.soundLibrary, sounds: sounds.items },
         backlotCustom: { ...s.backlotCustom, items: custom.items },
         backlotWorkspace: { ...s.backlotWorkspace, items: ws.items },
         mediaTrash: media.items,
+        scriptDeskTrash: sdTrash.items,
       };
     });
     return total;
@@ -804,12 +911,18 @@ export const useWorkspaceDocument = create<WorkspaceDocumentState>((set, get) =>
     }),
 
   getSnapshotForSave: () => {
-    const { storyboard, voice, characters, soundLibrary, scriptPlan, environments, backlotCustom, backlotWorkspace, mediaTrash, canvasAppearance, playbookSession, projectStatus } = get();
+    const {
+      storyboard, voice, characters, soundLibrary, scriptPlan, environments,
+      backlotCustom, backlotWorkspace, mediaTrash, scriptDeskDrafts, scriptDeskTrash,
+      canvasAppearance, playbookSession, projectStatus,
+    } = get();
     return {
       storyboard, voice, characters, soundLibrary,
       scriptPlan: scriptPlan ?? undefined,
       environments: environments ?? undefined,
-      backlotCustom, backlotWorkspace, mediaTrash, canvasAppearance,
+      backlotCustom, backlotWorkspace, mediaTrash,
+      scriptDeskDrafts, scriptDeskTrash,
+      canvasAppearance,
       playbookSession: playbookSession
         ? syncSessionForStoryboard(playbookSession, storyboard)
         : undefined,

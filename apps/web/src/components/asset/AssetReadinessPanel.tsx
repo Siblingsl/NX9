@@ -76,12 +76,20 @@ export const AssetReadinessPanel = memo(function AssetReadinessPanel({
   }, [onReadinessChange, pkg, report]);
 
   if (!pkg || pkg.status !== 'confirmed') {
+    const charN = pkg?.bible.characters.length ?? 0;
+    const sceneN = pkg?.bible.scenes.length ?? 0;
     return (
-      <div className="space-y-3">
-        <div className="flex items-center gap-2 text-ink/50">
-          <BookOpen size={14} />
-          <span className="text-[11px]">请先确认成稿，再进行设定就绪检查</span>
-        </div>
+      <div className="sd2-readiness-gate" role="status">
+        <BookOpen size={16} aria-hidden />
+        <p className="sd2-readiness-gate__title">设定就绪尚未解锁</p>
+        <p className="sd2-readiness-gate__desc">
+          本页检查的是 Bible 人物/场景是否已入库、能否交给分镜台。
+          请先点顶栏「确认成稿」，再回到这里查看缺口并同步到资产库。
+        </p>
+        <p className="sd2-readiness-gate__meta">
+          当前 Bible：人物 {charN} · 场景 {sceneN}
+          {charN === 0 && sceneN === 0 ? '（可先点「抽取 Bible」）' : ''}
+        </p>
       </div>
     );
   }

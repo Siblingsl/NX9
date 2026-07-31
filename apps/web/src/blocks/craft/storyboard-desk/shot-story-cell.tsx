@@ -1,5 +1,5 @@
 import { useCallback, useRef, useState } from 'react';
-import { ImagePlus, Loader2, Pencil, Sparkles } from 'lucide-react';
+import { ImagePlus, Loader2, Pencil } from 'lucide-react';
 import type { ScriptBreakdownShot } from '@nx9/shared';
 import { api } from '../../../api/client';
 import { shotDialogueLine } from './helpers';
@@ -11,7 +11,6 @@ export function ShotStoryCell({
   generating,
   onSelect,
   onUpload,
-  onGenerate,
   onGenerateLineArt,
   onEdit,
 }: {
@@ -21,7 +20,6 @@ export function ShotStoryCell({
   generating?: boolean;
   onSelect: () => void;
   onUpload: (url: string) => void;
-  onGenerate: () => void;
   onGenerateLineArt: () => void;
   onEdit: () => void;
 }) {
@@ -109,9 +107,6 @@ export function ShotStoryCell({
       <div className="sg-story-cell__acts">
         <button type="button" className="sg-story-cell__act" title="生成线稿构图" disabled={busy} onClick={onGenerateLineArt}>
           <Pencil size={11} />线稿
-        </button>
-        <button type="button" className="sg-story-cell__act" title="生成试出画面" disabled={busy} onClick={onGenerate}>
-          <Sparkles size={11} />试出
         </button>
         <button type="button" className="sg-story-cell__act" title="编辑镜头字段" onClick={onEdit}>
           <Pencil size={11} />编辑

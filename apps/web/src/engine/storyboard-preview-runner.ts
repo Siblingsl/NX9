@@ -47,8 +47,12 @@ export async function generateStoryboardFrameImage(
   frame: StoryboardPreviewFrame,
   pictureNodeData: Record<string, unknown>,
   previewSettings?: StoryboardPreviewPictureSettings,
+  lineArt = false,
 ): Promise<string> {
-  const prompt = buildStoryboardFramePrompt(frame);
+  const effectiveFrame = lineArt
+    ? { ...frame, stylePreset: 'line-art' }
+    : frame;
+  const prompt = buildStoryboardFramePrompt(effectiveFrame);
   if (!prompt.trim()) throw new Error('Prompt 为空');
 
   const { modelId, size } = resolvePictureGenSettings(pictureNodeData, previewSettings);

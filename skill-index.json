@@ -143,8 +143,8 @@
   {
     "id": "script-skill-generate",
     "name": "分集成稿生成",
-    "description": "根据 brief/bible 生成场次+动作+对白分集正文；禁 imagePrompt/镜头表；对齐 bible。",
-    "version": "2.0.0",
+    "description": "根据 brief/bible 生成分集成稿 JSON patch；bodyMd 体例与 agent-screenplay 锁死一致；禁镜头表。",
+    "version": "2.1.0",
     "status": "stable",
     "tags": [
       "script",
@@ -159,8 +159,8 @@
   {
     "id": "agent-screenplay",
     "name": "分集剧本写作",
-    "description": "根据改编策略与原文写出分集剧本；场次+动作+对白；禁镜头表。",
-    "version": "2.0.0",
+    "description": "根据 brief/策略/原文写出分集剧本正文；场次+动作+对白；体例锁死；禁镜头表与 JSON。",
+    "version": "2.1.0",
     "status": "stable",
     "tags": [
       "agent",
@@ -441,8 +441,8 @@
   {
     "id": "agent-extract-assets",
     "name": "资产抽取",
-    "description": "从文本提取角色与场景，并为角色填写六层设定与视觉锚点。",
-    "version": "2.0.0",
+    "description": "从文本提取角色与场景；角色六层设定；场景写入 locations（兼容 environments）。",
+    "version": "2.1.0",
     "status": "stable",
     "tags": [
       "agent",

@@ -46,12 +46,12 @@ describe('F-026 acceptance', () => {
     }
   });
 
-  // ═══════════ shot-story-cell.tsx: no "关键帧" button ═══════════
+  // ═══════════ shot-story-cell.tsx: no 试出, keep 线稿+编辑 ═══════════
   describe('shot-story-cell button labels', () => {
     const src = readWeb(SHOT_STORY_CELL);
 
-    it('has 试出 button', () => {
-      expect(src).toContain('试出');
+    it('NO 试出 button', () => {
+      expect(src).not.toContain('试出');
     });
 
     it('has 线稿 button', () => {
@@ -63,7 +63,6 @@ describe('F-026 acceptance', () => {
     });
 
     it('NO 关键帧 button text', () => {
-      // The button label should not say "关键帧"
       const buttonTexts = [...src.matchAll(/<button[^>]*>([\s\S]*?)<\/button>/g)];
       const hasKeyframeLabel = buttonTexts.some((m) =>
         m[1].includes('关键帧'),
@@ -71,8 +70,8 @@ describe('F-026 acceptance', () => {
       expect(hasKeyframeLabel).toBe(false);
     });
 
-    it('试出 button tooltip says 试出画面', () => {
-      expect(src).toContain('生成试出画面');
+    it('NO 试出画面 tooltip', () => {
+      expect(src).not.toContain('生成试出画面');
     });
 
     it('NO 关键帧成图 tooltip', () => {
@@ -80,81 +79,53 @@ describe('F-026 acceptance', () => {
     });
   });
 
-  // ═══════════ use-storyboard-desk.tsx: batchMode → trial ═══════════
+  // ═══════════ use-storyboard-desk.tsx: no trial batchMode ═══════════
   describe('use-storyboard-desk batch mode', () => {
     const src = readWeb(USE_STORYBOARD_DESK);
 
-    it("batchMode type is 'line-art' | 'trial'", () => {
-      expect(src).toContain("'line-art' | 'trial'");
+    it("batchMode type is 'line-art' | 'grid-line-art' | null (no trial)", () => {
+      expect(src).toContain("'line-art' | 'grid-line-art' | null");
     });
 
-    it("batchMode type does NOT contain 'keyframe'", () => {
-      expect(src).not.toMatch(/'line-art'\s*\|\s*'keyframe'/);
+    it("batchMode type does NOT contain 'trial'", () => {
+      expect(src).not.toMatch(/batchMode.*trial/);
     });
 
-    it('comment says 试出互斥', () => {
-      expect(src).toContain('试出互斥');
+    it('NO 试出互斥 comment', () => {
+      expect(src).not.toContain('试出互斥');
     });
 
-    it('function renamed generateBatchTrials', () => {
-      expect(src).toContain('const generateBatchTrials = useCallback(');
+    it('NO generateBatchTrials function', () => {
+      expect(src).not.toContain('const generateBatchTrials = useCallback(');
     });
 
-    it('function NOT named generateBatchKeyframes', () => {
-      expect(src).not.toContain('generateBatchKeyframes');
+    it('NO setBatchMode trial', () => {
+      expect(src).not.toContain("setBatchMode('trial')");
     });
 
-    it("setBatchMode('trial') exists", () => {
-      expect(src).toContain("setBatchMode('trial')");
+    it('NO batchMode trial in compose', () => {
+      expect(src).not.toContain("batchMode === 'trial'");
     });
 
-    it("setBatchMode('keyframe') removed", () => {
-      expect(src).not.toContain("setBatchMode('keyframe')");
+    it('NO 批量试出 logs', () => {
+      expect(src).not.toContain('批量试出');
     });
 
-    it("batchMode === 'trial' used in compose tab", () => {
-      expect(src).toContain("batchMode === 'trial'");
-    });
-
-    it('log says 批量试出 (not 批量关键帧)', () => {
-      expect(src).not.toContain('批量关键帧');
-    });
-
-    it('log says 批量试出前请先连接', () => {
-      expect(src).toContain('批量试出前请先连接');
-    });
-
-    it('log says 开始批量试出', () => {
-      expect(src).toContain('开始批量试出');
-    });
-
-    it('log says 批量试出跳过', () => {
-      expect(src).toContain('批量试出跳过');
-    });
-
-    it('log says 批量试出失败', () => {
-      expect(src).toContain('批量试出失败');
-    });
-
-    it('log says 批量试出完成', () => {
-      expect(src).toContain('批量试出完成');
-    });
-
-    it('toast says 批量试出完成', () => {
-      expect(src).toMatch(/toastSuccess\(`批量试出完成/);
-    });
-
-    it('placeholder says 画面: instead of 关键帧:', () => {
-      expect(src).toContain('画面：环境、人物位置、光线、情绪、构图');
+    it('NO 开始批量试出 log', () => {
+      expect(src).not.toContain('开始批量试出');
     });
   });
 
-  // ═══════════ use-storyboard-desk: remaining 关键帧 correctly attributed ═══════════
-  describe('remaining 关键帧 references are DirectorDesk-bound', () => {
+  // ═══════════ use-storyboard-desk: hint text updated ═══════════
+  describe('use-storyboard-desk hint and boundary text', () => {
     const src = readWeb(USE_STORYBOARD_DESK);
 
-    it('整集关键帧请交导演台', () => {
-      expect(src).toContain('整集关键帧请交导演台');
+    it('says 彩色关键帧请到导演台批出 (updated from old text)', () => {
+      expect(src).toContain('彩色关键帧请到导演台批出');
+    });
+
+    it('NO old hint 整集关键帧请交导演台', () => {
+      expect(src).not.toContain('整集关键帧请交导演台');
     });
 
     it('整集工业级关键帧在导演台批出', () => {
@@ -167,6 +138,20 @@ describe('F-026 acceptance', () => {
 
     it('已聚焦导演台 · 请开台批出关键帧', () => {
       expect(src).toContain('已聚焦导演台 · 请开台批出关键帧');
+    });
+
+    it('foot actions 无批量线稿按钮', () => {
+      // foot actions should only have 确认本集
+      const footStart = src.indexOf('sg3-foot__actions');
+      const footEnd = src.indexOf('sg3-foot__actions', footStart + 10) > 0
+        ? src.indexOf('sg3-foot__actions', footStart + 10)
+        : src.indexOf('</div>', footStart + 200);
+      const footSection = src.slice(footStart, footEnd > footStart ? footEnd : src.length);
+      expect(footSection).not.toContain('批量线稿');
+      expect(footSection).not.toContain('宫格线稿');
+      expect(footSection).not.toContain('故事板大图');
+      expect(footSection).not.toContain('去导演台批出');
+      expect(footSection).toContain('确认本集');
     });
   });
 

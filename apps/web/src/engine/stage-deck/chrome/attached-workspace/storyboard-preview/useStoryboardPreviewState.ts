@@ -552,6 +552,7 @@ export function useStoryboardPreviewState(blockId: string) {
           targetFrame,
           pictureData,
           pictureSettings,
+          true,
         );
         updateNodeData(blockId, (node) => {
           const data = (node.data ?? {}) as Record<string, unknown>;
@@ -645,7 +646,7 @@ export function useStoryboardPreviewState(blockId: string) {
         });
 
         try {
-          const imageUrl = await generateStoryboardFrameImage(frame, pictureData, pictureSettings);
+          const imageUrl = await generateStoryboardFrameImage(frame, pictureData, pictureSettings, true);
           frames = frames.map((f) =>
             f.id === frame.id ? { ...f, imageUrl, status: 'success' as const, errorMessage: null } : f,
           );

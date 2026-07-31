@@ -274,28 +274,214 @@ export function buildScreenplayMeta(blockId: string, pkg: ScreenplayPackage) {
   };
 }
 
+/** 去掉模型 JSON 泄漏进标题的尾巴：`第1集",` / `第3集 xx","bodyMd":"...` */
+export function cleanEpisodeTitle(raw: string, index: number): string {
+  let t = String(raw ?? '').trim();
+  if (!t) return `第${index}集`;
+  const bodyLeak = t.search(/"\s*,\s*"bodyMd"\s*:/i);
+  if (bodyLeak >= 0) t = t.slice(0, bodyLeak);
+  t = t.replace(/^["'“”]+/, '').replace(/["'“”,，\s]+$/g, '').trim();
+  // 标题里误带整段正文时，只保留首行短标题
+  const firstLine = t.split(/\r?\n/)[0]?.trim() ?? t;
+  if (firstLine.length > 80 && /【场景|场景：|"bodyMd"/i.test(firstLine)) {
+    const m = firstLine.match(/^第\s*[一二三四五六七八九十百千\d]+\s*集\s*[·\-—:]?\s*(.*)$/);
+    if (m) {
+      const rest = m[1].replace(/["'“”,，].*$/, '').trim();
+      return rest ? `第${index}集 ${rest}`.trim() : `第${index}集`;
+    }
+    return `第${index}集`;
+  }
+  return firstLine || `第${index}集`;
+}
+
+function unescapeJsonString(value: string): string {
+  return value
+    .replace(/\\n/g, '\n')
+    .replace(/\\r/g, '\r')
+    .replace(/\\t/g, '\t')
+    .replace(/\\"/g, '"')
+    .replace(/\\\\/g, '\\');
+}
+
+/** 修复已被 JSON 泄漏污染的分集 title/bodyMd（兼容旧错误数据） */
+export function normalizeScreenplayEpisode(ep: ScreenplayEpisode): ScreenplayEpisode {
+  let title = String(ep.title ?? '');
+  let bodyMd = String(ep.bodyMd ?? '');
+
+  const leakAt = title.search(/"\s*,\s*"bodyMd"\s*:/i);
+  if (leakAt >= 0) {
+    const after = title.slice(leakAt).match(/"\s*,\s*"bodyMd"\s*:\s*"((?:[^"\\]|\\.)*)"/i)
+      ?? title.slice(leakAt).match(/"\s*,\s*"bodyMd"\s*:\s*"([\s\S]*)$/i);
+    if (after?.[1]) {
+      let extracted = unescapeJsonString(after[1]);
+      extracted = extracted.replace(/"\s*\}\s*,?\s*$/, '').replace(/"\s*$/, '').trim();
+      if (extracted && extracted.length >= bodyMd.trim().length) bodyMd = extracted;
+    }
+    title = title.slice(0, leakAt);
+  }
+
+  // 正文里夹着 "bodyMd":"..."（整段 JSON 或切片残留）
+  if (/"bodyMd"\s*:/i.test(bodyMd)) {
+    const trimmedBody = bodyMd.trim();
+    if (/^\s*\{/.test(trimmedBody)) {
+      try {
+        const start = trimmedBody.indexOf('{');
+        const end = trimmedBody.lastIndexOf('}');
+        if (start >= 0 && end > start) {
+          const parsed = JSON.parse(trimmedBody.slice(start, end + 1)) as Record<string, unknown>;
+          const fromJson = String(parsed.bodyMd ?? parsed.body ?? parsed.text ?? '').trim();
+          if (fromJson) {
+            bodyMd = fromJson;
+            if (!title.trim() || /"bodyMd"|^\s*\{|"\s*,/.test(title)) {
+              title = String(parsed.title ?? title);
+            }
+          }
+        }
+      } catch {
+        /* fall through to regex */
+      }
+    }
+    if (/"bodyMd"\s*:/i.test(bodyMd)) {
+      const m = bodyMd.match(/"bodyMd"\s*:\s*"((?:[^"\\]|\\.)*)"/i)
+        ?? bodyMd.match(/"bodyMd"\s*:\s*"([\s\S]*)$/i);
+      if (m?.[1]) {
+        let extracted = unescapeJsonString(m[1]);
+        extracted = extracted.replace(/"\s*\}\s*,?\s*$/, '').replace(/"\s*$/, '').trim();
+        if (extracted.length > 0) bodyMd = extracted;
+      }
+      const tm = String(ep.bodyMd ?? '').match(/"title"\s*:\s*"((?:[^"\\]|\\.)*)"/i);
+      if (tm?.[1] && (!title.trim() || /"|,/.test(title))) {
+        title = unescapeJsonString(tm[1]);
+      }
+    }
+  }
+
+  title = cleanEpisodeTitle(title, ep.index);
+  // 正文仍以「第N集…」开头时去掉标题行，避免与 summary 重复
+  const headerRe = new RegExp(
+    `^第\\s*${ep.index}\\s*集[^\\n]*\\n+`,
+  );
+  bodyMd = bodyMd.replace(headerRe, '').trim();
+  if (bodyMd.startsWith(title) && bodyMd.length > title.length) {
+    const rest = bodyMd.slice(title.length).replace(/^[\s"“”',，]+/, '');
+    if (rest.length > 20) bodyMd = rest;
+  }
+
+  return {
+    ...ep,
+    title,
+    bodyMd,
+  };
+}
+
+export function normalizeScreenplayEpisodes(episodes: ScreenplayEpisode[]): ScreenplayEpisode[] {
+  return episodes.map((ep) => normalizeScreenplayEpisode(ep));
+}
+
+function tryParseJsonValue(source: string): unknown | null {
+  const trimmed = source.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '');
+  try {
+    return JSON.parse(trimmed);
+  } catch {
+    /* continue */
+  }
+  const start = trimmed.indexOf('{');
+  const end = trimmed.lastIndexOf('}');
+  if (start >= 0 && end > start) {
+    try {
+      return JSON.parse(trimmed.slice(start, end + 1));
+    } catch {
+      /* continue */
+    }
+  }
+  const a0 = trimmed.indexOf('[');
+  const a1 = trimmed.lastIndexOf(']');
+  if (a0 >= 0 && a1 > a0) {
+    try {
+      return JSON.parse(trimmed.slice(a0, a1 + 1));
+    } catch {
+      /* continue */
+    }
+  }
+  return null;
+}
+
+function episodesFromJsonPayload(payload: unknown, stamp: string): ScreenplayEpisode[] | null {
+  if (!payload || typeof payload !== 'object') return null;
+  const root = payload as Record<string, unknown>;
+  const screenplay = root.screenplay as Record<string, unknown> | undefined;
+  const list = (
+    Array.isArray(screenplay?.episodes)
+      ? screenplay.episodes
+      : Array.isArray(root.episodes)
+        ? root.episodes
+        : Array.isArray(payload)
+          ? payload
+          : null
+  ) as unknown[] | null;
+  if (!list?.length) return null;
+
+  const episodes: ScreenplayEpisode[] = [];
+  for (let i = 0; i < list.length; i++) {
+    const row = list[i];
+    if (!row || typeof row !== 'object') continue;
+    const r = row as Record<string, unknown>;
+    const bodyMd = String(r.bodyMd ?? r.body ?? r.text ?? r.content ?? '').trim();
+    const titleRaw = String(r.title ?? r.name ?? '').trim();
+    if (!bodyMd && !titleRaw) continue;
+    const index = Number(r.index) > 0 ? Number(r.index) : episodes.length + 1;
+    episodes.push({
+      id: String(r.id ?? '').trim() || makeId(`ep-${index}`),
+      index,
+      title: cleanEpisodeTitle(titleRaw || `第${index}集`, index),
+      bodyMd: bodyMd || titleRaw,
+      updatedAt: typeof r.updatedAt === 'string' ? r.updatedAt : stamp,
+    });
+  }
+  if (!episodes.length) return null;
+  return episodes
+    .sort((a, b) => a.index - b.index)
+    .map((ep, i) => ({ ...ep, index: i + 1 }));
+}
+
 export function episodesFromIngestText(
   sourceText: string,
   opts?: { episodeCount?: number; sourceType?: ScreenplayPackage['screenplay']['sourceType'] },
 ): ScreenplayEpisode[] {
   const source = sourceText.trim();
   if (!source) return [];
+  const stamp = nowIso();
+
+  // 模型常无视「纯文本」要求，直接回 JSON patch —— 优先按分集字段解析
+  if (/^\s*[{\[]/.test(source) || /```json|"bodyMd"\s*:|"episodes"\s*:/i.test(source)) {
+    const parsed = tryParseJsonValue(source);
+    const fromJson = episodesFromJsonPayload(parsed, stamp);
+    if (fromJson?.length) return normalizeScreenplayEpisodes(fromJson);
+  }
+
   const marker = /第\s*([一二三四五六七八九十百千\d]+)\s*集[^\n]*/g;
   const matches = [...source.matchAll(marker)];
-  const stamp = nowIso();
   if (matches.length > 0) {
-    return matches.map((match, index) => {
+    return normalizeScreenplayEpisodes(matches.map((match, index) => {
       const start = match.index ?? 0;
       const end = matches[index + 1]?.index ?? source.length;
       const chunk = source.slice(start, end).trim();
+      const header = match[0].trim();
+      const title = cleanEpisodeTitle(header, index + 1);
+      let bodyMd = chunk;
+      if (bodyMd.startsWith(header)) {
+        bodyMd = bodyMd.slice(header.length).trim();
+      } else {
+        bodyMd = bodyMd.replace(/^[^\n]*\n+/, '').trim() || bodyMd;
+      }
       return {
         id: makeId(`ep-${index + 1}`),
         index: index + 1,
-        title: match[0].trim() || `第${index + 1}集`,
-        bodyMd: chunk,
+        title,
+        bodyMd: bodyMd || chunk,
         updatedAt: stamp,
       };
-    });
+    }));
   }
   const count = Math.max(1, Math.min(50, opts?.episodeCount ?? 1));
   if (count === 1) {
@@ -467,6 +653,8 @@ export function sceneDraftFromPartial(
 export function bibleDraftsFromExtract(input: {
   characters?: Array<Record<string, unknown>>;
   locations?: string[];
+  /** 兼容 extract-assets skill 的 environments 字段（string 或 {name/location}） */
+  environments?: Array<string | Record<string, unknown>>;
   scenes?: Array<Record<string, unknown>>;
 }): Pick<ScreenplayBible, 'characters' | 'scenes'> {
   const characters = (input.characters ?? [])
@@ -489,7 +677,20 @@ export function bibleDraftsFromExtract(input: {
     })
     .filter((item): item is ScreenplayCharacterDraft => Boolean(item));
 
-  const sceneFromLocations = (input.locations ?? [])
+  const envNames = (input.environments ?? [])
+    .map((item) => {
+      if (typeof item === 'string') return item.trim();
+      if (item && typeof item === 'object') {
+        return String((item as Record<string, unknown>).name
+          ?? (item as Record<string, unknown>).location
+          ?? (item as Record<string, unknown>).title
+          ?? '').trim();
+      }
+      return '';
+    })
+    .filter(Boolean);
+
+  const sceneFromLocations = [...(input.locations ?? []), ...envNames]
     .map((name) => String(name).trim())
     .filter(Boolean)
     .map((name) => sceneDraftFromPartial({ name, location: name }));
@@ -514,6 +715,85 @@ export function bibleDraftsFromExtract(input: {
     characters,
     scenes: mergeSceneDrafts(sceneFromLocations, sceneFromObjects),
   };
+}
+
+/**
+ * 从成稿正文解析场景 draft（不依赖 LLM）。
+ * 支持标准场头 `## S01 | 内景 · 地点 | 时间`，以及遗留 `【场景：…】`。
+ */
+export function sceneDraftsFromScreenplayText(sourceText: string): ScreenplaySceneDraft[] {
+  const text = String(sourceText ?? '');
+  if (!text.trim()) return [];
+  const byName = new Map<string, ScreenplaySceneDraft>();
+
+  const standard = /##\s*(S\d+)\s*\|\s*(内景|外景)\s*[·•.\-—]?\s*([^|\n]+?)\s*\|\s*([^\n]+)/gi;
+  for (const m of text.matchAll(standard)) {
+    const code = String(m[1] ?? '').toUpperCase();
+    const interior = String(m[2] ?? '').trim();
+    const location = String(m[3] ?? '').trim();
+    const time = String(m[4] ?? '').trim();
+    const name = location || `${interior}${time ? `·${time}` : ''}`;
+    if (!name) continue;
+    const prev = byName.get(name);
+    if (prev) {
+      byName.set(name, {
+        ...prev,
+        code: prev.code || code,
+        summary: prev.summary || [interior, time].filter(Boolean).join(' · '),
+        location: prev.location || location,
+      });
+      continue;
+    }
+    byName.set(name, sceneDraftFromPartial({
+      name,
+      code,
+      location,
+      summary: [interior, time].filter(Boolean).join(' · '),
+    }));
+  }
+
+  const bracket = /【\s*场景\s*[:：]\s*([^】]+)】/g;
+  for (const m of text.matchAll(bracket)) {
+    const raw = String(m[1] ?? '').trim();
+    if (!raw) continue;
+    const parts = raw.split(/[，,·|]/).map((s) => s.trim()).filter(Boolean);
+    const name = parts[0] || raw;
+    if (!name || byName.has(name)) continue;
+    byName.set(name, sceneDraftFromPartial({
+      name,
+      location: name,
+      summary: parts.slice(1).join(' · ') || undefined,
+    }));
+  }
+
+  // 遗留体例：独立成行的「咖啡厅。白天。」
+  const legacyLine = /^(?:场景[:：]?\s*)?([\u4e00-\u9fffA-Za-z0-9「」《》\-—]{2,16})[。．]\s*(白天|傍晚|夜晚|深夜|清晨|上午|下午|雨夜)[。．]?\s*$/gm;
+  for (const m of text.matchAll(legacyLine)) {
+    const name = String(m[1] ?? '').trim();
+    const time = String(m[2] ?? '').trim();
+    if (!name || byName.has(name)) continue;
+    if (/^(第[一二三四五六七八九十百千\d]+集|旁白|内景|外景)$/.test(name)) continue;
+    byName.set(name, sceneDraftFromPartial({
+      name,
+      location: name,
+      summary: time || undefined,
+    }));
+  }
+
+  return [...byName.values()];
+}
+
+/** 用成稿场头回填 bible.scenes（保留已有 draft，只合并增量） */
+export function enrichBibleScenesFromPackage(pkg: ScreenplayPackage): ScreenplayPackage {
+  const fromText = sceneDraftsFromScreenplayText(screenplayFullText(pkg));
+  if (fromText.length === 0) return pkg;
+  return touchScreenplayPackage(pkg, {
+    bible: {
+      world: pkg.bible.world,
+      characters: pkg.bible.characters,
+      scenes: mergeSceneDrafts(pkg.bible.scenes, fromText),
+    },
+  });
 }
 
 export function bibleDraftsFromBreakdown(
@@ -789,9 +1069,9 @@ export const DEFAULT_SCRIPT_DESK_SKILL_PROMPTS: Record<ScriptDeskSkillId, string
   character: '你是人物构建者。输出 JSON patch：{"bible":{"characters":[{"name":"","identity":"","appearance":"","personality":"","relationships":"","goal":"","voiceNotes":"","fixedVisualKeywords":""}]}}。叙事层 draft only。不要输出镜头表。',
   plot: '你是剧情构建者。输出 JSON patch：{"brief":{"plotOutline":"","episodeCount":1}}。不要输出镜头表。',
   pacing: '你是节奏构建者。输出 JSON patch：{"brief":{"pacing":"balanced|slow|fast","targetEpisodeDurationSec":90}}。不要输出镜头表。',
-  dialogue: '你是对白构建者。改写成稿对白层，输出 JSON patch：{"screenplay":{"episodes":[{"id":"保留或新id","index":1,"title":"","bodyMd":"含对白的正文"}],"sourceType":"generated"}}。不要输出镜头表。',
+  dialogue: '你是对白构建者。改写成稿对白层，输出 JSON：{"patch":{"screenplay":{"episodes":[{"id":"保留或新id","index":1,"title":"","bodyMd":"..."}],"sourceType":"generated"}}}。bodyMd 保持场景头「## S01 | 内景/外景 · 地点 | 时间」；对白「角色名：台词」或「角色名（情绪）：台词」，禁止引号与镜头表。',
   hooks: '你是爆点构建者。输出 JSON patch：{"brief":{"hooks":["钩子1"]}}。不要输出镜头表。',
   consistency: '你是叙事一致性审稿。输出 JSON：{"diagnostics":[{"level":"warning|error|info","code":"","message":""}]}。不要改成稿正文。不要输出镜头表。',
-  generate: '你是编剧。根据 brief/bible 生成分集剧本正文。输出 JSON patch：{"brief":{"title":""},"screenplay":{"sourceType":"generated","episodes":[{"index":1,"title":"第1集","bodyMd":"场次+动作+对白"}]}}。不要输出镜头表或 imagePrompt。',
+  generate: '你是编剧。根据 brief/bible 生成分集成稿。只输出 JSON：{"patch":{"brief":{"title":""},"screenplay":{"sourceType":"generated","episodes":[{"index":1,"title":"第1集 短标题","bodyMd":"..."}]}},"explanation":""}。bodyMd 体例锁死：场景头必须为「## S01 | 内景/外景 · 地点 | 时间」；对白必须为「角色名：台词」或「角色名（状态）：台词」，禁止引号与【场景：】；禁止镜头表/imagePrompt/非终章（完）；多集体例必须一致并衔接。',
   ingest: '你是成稿解析器。将用户粘贴文本整理为分集正文，输出 JSON patch：{"screenplay":{"sourceType":"pasted","episodes":[{"index":1,"title":"第1集","bodyMd":"..."}]}}。不要输出镜头表。',
 };

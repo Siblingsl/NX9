@@ -797,9 +797,13 @@ export class AgentService {
     const system = this.systemFrom(
       resolveAgentSkillName('screenplay'),
       [
-        '你是编剧。根据改编策略和原文，写出分集剧本。',
-        '格式：每集标注 "第 X 集"，每场标注场景标题和内容。包含对白和动作描写。',
-        '输出纯文本，不要 JSON。',
+        '你是编剧。根据 brief/策略/原文写出分集剧本。',
+        '只输出纯文本，不要 JSON，不要前言后记。',
+        '每集以「第N集 短标题」开头。',
+        '场景头唯一形态：## S01 | 内景/外景 · 地点 | 时间',
+        '对白唯一形态：角色名：台词 或 角色名（状态）：台词（禁止引号）。',
+        '禁止【场景：】、咖啡厅。白天。、特写/运镜/imagePrompt、非终章（完）。',
+        '续写须衔接上一集状态且体例不得漂移；重写不得与邻集矛盾。',
       ].join('\n'),
     );
     const res = (await this.gateway.proxyLlm({
@@ -844,8 +848,8 @@ export class AgentService {
       resolveAgentSkillName('extract-assets'),
       [
         '你是剧本资产抽取器。从剧本/小说文本中提取角色和场景，并为每个角色填写六层设定。',
-        'JSON 格式: {"characters":[{"name":"角色名","archetype":"主角/配角/反派","traits":"性格特征","description":"外观描述","bible":{"identity":"身份","appearance":"外貌","personality":"性格","background":"背景","voice":"声音","relationships":"关系"}}],"locations":["场景1","场景2"]}',
-        'bible 六层字段必须填写。只输出 JSON。',
+        'JSON 格式: {"characters":[{"name":"角色名","archetype":"主角/配角/反派","traits":"性格特征","description":"外观描述","bible":{"identity":"身份","appearance":"外貌","personality":"性格","background":"背景","voice":"声音","relationships":"关系"}}],"locations":["场景1","场景2"],"environments":["场景1","场景2"],"scenes":[{"name":"场景1","location":"场景1","summary":"摘要"}]}',
+        'locations 必填（有场所时）；environments 与 locations 同义可并列；bible 六层尽量填写。只输出 JSON。',
       ].join('\n'),
     );
     const res = (await this.gateway.proxyLlm({
@@ -857,8 +861,35 @@ export class AgentService {
     }, userId)) as { choices?: { message?: { content?: string } }[] };
     const content = res.choices?.[0]?.message?.content ?? '';
     if (!content) throw new ServiceUnavailableException('LLM 未返回内容');
-    const assets = JSON.parse(content) as { characters: Partial<CharacterProfile>[]; locations: string[] };
-    return { ok: true, assets };
+    const parsed = JSON.parse(content) as {
+      characters?: Partial<CharacterProfile>[];
+      locations?: string[];
+      environments?: Array<string | { name?: string; location?: string; title?: string }>;
+      scenes?: Array<{ name?: string; location?: string }>;
+    };
+    const fromEnv = (parsed.environments ?? [])
+      .map((item) => (typeof item === 'string'
+        ? item.trim()
+        : String(item?.name ?? item?.location ?? item?.title ?? '').trim()))
+      .filter(Boolean);
+    const fromScenes = (parsed.scenes ?? [])
+      .map((s) => String(s.name ?? s.location ?? '').trim())
+      .filter(Boolean);
+    const locations = [
+      ...(parsed.locations ?? []).map((s) => String(s).trim()).filter(Boolean),
+      ...fromEnv,
+      ...fromScenes,
+    ];
+    const deduped = [...new Set(locations)];
+    return {
+      ok: true,
+      assets: {
+        characters: parsed.characters ?? [],
+        locations: deduped,
+        environments: parsed.environments ?? deduped,
+        scenes: parsed.scenes ?? [],
+      } as { characters: (Partial<CharacterProfile> & { bible?: import('@nx9/shared').CharacterBible })[]; locations: string[] },
+    };
   }
 
   async novelEvents(
