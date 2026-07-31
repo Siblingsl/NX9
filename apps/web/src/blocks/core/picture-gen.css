@@ -309,7 +309,7 @@
   filter: brightness(1.06);
 }
 
-/* 专业工具弹层（portal 到 body，需自带 desk 变量） */
+/* 专业工具 / @引用 弹层（portal 到 body，需自带 desk 变量） */
 .nx9-composer-popover.is-picture-desk {
   background: var(--desk-bg-2) !important;
   border-color: var(--desk-line-strong) !important;
@@ -318,6 +318,7 @@
 }
 
 .nx9-composer-popover.is-picture-desk .text-ink,
+.nx9-composer-popover.is-picture-desk .text-ink\/75,
 .nx9-composer-popover.is-picture-desk .text-ink\/70,
 .nx9-composer-popover.is-picture-desk .text-ink\/65 {
   color: var(--desk-ink) !important;
@@ -334,12 +335,18 @@
 
 .nx9-composer-popover.is-picture-desk .bg-surface,
 .nx9-composer-popover.is-picture-desk .hover\:bg-surface\/90:hover,
-.nx9-composer-popover.is-picture-desk .hover\:bg-surface\/80:hover {
+.nx9-composer-popover.is-picture-desk .hover\:bg-surface\/80:hover,
+.nx9-composer-popover.is-picture-desk .hover\:bg-surface:hover {
   background-color: var(--desk-panel) !important;
 }
 
+.nx9-composer-popover.is-picture-desk .hover\:bg-ink\/\[0\.04\]:hover {
+  background-color: color-mix(in srgb, var(--desk-ink) 6%, transparent) !important;
+}
+
 .nx9-composer-popover.is-picture-desk .bg-brand\/10,
-.nx9-composer-popover.is-picture-desk .bg-brand\/15 {
+.nx9-composer-popover.is-picture-desk .bg-brand\/15,
+.nx9-composer-popover.is-picture-desk .bg-brand\/8 {
   background-color: var(--desk-accent-soft) !important;
 }
 
@@ -347,6 +354,7 @@
   color: var(--desk-accent) !important;
 }
 
+.nx9-composer-popover.is-picture-desk .border-line\/60,
 .nx9-composer-popover.is-picture-desk .border-line\/40,
 .nx9-composer-popover.is-picture-desk .border-line\/35 {
   border-color: var(--desk-line) !important;

@@ -121,6 +121,8 @@ export interface WorkspacePayloadV3 extends Omit<WorkspacePayloadV2, 'version'> 
   playbookSession?: PlaybookSession | null;
   projectStatus?: ProjectStatus;
   projectMeta?: ProjectMeta;
+  /** F-010: 生成结果软删（图像/视频），进资产回收站 */
+  mediaTrash?: import('../utils/asset-trash').MediaTrashItem[];
 }
 
 /** Workspace on disk — v1/v2 legacy or v3 Stage Deck */

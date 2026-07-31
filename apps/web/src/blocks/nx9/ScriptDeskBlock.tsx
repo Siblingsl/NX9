@@ -192,13 +192,22 @@ function ScriptDeskBlock(props: NodeProps) {
   }, [appendLog, pkg, savePkg]);
 
   const handleHandoffToStoryboard = useCallback(() => {
+    const body = screenplayFullText(pkg).trim();
+    if (pkg.status !== 'confirmed' || !body) {
+      setTip(
+        !body
+          ? '尚无分集成稿正文：请先用「生成剧本」成功生成并点「应用」，再确认成稿'
+          : '请先点「确认成稿」，再送到分镜台',
+      );
+      return;
+    }
     const runtime = useFlowRuntime.getState().runtime;
     const nodes = runtime?.getNodes() ?? [];
     const storyboardDesk = nodes.find((n) => n.type === 'storyboard-desk');
     if (storyboardDesk) {
       runtime?.focusBlock(storyboardDesk.id);
-      setTip('已聚焦分镜台 · 请在交接页签确认');
-      appendLog(`编剧台：打开分镜台 · 交接本集成稿`);
+      setTip('已打开分镜台 · 请在「拆镜」页点「从成稿拆镜」（送到分镜不会自动生成镜表）');
+      appendLog(`编剧台：打开分镜台 · 请手动从成稿拆镜`);
     } else {
       const handoffData = {
         connectToSource: props.id,
@@ -210,10 +219,10 @@ function ScriptDeskBlock(props: NodeProps) {
         },
       };
       useFlowCommands.getState().requestSpawn('storyboard-desk', undefined, handoffData);
-      setTip('已创建分镜台 · 编剧台已连线分镜台');
+      setTip('已创建分镜台并连线 · 打开后请在「拆镜」页点「从成稿拆镜」');
       appendLog(`编剧台：送至分镜 · 一键创建并连线分镜台`);
     }
-  }, [appendLog, props.id]);
+  }, [appendLog, pkg, props.id]);
 
   const handleReadinessChange = useCallback((state: AssetReadinessState) => {
     updateNodeData(props.id, { assetReadiness: state });

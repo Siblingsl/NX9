@@ -7,6 +7,8 @@ import {
   type CharacterProfile,
   type EnvironmentProfile,
   buildLineArtShotPrompt,
+  buildLineArtPanelGridPrompt,
+  pickLineArtGridLayout,
   createScriptBreakdownPromptPack,
   parseScriptBreakdownPromptPack,
   DEFAULT_SCRIPT_BREAKDOWN_PROMPTS,
@@ -16,6 +18,8 @@ import {
   type ScriptBreakdownPromptTemplates,
   emptyStoryboardPreview,
   flattenScriptBreakdownShots,
+  patchChainShot,
+  readChainStoryboard,
   resolveConnectedPictureGenId,
   resolveStoryboardPreviewPictureSettings,
   bindStoryboardShotAssets,
@@ -67,7 +71,8 @@ import {
   type QueueProgress,
 } from '@nx9/shared';
 import { EpisodeQueueBar } from '../../../components/EpisodeQueueBar';
-import { generateStoryboardFrameImage } from '../../../engine/storyboard-preview-runner';
+import { generateStoryboardFrameImage, resolvePictureGenSettings } from '../../../engine/storyboard-preview-runner';
+import { runPictureGenJob } from '../../../engine/picture-gen-runner';
 import {
   buildDeskContactSheetSignature,
   composeStoryboardSheetPng,
@@ -125,6 +130,8 @@ export function useStoryboardDesk(props: NodeProps) {
   );
   const [studioOpen, setStudioOpen] = useState(false);
   const [studioTab, setStudioTab] = useState<StudioTab>('grid');
+  /** 构图区子页：关键帧预览 / 故事板大图 */
+  const [composeViewTab, setComposeViewTab] = useState<'preview' | 'sheet'>('preview');
   const breakdownJob = props.data?.breakdownJob as {
     phase?: string;
     sourcePackageHash?: string;
@@ -134,8 +141,8 @@ export function useStoryboardDesk(props: NodeProps) {
   const [editingShotId, setEditingShotId] = useState<string | null>(null);
   /** 正在生成画面的 shot id */
   const [generatingShotId, setGeneratingShotId] = useState<string | null>(null);
-  /** 批量任务：线稿 / 试出互斥 */
-  const [batchMode, setBatchMode] = useState<'line-art' | 'trial' | null>(null);
+  /** 批量任务：逐镜线稿 / 宫格线稿 / 试出互斥 */
+  const [batchMode, setBatchMode] = useState<'line-art' | 'grid-line-art' | 'trial' | null>(null);
   const [batchProgress, setBatchProgress] = useState<string | null>(null);
   const [sheetComposing, setSheetComposing] = useState(false);
   const batchRunning = batchMode !== null;
@@ -207,8 +214,17 @@ export function useStoryboardDesk(props: NodeProps) {
     for (const s of storyboardShots) {
       if (s.firstFrameAssetId) map.set(s.id, s.firstFrameAssetId);
     }
+    // chain 缺图时回退全局镜表 / 关键帧预览帧（构图已出图但未回填镜表时）
+    for (const s of useWorkspaceDocument.getState().storyboard.shots) {
+      if (s.firstFrameAssetId && !map.get(s.id)) map.set(s.id, s.firstFrameAssetId);
+    }
+    for (const frame of previewPayloadEarly?.frames ?? []) {
+      if (frame.sourceShotId && frame.imageUrl && !map.get(frame.sourceShotId)) {
+        map.set(frame.sourceShotId, frame.imageUrl);
+      }
+    }
     return map;
-  }, [storyboardShots]);
+  }, [previewPayloadEarly, storyboardShots]);
 
   const compositionStats = useMemo(
     () => computeCompositionStats(
@@ -254,6 +270,15 @@ export function useStoryboardDesk(props: NodeProps) {
     [readiness, preflightMode],
   );
   const breakdownBlocked = preflight.blocking;
+  const breakdownBlockedReason = !upstreamPackage
+    ? '未连接编剧台，或上游没有合法成稿包'
+    : upstreamPackage.status !== 'confirmed'
+      ? `上游成稿状态为「${upstreamPackage.status}」，请先在编剧台点「确认成稿」`
+      : !upstreamPackage.screenplay.episodes.some((ep) => ep.bodyMd.trim())
+        ? '上游成稿没有分集正文：请回到编剧台用「生成剧本」生成并应用后再确认'
+        : breakdownBlocked
+          ? (preflight.reason ?? '硬模式下设定未就绪')
+          : undefined;
   const hasSource = Boolean(canBreakdownFromPackage || upstreamPackage || payload);
 
   const togglePreflightMode = useCallback(() => {
@@ -531,9 +556,17 @@ export function useStoryboardDesk(props: NodeProps) {
     if (!currentEpisodeId || visibleShots.length === 0) return;
     const preview = props.data?.storyboardPreview as StoryboardPreviewPayload | undefined;
     const urlMap = new Map<string, string | undefined>();
-    // F-003: 从链镜表聚合 url 映射（回退全局）
+    // F-003: 从链镜表聚合 url 映射（回退全局 / 关键帧预览）
     for (const s of getAllChainShots(getNodes())) {
       if (s.firstFrameAssetId) urlMap.set(s.id, s.firstFrameAssetId);
+    }
+    for (const s of useWorkspaceDocument.getState().storyboard.shots) {
+      if (s.firstFrameAssetId && !urlMap.get(s.id)) urlMap.set(s.id, s.firstFrameAssetId);
+    }
+    for (const frame of preview?.frames ?? []) {
+      if (frame.sourceShotId && frame.imageUrl && !urlMap.get(frame.sourceShotId)) {
+        urlMap.set(frame.sourceShotId, frame.imageUrl);
+      }
     }
     const sceneNameSet = new Set([
       ...environments.map((e) => e.name.trim()),
@@ -667,8 +700,16 @@ export function useStoryboardDesk(props: NodeProps) {
     for (const s of storyboardShots) {
       if (s.firstFrameAssetId) map.set(s.id, s.firstFrameAssetId);
     }
+    for (const s of useWorkspaceDocument.getState().storyboard.shots) {
+      if (s.firstFrameAssetId && !map.has(s.id)) map.set(s.id, s.firstFrameAssetId);
+    }
+    for (const frame of previewPayloadEarly?.frames ?? []) {
+      if (frame.sourceShotId && frame.imageUrl && !map.has(frame.sourceShotId)) {
+        map.set(frame.sourceShotId, frame.imageUrl);
+      }
+    }
     return map;
-  }, [storyboardShots]);
+  }, [previewPayloadEarly, storyboardShots]);
 
   /** 写入画面 URL：拆分结构 + 故事板 + 预览帧（优先读节点最新 payload，避免批量写回被旧闭包覆盖） */
   const setShotFrameUrl = useCallback(
@@ -690,7 +731,7 @@ export function useStoryboardDesk(props: NodeProps) {
         status: 'review',
       });
 
-      // 同步 storyboardPreview.frames
+      // 同步 storyboardPreview.frames + chainStoryboard（镜表 SSOT）
       updateNodeData(props.id, (node) => {
         const data = (node.data ?? {}) as Record<string, unknown>;
         // 节点 data 可能仍滞后于刚 apply 的拆分；以 nextBreakdown 为准
@@ -738,8 +779,22 @@ export function useStoryboardDesk(props: NodeProps) {
           };
           frames = [...frames, frame];
         }
+        const chain = readChainStoryboard(data);
+        const chainPatch = chain
+          ? {
+              chainStoryboard: {
+                ...chain,
+                shots: patchChainShot(chain, shotId, {
+                  firstFrameAssetId: imageUrl,
+                  keyframeStatus: 'review' as const,
+                  status: 'review' as const,
+                }),
+              },
+            }
+          : {};
         return {
             ...data,
+            ...chainPatch,
             scriptBreakdown: nextBreakdown,
             storyboardPreview: {
               ...current,
@@ -752,6 +807,62 @@ export function useStoryboardDesk(props: NodeProps) {
     },
     [getNodes, payload, props.id, updateNodeData, updateShot],
   );
+
+  /** 构图已出图但镜表缺图时，打开分镜台自动从预览帧补齐回填 */
+  useEffect(() => {
+    if (!studioOpen) return;
+    const node = getNodes().find((n) => n.id === props.id);
+    if (!node) return;
+    const data = (node.data ?? {}) as Record<string, unknown>;
+    const breakdown = data.scriptBreakdown as ScriptBreakdownPayload | undefined;
+    const frames = (data.storyboardPreview as StoryboardPreviewPayload | undefined)?.frames ?? [];
+    if (!breakdown?.episodes?.length || frames.length === 0) return;
+
+    let next = breakdown;
+    let changed = 0;
+    for (const frame of frames) {
+      if (!frame.sourceShotId || !frame.imageUrl) continue;
+      const shot = flattenScriptBreakdownShots(next).find((s) => s.id === frame.sourceShotId);
+      if (shot?.previewImageUrl) continue;
+      next = writeBackBreakdownPreviewImage(next, frame.sourceShotId, frame.imageUrl)
+        ?? patchShotInPayload(next, frame.sourceShotId, {
+          previewImageUrl: frame.imageUrl,
+          referenceImageUrl: frame.imageUrl,
+          status: 'previewing',
+        });
+      changed += 1;
+      updateShot(frame.sourceShotId, {
+        firstFrameAssetId: frame.imageUrl,
+        keyframeStatus: 'review',
+        status: 'review',
+      });
+    }
+    if (changed === 0) return;
+
+    applyScriptBreakdownPayload(props.id, next);
+    updateNodeData(props.id, (n) => {
+      const d = (n.data ?? {}) as Record<string, unknown>;
+      let chain = readChainStoryboard(d);
+      if (chain) {
+        let shots = chain.shots;
+        for (const frame of frames) {
+          if (!frame.sourceShotId || !frame.imageUrl) continue;
+          shots = patchChainShot({ ...chain, shots }, frame.sourceShotId, {
+            firstFrameAssetId: frame.imageUrl,
+            keyframeStatus: 'review',
+            status: 'review',
+          });
+        }
+        chain = { ...chain, shots };
+      }
+      return {
+        ...d,
+        ...(chain ? { chainStoryboard: chain } : {}),
+        scriptBreakdown: next,
+      };
+    });
+    appendLog(`已从关键帧预览回填镜表 · ${changed} 镜`);
+  }, [appendLog, getNodes, props.id, studioOpen, updateNodeData, updateShot]);
 
   const generateShotFrame = useCallback(
     async (shot: ScriptBreakdownShot) => {
@@ -1102,6 +1213,244 @@ export function useStoryboardDesk(props: NodeProps) {
     ],
   );
 
+  /** 宫格线稿：多镜提示词合成一张图 → grid-split → 按顺序回填（省出图次数） */
+  const generateBatchGridLineArt = useCallback(
+    async (scope: 'visible' | 'all' = 'visible') => {
+      const pictureId = resolveConnectedPictureGenId(props.id, getNodes(), getEdges());
+      if (!pictureId) {
+        appendLog('分镜台：宫格线稿前请先连接「图像生成」节点');
+        return;
+      }
+      const pictureNode = getNodes().find((n) => n.id === pictureId);
+      if (!pictureNode) return;
+
+      const targetShots = (scope === 'visible' ? visibleShots : shots).filter(Boolean);
+      if (targetShots.length === 0) {
+        appendLog('分镜台：当前没有可生成线稿的镜头');
+        return;
+      }
+
+      const pageSize = 9;
+      const pageCount = Math.ceil(targetShots.length / pageSize);
+      setBatchMode('grid-line-art');
+      setBatchProgress(`0/${pageCount}`);
+      appendLog(
+        `开始宫格线稿 · ${targetShots.length} 镜 · ${pageCount} 张宫格（${scope === 'visible' ? '当前可见' : '全部'}）`,
+      );
+
+      let ok = 0;
+      let fail = 0;
+      const pictureData = (pictureNode.data ?? {}) as Record<string, unknown>;
+
+      for (let page = 0; page < pageCount; page++) {
+        const chunk = targetShots.slice(page * pageSize, page * pageSize + pageSize);
+        const { rows, cols } = pickLineArtGridLayout(chunk.length);
+        setBatchProgress(`${page + 1}/${pageCount}`);
+        setGeneratingShotId(chunk[0]?.id ?? null);
+
+        try {
+          const livePayload = (getNodes().find((n) => n.id === props.id)?.data as Record<string, unknown> | undefined)
+            ?.scriptBreakdown as ScriptBreakdownPayload | undefined;
+          const liveMap = new Map(flattenScriptBreakdownShots(livePayload).map((s) => [s.id, s]));
+
+          const panels = chunk.map((shot) => {
+            const liveShot = liveMap.get(shot.id) ?? shot;
+            const sketchPrompt = resolveSketchPrompt(liveShot);
+            return {
+              shot: liveShot,
+              sketchPrompt,
+              label: liveShot.sceneCode || `Shot${liveShot.index}`,
+              prompt: sketchPrompt,
+            };
+          });
+
+          const gridPrompt = buildLineArtPanelGridPrompt(
+            panels.map((p) => ({ label: p.label, prompt: p.prompt })),
+            rows,
+            cols,
+          );
+          const nodeData = (getNodes().find((n) => n.id === props.id)?.data ?? {}) as Record<string, unknown>;
+          const previewRaw = nodeData.storyboardPreview as StoryboardPreviewPayload | undefined;
+          const pictureSettings = resolveStoryboardPreviewPictureSettings(previewRaw);
+          const { modelId } = resolvePictureGenSettings(pictureData, pictureSettings);
+          // 宫格用正方形，便于等分裁切
+          const size = '1024x1024';
+
+          appendLog(`宫格出图中 · 第 ${page + 1}/${pageCount} 张 · ${rows}×${cols} · ${chunk.length} 镜`);
+          const urls = await runPictureGenJob({
+            prompt: gridPrompt,
+            modelId,
+            size,
+            n: 1,
+          });
+          const gridUrl = urls[0];
+          if (!gridUrl) throw new Error('宫格线稿未返回图片');
+
+          const split = await api.gridSplit({ sourceUrl: gridUrl, rows, cols });
+          if (!split.urls?.length) throw new Error('宫格切分未返回图片');
+
+          // 每页开始前重读节点，并用已有预览帧图补齐缺 previewImageUrl 的镜
+          // （避免上一页写回尚未进入闭包 / 被旧 payload 覆盖）
+          const freshNode = (getNodes().find((n) => n.id === props.id)?.data
+            ?? {}) as Record<string, unknown>;
+          const freshBreakdown = (freshNode.scriptBreakdown as ScriptBreakdownPayload | undefined)
+            ?? livePayload
+            ?? payload;
+          const existingFrames = (freshNode.storyboardPreview as StoryboardPreviewPayload | undefined)?.frames ?? [];
+          let nextBreakdown = freshBreakdown;
+          if (nextBreakdown) {
+            for (const frame of existingFrames) {
+              if (!frame.sourceShotId || !frame.imageUrl) continue;
+              const existing = flattenScriptBreakdownShots(nextBreakdown).find((s) => s.id === frame.sourceShotId);
+              if (existing?.previewImageUrl) continue;
+              nextBreakdown = writeBackBreakdownPreviewImage(nextBreakdown, frame.sourceShotId, frame.imageUrl)
+                ?? patchShotInPayload(nextBreakdown, frame.sourceShotId, {
+                  previewImageUrl: frame.imageUrl,
+                  referenceImageUrl: frame.imageUrl,
+                  status: 'previewing',
+                });
+            }
+          }
+          const framePatches: Array<{
+            shot: ScriptBreakdownShot;
+            sketchPrompt: string;
+            imageUrl: string;
+          }> = [];
+
+          for (let i = 0; i < panels.length; i++) {
+            const imageUrl = split.urls[i];
+            if (!imageUrl) {
+              fail += 1;
+              appendLog(`宫格线稿缺格 · ${panels[i].label}`);
+              continue;
+            }
+            const { shot: liveShot, sketchPrompt } = panels[i];
+            framePatches.push({ shot: liveShot, sketchPrompt, imageUrl });
+            if (!nextBreakdown) {
+              setShotFrameUrl(liveShot.id, imageUrl);
+              ok += 1;
+              continue;
+            }
+            const withSketch = patchShotInPayload(nextBreakdown, liveShot.id, {
+              sketchPrompt,
+              previewImageUrl: imageUrl,
+              referenceImageUrl: imageUrl,
+              status: 'previewing',
+            });
+            nextBreakdown = writeBackBreakdownPreviewImage(withSketch, liveShot.id, imageUrl) ?? withSketch;
+            updateShot(liveShot.id, {
+              firstFrameAssetId: imageUrl,
+              keyframeStatus: 'review',
+              status: 'review',
+              sketchPrompt,
+            });
+            ok += 1;
+          }
+
+          if (nextBreakdown && framePatches.length > 0) {
+            applyScriptBreakdownPayload(props.id, nextBreakdown);
+            const applied = nextBreakdown;
+            updateNodeData(props.id, (node) => {
+              const data = (node.data ?? {}) as Record<string, unknown>;
+              const raw = data.storyboardPreview as StoryboardPreviewPayload | undefined;
+              const current = raw?.version === 1 && Array.isArray(raw.frames)
+                ? { ...emptyStoryboardPreview(), ...raw, pictureSettings: resolveStoryboardPreviewPictureSettings(raw) }
+                : emptyStoryboardPreview();
+              let frames = [...current.frames];
+              for (const patch of framePatches) {
+                const idx = frames.findIndex(
+                  (f) =>
+                    f.sourceShotId === patch.shot.id
+                    || f.id === `frame-line-${patch.shot.id}`
+                    || f.id === `spf-${patch.shot.id}`
+                    || f.id === patch.shot.id,
+                );
+                const framePatch = {
+                  imageUrl: patch.imageUrl,
+                  status: 'success' as const,
+                  errorMessage: null,
+                  promptSummary: patch.sketchPrompt,
+                  stylePreset: 'line-art',
+                };
+                if (idx >= 0) {
+                  frames = frames.map((f, fi) => (fi === idx ? { ...f, ...framePatch } : f));
+                } else {
+                  frames = [
+                    ...frames,
+                    {
+                      id: `spf-${patch.shot.id}`,
+                      order: frames.length + 1,
+                      label: `${patch.shot.sceneCode || `Shot${patch.shot.index}`} · 线稿`,
+                      startSec: 0,
+                      endSec: Math.max(1, patch.shot.durationSec || 5),
+                      sourceShotId: patch.shot.id,
+                      promptSummary: patch.sketchPrompt,
+                      characterNames: patch.shot.characters,
+                      sceneAssetRef: patch.shot.scene,
+                      referenceImageUrl: null,
+                      imageUrl: patch.imageUrl,
+                      status: 'success' as const,
+                      locked: false,
+                      stylePreset: 'line-art',
+                    },
+                  ];
+                }
+              }
+              let chain = readChainStoryboard(data);
+              if (chain) {
+                let chainShots = chain.shots;
+                for (const patch of framePatches) {
+                  chainShots = patchChainShot(
+                    { ...chain, shots: chainShots },
+                    patch.shot.id,
+                    {
+                      firstFrameAssetId: patch.imageUrl,
+                      keyframeStatus: 'review',
+                      status: 'review',
+                      sketchPrompt: patch.sketchPrompt,
+                    },
+                  );
+                }
+                chain = { ...chain, shots: chainShots };
+              }
+              return {
+                ...data,
+                ...(chain ? { chainStoryboard: chain } : {}),
+                scriptBreakdown: applied,
+                storyboardPreview: { ...current, frames, confirmed: false },
+                previewUrls: frames.map((f) => f.imageUrl).filter(Boolean),
+              };
+            });
+          }
+
+          appendLog(`宫格线稿已回填 · 第 ${page + 1}/${pageCount} 张 · ${framePatches.length} 镜`);
+        } catch (e) {
+          fail += chunk.length;
+          appendLog(`宫格线稿失败 · 第 ${page + 1}/${pageCount} 张: ${String(e)}`);
+        }
+      }
+
+      setGeneratingShotId(null);
+      setBatchMode(null);
+      setBatchProgress(null);
+      appendLog(`宫格线稿完成 · 成功 ${ok} · 失败 ${fail}`);
+      if (ok > 0) toastSuccess(`宫格线稿完成 ${ok}/${targetShots.length}`);
+    },
+    [
+      appendLog,
+      getEdges,
+      getNodes,
+      payload,
+      props.id,
+      resolveSketchPrompt,
+      setShotFrameUrl,
+      shots,
+      updateNodeData,
+      updateShot,
+      visibleShots,
+    ],
+  );
+
   const generateBatchTrials = useCallback(
     async (scope: 'visible' | 'all' | 'missing' = 'visible') => {
       const pictureId = resolveConnectedPictureGenId(props.id, getNodes(), getEdges());
@@ -1268,6 +1617,7 @@ export function useStoryboardDesk(props: NodeProps) {
         });
         appendLog(`分镜故事板大图已生成 · ${withImage}/${cells.length} 格有图`);
         toastSuccess(`故事板大图已生成 · ${withImage} 格`);
+        setComposeViewTab('sheet');
       } catch (e) {
         appendLog(`分镜故事板大图失败: ${String(e)}`);
       } finally {
@@ -1524,12 +1874,17 @@ export function useStoryboardDesk(props: NodeProps) {
                         ? `上游成稿：${upstreamPackage.brief.title || '未命名'} · ${upstreamPackage.status}${packageStale ? ' · 成稿已更新' : ''}`
                         : '未连接编剧台 confirmed package'}
                     </p>
+                    {!canBreakdownFromPackage && breakdownBlockedReason ? (
+                      <p className="sg3-muted" style={{ color: 'var(--nx9-danger, #c45c5c)' }}>
+                        无法拆镜：{breakdownBlockedReason}
+                      </p>
+                    ) : null}
                     <div className="sg3-hero__actions">
                       <button
                         type="button"
                         className="sg3-btn sg3-btn--primary"
                         disabled={!canBreakdownFromPackage || breakingDown || breakdownBlocked}
-                        title={breakdownBlocked ? (preflight.reason ?? '硬模式下设定未就绪') : undefined}
+                        title={breakdownBlockedReason}
                         onClick={() => void breakdownFromPackage()}
                       >
                         {breakingDown ? '拆镜中…' : breakdownBlocked ? '设定未就绪（硬模式）' : '从成稿拆镜'}
@@ -1539,7 +1894,7 @@ export function useStoryboardDesk(props: NodeProps) {
                           type="button"
                           className="sg3-btn sg3-btn--ghost"
                           disabled={!canBreakdownFromPackage || breakingDown || breakdownBlocked}
-                          title={breakdownBlocked ? (preflight.reason ?? '硬模式下设定未就绪') : undefined}
+                          title={breakdownBlockedReason}
                           onClick={() => void breakdownFromPackage(undefined, true)}
                         >
                           {breakingDown ? '拆镜中…' : `全 ${upstreamPackage.screenplay.episodes.length} 集拆镜`}
@@ -1706,6 +2061,8 @@ export function useStoryboardDesk(props: NodeProps) {
                         ? '正在合成故事板大图…'
                         : batchMode === 'line-art'
                           ? `批量线稿 ${batchProgress || ''}`.trim()
+                          : batchMode === 'grid-line-art'
+                            ? `宫格线稿 ${batchProgress || ''}`.trim()
                           : batchMode === 'trial'
                             ? `试出图 ${batchProgress || ''}`.trim()
                             : `构图覆盖 ${Math.round(compositionStats.coverage * 100)}% · 试出建议 ≤ ${trialCap} 镜`}
@@ -1723,7 +2080,21 @@ export function useStoryboardDesk(props: NodeProps) {
                         type="button"
                         className="sg3-btn sg3-btn--ghost"
                         disabled={!payload || batchRunning || sheetComposing || visibleShots.length === 0}
-                        onClick={() => void generateStoryboardSheet(true)}
+                        title="多镜提示词合成一张宫格再切回各镜，节省出图次数"
+                        onClick={() => void generateBatchGridLineArt('visible')}
+                      >
+                        {batchMode === 'grid-line-art'
+                          ? `宫格 ${batchProgress}`
+                          : `宫格线稿 · ${Math.min(9, visibleShots.length) || 0}`}
+                      </button>
+                      <button
+                        type="button"
+                        className="sg3-btn sg3-btn--ghost"
+                        disabled={!payload || batchRunning || sheetComposing || visibleShots.length === 0}
+                        onClick={() => {
+                          setComposeViewTab('sheet');
+                          void generateStoryboardSheet(true);
+                        }}
                       >
                         {sheetComposing ? '合成中…' : contactSheetUrl ? '重出故事板' : '生成故事板大图'}
                       </button>
@@ -1752,47 +2123,91 @@ export function useStoryboardDesk(props: NodeProps) {
                   <p className="sg3-hint">
                     线稿确认构图为主路径；「故事板大图」将本集线稿拼成专业分镜总览板（含镜号/运镜注/对白）。整集工业级关键帧在导演台批出。
                   </p>
-                  {contactSheetUrl ? (
-                    <div className="sg3-sheet">
-                      <div className="sg3-sheet__head">
-                        <span className="sg3-sheet__title">本集故事板大图</span>
-                        <div className="sg3-sheet__acts">
-                          <button
-                            type="button"
-                            className="sg3-btn sg3-btn--ghost"
-                            disabled={sheetComposing}
-                            onClick={downloadContactSheet}
+
+                  <div className="sg3-compose-tabs" role="tablist" aria-label="构图视图">
+                    <button
+                      type="button"
+                      role="tab"
+                      aria-selected={composeViewTab === 'preview'}
+                      className={`sg3-compose-tabs__btn ${composeViewTab === 'preview' ? 'is-on' : ''}`}
+                      onClick={() => setComposeViewTab('preview')}
+                    >
+                      关键帧预览
+                      {previewOk > 0 ? <em>{previewOk}</em> : null}
+                    </button>
+                    <button
+                      type="button"
+                      role="tab"
+                      aria-selected={composeViewTab === 'sheet'}
+                      className={`sg3-compose-tabs__btn ${composeViewTab === 'sheet' ? 'is-on' : ''}`}
+                      onClick={() => setComposeViewTab('sheet')}
+                    >
+                      本集故事板大图
+                      {contactSheetUrl ? <em>已有</em> : null}
+                    </button>
+                  </div>
+
+                  {composeViewTab === 'preview' ? (
+                    <div className="sg3-compose-embed" role="tabpanel">
+                      <StoryboardPreviewWorkspace
+                        blockId={props.id}
+                        kind={props.type ?? 'storyboard-desk'}
+                        embedded
+                      />
+                    </div>
+                  ) : (
+                    <div className="sg3-compose-sheet" role="tabpanel">
+                      {contactSheetUrl ? (
+                        <div className="sg3-sheet sg3-sheet--tab">
+                          <div className="sg3-sheet__head">
+                            <span className="sg3-sheet__title">本集故事板大图</span>
+                            <div className="sg3-sheet__acts">
+                              <button
+                                type="button"
+                                className="sg3-btn sg3-btn--ghost"
+                                disabled={sheetComposing}
+                                onClick={downloadContactSheet}
+                              >
+                                下载 PNG
+                              </button>
+                              <button
+                                type="button"
+                                className="sg3-btn sg3-btn--ghost"
+                                disabled={sheetComposing || batchRunning}
+                                onClick={() => void generateStoryboardSheet(true)}
+                              >
+                                {sheetComposing ? '合成中…' : '重新合成'}
+                              </button>
+                            </div>
+                          </div>
+                          <a
+                            className="sg3-sheet__preview"
+                            href={contactSheetUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            title="新窗口打开全图"
                           >
-                            下载 PNG
-                          </button>
+                            <img src={contactSheetUrl} alt="分镜故事板大图" />
+                          </a>
+                        </div>
+                      ) : (
+                        <div className="sg3-sheet-empty">
+                          <p className="sg3-sheet-empty__title">尚未生成故事板大图</p>
+                          <p className="sg3-sheet-empty__desc">
+                            将本集线稿 / 分镜图拼成一张总览板，便于审阅镜序与构图。
+                          </p>
                           <button
                             type="button"
-                            className="sg3-btn sg3-btn--ghost"
-                            disabled={sheetComposing || batchRunning}
+                            className="sg3-btn sg3-btn--primary"
+                            disabled={!payload || batchRunning || sheetComposing || visibleShots.length === 0}
                             onClick={() => void generateStoryboardSheet(true)}
                           >
-                            重新合成
+                            {sheetComposing ? '合成中…' : '生成故事板大图'}
                           </button>
                         </div>
-                      </div>
-                      <a
-                        className="sg3-sheet__preview"
-                        href={contactSheetUrl}
-                        target="_blank"
-                        rel="noreferrer"
-                        title="新窗口打开全图"
-                      >
-                        <img src={contactSheetUrl} alt="分镜故事板大图" />
-                      </a>
+                      )}
                     </div>
-                  ) : null}
-                  <div className="sg3-compose-embed">
-                    <StoryboardPreviewWorkspace
-                      blockId={props.id}
-                      kind={props.type ?? 'storyboard-desk'}
-                      embedded
-                    />
-                  </div>
+                  )}
                 </div>
               )}
 
@@ -1857,6 +2272,7 @@ export function useStoryboardDesk(props: NodeProps) {
                           disabled={sheetComposing}
                           onClick={() => {
                             setStudioTab('compose');
+                            setComposeViewTab('sheet');
                             void generateStoryboardSheet(true);
                           }}
                         >
@@ -1872,6 +2288,7 @@ export function useStoryboardDesk(props: NodeProps) {
                         disabled={sheetComposing || visibleShots.length === 0}
                         onClick={() => {
                           setStudioTab('compose');
+                          setComposeViewTab('sheet');
                           void generateStoryboardSheet(true);
                         }}
                       >
@@ -1924,8 +2341,18 @@ export function useStoryboardDesk(props: NodeProps) {
                 type="button"
                 className="sg3-btn sg3-btn--ghost"
                 disabled={!payload || batchRunning || sheetComposing || visibleShots.length === 0}
+                title="多镜提示词合成一张宫格再切回各镜，节省出图次数"
+                onClick={() => void generateBatchGridLineArt('visible')}
+              >
+                {batchMode === 'grid-line-art' ? `宫格 ${batchProgress}` : '宫格线稿'}
+              </button>
+              <button
+                type="button"
+                className="sg3-btn sg3-btn--ghost"
+                disabled={!payload || batchRunning || sheetComposing || visibleShots.length === 0}
                 onClick={() => {
                   setStudioTab('compose');
+                  setComposeViewTab('sheet');
                   void generateStoryboardSheet(true);
                 }}
               >

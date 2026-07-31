@@ -31,7 +31,7 @@ export function NodeAttachedPromptBar({ blockId, kind, onCollapse }: NodeAttache
   }, [visible, handleCollapse]);
 
   const deskClass =
-    kind === 'picture-gen' ? 'is-picture-desk' : '';
+    kind === 'picture-gen' || kind === 'clip-gen' ? 'is-picture-desk' : '';
 
   return (
     <div

@@ -24,8 +24,22 @@
 }
 
 .kp.is-embedded {
-  height: 100%;
+  height: auto;
   min-height: min(520px, 58vh);
+  flex: 1 0 auto;
+}
+
+/* 嵌入分镜台构图时：内容随高度撑开，交给外层 .sg3-pane 滚动 */
+.kp.is-embedded .kp__stage {
+  flex: 0 0 auto;
+  min-height: 280px;
+  overflow: visible;
+}
+
+.kp.is-embedded .kp__stage-scroll {
+  flex: 0 0 auto;
+  overflow: visible;
+  min-height: 240px;
 }
 
 .kp:not(.is-embedded) {

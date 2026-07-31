@@ -4,9 +4,6 @@ import {
   PLAYBOOK_DEFINITIONS,
   evaluateAllStepVisualStates,
   type StepVisualState,
-  computeStageReadiness,
-  resolvePipelineStageStates,
-  PIPELINE_STAGES,
 } from '@nx9/shared';
 import { useWorkspaceDocument } from '../../../stores/workspace-document';
 import { useFlowRuntime } from '../../../stores/flow-runtime';
@@ -317,53 +314,8 @@ export function CanvasFlowRail() {
     }
   }, [runtime, selectedBlockId, session, flashStepId]);
 
-  const freeReadiness = useMemo(() => {
-    if (!runtime) return null;
-    return computeStageReadiness({
-      storyboard,
-      voice,
-      nodes: runtime.getNodes(),
-    });
-  }, [storyboard, voice, runtime]);
-
-  const freeStageStates = useMemo(() => {
-    if (!freeReadiness) return null;
-    return resolvePipelineStageStates(freeReadiness);
-  }, [freeReadiness]);
-
-  const isFree = !session || session.dismissed || session.playbookId === 'pb-blank-advanced';
-
-  if (isFree && (!session || session.playbookId === 'pb-blank-advanced' || session.dismissed)) {
-    return (
-      <div className="nx9-flow-rail" ref={railRef}>
-        <div className="nx9-flow-rail-free">
-          <div>制作进度 · 按阶段推进；需要自由连线时点顶栏「专家编排」或 ⌘K</div>
-          <div className="nx9-flow-rail-free-modes">
-            {PIPELINE_STAGES.map((stage, i) => {
-              const state = freeStageStates?.[i] ?? 'pending';
-              const ready = freeReadiness?.[stage.id] ?? false;
-              return (
-                <span
-                  key={stage.id}
-                  className={`nx9-flow-rail-free-dot nx9-flow-rail-free-dot--${state}`}
-                >
-                  <span className={`nx9-flow-rail-free-dot-indicator nx9-flow-rail-free-dot-indicator--${state}`}>
-                    {state === 'done' ? <Check size={8} /> : null}
-                  </span>
-                  {translate(stage.label)}
-                  {!ready && state !== 'done' && (
-                    <span className="nx9-flow-rail-free-dot-warn">!</span>
-                  )}
-                </span>
-              );
-            })}
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  if (!session || session.dismissed) return null;
+  // 自由画布不展示「制作进度」条；仅在活跃制作路径下显示步骤轨
+  if (!session || session.dismissed || session.playbookId === 'pb-blank-advanced') return null;
   if (!playbook || playbook.steps.length === 0) return null;
 
   return (

@@ -16,6 +16,11 @@ export interface ModelConnection {
   apiKey?: string;
   baseUrl?: string;
   model?: string;
+  /**
+   * 「自动获取」得到的模型列表；有值时设置页默认模型用下拉，
+   * 随连接一并持久化，关闭弹窗后再打开仍保留。
+   */
+  availableModels?: string[];
   isActive?: boolean;
   icon?: string;
   createdAt?: string;

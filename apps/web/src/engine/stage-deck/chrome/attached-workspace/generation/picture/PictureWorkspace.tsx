@@ -3,9 +3,8 @@ import type { AssetLibraryKind } from '@nx9/shared';
 import {
   IMAGE_ASPECT_OPTIONS,
   lookupBlock,
-  lookupPictureModel,
-  PICTURE_GEN_MODELS,
   resolveImageRequestSize,
+  resolvePictureModelForRequest,
 } from '@nx9/shared';
 import { useReactFlow } from '@xyflow/react';
 import { ImagePlus, X } from 'lucide-react';
@@ -21,6 +20,9 @@ import { useFlowRuntime } from '../../../../../../stores/flow-runtime';
 import { useActivityLog } from '../../../../../../stores/activity-log';
 import { usePromptHistory } from '../../../../stores/prompt-history';
 import { api } from '../../../../../../api/client';
+import { useConnectedPictureModels } from '../../../../../../hooks/use-connected-picture-models';
+import { useWorkspaceDocument } from '../../../../../../stores/workspace-document';
+import { toastSuccess } from '../../../../../../stores/toast';
 import { useUpstreamMedia } from '../use-upstream-media';
 import { useAttachedNodeData } from '../use-attached-node-data';
 import { useLocalNodePrompt } from '../use-local-node-prompt';
@@ -95,6 +97,20 @@ export function PictureWorkspace({ blockId, kind, onCollapse }: PictureWorkspace
   });
 
   const model = (data.model as string) ?? 'gemini-2.5-flash-image';
+  const {
+    options: pictureModelOptions,
+    hasConnections: hasPictureConnections,
+    preferredModel,
+    selectModel: selectPictureModel,
+    openConnectionsSettings,
+  } = useConnectedPictureModels(model);
+
+  useEffect(() => {
+    if (!preferredModel || preferredModel === model) return;
+    if (!hasPictureConnections) return;
+    handlePatch({ model: preferredModel });
+  }, [hasPictureConnections, handlePatch, model, preferredModel]);
+
   const status = (data.status as string) ?? 'idle';
   const pictureGenMode = readPictureGenMode(data);
   const proActionId = (data.pictureProAction as string) || undefined;
@@ -113,7 +129,7 @@ export function PictureWorkspace({ blockId, kind, onCollapse }: PictureWorkspace
     return single ? [single] : [];
   }, [data.previewUrl, data.previewUrls]);
 
-  const modelDef = lookupPictureModel(model);
+  const modelDef = resolvePictureModelForRequest(model);
   const resolvedSize = resolveImageRequestSize({
     quality,
     aspectRatio: aspectRatio === 'custom' ? undefined : aspectRatio,
@@ -137,7 +153,7 @@ export function PictureWorkspace({ blockId, kind, onCollapse }: PictureWorkspace
       // 图生图类自动切支持参考的模型
       if (
         action.needsReference &&
-        !lookupPictureModel(model).supportsReference &&
+        !resolvePictureModelForRequest(model).supportsReference &&
         action.pictureGenMode !== 'upscale-hd'
       ) {
         patch.model = 'flux-i2i';
@@ -154,6 +170,7 @@ export function PictureWorkspace({ blockId, kind, onCollapse }: PictureWorkspace
 
   const handleDeleteGenerated = useCallback(
     (index: number) => {
+      const removed = previewUrls[index];
       const next = previewUrls.filter((_, i) => i !== index);
       handlePatch({
         previewUrls: next,
@@ -165,9 +182,18 @@ export function PictureWorkspace({ blockId, kind, onCollapse }: PictureWorkspace
         if (prev >= next.length) return next.length - 1;
         return prev;
       });
-      appendLog(`已删除生成图 ${index + 1}`);
+      if (removed) {
+        useWorkspaceDocument.getState().trashGeneratedMedia({
+          url: removed,
+          mediaKind: 'picture',
+          label: `生成图 ${index + 1}`,
+          sourceBlockId: blockId,
+        });
+        toastSuccess('已移入资产回收站');
+      }
+      appendLog(`已移入回收站 · 生成图 ${index + 1}`);
     },
-    [appendLog, handlePatch, previewUrls],
+    [appendLog, blockId, handlePatch, previewUrls],
   );
 
   const handleUploadRef = useCallback(
@@ -617,11 +643,18 @@ export function PictureWorkspace({ blockId, kind, onCollapse }: PictureWorkspace
           />
           <ComposerModelSelect
             value={model}
-            options={PICTURE_GEN_MODELS.map((m) => ({
-              id: m.id,
-              label: m.hint ? `${m.label} · ${m.hint}` : m.label,
-            }))}
-            onChange={(v) => handlePatch({ model: v })}
+            options={
+              pictureModelOptions.length > 0
+                ? pictureModelOptions
+                : [{ id: model, label: '未配置图片连接 · 点此去设置' }]
+            }
+            onChange={(v) => {
+              if (!hasPictureConnections) {
+                openConnectionsSettings();
+                return;
+              }
+              void selectPictureModel(v, (id) => handlePatch({ model: id }));
+            }}
             width={260}
             tone="desk"
           />
@@ -650,6 +683,7 @@ export function PictureWorkspace({ blockId, kind, onCollapse }: PictureWorkspace
         localMedia={localMedia}
         highlightMentions
         className={COMPOSER_PROMPT_TEXTAREA_CLASS}
+        tone="desk"
       />
     </ComposerWorkspaceShell>
   );

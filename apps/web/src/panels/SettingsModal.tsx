@@ -247,6 +247,7 @@ function ConnectionSettings({
 }: {
   draft: AppSettings; setDraft: (v: AppSettings) => void;
 }) {
+  const saveSettings = useCredentialVault((s) => s.save);
   const [connections, setConnections] = useState<ModelConnection[]>(draft.connections ?? []);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [addingKind, setAddingKind] = useState<ModelConnection['kind'] | null>(null);
@@ -277,7 +278,20 @@ function ConnectionSettings({
       if (c.kind === 'audio') { next.ttsApiKey = c.apiKey; next.ttsBaseUrl = c.baseUrl; }
     }
     setDraft(next);
+    return next;
   }, [draft, setDraft]);
+
+  /** 自动获取模型后立刻写入连接并落盘，关闭弹窗后再开仍是下拉 */
+  const persistFetchedModels = useCallback((conn: ModelConnection) => {
+    if (!conn.id) return;
+    const now = new Date().toISOString();
+    const conns = connections.map((c) =>
+      c.id === conn.id ? { ...conn, updatedAt: now } : c,
+    );
+    if (!conns.some((c) => c.id === conn.id)) return;
+    const next = syncToDraft(conns);
+    void saveSettings(next);
+  }, [connections, saveSettings, syncToDraft]);
 
   const setActive = (connId: string) => {
     const target = connections.find((c) => c.id === connId);
@@ -407,6 +421,7 @@ function ConnectionSettings({
               conn={active}
               onSave={(next) => upsertConnection(next, true)}
               onCancel={() => setEditingId(null)}
+              onPersist={persistFetchedModels}
             />
           </div>
         ) : active ? (
@@ -454,6 +469,7 @@ function ConnectionSettings({
                       conn={c}
                       onSave={(next) => upsertConnection(next, false)}
                       onCancel={() => setEditingId(null)}
+                      onPersist={persistFetchedModels}
                     />
                   ) : (
                     <>
@@ -689,22 +705,42 @@ function ConnRowMenu({
   );
 }
 
-function ConnEditForm({ conn, onSave, onCancel }: {
+function normalizeAvailableModels(models?: string[] | null): string[] {
+  if (!models?.length) return [];
+  return Array.from(new Set(models.map((m) => m.trim()).filter(Boolean)));
+}
+
+function ConnEditForm({ conn, onSave, onCancel, onPersist }: {
   conn: ModelConnection;
   onSave: (c: ModelConnection) => void;
   onCancel: () => void;
+  /** 获取模型后立刻写入 draft/磁盘，不关闭编辑态 */
+  onPersist?: (c: ModelConnection) => void;
 }) {
+  const initialModels = normalizeAvailableModels(conn.availableModels);
   const [f, setF] = useState(conn);
-  const [modelOptions, setModelOptions] = useState<string[] | null>(null);
+  const [modelOptions, setModelOptions] = useState<string[] | null>(
+    initialModels.length > 0 ? initialModels : null,
+  );
   const [fetchingModels, setFetchingModels] = useState(false);
   const [fetchError, setFetchError] = useState<string | null>(null);
 
+  useEffect(() => {
+    setF(conn);
+    const cached = normalizeAvailableModels(conn.availableModels);
+    setModelOptions(cached.length > 0 ? cached : null);
+    setFetchError(null);
+  }, [conn]);
+
   const updateField = <K extends keyof ModelConnection>(key: K, value: ModelConnection[K]) => {
-    setF((prev) => ({ ...prev, [key]: value }));
-    if (key === 'baseUrl' || key === 'apiKey') {
-      setModelOptions(null);
-      setFetchError(null);
-    }
+    setF((prev) => {
+      if (key === 'baseUrl' || key === 'apiKey') {
+        setModelOptions(null);
+        setFetchError(null);
+        return { ...prev, [key]: value, availableModels: undefined };
+      }
+      return { ...prev, [key]: value };
+    });
   };
 
   const fetchModels = async () => {
@@ -716,10 +752,19 @@ function ConnEditForm({ conn, onSave, onCancel }: {
         f.apiKey ?? '',
         f.id || undefined,
       );
-      setModelOptions(res.models);
-      if (res.models.length > 0 && (!f.model || !res.models.includes(f.model))) {
-        setF((prev) => ({ ...prev, model: res.models[0] }));
-      }
+      const models = normalizeAvailableModels(res.models);
+      setModelOptions(models.length > 0 ? models : null);
+      const nextModel =
+        models.length > 0 && (!f.model || !models.includes(f.model))
+          ? models[0]
+          : f.model;
+      const next: ModelConnection = {
+        ...f,
+        model: nextModel,
+        availableModels: models.length > 0 ? models : undefined,
+      };
+      setF(next);
+      onPersist?.(next);
     } catch (e) {
       setModelOptions(null);
       setFetchError(e instanceof Error ? e.message : String(e));

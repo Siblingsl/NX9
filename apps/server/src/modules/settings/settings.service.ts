@@ -143,8 +143,53 @@ export class SettingsService {
         (merged as Record<string, unknown>)[key] = (current as Record<string, unknown>)[key];
       }
     }
+    // 连接条目内的掩码 Key 写回时保留原文，避免「设为当前」冲掉真实密钥
+    if (Array.isArray(partial.connections)) {
+      const prevById = new Map((current.connections ?? []).map((c) => [c.id, c]));
+      merged.connections = partial.connections.map((c) => {
+        const prev = prevById.get(c.id);
+        if (typeof c.apiKey === 'string' && c.apiKey.startsWith('****') && prev?.apiKey) {
+          return { ...c, apiKey: prev.apiKey };
+        }
+        return c;
+      });
+      this.applyActiveConnectionCredentials(merged);
+    }
     this.store.writeJson(PATHS.settings, merged);
     return this.getMasked();
+  }
+
+  /** 将各模态「当前连接」的 Key / URL / 模型回写到顶层兼容字段 */
+  private applyActiveConnectionCredentials(cfg: AppSettings): void {
+    for (const c of cfg.connections ?? []) {
+      if (!c.isActive) continue;
+      if (c.kind === 'llm') {
+        if (c.apiKey) cfg.llmApiKey = c.apiKey;
+        if (c.baseUrl !== undefined) cfg.llmBaseUrl = c.baseUrl;
+        if (c.model) cfg.llmModel = c.model;
+      }
+      if (c.kind === 'image') {
+        if (c.apiKey) cfg.primaryApiKey = c.apiKey;
+        if (c.baseUrl !== undefined) cfg.primaryBaseUrl = c.baseUrl;
+        if (c.provider === 'gemini') {
+          if (c.apiKey) cfg.geminiApiKey = c.apiKey;
+          if (c.baseUrl !== undefined) cfg.geminiBaseUrl = c.baseUrl;
+        }
+      }
+      if (c.kind === 'video') {
+        if (c.apiKey) cfg.videoApiKey = c.apiKey;
+        if (c.baseUrl !== undefined) cfg.videoBaseUrl = c.baseUrl;
+        if (['xai', 'grokgo', 'custom'].includes(c.provider)) {
+          cfg.videoProvider = c.provider as AppSettings['videoProvider'];
+        }
+        if (c.provider === 'xai' && c.apiKey) cfg.xaiApiKey = c.apiKey;
+        if (c.provider === 'grokgo' && c.apiKey) cfg.grokGoApiKey = c.apiKey;
+      }
+      if (c.kind === 'audio') {
+        if (c.apiKey) cfg.ttsApiKey = c.apiKey;
+        if (c.baseUrl !== undefined) cfg.ttsBaseUrl = c.baseUrl;
+      }
+    }
   }
 
   getConnectionStatus(): ConnectionStatus {

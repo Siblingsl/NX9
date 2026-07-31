@@ -37,6 +37,8 @@ export interface AssetMentionPickerProps {
   onPickLocalMedia?: (item: LocalMediaMentionItem) => void;
   onClose?: () => void;
   panelRef?: React.RefObject<HTMLDivElement | null>;
+  /** 对齐炭黑工作台弹层（portal 到 body 时需显式开启） */
+  tone?: 'default' | 'desk';
 }
 
 export function AssetMentionPicker({
@@ -50,6 +52,7 @@ export function AssetMentionPicker({
   onPick,
   onPickLocalMedia,
   panelRef,
+  tone = 'default',
 }: AssetMentionPickerProps) {
   const { allItems } = useAllAssetLibraryItems();
   const fetchPublic = usePublicAssetLibrary((s) => s.fetch);
@@ -116,11 +119,13 @@ export function AssetMentionPicker({
   return createPortal(
     <div
       ref={panelRef}
-      className="fixed z-[9999] w-56 rounded-xl border border-line bg-surface shadow-panel py-1 nx9-scroll max-h-52 overflow-y-auto nodrag nopan"
+      className={`nx9-asset-mention-picker nx9-composer-popover fixed z-[9999] w-56 rounded-xl border border-line/60 bg-surface shadow-panel py-1 nx9-scroll max-h-52 overflow-y-auto nodrag nopan ${
+        tone === 'desk' ? 'is-picture-desk' : ''
+      }`}
       style={style}
       onMouseDown={stop}
     >
-      <div className="flex flex-wrap gap-0.5 px-2 pb-1 border-b border-line/60">
+      <div className="flex flex-wrap gap-0.5 px-2 pb-1 border-b border-line/40">
         {localTabs.map((t) => (
           <button
             key={t.key}
@@ -128,7 +133,9 @@ export function AssetMentionPicker({
             onMouseDown={stop}
             onClick={() => onActiveKindChange?.(t.key)}
             className={`px-1.5 py-0.5 rounded text-[9px] ${
-              pickKind === t.key ? 'bg-brand/10 text-brand' : 'text-ink/50 hover:bg-surface'
+              pickKind === t.key
+                ? 'bg-brand/10 text-brand'
+                : 'text-ink/50 hover:bg-ink/[0.04] hover:text-ink/70'
             }`}
           >
             {t.label}
@@ -141,7 +148,9 @@ export function AssetMentionPicker({
             onMouseDown={stop}
             onClick={() => onActiveKindChange?.(t.key)}
             className={`px-1.5 py-0.5 rounded text-[9px] ${
-              pickKind === t.key ? 'bg-brand/10 text-brand' : 'text-ink/50 hover:bg-surface'
+              pickKind === t.key
+                ? 'bg-brand/10 text-brand'
+                : 'text-ink/50 hover:bg-ink/[0.04] hover:text-ink/70'
             }`}
           >
             {t.label}
@@ -157,7 +166,7 @@ export function AssetMentionPicker({
               key={`${opt.kind}-${opt.index}-${opt.url}`}
               type="button"
               onMouseDown={stop}
-              className="w-full flex items-center gap-2 text-left px-2.5 py-1.5 text-[11px] hover:bg-surface"
+              className="w-full flex items-center gap-2 text-left px-2.5 py-1.5 text-[11px] text-ink/75 hover:bg-ink/[0.04]"
               onClick={() => onPickLocalMedia?.(opt)}
             >
               <img
@@ -166,7 +175,7 @@ export function AssetMentionPicker({
                 className="w-7 h-7 rounded-md object-cover border border-line/40 shrink-0"
               />
               <span className="truncate">
-                <span className="text-ink/35 mr-1">
+                <span className="text-ink/40 mr-1">
                   {opt.kind === 'generated' ? '生成' : '上游'}
                 </span>
                 {opt.label}
@@ -182,10 +191,10 @@ export function AssetMentionPicker({
             key={`${opt.scope}-${opt.id}`}
             type="button"
             onMouseDown={stop}
-            className="w-full text-left px-2.5 py-1.5 text-[11px] hover:bg-surface truncate"
+            className="w-full text-left px-2.5 py-1.5 text-[11px] text-ink/75 hover:bg-ink/[0.04] truncate"
             onClick={() => onPick(opt)}
           >
-            <span className="text-ink/35 mr-1">{opt.scope === 'public' ? '公共' : '私有'}</span>
+            <span className="text-ink/40 mr-1">{opt.scope === 'public' ? '公共' : '私有'}</span>
             {opt.label}
           </button>
         ))

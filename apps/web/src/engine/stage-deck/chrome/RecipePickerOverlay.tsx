@@ -30,7 +30,7 @@ export function RecipePickerOverlay({ onPick, onBlank }: RecipePickerOverlayProp
           <div>
             <h2 className="text-base font-semibold text-ink">选择制作起点</h2>
             <p className="text-sm text-ink/55 mt-0.5">
-              推荐核心剧集流程；需要自由搭节点时选空白画布并打开「专家编排」
+              推荐核心剧集流程；需要自由搭节点时选空白画布
             </p>
           </div>
         </div>
@@ -57,7 +57,7 @@ export function RecipePickerOverlay({ onPick, onBlank }: RecipePickerOverlayProp
           onClick={onBlank}
           className="w-full rounded-xl border border-dashed border-line py-2 text-xs text-ink/60 hover:border-brand/30 hover:text-ink"
         >
-          空白画布 — 稍后用专家编排自行搭建
+          空白画布 — 自行拖入模块搭建
         </button>
       </div>
     </div>

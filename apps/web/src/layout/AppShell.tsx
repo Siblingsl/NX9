@@ -97,6 +97,10 @@ export default function AppShell() {
   }, [bootstrapUser]);
 
   useEffect(() => {
+    void useCredentialVault.getState().load();
+  }, []);
+
+  useEffect(() => {
     void (async () => {
       await fetchAll();
       const current = useWorkspaceCatalog.getState().items;

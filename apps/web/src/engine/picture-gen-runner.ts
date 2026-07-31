@@ -1,4 +1,4 @@
-import { lookupPictureModel } from '@nx9/shared';
+import { resolvePictureModelForRequest } from '@nx9/shared';
 import { api } from '../api/client';
 
 export interface PictureGenJobInput {
@@ -59,7 +59,7 @@ export async function runPictureGenJob(input: PictureGenJobInput): Promise<strin
     return [res.url];
   }
 
-  const def = lookupPictureModel(input.modelId);
+  const def = resolvePictureModelForRequest(input.modelId);
   const panorama = input.mode === 'panorama-720';
   const prompt = [input.prompt.trim(), panorama ? PANORAMA_720_PROMPT_SUFFIX : '']
     .filter(Boolean)
@@ -115,10 +115,16 @@ export async function runPictureGenJob(input: PictureGenJobInput): Promise<strin
     input.referenceImageUrls?.find((u) => u?.trim())?.trim() ||
     input.styleImageUrl?.trim() ||
     '';
+  const extraRefs = (input.referenceImageUrls ?? [])
+    .map((u) => u?.trim())
+    .filter((u): u is string => !!u && u !== refForProxy);
   const tier =
     input.imageSizeTier?.trim() ||
     input.resolutionTier?.trim() ||
     undefined;
+  const sendRefs = Boolean(
+    refForProxy && (def.supportsReference || def.provider === 'gemini' || def.provider === 'openai'),
+  );
   const res = (await api.proxyImage({
     prompt: safePrompt,
     model: def.model,
@@ -126,8 +132,11 @@ export async function runPictureGenJob(input: PictureGenJobInput): Promise<strin
     size: requestSize,
     n: panorama ? 1 : n,
     ...(tier ? { imageSizeTier: tier, resolutionTier: tier } : {}),
-    ...(refForProxy && (def.supportsReference || def.provider === 'gemini')
-      ? { referenceImageUrl: refForProxy }
+    ...(sendRefs
+      ? {
+          referenceImageUrl: refForProxy,
+          ...(extraRefs.length ? { referenceImageUrls: extraRefs } : {}),
+        }
       : {}),
   })) as {
     ok?: boolean;

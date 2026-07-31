@@ -1,10 +1,10 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   IMAGE_ASPECT_OPTIONS,
   IMAGE_QUALITY_OPTIONS,
-  PICTURE_GEN_MODELS,
   type StoryboardPreviewPictureSettings,
 } from '@nx9/shared';
+import { useConnectedPictureModels } from '../../../../../hooks/use-connected-picture-models';
 import { ComposerModelSelect } from '../composer/ComposerModelSelect';
 import { VideoPopover, PopoverItem } from '../generation/video/VideoPopover';
 import { PictureGenModeChip } from '../generation/picture/PictureGenModeChip';
@@ -74,6 +74,20 @@ export function StoryboardPreviewGenSettings({
   const aspectLabel =
     IMAGE_ASPECT_OPTIONS.find((o) => o.id === settings.aspectRatio)?.label ?? settings.aspectRatio;
 
+  const {
+    options: pictureModelOptions,
+    hasConnections: hasPictureConnections,
+    preferredModel,
+    selectModel: selectPictureModel,
+    openConnectionsSettings,
+  } = useConnectedPictureModels(settings.model);
+
+  useEffect(() => {
+    if (!preferredModel || preferredModel === settings.model) return;
+    if (!hasPictureConnections) return;
+    onChange({ model: preferredModel });
+  }, [hasPictureConnections, onChange, preferredModel, settings.model]);
+
   return (
     <div
       className="sb-preview-gen shrink-0 flex flex-wrap items-center gap-2 px-3 py-1.5"
@@ -81,8 +95,19 @@ export function StoryboardPreviewGenSettings({
     >
       <ComposerModelSelect
         value={settings.model}
-        options={PICTURE_GEN_MODELS.map((m) => ({ id: m.id, label: m.label }))}
-        onChange={(model: string) => onChange({ model })}
+        options={
+          pictureModelOptions.length > 0
+            ? pictureModelOptions
+            : [{ id: settings.model, label: '未配置图片连接 · 点此去设置' }]
+        }
+        onChange={(model: string) => {
+          if (!hasPictureConnections) {
+            openConnectionsSettings();
+            return;
+          }
+          void selectPictureModel(model, (id) => onChange({ model: id }));
+        }}
+        width={260}
         tone="desk"
       />
       <span className="kp__sep" />

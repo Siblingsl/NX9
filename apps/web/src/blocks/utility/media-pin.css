@@ -25,6 +25,10 @@
   cursor: zoom-in;
 }
 
+.nx9-media-pin__frame:disabled {
+  cursor: default;
+}
+
 .nx9-media-pin__img {
   width: 100%;
   height: 100%;
@@ -53,10 +57,52 @@
   padding: 16px;
 }
 
+.nx9-media-pin-lightbox__stage {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  max-width: min(96vw, 980px);
+  max-height: 94vh;
+}
+
+.nx9-media-pin-lightbox__toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+}
+
+.nx9-media-pin-lightbox__tools {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.nx9-media-pin-lightbox__tool {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: rgba(0, 0, 0, 0.45);
+  color: rgba(255, 255, 255, 0.88);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.nx9-media-pin-lightbox__tool.is-active,
+.nx9-media-pin-lightbox__tool:hover {
+  background: rgba(196, 165, 116, 0.28);
+  border-color: rgba(196, 165, 116, 0.55);
+  color: #fff;
+}
+
 .nx9-media-pin-lightbox__close {
-  position: absolute;
-  top: 16px;
-  right: 16px;
   width: 32px;
   height: 32px;
   border-radius: 999px;
@@ -67,12 +113,137 @@
   align-items: center;
   justify-content: center;
   cursor: pointer;
+  flex-shrink: 0;
 }
 
-.nx9-media-pin-lightbox img {
+.nx9-media-pin-lightbox__img {
   max-width: min(92vw, 960px);
-  max-height: 88vh;
+  max-height: min(72vh, 720px);
   object-fit: contain;
   border-radius: 12px;
   box-shadow: 0 24px 64px rgba(0, 0, 0, 0.55);
+}
+
+.nx9-media-pin-lightbox__panel {
+  width: min(100%, 420px);
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(18, 19, 22, 0.94);
+  padding: 12px 14px;
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.nx9-media-pin-lightbox__panel-title {
+  margin: 0 0 6px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.nx9-media-pin-lightbox__hint {
+  margin: 0 0 10px;
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.5);
+}
+
+.nx9-media-pin-lightbox__grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.nx9-media-pin-lightbox__grid label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.55);
+}
+
+.nx9-media-pin-lightbox__grid input {
+  width: 100%;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(0, 0, 0, 0.35);
+  color: #fff;
+  padding: 6px 8px;
+  font-size: 12px;
+}
+
+.nx9-media-pin-lightbox__grid span {
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.35);
+}
+
+.nx9-media-pin-lightbox__slider {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.65);
+  margin-bottom: 10px;
+}
+
+.nx9-media-pin-lightbox__slider input {
+  width: 100%;
+}
+
+.nx9-media-pin-lightbox__scales {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.nx9-media-pin-lightbox__scales button {
+  flex: 1;
+  height: 28px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(0, 0, 0, 0.3);
+  color: rgba(255, 255, 255, 0.75);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.nx9-media-pin-lightbox__scales button.is-active {
+  border-color: rgba(196, 165, 116, 0.55);
+  background: rgba(196, 165, 116, 0.22);
+  color: #fff;
+}
+
+.nx9-media-pin-lightbox__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.nx9-media-pin-lightbox__actions button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 12px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: transparent;
+  color: rgba(255, 255, 255, 0.8);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.nx9-media-pin-lightbox__actions button.is-primary {
+  background: #c4a574;
+  border-color: #c4a574;
+  color: #1a1510;
+}
+
+.nx9-media-pin-lightbox__actions button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.nx9-media-pin-lightbox__error {
+  margin: 0;
+  font-size: 11px;
+  color: #f0a0a0;
 }

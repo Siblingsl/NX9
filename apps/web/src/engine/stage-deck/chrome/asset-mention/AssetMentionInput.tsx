@@ -29,6 +29,8 @@ export interface AssetMentionInputProps {
   onFocus?: () => void;
   onBlur?: () => void;
   onMouseDown?: (e: React.MouseEvent) => void;
+  /** 引用弹层主题：desk 对齐炭黑工作台 */
+  tone?: 'default' | 'desk';
 }
 
 export function AssetMentionInput({
@@ -45,6 +47,7 @@ export function AssetMentionInput({
   onFocus,
   onBlur,
   onMouseDown,
+  tone = 'default',
 }: AssetMentionInputProps) {
   const mention = useAssetMention({ value, onChange, kinds, localMedia, enabled });
   const inputRef = useRef<HTMLInputElement>(null);
@@ -189,6 +192,7 @@ export function AssetMentionInput({
         onPick={mention.pickItem}
         onPickLocalMedia={mention.pickLocalMedia}
         panelRef={mention.panelRef}
+        tone={tone}
       />
 
       {lightbox && (

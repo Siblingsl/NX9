@@ -153,9 +153,10 @@ export function PictureResultGallery({
             onClick={(e) => e.stopPropagation()}
             onMouseDown={stop}
           >
-            <p className="text-[13px] font-medium text-ink mb-1">删除这张生成图？</p>
+            <p className="text-[13px] font-medium text-ink mb-1">移入资产回收站？</p>
             <p className="text-[11px] text-ink/50 mb-3 leading-relaxed">
-              删除后无法从本工作区恢复。若提示词里仍有对应 @生成 引用，需自行清理。
+              将移出本工作区生成结果，并保留在资产回收站 30 天，可随时恢复。若提示词里仍有对应
+              @生成 引用，需自行清理。
             </p>
             {pendingUrl && (
               <img
@@ -182,7 +183,7 @@ export function PictureResultGallery({
                 }}
                 className="px-3 py-1.5 rounded-lg text-[12px] font-medium text-white bg-rose-600 hover:bg-rose-500"
               >
-                确认删除
+                移入回收站
               </button>
             </div>
           </div>

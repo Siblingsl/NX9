@@ -593,9 +593,12 @@ export {
   softDeleteAssetById,
   restoreAssetById,
   daysRemainingInTrash,
+  createMediaTrashItem,
   type SoftDeletable,
   type AssetTrashKind,
   type AssetTrashEntry,
+  type MediaTrashKind,
+  type MediaTrashItem,
 } from './utils/asset-trash';
 export {
   resolveBlockCharacters,
@@ -670,6 +673,11 @@ export {
   buildReferencePack,
   extractReferencePack,
   syncReferenceBoardEmitFields,
+  readClipGenPlaybook,
+  buildClipGenPlaybookPatch,
+  clearClipGenPlaybookPatch,
+  clipGenPlaybookToBoard,
+  buildClipGenPlaybookPack,
   type ReferenceSlotRole,
   type ReferenceSlotMediaType,
   type DepthConvertStatus,
@@ -678,6 +686,7 @@ export {
   type ReferencePlaybookDef,
   type ReferenceBoardData,
   type ReferencePack,
+  type ClipGenPlaybookState,
 } from './utils/reference-playbook';
 export {
   runConsistencyChecks,
@@ -877,7 +886,11 @@ export {
   CLIP_GEN_MODELS,
   CLIP_GEN_ASPECTS,
   lookupPictureModel,
+  matchPictureModel,
+  resolvePictureModelForRequest,
+  listConnectedPictureModels,
   type PictureGenModelDef,
+  type ConnectedPictureModelOption,
 } from './data/gen-models';
 export {
   PERF,
@@ -893,8 +906,11 @@ export type {
 export {
   LINE_ART_SUFFIX,
   buildLineArtGridPrompt,
+  buildLineArtPanelGridPrompt,
   buildLineArtShotPrompt,
+  pickLineArtGridLayout,
 } from './utils/line-art-prompt';
+export type { LineArtGridPanel } from './utils/line-art-prompt';
 export {
   IMAGE_QUALITY_OPTIONS,
   IMAGE_ASPECT_OPTIONS,

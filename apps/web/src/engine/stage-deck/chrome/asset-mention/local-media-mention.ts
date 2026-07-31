@@ -151,3 +151,16 @@ export function resolveLocalMediaMentionUrls(
   }
   return urls;
 }
+
+/**
+ * 发给上游模型前改写本地媒体 @ token：
+ * `@上游:图1` → `参考图1`，避免模型把 token 当成「待上传文件名」而拒识。
+ */
+export function rewriteLocalMediaMentionsForApi(prompt: string): string {
+  return prompt
+    .replace(/@(生成|上游):图(\d+)/g, '参考图$2')
+    .replace(/@(生成|上游):(\S+)/g, '参考图($2)')
+    .replace(/\n\n\[Local media refs: \d+\]/g, '')
+    .replace(/[ \t]{2,}/g, ' ')
+    .trim();
+}

@@ -103,7 +103,7 @@ export async function runPictureGenExecutor(ctx: BlockExecutorContext): Promise<
     : d.previewUrl
       ? [String(d.previewUrl)]
       : [];
-  const { resolveLocalMediaMentionUrls } = await import(
+  const { resolveLocalMediaMentionUrls, rewriteLocalMediaMentionsForApi } = await import(
     '../stage-deck/chrome/asset-mention/local-media-mention'
   );
   const mentionedMediaUrls = resolveLocalMediaMentionUrls(
@@ -214,7 +214,8 @@ export async function runPictureGenExecutor(ctx: BlockExecutorContext): Promise<
       }
 
       if (mentionRefs.length > 0) {
-        finalPrompt = `${finalPrompt}\n\n[Local media refs: ${mentionRefs.length}]`;
+        finalPrompt = rewriteLocalMediaMentionsForApi(finalPrompt);
+        finalPrompt = `${finalPrompt}\n\n（已附上 ${mentionRefs.length} 张参考图，请按参考图编辑）`;
       }
 
       const batchUrls = await runPictureGenJob({

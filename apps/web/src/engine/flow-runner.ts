@@ -474,13 +474,23 @@ async function executeBlock(
     const linkedShot = linkedShotForBlock(block.id, d, ctx?.nodes, ctx?.edges);
     const shotRef = linkedShot?.firstFrameAssetId;
     const nodeRef = (d.referenceImageUrl as string | undefined)?.trim();
+    const existingGenerated = Array.isArray(d.previewUrls)
+      ? (d.previewUrls as string[]).filter((u) => typeof u === 'string' && u.trim())
+      : d.previewUrl
+        ? [String(d.previewUrl)]
+        : [];
+    const { resolveLocalMediaMentionUrls, rewriteLocalMediaMentionsForApi } = await import(
+      './stage-deck/chrome/asset-mention/local-media-mention'
+    );
+    const mentionedMediaUrls = resolveLocalMediaMentionUrls(prompt, existingGenerated, upstreamPics);
     const charRef =
       enhancedCtx.referenceImageUrl ?? upstreamPics[0] ?? envRefUrl ?? shotRef;
     const needsRef =
       pictureGenMode === 'image-to-image' ||
       pictureGenMode === 'multi-ref' ||
       pictureGenMode === 'style-ref' ||
-      pictureGenMode === 'upscale-hd';
+      pictureGenMode === 'upscale-hd' ||
+      mentionedMediaUrls.length > 0;
 
     const { composePictureProPrompt, lookupPictureProAction } = await import(
       './stage-deck/chrome/attached-workspace/generation/picture/picture-pro-actions'
@@ -517,7 +527,8 @@ async function executeBlock(
     const { runPictureGenJob } = await import('./picture-gen-runner');
 
     if (pictureGenMode === 'upscale-hd') {
-      const refImage = nodeRef || charRef || multiRefs[0] || upstreamPics[0];
+      const refImage =
+        mentionedMediaUrls[0] || nodeRef || charRef || multiRefs[0] || upstreamPics[0];
       if (!refImage) throw new Error('图片高清需要参考图：请上传或连接上游');
       const batchUrls = await runPictureGenJob({
         prompt: 'upscale',
@@ -539,8 +550,27 @@ async function executeBlock(
         const neg = (d.negativePrompt as string | undefined)?.trim();
         if (neg) finalPrompt = `${finalPrompt}\n\nNegative: ${neg}`;
         lastPrompt = finalPrompt;
+
+        const jobMentioned = resolveLocalMediaMentionUrls(
+          job.prompt,
+          existingGenerated,
+          upstreamPics,
+        );
+        const mentionRefs =
+          jobMentioned.length > 0 ? jobMentioned : mentionedMediaUrls;
+
         let refImage =
-          job.imageUrls?.[0] || nodeRef || charRef || multiRefs[0] || styleImageUrl;
+          job.imageUrls?.[0] ||
+          mentionRefs[0] ||
+          nodeRef ||
+          charRef ||
+          multiRefs[0] ||
+          styleImageUrl;
+
+        const effectiveMultiRefs = [
+          ...multiRefs,
+          ...mentionRefs.filter((u) => u !== refImage && !multiRefs.includes(u)),
+        ];
 
         if (job.imageUrls && job.imageUrls.length >= 2) {
           if (composeAction === 'merge' || composeAction === 'merge-then-generate') {
@@ -560,9 +590,11 @@ async function executeBlock(
         if (
           !job.imageUrls?.length &&
           pictureGenMode === 'multi-ref' &&
-          multiRefs.length + (nodeRef ? 1 : 0) >= 2
+          effectiveMultiRefs.length + (nodeRef || mentionRefs[0] ? 1 : 0) >= 2
         ) {
-          const collageSrc = [nodeRef, ...multiRefs].filter(Boolean) as string[];
+          const collageSrc = [nodeRef || mentionRefs[0], ...effectiveMultiRefs].filter(
+            Boolean,
+          ) as string[];
           try {
             const merged = await api.mergeImages({
               imageUrls: collageSrc.slice(0, 4),
@@ -576,7 +608,12 @@ async function executeBlock(
         }
 
         if (needsRef && !refImage) {
-          throw new Error('当前模式需要参考图：请上传主体参考，或连接上游图片');
+          throw new Error('当前模式需要参考图：请上传主体参考，或连接上游图片，或 @生成/@上游 图片');
+        }
+
+        if (mentionRefs.length > 0) {
+          finalPrompt = rewriteLocalMediaMentionsForApi(finalPrompt);
+          finalPrompt = `${finalPrompt}\n\n（已附上 ${mentionRefs.length} 张参考图，请按参考图编辑）`;
         }
 
         const batchUrls = await runPictureGenJob({
@@ -584,7 +621,7 @@ async function executeBlock(
           modelId,
           size,
           referenceImageUrl: refImage,
-          referenceImageUrls: multiRefs,
+          referenceImageUrls: effectiveMultiRefs,
           styleImageUrl,
           strength: imageStrength,
           n: imageCount,

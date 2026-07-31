@@ -13,6 +13,7 @@ import {
 import { useDeckUi } from '../../engine/stage-deck/stores/deck-ui';
 import { NodeSummaryBody } from './NodeSummaryBody';
 import '../core/picture-gen.css';
+import '../utility/media-pin.css';
 
 const STATUS_LABEL: Record<NodeRunStatus, string> = {
   idle: '待配置',
@@ -30,8 +31,41 @@ export interface CanvasNodeBodyProps {
   data: Record<string, unknown>;
   alias?: string;
   onRun?: () => void;
+  /** 点击预览图（画布钉图等） */
+  onPreviewOpen?: () => void;
   compact?: boolean;
   canOpenWorkspace?: boolean;
+}
+
+/** 画布钉图：仅展示图像，无说明/状态脚/运行按钮 */
+function MediaPinOnlyBody({
+  url,
+  onOpen,
+}: {
+  url: string;
+  onOpen?: () => void;
+}) {
+  return (
+    <div className="nx9-media-pin nodrag nopan">
+      <button
+        type="button"
+        className="nx9-media-pin__frame"
+        onClick={(e) => {
+          e.stopPropagation();
+          if (url) onOpen?.();
+        }}
+        onMouseDown={(e) => e.stopPropagation()}
+        title={url ? '点击放大 · 裁剪 / 本地清晰度' : undefined}
+        disabled={!url}
+      >
+        {url ? (
+          <img src={url} alt="" className="nx9-media-pin__img" draggable={false} />
+        ) : (
+          <div className="nx9-media-pin__empty">暂无图像</div>
+        )}
+      </button>
+    </div>
+  );
 }
 
 /** 图像生成卡：仅展示图片（1 张铺满 / 多张宫格） */
@@ -160,6 +194,7 @@ export const CanvasNodeBody = memo(function CanvasNodeBody({
   data,
   alias,
   onRun,
+  onPreviewOpen,
   canOpenWorkspace = true,
 }: CanvasNodeBodyProps) {
   const meta = lookupBlock(kind);
@@ -186,6 +221,7 @@ export const CanvasNodeBody = memo(function CanvasNodeBody({
 
   const isPicture = kind === 'picture-gen';
   const isVideo = kind === 'clip-gen';
+  const isMediaPin = kind === 'media-pin';
   const pictureUrls = useMemo(() => {
     if (!isPicture) return [] as string[];
     const urls = (data.previewUrls as string[] | undefined) ?? [];
@@ -193,6 +229,17 @@ export const CanvasNodeBody = memo(function CanvasNodeBody({
     const single = (data.previewUrl as string | undefined) ?? thumb;
     return single ? [single] : [];
   }, [isPicture, data.previewUrl, data.previewUrls, thumb]);
+
+  /* 画布钉图：纯图卡，无底部说明/运行 */
+  if (isMediaPin) {
+    const pinUrl =
+      (data.pinUrl as string | undefined) ||
+      (data.previewUrl as string | undefined) ||
+      (data.assetUrl as string | undefined) ||
+      thumb ||
+      '';
+    return <MediaPinOnlyBody url={pinUrl} onOpen={onPreviewOpen} />;
+  }
 
   /* 图像生成：卡片只展示图，参数与操作都在底部工作区 */
   if (isPicture) {

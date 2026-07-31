@@ -6,6 +6,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import {
   ASSET_TRASH_RETENTION_MS,
+  createMediaTrashItem,
   daysRemainingInTrash,
   filterActiveAssets,
   filterTrashedAssets,
@@ -91,6 +92,18 @@ describe('F-010 资产软删核心', () => {
     expect(result.conflictRenamed).toBe(false);
     expect(result.items[0].deletedAt).toBeUndefined();
   });
+
+  it('生成媒体软删项可进回收站窗口', () => {
+    const item = createMediaTrashItem({
+      url: '/uploads/gen.png',
+      label: '生成图 1',
+      sourceBlockId: 'blk-1',
+      now: Date.now(),
+    });
+    expect(item.mediaKind).toBe('picture');
+    expect(isAssetTrashed(item)).toBe(true);
+    expect(filterTrashedAssets([item])).toHaveLength(1);
+  });
 });
 
 describe('F-010 接线与入口', () => {
@@ -105,6 +118,14 @@ describe('F-010 接线与入口', () => {
     expect(store).toContain('softDeleteAssetById');
     expect(store).toContain('purgeExpiredTrashedAssets');
     expect(store).toContain('restoreCharacter');
+    expect(store).toContain('trashGeneratedMedia');
+
+    const pictureWs = readFileSync(
+      resolve(webSrc, 'engine/stage-deck/chrome/attached-workspace/generation/picture/PictureWorkspace.tsx'),
+      'utf8',
+    );
+    expect(pictureWs).toContain('trashGeneratedMedia');
+    expect(pictureWs).toContain('已移入资产回收站');
 
     const modal = readFileSync(resolve(webSrc, 'panels/AssetLibraryModal.tsx'), 'utf8');
     expect(modal).toContain('移入回收站');
@@ -113,6 +134,7 @@ describe('F-010 接线与入口', () => {
     const trash = readFileSync(resolve(webSrc, 'panels/AssetTrashPanel.tsx'), 'utf8');
     expect(trash).toContain('资产回收站');
     expect(trash).toContain('filterTrashedAssets');
+    expect(trash).toContain('mediaTrash');
   });
 
   it('画布顶栏 / 命令面板有资产回收站入口', () => {

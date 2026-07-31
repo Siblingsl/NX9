@@ -48,8 +48,10 @@ import {
   softDeleteAssetById,
   restoreAssetById,
   purgeAssetById,
+  createMediaTrashItem,
   type PlaybookReadinessContext,
   type EpisodeMeta,
+  type MediaTrashItem,
 } from '@nx9/shared';
 import { api } from '../api/client';
 
@@ -61,6 +63,8 @@ interface WorkspaceDocumentState {
   soundLibrary: SoundLibraryPayload;
   backlotCustom: BacklotCustomPayload;
   backlotWorkspace: BacklotWorkspacePayload;
+  /** F-010: 生成结果软删列表 */
+  mediaTrash: MediaTrashItem[];
   canvasAppearance: CanvasAppearance;
   scriptPlan: ScriptPlanPayload | null;
   environments: EnvironmentLibraryPayload | null;
@@ -106,6 +110,16 @@ interface WorkspaceDocumentState {
   removeBacklotWorkspace: (id: string) => void;
   restoreBacklotWorkspace: (id: string) => { restoredId: string; conflictRenamed: boolean };
   purgeBacklotWorkspace: (id: string) => void;
+  /** F-010: 生成结果 → 资产回收站 */
+  trashGeneratedMedia: (input: {
+    url: string;
+    mediaKind?: 'picture' | 'video';
+    label?: string;
+    sourceBlockId?: string;
+  }) => MediaTrashItem;
+  /** F-010: 从回收站取出生成媒体（调用方负责写回节点） */
+  takeMediaTrashItem: (id: string) => MediaTrashItem | null;
+  purgeMediaTrash: (id: string) => void;
   /** F-010: 清理过期资产（≥30天） */
   purgeExpiredTrashedAssets: () => number;
   setCanvasAppearance: (appearance: CanvasAppearance) => void;
@@ -128,6 +142,7 @@ interface WorkspaceDocumentState {
     environments?: EnvironmentLibraryPayload;
     backlotCustom: BacklotCustomPayload;
     backlotWorkspace: BacklotWorkspacePayload;
+    mediaTrash: MediaTrashItem[];
     canvasAppearance: CanvasAppearance;
     playbookSession?: PlaybookSession | null;
   };
@@ -158,6 +173,7 @@ export const useWorkspaceDocument = create<WorkspaceDocumentState>((set, get) =>
   soundLibrary: emptySoundLibrary(),
   backlotCustom: emptyBacklotCustom(),
   backlotWorkspace: emptyBacklotWorkspace(),
+  mediaTrash: [],
   canvasAppearance: DEFAULT_CANVAS_APPEARANCE,
   scriptPlan: null,
   environments: null,
@@ -181,6 +197,13 @@ export const useWorkspaceDocument = create<WorkspaceDocumentState>((set, get) =>
     const soundPurged = purgeExpiredAssets(payload.soundLibrary?.sounds ?? []);
     const customPurged = purgeExpiredAssets(payload.backlotCustom?.items ?? []);
     const wsPurged = purgeExpiredAssets(payload.backlotWorkspace?.items ?? []);
+    const mediaTrashRaw = ((payload as { mediaTrash?: MediaTrashItem[] }).mediaTrash ?? []).map(
+      (item) => ({
+        ...item,
+        deletedAt: item.deletedAt ?? Date.now(),
+      }),
+    );
+    const mediaPurged = purgeExpiredAssets(mediaTrashRaw);
 
     set({
       workspaceId,
@@ -202,6 +225,7 @@ export const useWorkspaceDocument = create<WorkspaceDocumentState>((set, get) =>
         version: 1,
         items: wsPurged.items,
       },
+      mediaTrash: mediaPurged.items,
       canvasAppearance: (payload as any).canvasAppearance ?? DEFAULT_CANVAS_APPEARANCE,
       scriptPlan: (payload as any).scriptPlan ?? null,
       environments: (payload as any).environments
@@ -225,6 +249,7 @@ export const useWorkspaceDocument = create<WorkspaceDocumentState>((set, get) =>
       soundLibrary: emptySoundLibrary(),
       backlotCustom: emptyBacklotCustom(),
       backlotWorkspace: emptyBacklotWorkspace(),
+      mediaTrash: [],
       scriptPlan: null,
       environments: null,
       playbookSession: null,
@@ -606,6 +631,28 @@ export const useWorkspaceDocument = create<WorkspaceDocumentState>((set, get) =>
       },
     })),
 
+  trashGeneratedMedia: (input) => {
+    const item = createMediaTrashItem(input);
+    set((s) => ({ mediaTrash: [item, ...s.mediaTrash] }));
+    return item;
+  },
+
+  takeMediaTrashItem: (id) => {
+    let taken: MediaTrashItem | null = null;
+    set((s) => {
+      const hit = s.mediaTrash.find((x) => x.id === id) ?? null;
+      if (!hit) return s;
+      taken = hit;
+      return { mediaTrash: s.mediaTrash.filter((x) => x.id !== id) };
+    });
+    return taken;
+  },
+
+  purgeMediaTrash: (id) =>
+    set((s) => ({
+      mediaTrash: purgeAssetById(s.mediaTrash, id),
+    })),
+
   purgeExpiredTrashedAssets: () => {
     let total = 0;
     set((s) => {
@@ -613,12 +660,19 @@ export const useWorkspaceDocument = create<WorkspaceDocumentState>((set, get) =>
       const sounds = purgeExpiredAssets(s.soundLibrary.sounds);
       const custom = purgeExpiredAssets(s.backlotCustom.items);
       const ws = purgeExpiredAssets(s.backlotWorkspace.items);
-      total = chars.purgedCount + sounds.purgedCount + custom.purgedCount + ws.purgedCount;
+      const media = purgeExpiredAssets(s.mediaTrash);
+      total =
+        chars.purgedCount +
+        sounds.purgedCount +
+        custom.purgedCount +
+        ws.purgedCount +
+        media.purgedCount;
       return {
         characters: { ...s.characters, characters: chars.items },
         soundLibrary: { ...s.soundLibrary, sounds: sounds.items },
         backlotCustom: { ...s.backlotCustom, items: custom.items },
         backlotWorkspace: { ...s.backlotWorkspace, items: ws.items },
+        mediaTrash: media.items,
       };
     });
     return total;
@@ -750,12 +804,12 @@ export const useWorkspaceDocument = create<WorkspaceDocumentState>((set, get) =>
     }),
 
   getSnapshotForSave: () => {
-    const { storyboard, voice, characters, soundLibrary, scriptPlan, environments, backlotCustom, backlotWorkspace, canvasAppearance, playbookSession, projectStatus } = get();
+    const { storyboard, voice, characters, soundLibrary, scriptPlan, environments, backlotCustom, backlotWorkspace, mediaTrash, canvasAppearance, playbookSession, projectStatus } = get();
     return {
       storyboard, voice, characters, soundLibrary,
       scriptPlan: scriptPlan ?? undefined,
       environments: environments ?? undefined,
-      backlotCustom, backlotWorkspace, canvasAppearance,
+      backlotCustom, backlotWorkspace, mediaTrash, canvasAppearance,
       playbookSession: playbookSession
         ? syncSessionForStoryboard(playbookSession, storyboard)
         : undefined,

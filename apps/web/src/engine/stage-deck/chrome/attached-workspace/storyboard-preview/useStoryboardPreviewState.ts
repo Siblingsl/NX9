@@ -8,6 +8,8 @@ import {
   canConfirmStoryboardPreview,
   emptyStoryboardPreview,
   flattenScriptBreakdownShots,
+  patchChainShot,
+  readChainStoryboard,
   resolveStoryboardPreviewPictureSettings,
   resolveConnectedDirector3dId,
   writeBackBreakdownPreviewImage,
@@ -30,6 +32,25 @@ import {
   scoreStoryboardKeyframes,
 } from '../../../../storyboard-preview-runner';
 
+function patchDeskChainFrame(
+  data: Record<string, unknown>,
+  sourceShotId: string | undefined | null,
+  imageUrl: string,
+): Record<string, unknown> {
+  if (!sourceShotId) return {};
+  const chain = readChainStoryboard(data);
+  if (!chain) return {};
+  return {
+    chainStoryboard: {
+      ...chain,
+      shots: patchChainShot(chain, sourceShotId, {
+        firstFrameAssetId: imageUrl,
+        keyframeStatus: 'review',
+        status: 'review',
+      }),
+    },
+  };
+}
 /** 参与宫格合成的帧签名：url + 列数，变化则重合成 */
 export function buildContactSheetSignature(
   frames: StoryboardPreviewFrame[],
@@ -545,7 +566,10 @@ export function useStoryboardPreviewState(blockId: string) {
             targetFrame!.sourceShotId,
             imageUrl,
           );
-          return previewNodePatch(current, frames, breakdown);
+          return {
+            ...previewNodePatch(current, frames, breakdown),
+            ...patchDeskChainFrame(data, targetFrame!.sourceShotId, imageUrl),
+          };
         });
         updateNodeData(pictureNode.id, {
           status: 'success',
@@ -646,7 +670,14 @@ export function useStoryboardPreviewState(blockId: string) {
             f.id === frame.id ? { ...f, status: 'error' as const, errorMessage: String(e) } : f,
           );
         }
-        updateNodeData(blockId, previewNodePatch(current, frames, breakdown));
+        const successUrl = frames.find((f) => f.id === frame.id)?.imageUrl;
+        updateNodeData(blockId, (node) => {
+          const data = (node.data ?? {}) as Record<string, unknown>;
+          return {
+            ...previewNodePatch(current, frames, breakdown),
+            ...(successUrl ? patchDeskChainFrame(data, frame.sourceShotId, successUrl) : {}),
+          };
+        });
       }
 
       appendLog(`批量生成完成 · ${targets.length} 张`);

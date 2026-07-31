@@ -30,6 +30,8 @@ import {
   readChainStoryboard,
   resolveMentionsForPrompt,
   extractReferencePack,
+  readClipGenPlaybook,
+  buildClipGenPlaybookPack,
   type MentionRef,
   type ReferencePack,
 } from '@nx9/shared';
@@ -130,7 +132,13 @@ function ClipGenBlock(props: NodeProps) {
     return gatherUpstream(props.id, flowBlocks, flowLinks, policy, primarySourceId);
   }, [props.id, nodes, edges, props.data]);
 
-  /** 上游参考板结构化引用包（深度动作复刻等） */
+  /** 本节点热门玩法（优先于上游参考板） */
+  const localPlaybook = useMemo(
+    () => readClipGenPlaybook((props.data ?? {}) as Record<string, unknown>),
+    [props.data],
+  );
+
+  /** 上游参考板结构化引用包（兼容旧路径） */
   const upstreamReferencePack = useMemo((): ReferencePack | null => {
     const incoming = edges.filter((e) => e.target === props.id);
     for (const edge of incoming) {
@@ -147,7 +155,17 @@ function ClipGenBlock(props: NodeProps) {
     [shots, linkedShotId],
   );
   const directorDeskRefs = (props.data?.directorDeskRefs as string[] | undefined) ?? [];
-  const packImages = upstreamReferencePack?.imageUrls ?? [];
+  const packImages =
+    (localPlaybook
+      ? localPlaybook.slots
+          .filter((s) => s.assetUrl && s.mediaType !== 'video' && s.role !== 'depth_motion')
+          .map((s) => s.assetUrl!)
+      : null) ??
+    upstreamReferencePack?.imageUrls ??
+    [];
+  const localDepthUrl = localPlaybook?.slots.find(
+    (s) => s.role === 'depth_motion' && s.assetUrl,
+  )?.assetUrl;
   const imageUrl =
     packImages[0] ||
     linkedShot?.firstFrameAssetId ||
@@ -161,6 +179,7 @@ function ClipGenBlock(props: NodeProps) {
   );
   const refVideoCount = Math.max(
     upstreamMedia.clips?.length ?? 0,
+    localDepthUrl ? 1 : 0,
     upstreamReferencePack?.videoUrls?.length ?? 0,
   );
   const refError = validateSClassReferences(refImageCount, refVideoCount);
@@ -171,10 +190,22 @@ function ClipGenBlock(props: NodeProps) {
     updateNodeData(props.id, { status: 'running' });
     appendLog(`视频生成启动 · ${props.id}`);
     try {
-      if (upstreamReferencePack?.enforce) {
-        if (upstreamReferencePack.blockReason || !upstreamReferencePack.ready) {
+      let activePack: ReferencePack | null = null;
+      if (localPlaybook) {
+        const skillId =
+          localPlaybook.playbookId === 'depth-action-replica'
+            ? 'gen-depth-action-replica'
+            : undefined;
+        const depthPack = skillId ? await getGenPack(skillId) : null;
+        activePack = buildClipGenPlaybookPack(localPlaybook, localContent, depthPack);
+      } else if (upstreamReferencePack) {
+        activePack = upstreamReferencePack;
+      }
+
+      if (activePack?.enforce) {
+        if (activePack.blockReason || !activePack.ready) {
           const reason =
-            upstreamReferencePack.blockReason || '参考板强约束未就绪：请补齐槽位并确认装配提示词';
+            activePack.blockReason || '热门玩法未就绪：请补齐必填槽位';
           updateNodeData(props.id, { status: 'error', error: reason });
           appendLog(`视频生成已阻断 · ${reason}`);
           return;
@@ -191,7 +222,7 @@ function ClipGenBlock(props: NodeProps) {
       const videoParams = resolveVideoGenParams({
         resolution,
         orientation,
-        aspect: upstreamReferencePack?.aspect || aspect,
+        aspect: activePack?.aspect || aspect,
         durationSec,
       });
       const videoPack = await getGenPack('gen-studio-video');
@@ -205,7 +236,7 @@ function ClipGenBlock(props: NodeProps) {
           )
         : '';
       const base =
-        upstreamReferencePack?.assembledPrompt?.trim() ||
+        activePack?.assembledPrompt?.trim() ||
         upstreamMedia.prompts.filter(Boolean).join('\n\n') ||
         localContent ||
         linkedShot?.videoPromptPro ||
@@ -236,34 +267,34 @@ function ClipGenBlock(props: NodeProps) {
         const publicItems = BUILTIN_BACKLOT_TEMPLATES.map((tpl) => templateToAsset(tpl as any, 'public', true));
         prompt = enrichPromptWithAssetMentions(prompt, privateItems, publicItems);
       }
-      // F-024 + 参考板槽位：解析 @block / @人物 / @深度视频
+      // F-024 + 热门玩法槽位：解析 @block / @人物 / @深度视频
       {
         const refs: MentionRef[] = [];
         const pics = [
-          ...(upstreamReferencePack?.imageUrls ?? []),
+          ...(activePack?.imageUrls ?? []),
           ...upstreamMedia.pictures,
         ];
         const uniquePics = [...new Set(pics.filter(Boolean))];
         uniquePics.forEach((url, i) => refs.push({ id: `pic-${i}`, kind: 'picture', url, label: `上游图片 ${i + 1}` }));
-        if (upstreamReferencePack?.characterUrls) {
-          upstreamReferencePack.characterUrls.forEach((url, i) => {
+        if (activePack?.characterUrls) {
+          activePack.characterUrls.forEach((url, i) => {
             refs.push({ id: `char-${i}`, kind: 'picture', url, label: `人物${i + 1}` });
           });
         }
-        if (upstreamReferencePack?.sceneUrl) {
-          refs.push({ id: 'scene', kind: 'picture', url: upstreamReferencePack.sceneUrl, label: '场景' });
+        if (activePack?.sceneUrl) {
+          refs.push({ id: 'scene', kind: 'picture', url: activePack.sceneUrl, label: '场景' });
         }
         const clips = [
-          ...(upstreamReferencePack?.videoUrls ?? []),
+          ...(activePack?.videoUrls ?? []),
           ...upstreamMedia.clips,
         ];
         const uniqueClips = [...new Set(clips.filter(Boolean))];
         uniqueClips.forEach((url, i) => refs.push({ id: `clip-${i}`, kind: 'clip', url, label: i === 0 ? '深度视频' : `上游视频 ${i + 1}` }));
-        if (upstreamReferencePack?.depthVideoUrl) {
+        if (activePack?.depthVideoUrl) {
           refs.push({
             id: 'depth',
             kind: 'clip',
-            url: upstreamReferencePack.depthVideoUrl,
+            url: activePack.depthVideoUrl,
             label: '深度视频',
           });
         }
@@ -291,11 +322,11 @@ function ClipGenBlock(props: NodeProps) {
       }
       const audioUrl = hasAudioUpstream ? upstreamMedia.sounds[0] : undefined;
       const referenceImages = [
-        ...(upstreamReferencePack?.imageUrls ?? []),
+        ...(activePack?.imageUrls ?? []),
         ...upstreamMedia.pictures,
       ].filter(Boolean);
       const referenceVideos = [
-        ...(upstreamReferencePack?.videoUrls ?? []),
+        ...(activePack?.videoUrls ?? []),
         ...upstreamMedia.clips,
       ].filter(Boolean);
       let res;
@@ -316,7 +347,7 @@ function ClipGenBlock(props: NodeProps) {
       } catch (e) {
         const err = String(e);
         if (/API Key|未配置|401|Unauthorized/i.test(err)) {
-          openSettingsTo('connections');
+          openSettingsTo('connection');
           throw new Error(`${err} · 已打开设置 → 连接（请配置视频连接）`);
         }
         throw e;
@@ -328,7 +359,7 @@ function ClipGenBlock(props: NodeProps) {
         message: res.message,
         content: prompt,
         referenceImageUsed: imageUrl,
-        referencePackUsed: upstreamReferencePack?.playbookId,
+        referencePackUsed: activePack?.playbookId,
         characterInjected: activeCharacters.map((c) => c.id),
         lastResult: res,
       });
@@ -365,7 +396,7 @@ function ClipGenBlock(props: NodeProps) {
     appendLog, model, aspect, durationSec, resolution, imageUrl, linkedShot,
     orientation, generateAudio, localContent, props.data, props.id,
     updateNodeData, activeCharacters, upstreamMedia, edges, nodes,
-    upstreamReferencePack, openSettingsTo,
+    localPlaybook, upstreamReferencePack, openSettingsTo,
   ]);
 
   const poll = useCallback(async () => {
@@ -605,7 +636,14 @@ function ClipGenBlock(props: NodeProps) {
         {videoUrl && (
           <video src={videoUrl} controls className="w-full rounded-lg max-h-36" />
         )}
-        {upstreamReferencePack && (
+        {localPlaybook && (
+          <p className="text-[10px] text-ink/55 bg-surface rounded px-1.5 py-1 border border-line/50">
+            热门玩法：{localPlaybook.playbookId}
+            {localDepthUrl ? ' · 已含深度视频' : ''}
+            {packImages.length ? ` · 参考图×${packImages.length}` : ''}
+          </p>
+        )}
+        {!localPlaybook && upstreamReferencePack && (
           <p className="text-[10px] text-ink/55 bg-surface rounded px-1.5 py-1 border border-line/50">
             参考板玩法：{upstreamReferencePack.playbookId}
             {upstreamReferencePack.depthVideoUrl ? ' · 已含深度视频' : ''}
@@ -632,7 +670,7 @@ function ClipGenBlock(props: NodeProps) {
             disabled={
               status === 'running' ||
               Boolean(refError) ||
-              Boolean(upstreamReferencePack?.enforce && !upstreamReferencePack.ready)
+              Boolean(upstreamReferencePack?.enforce && !upstreamReferencePack.ready && !localPlaybook)
             }
             className="flex-1 rounded-xl bg-brand text-white text-sm py-2 disabled:opacity-50"
           >

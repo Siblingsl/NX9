@@ -1,8 +1,10 @@
 import {
   bindStoryboardShotAssets,
+  buildChainStoryboardPayload,
   flattenScriptBreakdownShots,
   normalizeScriptBreakdownConfig,
   normalizeScriptBreakdownPrompts,
+  readChainStoryboard,
   storyboardShotsFromScriptBreakdown,
   type CharacterProfile,
   type EnvironmentProfile,
@@ -128,24 +130,39 @@ export function applyScriptBreakdownPayload(
   const environmentLibrary = options.syncAssets && importedEnvironments.length
     ? useWorkspaceDocument.getState().environments?.environments ?? []
     : doc.environments?.environments ?? [];
-  const previousById = new Map(doc.storyboard.shots.map((shot) => [shot.id, shot]));
-  const rawShots = storyboardShotsFromScriptBreakdown(payload).map((base) => ({
-    ...base,
-    ...(previousById.get(base.id) ?? {}),
-    episodeId: base.episodeId,
-    episodeIndex: base.episodeIndex,
-    episodeTitle: base.episodeTitle,
-    index: base.index,
-    durationSec: base.durationSec,
-    shotType: base.shotType,
-    descriptionZh: base.descriptionZh,
-    promptEn: base.promptEn,
-    videoPromptEn: base.videoPromptEn,
-    characterNames: base.characterNames,
-    sceneName: base.sceneName,
-    sceneId: base.sceneId,
-    sceneCode: base.sceneCode,
-  }));
+  const existingNodeData = (runtime?.getNodes?.().find((node) => node.id === blockId)?.data
+    ?? {}) as Record<string, unknown>;
+  const previousChain = readChainStoryboard(existingNodeData);
+  const previousById = new Map<string, (typeof doc.storyboard.shots)[number]>();
+  for (const shot of doc.storyboard.shots) previousById.set(shot.id, shot);
+  for (const shot of previousChain?.shots ?? []) previousById.set(shot.id, shot);
+  const rawShots = storyboardShotsFromScriptBreakdown(payload).map((base) => {
+    const prev = previousById.get(base.id);
+    return {
+      ...base,
+      ...(prev ?? {}),
+      episodeId: base.episodeId,
+      episodeIndex: base.episodeIndex,
+      episodeTitle: base.episodeTitle,
+      index: base.index,
+      durationSec: base.durationSec,
+      shotType: base.shotType,
+      descriptionZh: base.descriptionZh,
+      promptEn: base.promptEn,
+      videoPromptEn: base.videoPromptEn,
+      characterNames: base.characterNames,
+      sceneName: base.sceneName,
+      sceneId: base.sceneId,
+      sceneCode: base.sceneCode,
+      // 预览图优先；勿被旧 firstFrameAssetId:null 覆盖
+      firstFrameAssetId: base.firstFrameAssetId || prev?.firstFrameAssetId || null,
+      keyframeStatus: base.firstFrameAssetId
+        ? base.keyframeStatus
+        : (prev?.keyframeStatus ?? base.keyframeStatus),
+      status: base.firstFrameAssetId ? base.status : (prev?.status ?? base.status),
+      sketchPrompt: base.sketchPrompt ?? prev?.sketchPrompt ?? null,
+    };
+  });
   const shots = bindStoryboardShotAssets(
     rawShots,
     characterLibrary,
@@ -163,11 +180,18 @@ export function applyScriptBreakdownPayload(
     shots,
   });
   const flat = flattenScriptBreakdownShots(payload);
+  const chainStoryboard = buildChainStoryboardPayload(previousChain, {
+    title: payload.title,
+    activeEpisodeId,
+    shots,
+    episodes: doc.storyboard.episodes,
+  });
   runtime?.updateNodeData(blockId, {
     status: 'success',
     sourceText: payload.sourceText,
     scriptBreakdown: payload,
     scriptBreakdownConfig: payload.config,
+    chainStoryboard,
     breakdownProgress: null,
     lines: flat.flatMap((shot) => shot.dialogue),
     content: `${payload.title} · ${payload.episodes.length} 集 · ${flat.length} 个分镜`,

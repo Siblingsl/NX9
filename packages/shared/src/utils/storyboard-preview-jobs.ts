@@ -96,22 +96,40 @@ export function resolveConnectedStoryboardPreviewForDirector3dId(
   return undefined;
 }
 
-/** 将预览图写回剧本拆分结构 */
+/** 将预览图写回剧本拆分结构（episode.shots + scenes[].shots 同步） */
 export function writeBackBreakdownPreviewImage(
   payload: ScriptBreakdownPayload | undefined,
   sourceShotId: string,
   imageUrl: string,
 ): ScriptBreakdownPayload | undefined {
-  if (!payload?.episodes?.length) return payload;
+  if (!payload?.episodes?.length || !sourceShotId || !imageUrl) return payload;
   return {
     ...payload,
     episodes: payload.episodes.map((episode) => ({
       ...episode,
       shots: episode.shots.map((shot) =>
         shot.id === sourceShotId
-          ? { ...shot, previewImageUrl: imageUrl, status: 'previewing' as const }
+          ? {
+              ...shot,
+              previewImageUrl: imageUrl,
+              referenceImageUrl: imageUrl,
+              status: 'previewing' as const,
+            }
           : shot,
       ),
+      scenes: episode.scenes?.map((scene) => ({
+        ...scene,
+        shots: scene.shots.map((shot) =>
+          shot.id === sourceShotId
+            ? {
+                ...shot,
+                previewImageUrl: imageUrl,
+                referenceImageUrl: imageUrl,
+                status: 'previewing' as const,
+              }
+            : shot,
+        ),
+      })),
     })),
   };
 }

@@ -21,9 +21,19 @@ import { usePromptHistory } from '../../../../stores/prompt-history';
 import { useAttachedNodeData } from '../use-attached-node-data';
 import { useLocalNodePrompt } from '../use-local-node-prompt';
 import { useUpstreamShots } from '../use-upstream-shots';
+import {
+  buildClipGenPlaybookPatch,
+  clearClipGenPlaybookPatch,
+  readClipGenPlaybook,
+  validateReferenceSlots,
+  type ReferenceSlot,
+} from '@nx9/shared';
 import { VideoGenModeChip } from './VideoGenModeChip';
 import { VideoParamChips } from './VideoParamChips';
 import { VideoFrameStrip } from './VideoFrameStrip';
+import { VideoPlaybookMenu } from './VideoPlaybookMenu';
+import { VideoPlaybookTools } from './VideoPlaybookTools';
+import { lookupVideoPlaybookAction, type VideoPlaybookActionDef } from './video-playbooks';
 import {
   patchVideoGenMode,
   readVideoGenMode,
@@ -148,6 +158,33 @@ export function VideoWorkspace({ blockId, kind, onCollapse }: VideoWorkspaceProp
   const status = (data.status as string) ?? 'idle';
   const videoGenMode = readVideoGenMode(data);
   const showFrames = showVideoFrameStrip(videoGenMode);
+  const playbookState = useMemo(
+    () => readClipGenPlaybook(data as Record<string, unknown>),
+    [data],
+  );
+  const playbookAction = lookupVideoPlaybookAction(playbookState?.playbookId);
+  const [playbookMsg, setPlaybookMsg] = useState('');
+
+  const handleSelectPlaybook = useCallback(
+    (action: VideoPlaybookActionDef) => {
+      handlePatch(buildClipGenPlaybookPatch(action.id));
+      appendLog(`热门玩法 · ${action.label}`);
+    },
+    [appendLog, handlePatch],
+  );
+
+  const handleClearPlaybook = useCallback(() => {
+    handlePatch(clearClipGenPlaybookPatch());
+    setPlaybookMsg('');
+    appendLog('已清除热门玩法');
+  }, [appendLog, handlePatch]);
+
+  const handlePlaybookSlots = useCallback(
+    (slots: ReferenceSlot[]) => {
+      handlePatch({ videoPlaybookSlots: slots });
+    },
+    [handlePatch],
+  );
 
   useEffect(() => {
     const ta = promptContainerRef.current?.querySelector('textarea');
@@ -322,20 +359,65 @@ export function VideoWorkspace({ blockId, kind, onCollapse }: VideoWorkspaceProp
     </div>
   );
 
+  const playbookReady = playbookState
+    ? validateReferenceSlots(playbookState.slots, playbookState.enforce)
+    : { ready: true as boolean, reason: undefined as string | undefined };
+
+  const runLabel = playbookAction ? '运行 · 深度复刻' : undefined;
+
+  const playbookTop =
+    playbookAction?.needsSlotTools && playbookState ? (
+      <VideoPlaybookTools
+        label={playbookAction.label}
+        hint={playbookAction.hint}
+        slots={playbookState.slots}
+        statusText={playbookMsg || (!playbookReady.ready ? playbookReady.reason : undefined)}
+        onClearPlaybook={handleClearPlaybook}
+        onSlotsChange={handlePlaybookSlots}
+        onBusy={setPlaybookMsg}
+      />
+    ) : playbookAction ? (
+      <div className="shrink-0 flex items-center gap-2 px-3 pt-2 pb-1.5 border-b border-line/25">
+        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-brand/10 text-brand text-[10px] font-medium border border-brand/20">
+          {playbookAction.label}
+          <button
+            type="button"
+            onMouseDown={stop}
+            onClick={handleClearPlaybook}
+            className="opacity-55 hover:opacity-100"
+            title="清除热门玩法"
+          >
+            ×
+          </button>
+        </span>
+        <span className="text-[9px] text-ink/35 truncate">{playbookAction.hint}</span>
+      </div>
+    ) : null;
+
   return (
     <ComposerWorkspaceShell
       kind={kind}
       status={status as any}
       onCollapse={handleCollapse}
       headerTrailing={
-        <ComposerModelSelect
-          value={model}
-          options={CLIP_GEN_MODELS.map((m) => ({ id: m.id, label: m.label }))}
-          onChange={(v) => handlePatch({ model: v })}
-        />
+        <div className="flex items-center gap-1" onMouseDown={stop}>
+          <VideoPlaybookMenu
+            activeId={playbookState?.playbookId}
+            onSelect={handleSelectPlaybook}
+            variant="header"
+          />
+          <ComposerModelSelect
+            value={model}
+            options={CLIP_GEN_MODELS.map((m) => ({ id: m.id, label: m.label }))}
+            onChange={(v) => handlePatch({ model: v })}
+            width={220}
+            tone="desk"
+          />
+        </div>
       }
       topSlot={
         <>
+          {playbookTop}
           {showFrames && (
             <VideoFrameStrip
               startFrameUrl={data.startFrameUrl as string | undefined}
@@ -496,6 +578,8 @@ export function VideoWorkspace({ blockId, kind, onCollapse }: VideoWorkspaceProp
       onAiAction={handleAiAction}
       onRun={() => void handleRun()}
       running={data.status === 'running'}
+      runLabel={runLabel}
+      runDisabled={Boolean(playbookState && !playbookReady.ready)}
       promptContainerRef={promptContainerRef}
     >
       <AssetMentionInput
@@ -504,9 +588,14 @@ export function VideoWorkspace({ blockId, kind, onCollapse }: VideoWorkspaceProp
         onChange={onChange}
         onFocus={onFocus}
         onBlur={onBlur}
-        placeholder="描述你想生成的视频… 输入 @ 引用角色、场景、镜头、情绪、声音"
+        placeholder={
+          playbookAction
+            ? '补句：风格、台词、情绪、禁则… 输入 @ 引用资产'
+            : '描述你想生成的视频… 输入 @ 引用角色、场景、镜头、情绪、声音'
+        }
         kinds={VIDEO_MENTION_KINDS}
         className={COMPOSER_PROMPT_TEXTAREA_CLASS}
+        tone="desk"
       />
     </ComposerWorkspaceShell>
   );

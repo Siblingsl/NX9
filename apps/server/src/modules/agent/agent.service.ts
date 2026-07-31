@@ -388,7 +388,6 @@ export class AgentService {
 
     const res = (await this.gateway.proxyLlm(
       {
-        model: 'gpt-4o-mini',
         response_format: { type: 'json_object' },
         messages: [
           { role: 'system', content: system },
@@ -453,7 +452,6 @@ export class AgentService {
 
     const res = (await this.gateway.proxyLlm(
       {
-        model: 'gpt-4o-mini',
         response_format: { type: 'json_object' },
         messages: [
           { role: 'system', content: system },
@@ -505,7 +503,6 @@ export class AgentService {
 
     const res = (await this.gateway.proxyLlm(
       {
-        model: 'gpt-4o-mini',
         response_format: { type: 'json_object' },
         messages: [
           { role: 'system', content: system },
@@ -544,7 +541,6 @@ export class AgentService {
 
     const res = (await this.gateway.proxyLlm(
       {
-        model: 'gpt-4o-mini',
         response_format: { type: 'json_object' },
         messages: [
           { role: 'system', content: system },
@@ -782,7 +778,6 @@ export class AgentService {
       ].join('\n'),
     );
     const res = (await this.gateway.proxyLlm({
-      model: 'gpt-4o-mini',
       response_format: { type: 'json_object' },
       messages: [
         { role: 'system', content: system },
@@ -808,7 +803,6 @@ export class AgentService {
       ].join('\n'),
     );
     const res = (await this.gateway.proxyLlm({
-      model: 'gpt-4o-mini',
       messages: [
         { role: 'system', content: system },
         { role: 'user', content: sourceText },
@@ -832,7 +826,6 @@ export class AgentService {
       ].join('\n'),
     );
     const res = (await this.gateway.proxyLlm({
-      model: 'gpt-4o-mini',
       messages: [
         { role: 'system', content: system },
         { role: 'user', content: sourceText },
@@ -856,7 +849,6 @@ export class AgentService {
       ].join('\n'),
     );
     const res = (await this.gateway.proxyLlm({
-      model: 'gpt-4o-mini',
       response_format: { type: 'json_object' },
       messages: [
         { role: 'system', content: system },
@@ -882,7 +874,6 @@ export class AgentService {
       ].join('\n'),
     );
     const res = (await this.gateway.proxyLlm({
-      model: 'gpt-4o-mini',
       response_format: { type: 'json_object' },
       messages: [
         { role: 'system', content: system },
@@ -931,7 +922,6 @@ export class AgentService {
     );
 
     const res = (await this.gateway.proxyLlm({
-      model: 'gpt-4o-mini',
       response_format: { type: 'json_object' },
       messages: [
         { role: 'system', content: system },
@@ -983,7 +973,6 @@ export class AgentService {
     );
 
     const res = (await this.gateway.proxyLlm({
-      model: 'gpt-4o-mini',
       response_format: { type: 'json_object' },
       messages: [
         { role: 'system', content: system },
@@ -1063,7 +1052,6 @@ export class AgentService {
       `当前剧本包：${JSON.stringify(body.package, null, 2).slice(0, 8000)}`,
     ].filter(Boolean).join('\n\n');
     const res = (await this.gateway.proxyLlm({
-      model: 'gpt-4o-mini',
       response_format: { type: 'json_object' },
       messages: [
         { role: 'system', content: system },

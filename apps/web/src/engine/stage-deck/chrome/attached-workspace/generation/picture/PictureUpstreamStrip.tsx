@@ -59,9 +59,10 @@ export function PictureUpstreamStrip({
           {visible.map(({ url, index }) => {
             const active = mentionedUrls.includes(url);
             return (
-              <button
+              <div
                 key={`${url}-${index}`}
-                type="button"
+                role="button"
+                tabIndex={0}
                 draggable
                 onMouseDown={stop}
                 onDragStart={(e) => {
@@ -87,7 +88,12 @@ export function PictureUpstreamStrip({
                   if (draggedRef.current) return;
                   onSelect?.(url, index);
                 }}
-                className={`relative w-14 h-14 rounded-lg overflow-hidden border shrink-0 transition-all cursor-grab active:cursor-grabbing ${
+                onKeyDown={(e) => {
+                  if (e.key !== 'Enter' && e.key !== ' ') return;
+                  e.preventDefault();
+                  onSelect?.(url, index);
+                }}
+                className={`group relative w-14 h-14 rounded-lg overflow-hidden border shrink-0 transition-all cursor-grab active:cursor-grabbing ${
                   active
                     ? 'border-brand/50 ring-1 ring-brand/25'
                     : 'border-line/40 hover:border-brand/30'
@@ -106,13 +112,13 @@ export function PictureUpstreamStrip({
                       e.stopPropagation();
                       onExclude(url);
                     }}
-                    className="absolute top-0.5 right-0.5 p-0.5 rounded-full bg-ink/50 text-white opacity-0 hover:opacity-100 focus:opacity-100"
+                    className="absolute top-0.5 right-0.5 p-0.5 rounded-full bg-ink/50 text-white opacity-0 group-hover:opacity-100 hover:opacity-100 focus:opacity-100"
                     title="排除此上游图"
                   >
                     <X size={9} />
                   </button>
                 )}
-              </button>
+              </div>
             );
           })}
         </div>

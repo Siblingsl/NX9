@@ -115,7 +115,10 @@ export type AssetTrashKind =
   | 'shot'
   | 'emotion'
   | 'hook'
-  | 'sound';
+  | 'sound'
+  /** 节点生成结果（图像生成 / 视频等）软删进回收站 */
+  | 'picture'
+  | 'video';
 
 export interface AssetTrashEntry {
   id: string;
@@ -126,6 +129,39 @@ export interface AssetTrashEntry {
   imageUrl?: string;
   videoUrl?: string;
   audioUrl?: string;
+  /** 生成结果软删时的来源节点（恢复时写回 previewUrls） */
+  sourceBlockId?: string;
+}
+
+/** 画布生成媒体软删项（图像/视频生成结果，非素材库条目） */
+export type MediaTrashKind = 'picture' | 'video';
+
+export interface MediaTrashItem {
+  id: string;
+  mediaKind: MediaTrashKind;
+  url: string;
+  label: string;
+  sourceBlockId?: string;
+  deletedAt: number;
+}
+
+export function createMediaTrashItem(input: {
+  url: string;
+  mediaKind?: MediaTrashKind;
+  label?: string;
+  sourceBlockId?: string;
+  now?: number;
+}): MediaTrashItem {
+  const now = input.now ?? Date.now();
+  const mediaKind = input.mediaKind ?? 'picture';
+  return {
+    id: `media-trash-${now}-${Math.random().toString(36).slice(2, 8)}`,
+    mediaKind,
+    url: input.url,
+    label: input.label?.trim() || (mediaKind === 'video' ? '生成视频' : '生成图'),
+    sourceBlockId: input.sourceBlockId,
+    deletedAt: now,
+  };
 }
 
 export function daysRemainingInTrash(deletedAt: number, now = Date.now()): number {

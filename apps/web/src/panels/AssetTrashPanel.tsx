@@ -32,6 +32,7 @@ import {
 } from '@nx9/shared';
 import { useWorkspaceDocument } from '../stores/workspace-document';
 import { usePublicAssetLibrary } from '../stores/public-asset-library';
+import { useFlowRuntime } from '../stores/flow-runtime';
 import { toastSuccess, toastError } from '../stores/toast';
 import { confirmDelete } from '../stores/confirm-dialog';
 
@@ -39,6 +40,8 @@ type KindFilter = 'all' | AssetTrashKind;
 
 const KIND_FILTERS: { id: KindFilter; label: string }[] = [
   { id: 'all', label: '全部' },
+  { id: 'picture', label: '图片' },
+  { id: 'video', label: '视频' },
   ...ASSET_LIBRARY_TABS.map((t) => ({ id: t.key as AssetTrashKind, label: t.label })),
 ];
 
@@ -50,6 +53,14 @@ const KIND_ICONS: Record<AssetTrashKind, typeof User> = {
   emotion: Smile,
   hook: Anchor,
   sound: Volume2,
+  picture: ImageIcon,
+  video: Film,
+};
+
+const KIND_LABEL: Record<AssetTrashKind, string> = {
+  ...ASSET_KIND_MENTION_PREFIX,
+  picture: '图片',
+  video: '视频',
 };
 
 function formatTime(ts: number) {
@@ -104,7 +115,7 @@ function TrashMediaThumb({ entry }: { entry: AssetTrashEntry }) {
   return (
     <div className="absolute inset-0 flex flex-col items-center justify-center gap-1 bg-surface/80">
       <Icon size={22} className="text-ink/25" />
-      <span className="text-[8px] text-ink/30">{ASSET_KIND_MENTION_PREFIX[entry.kind]}</span>
+      <span className="text-[8px] text-ink/30">{KIND_LABEL[entry.kind]}</span>
     </div>
   );
 }
@@ -127,6 +138,7 @@ export const AssetTrashPanel = memo(function AssetTrashPanel({
   const sounds = useWorkspaceDocument((s) => s.soundLibrary.sounds);
   const backlotWorkspace = useWorkspaceDocument((s) => s.backlotWorkspace.items);
   const backlotCustom = useWorkspaceDocument((s) => s.backlotCustom.items);
+  const mediaTrash = useWorkspaceDocument((s) => s.mediaTrash);
   const restoreCharacter = useWorkspaceDocument((s) => s.restoreCharacter);
   const purgeCharacter = useWorkspaceDocument((s) => s.purgeCharacter);
   const restoreSound = useWorkspaceDocument((s) => s.restoreSound);
@@ -135,6 +147,8 @@ export const AssetTrashPanel = memo(function AssetTrashPanel({
   const purgeBacklotWorkspace = useWorkspaceDocument((s) => s.purgeBacklotWorkspace);
   const restoreBacklotCustom = useWorkspaceDocument((s) => s.restoreBacklotCustom);
   const purgeBacklotCustom = useWorkspaceDocument((s) => s.purgeBacklotCustom);
+  const takeMediaTrashItem = useWorkspaceDocument((s) => s.takeMediaTrashItem);
+  const purgeMediaTrash = useWorkspaceDocument((s) => s.purgeMediaTrash);
   const purgeExpiredPrivate = useWorkspaceDocument((s) => s.purgeExpiredTrashedAssets);
 
   const publicPayload = usePublicAssetLibrary((s) => s.payload);
@@ -201,6 +215,19 @@ export const AssetTrashPanel = memo(function AssetTrashPanel({
       });
     }
 
+    for (const m of filterTrashedAssets(mediaTrash)) {
+      out.push({
+        id: m.id,
+        kind: m.mediaKind,
+        scope: 'private',
+        label: m.label,
+        deletedAt: m.deletedAt,
+        imageUrl: m.mediaKind === 'picture' ? m.url : undefined,
+        videoUrl: m.mediaKind === 'video' ? m.url : undefined,
+        sourceBlockId: m.sourceBlockId,
+      });
+    }
+
     for (const c of filterTrashedAssets(publicPayload.characters)) {
       const item = characterToItem(c, 'public');
       out.push({
@@ -244,6 +271,7 @@ export const AssetTrashPanel = memo(function AssetTrashPanel({
     sounds,
     backlotWorkspace,
     backlotCustom,
+    mediaTrash,
     publicPayload,
     scopeFilter,
     kindFilter,
@@ -254,7 +282,50 @@ export const AssetTrashPanel = memo(function AssetTrashPanel({
       setRestoring(`${entry.scope}:${entry.id}`);
       try {
         let conflict = false;
-        if (entry.scope === 'private') {
+        if (entry.kind === 'picture' || entry.kind === 'video') {
+          const taken = takeMediaTrashItem(entry.id);
+          if (!taken) throw new Error('回收站项不存在');
+          const runtime = useFlowRuntime.getState().runtime;
+          const blockId = taken.sourceBlockId;
+          const node = runtime && blockId ? runtime.getNodes().find((n) => n.id === blockId) : undefined;
+          if (runtime && blockId && node) {
+            const data = (node.data ?? {}) as Record<string, unknown>;
+            if (taken.mediaKind === 'picture') {
+              const urls = Array.isArray(data.previewUrls)
+                ? (data.previewUrls as string[]).filter(Boolean)
+                : [];
+              const next = urls.includes(taken.url) ? urls : [...urls, taken.url];
+              runtime.updateNodeData(blockId, {
+                previewUrls: next,
+                previewUrl: next[0] ?? taken.url,
+              });
+            } else {
+              runtime.updateNodeData(blockId, {
+                videoUrl: taken.url,
+                previewUrl: taken.url,
+              });
+            }
+            toastSuccess(`已恢复「${entry.label}」到原节点`);
+          } else {
+            // 原节点不在：写入私有镜头库，避免媒体丢失
+            useWorkspaceDocument.getState().upsertBacklotWorkspace({
+              id: `restored-${taken.id}`,
+              kind: taken.mediaKind === 'picture' ? 'costume' : 'shot',
+              label: taken.label,
+              promptEn: taken.label,
+              promptZh: '从生成结果回收站恢复',
+              creative:
+                taken.mediaKind === 'picture'
+                  ? { sheetUrl: taken.url, description: '生成结果恢复' }
+                  : { gifUrl: taken.url, purpose: '生成结果恢复' },
+            });
+            toastSuccess(
+              taken.mediaKind === 'picture'
+                ? `已恢复「${entry.label}」到服装素材`
+                : `已恢复「${entry.label}」到镜头素材`,
+            );
+          }
+        } else if (entry.scope === 'private') {
           if (entry.kind === 'character') {
             conflict = restoreCharacter(entry.id).conflictRenamed;
           } else if (entry.kind === 'sound') {
@@ -264,14 +335,17 @@ export const AssetTrashPanel = memo(function AssetTrashPanel({
           } else {
             conflict = restoreBacklotWorkspace(entry.id).conflictRenamed;
           }
+          toastSuccess(conflict ? `已恢复「${entry.label}」（id 冲突已重命名）` : `已恢复「${entry.label}」`);
         } else if (entry.kind === 'character') {
           conflict = publicRestoreCharacter(entry.id).conflictRenamed;
+          toastSuccess(conflict ? `已恢复「${entry.label}」（id 冲突已重命名）` : `已恢复「${entry.label}」`);
         } else if (entry.kind === 'sound') {
           conflict = publicRestoreSound(entry.id).conflictRenamed;
+          toastSuccess(conflict ? `已恢复「${entry.label}」（id 冲突已重命名）` : `已恢复「${entry.label}」`);
         } else {
           conflict = publicRestoreTemplate(entry.id).conflictRenamed;
+          toastSuccess(conflict ? `已恢复「${entry.label}」（id 冲突已重命名）` : `已恢复「${entry.label}」`);
         }
-        toastSuccess(conflict ? `已恢复「${entry.label}」（id 冲突已重命名）` : `已恢复「${entry.label}」`);
       } catch (err) {
         toastError(err instanceof Error ? err.message : '恢复失败');
       } finally {
@@ -279,6 +353,7 @@ export const AssetTrashPanel = memo(function AssetTrashPanel({
       }
     },
     [
+      takeMediaTrashItem,
       restoreCharacter,
       restoreSound,
       restoreBacklotCustom,
@@ -292,6 +367,10 @@ export const AssetTrashPanel = memo(function AssetTrashPanel({
 
   const purgeOne = useCallback(
     (entry: AssetTrashEntry) => {
+      if (entry.kind === 'picture' || entry.kind === 'video') {
+        purgeMediaTrash(entry.id);
+        return;
+      }
       if (entry.scope === 'private') {
         if (entry.kind === 'character') purgeCharacter(entry.id);
         else if (entry.kind === 'sound') purgeSound(entry.id);
@@ -306,6 +385,7 @@ export const AssetTrashPanel = memo(function AssetTrashPanel({
       }
     },
     [
+      purgeMediaTrash,
       purgeCharacter,
       purgeSound,
       purgeBacklotCustom,
@@ -438,7 +518,7 @@ export const AssetTrashPanel = memo(function AssetTrashPanel({
                   <div className="relative aspect-square bg-surface">
                     <TrashMediaThumb entry={item} />
                     <div className="pointer-events-none absolute left-1.5 top-1.5 rounded bg-black/45 px-1.5 py-0.5 text-[8px] text-white/90">
-                      {ASSET_KIND_MENTION_PREFIX[item.kind]}
+                      {KIND_LABEL[item.kind]}
                     </div>
                     <div className="pointer-events-none absolute right-1.5 top-1.5 rounded bg-black/45 px-1.5 py-0.5 text-[8px] text-white/80">
                       剩 {daysRemainingInTrash(item.deletedAt)} 天

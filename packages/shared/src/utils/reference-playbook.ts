@@ -84,6 +84,14 @@ export interface ReferencePack {
   blockReason?: string;
 }
 
+/** 视频生成节点上的热门玩法状态（最小侵入，存在 clip-gen data） */
+export interface ClipGenPlaybookState {
+  playbookId: string;
+  slots: ReferenceSlot[];
+  enforce: boolean;
+  aspect?: string;
+}
+
 function uid(prefix: string): string {
   return `${prefix}-${Math.random().toString(36).slice(2, 8)}`;
 }
@@ -110,7 +118,7 @@ export const BUILTIN_REFERENCE_PLAYBOOKS: ReferencePlaybookDef[] = [
         mediaType: 'image',
         required: true,
         lockDefault: true,
-        count: 2,
+        count: 1,
       },
       {
         role: 'scene',
@@ -118,6 +126,7 @@ export const BUILTIN_REFERENCE_PLAYBOOKS: ReferencePlaybookDef[] = [
         mediaType: 'image',
         required: false,
         lockDefault: true,
+        count: 0,
       },
     ],
   },
@@ -179,7 +188,9 @@ export function lookupReferencePlaybook(id: string): ReferencePlaybookDef | unde
 export function createSlotsFromPlaybook(playbook: ReferencePlaybookDef): ReferenceSlot[] {
   const slots: ReferenceSlot[] = [];
   for (const tpl of playbook.slots) {
-    const n = Math.max(1, tpl.count ?? 1);
+    // count=0：不预创建槽（由 UI 动态添加，如场景）
+    const n = tpl.count ?? 1;
+    if (n <= 0) continue;
     for (let i = 0; i < n; i++) {
       const label = n > 1 ? `${tpl.label}${i + 1}` : tpl.label;
       slots.push({
@@ -498,5 +509,94 @@ export function syncReferenceBoardEmitFields(board: ReferenceBoardData): Record<
         ? ['depth motion lock', 'character identity lock']
         : undefined,
     },
+  };
+}
+
+/** 从 clip-gen 节点 data 读取热门玩法（无则 null，保持普通视频生成） */
+export function readClipGenPlaybook(nodeData: Record<string, unknown>): ClipGenPlaybookState | null {
+  const id = (nodeData.videoPlaybookId as string | undefined)?.trim();
+  if (!id) return null;
+  const def = lookupReferencePlaybook(id);
+  const slots = Array.isArray(nodeData.videoPlaybookSlots)
+    ? (nodeData.videoPlaybookSlots as ReferenceSlot[])
+    : def
+      ? createSlotsFromPlaybook(def)
+      : [];
+  return {
+    playbookId: id,
+    slots,
+    enforce: nodeData.videoPlaybookEnforce !== false,
+    aspect:
+      (nodeData.videoPlaybookAspect as string | undefined) ||
+      (nodeData.aspect as string | undefined) ||
+      def?.defaultAspect,
+  };
+}
+
+/** 选中热门玩法 → clip-gen data patch */
+export function buildClipGenPlaybookPatch(playbookId: string): Record<string, unknown> {
+  const board = switchPlaybook(playbookId);
+  const def = lookupReferencePlaybook(playbookId);
+  return {
+    videoPlaybookId: playbookId,
+    videoPlaybookLabel: def?.title,
+    videoPlaybookSlots: board.slots,
+    videoPlaybookEnforce: board.enforce ?? true,
+    videoPlaybookAspect: board.aspect ?? def?.defaultAspect,
+    ...(def?.defaultAspect ? { aspect: def.defaultAspect } : {}),
+  };
+}
+
+/** 清除热门玩法 → 恢复普通视频生成 */
+export function clearClipGenPlaybookPatch(): Record<string, unknown> {
+  return {
+    videoPlaybookId: undefined,
+    videoPlaybookLabel: undefined,
+    videoPlaybookSlots: undefined,
+    videoPlaybookEnforce: undefined,
+    videoPlaybookAspect: undefined,
+  };
+}
+
+/** clip-gen 玩法 → ReferenceBoardData（装配用） */
+export function clipGenPlaybookToBoard(
+  state: ClipGenPlaybookState,
+  userPromptExtras?: string,
+): ReferenceBoardData {
+  return {
+    playbookId: state.playbookId,
+    slots: state.slots,
+    enforce: state.enforce,
+    aspect: state.aspect,
+    userPromptExtras,
+  };
+}
+
+/**
+ * 从 clip-gen 玩法组装引用包。
+ * 不要求「确认写入」——运行时用用户正文 + 槽位即时装配。
+ */
+export function buildClipGenPlaybookPack(
+  state: ClipGenPlaybookState,
+  userPrompt: string,
+  genPack?: GenPromptPack | null,
+): ReferencePack {
+  const board = clipGenPlaybookToBoard(state, userPrompt);
+  const { prompt, blocked, reason } = assembleReferencePrompt(board, genPack);
+  const withPrompt: ReferenceBoardData = {
+    ...board,
+    assembledPrompt: blocked ? '' : prompt,
+  };
+  const pack = buildReferencePack(withPrompt);
+  if (blocked) {
+    return { ...pack, ready: false, blockReason: reason, assembledPrompt: '' };
+  }
+  // 运行时即时装配：槽位就绪即可，不强制事先确认
+  const check = validateReferenceSlots(state.slots, state.enforce);
+  return {
+    ...pack,
+    assembledPrompt: prompt,
+    ready: check.ready,
+    blockReason: check.reason,
   };
 }

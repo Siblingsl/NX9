@@ -96,7 +96,16 @@ export class GatewayService {
         : kind === 'llm'
           ? cfg.llmBaseUrl || cfg.primaryBaseUrl
           : cfg.primaryBaseUrl;
-    return (override || configured || 'https://api.openai.com/v1').replace(/\/$/, '');
+    let url = (override || configured || 'https://api.openai.com/v1').replace(/\/$/, '');
+    // OpenAI 兼容根路径需带 /v1；设置里常漏写（如 host:port），会导致 /images/generations → 405
+    if (
+      (kind === 'primary' || kind === 'llm') &&
+      !/\/v1$/i.test(url) &&
+      !/\/v1beta$/i.test(url)
+    ) {
+      url = `${url}/v1`;
+    }
+    return url;
   }
 
   private normalizeBaseUrl(value: string | undefined, fallback: string): string {
@@ -236,7 +245,7 @@ export class GatewayService {
     if (!apiKey) throw new BadRequestException('LLM API key not configured');
     const baseUrl = this.baseUrl(undefined, 'llm');
     const cfg = this.settings.getRaw();
-    const model = cfg.llmModel || 'gpt-4o-mini';
+    const model = cfg.llmModel || 'auto';
     const res = await fetch(`${baseUrl}/chat/completions`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
@@ -272,7 +281,7 @@ export class GatewayService {
     if (!apiKey) throw new BadRequestException('LLM API key not configured');
 
     const baseUrl = this.baseUrl(body.baseUrl as string, 'llm');
-    const model = (body.model as string) || this.settings.getRaw().llmModel || 'gpt-4o-mini';
+    const model = (body.model as string) || this.settings.getRaw().llmModel || 'auto';
     const messages = body.messages;
 
     const res = await fetch(`${baseUrl}/chat/completions`, {
@@ -345,14 +354,36 @@ export class GatewayService {
 
     const baseUrl = this.baseUrl(body.baseUrl as string);
 
-    const res = await fetch(`${baseUrl}/images/generations`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({ model, prompt, n, size, response_format: 'b64_json' }),
-    });
+    const refCandidates: string[] = [];
+    if (typeof body.referenceImageUrl === 'string' && body.referenceImageUrl.trim()) {
+      refCandidates.push(body.referenceImageUrl.trim());
+    }
+    if (Array.isArray(body.referenceImageUrls)) {
+      for (const u of body.referenceImageUrls as unknown[]) {
+        if (typeof u === 'string' && u.trim()) refCandidates.push(u.trim());
+      }
+    }
+    const uniqueRefs = [...new Set(refCandidates)].slice(0, 4);
+
+    // gpt-image / 兼容通道：有参考图时走 /images/edits（multipart），纯文生图走 /images/generations
+    const res = uniqueRefs.length
+      ? await this.postOpenAiImageEdits({
+          baseUrl,
+          apiKey,
+          model,
+          prompt,
+          size,
+          n,
+          referenceUrls: uniqueRefs,
+        })
+      : await fetch(`${baseUrl}/images/generations`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${apiKey}`,
+          },
+          body: JSON.stringify({ model, prompt, n, size, response_format: 'b64_json' }),
+        });
 
     if (!res.ok) {
       const text = await res.text();
@@ -391,6 +422,90 @@ export class GatewayService {
       revisedPrompt: json.data[0].revised_prompt,
       status: 'success',
     };
+  }
+
+  /** OpenAI 兼容图生图：multipart POST /images/edits */
+  private async postOpenAiImageEdits(opts: {
+    baseUrl: string;
+    apiKey: string;
+    model: string;
+    prompt: string;
+    size: string;
+    n: number;
+    referenceUrls: string[];
+  }): Promise<Response> {
+    const form = new FormData();
+    form.append('model', opts.model);
+    form.append('prompt', opts.prompt);
+    form.append('n', String(opts.n));
+    form.append('size', opts.size);
+    form.append('response_format', 'b64_json');
+
+    let attached = 0;
+    for (let i = 0; i < opts.referenceUrls.length; i++) {
+      const loaded = await this.loadReferenceImageBytes(opts.referenceUrls[i]);
+      if (!loaded) continue;
+      const filename = `ref-${i + 1}.${loaded.ext}`;
+      form.append('image', new Blob([new Uint8Array(loaded.buf)], { type: loaded.mime }), filename);
+      attached += 1;
+    }
+    if (attached === 0) {
+      throw new BadRequestException('参考图无法读取：请确认 @上游/@生成 对应的图片仍在工作区');
+    }
+
+    return fetch(`${opts.baseUrl}/images/edits`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${opts.apiKey}` },
+      body: form,
+    });
+  }
+
+  private async loadReferenceImageBytes(
+    refUrl: string,
+  ): Promise<{ buf: Buffer; mime: string; ext: string } | null> {
+    const url = refUrl.trim();
+    if (!url) return null;
+    try {
+      if (url.startsWith('data:')) {
+        const m = url.match(/^data:([^;]+);base64,(.+)$/);
+        if (!m) return null;
+        const mime = m[1] || 'image/png';
+        const ext = mime.includes('jpeg') || mime.includes('jpg') ? 'jpg' : mime.includes('webp') ? 'webp' : 'png';
+        return { buf: Buffer.from(m[2], 'base64'), mime, ext };
+      }
+      const local = resolveMediaUrl(url);
+      if (local && existsSync(local)) {
+        const buf = readFileSync(local);
+        const lower = local.toLowerCase();
+        const mime = lower.endsWith('.png')
+          ? 'image/png'
+          : lower.endsWith('.webp')
+            ? 'image/webp'
+            : 'image/jpeg';
+        const ext = mime === 'image/png' ? 'png' : mime === 'image/webp' ? 'webp' : 'jpg';
+        return { buf, mime, ext };
+      }
+      if (/^https?:\/\//i.test(url)) {
+        const imgRes = await fetch(url);
+        if (!imgRes.ok) return null;
+        const buf = Buffer.from(await imgRes.arrayBuffer());
+        const ct = imgRes.headers.get('content-type') || 'image/png';
+        const mime = ct.split(';')[0].trim() || 'image/png';
+        const ext = mime.includes('jpeg') || mime.includes('jpg') ? 'jpg' : mime.includes('webp') ? 'webp' : 'png';
+        return { buf, mime, ext };
+      }
+      // /media/... 相对路径：拼本地服务根再取（resolveMediaUrl 通常已覆盖）
+      if (url.startsWith('/media/') || url.startsWith('media/')) {
+        const abs = `http://127.0.0.1:${PORT}${url.startsWith('/') ? url : `/${url}`}`;
+        const imgRes = await fetch(abs);
+        if (!imgRes.ok) return null;
+        const buf = Buffer.from(await imgRes.arrayBuffer());
+        return { buf, mime: 'image/png', ext: 'png' };
+      }
+    } catch {
+      return null;
+    }
+    return null;
   }
 
   private async proxyImageGemini(

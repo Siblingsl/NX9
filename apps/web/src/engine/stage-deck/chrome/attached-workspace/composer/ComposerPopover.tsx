@@ -74,7 +74,7 @@ export function ComposerPopover({
       />
       <div
         ref={panelRef}
-        className={`nx9-composer-popover fixed z-[321] rounded-xl border border-line/60 bg-surface shadow-panel py-1 nodrag nopan ${
+        className={`nx9-composer-popover nx9-scroll fixed z-[321] rounded-xl border border-line/60 bg-surface shadow-panel py-1 nodrag nopan overflow-y-auto ${
           tone === 'desk' ? 'is-picture-desk' : ''
         }`}
         style={{
@@ -83,7 +83,6 @@ export function ComposerPopover({
           width,
           visibility: pos ? 'visible' : 'hidden',
           maxHeight: 'min(320px, calc(100vh - 24px))',
-          overflowY: 'auto',
         }}
         onMouseDown={stop}
         onPointerDown={stop}

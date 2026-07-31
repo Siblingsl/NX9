@@ -174,3 +174,95 @@ export function lookupPictureModel(id?: string): PictureGenModelDef {
     PICTURE_GEN_MODELS[0]
   );
 }
+
+export function matchPictureModel(id?: string): PictureGenModelDef | undefined {
+  if (!id) return undefined;
+  return PICTURE_GEN_MODELS.find((m) => m.id === id || m.model === id);
+}
+
+/**
+ * 解析实际发请求用的模型定义。
+ * 连接里配置了目录外 model（如 gpt-image-2）时，透传为 OpenAI 兼容通道，
+ * 勿回落到默认 Gemini（否则 UI 选了连接模型却打到另一家）。
+ */
+export function resolvePictureModelForRequest(id?: string): PictureGenModelDef {
+  const hit = matchPictureModel(id);
+  if (hit) return hit;
+  const raw = (id ?? '').trim();
+  if (!raw) return lookupPictureModel();
+  return {
+    id: raw,
+    label: raw,
+    provider: 'openai',
+    model: raw,
+    supportsReference: true,
+    defaultSize: '1024x1024',
+    group: 'openai',
+  };
+}
+
+export interface ConnectedPictureModelOption {
+  id: string;
+  label: string;
+  connectionId: string;
+  /** 连接上保存的原始 model 字符串 */
+  connectionModel: string;
+}
+
+type PictureConnectionLike = {
+  id: string;
+  kind: string;
+  model?: string;
+  label?: string;
+  isActive?: boolean;
+  /** 「自动获取」缓存的可选模型列表 */
+  availableModels?: string[];
+};
+
+/**
+ * 从设置里的图片连接推导图像生成可选模型：
+ * 优先展开连接上已获取的 availableModels；否则回退到默认 model。
+ */
+export function listConnectedPictureModels(
+  connections: PictureConnectionLike[] | undefined | null,
+): ConnectedPictureModelOption[] {
+  const imageConns = (connections ?? []).filter((c) => c.kind === 'image');
+  const out: ConnectedPictureModelOption[] = [];
+  const seen = new Set<string>();
+
+  const pushModel = (c: PictureConnectionLike, rawModel: string) => {
+    const raw = rawModel.trim();
+    if (!raw) return;
+    const def = matchPictureModel(raw);
+    const id = def?.id ?? raw;
+    if (seen.has(id)) return;
+    seen.add(id);
+    const label = def
+      ? def.hint
+        ? `${def.label} · ${def.hint}`
+        : def.label
+      : c.label
+        ? `${c.label} · ${raw}`
+        : raw;
+    out.push({ id, label, connectionId: c.id, connectionModel: raw });
+  };
+
+  const pushConn = (c: PictureConnectionLike) => {
+    const cached = (c.availableModels ?? [])
+      .map((m) => m.trim())
+      .filter(Boolean);
+    if (cached.length > 0) {
+      for (const m of cached) pushModel(c, m);
+      // 默认 model 若不在缓存里，仍补一条，避免当前选中丢失
+      const fallback = (c.model ?? '').trim();
+      if (fallback && !cached.includes(fallback)) pushModel(c, fallback);
+      return;
+    }
+    pushModel(c, c.model ?? '');
+  };
+
+  // 当前连接优先
+  for (const c of imageConns.filter((x) => x.isActive)) pushConn(c);
+  for (const c of imageConns.filter((x) => !x.isActive)) pushConn(c);
+  return out;
+}

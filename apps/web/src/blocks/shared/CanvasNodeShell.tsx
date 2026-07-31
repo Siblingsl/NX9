@@ -10,6 +10,8 @@ import { isSurfaceEnabled } from '../../config/product-surface';
 interface CanvasNodeShellProps extends NodeProps {
   alias?: string;
   onRunOverride?: () => void;
+  /** 点击预览图打开（如画布钉图放大） */
+  onPreviewOpen?: () => void;
 }
 
 /**
@@ -21,11 +23,12 @@ export const CanvasNodeShell = memo(function CanvasNodeShell(props: CanvasNodeSh
   const kind = props.type ?? 'prompt';
   const data = (props.data ?? {}) as Record<string, unknown>;
   const interaction = resolveNodeInteraction(kind);
+  const workspace = resolveAttachedWorkspace(kind);
   const canvasFirst = isSurfaceEnabled('canvasFirst');
   const canOpenWorkspace =
     isSurfaceEnabled('promptBar') &&
     Boolean(interaction.opensPromptBar) &&
-    Boolean(resolveAttachedWorkspace(kind)?.attachToNode);
+    Boolean(workspace?.attachToNode);
 
   const handleRun = useCallback(async () => {
     if (!runtime || !props.id) return;
@@ -49,10 +52,11 @@ export const CanvasNodeShell = memo(function CanvasNodeShell(props: CanvasNodeSh
     }
   }, [runtime, props.id]);
 
-  const showRun =
+  const showRunByClass =
     interaction.class === 'input' ||
     interaction.class === 'ai' ||
     interaction.class === 'output';
+  const showRun = workspace ? workspace.showRun && showRunByClass : showRunByClass;
 
   return (
     <div className={canvasFirst ? 'relative nx9-node-with-prompt' : undefined}>
@@ -63,10 +67,11 @@ export const CanvasNodeShell = memo(function CanvasNodeShell(props: CanvasNodeSh
           data={data}
           alias={props.alias}
           onRun={showRun ? (props.onRunOverride ?? (() => void handleRun())) : undefined}
+          onPreviewOpen={props.onPreviewOpen}
           canOpenWorkspace={canOpenWorkspace}
         />
       </BlockShell>
-      {canvasFirst && (resolveAttachedWorkspace(kind)?.attachToNode ?? false) && (
+      {canvasFirst && (workspace?.attachToNode ?? false) && (
         <NodePromptBarAnchor blockId={props.id} kind={kind} selected={props.selected} />
       )}
     </div>
