@@ -160,6 +160,8 @@ export interface ScriptBreakdownShot {
   negativePrompt?: string;
   referenceImageUrl?: string | null;
   previewImageUrl?: string | null;
+  /** 构图模板 id；由故事板构图编辑器选择，控制线稿/构图布局 */
+  compositionTemplateId?: string | null;
   status: 'draft' | 'previewing' | 'approved';
 }
 

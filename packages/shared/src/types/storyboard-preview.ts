@@ -110,6 +110,12 @@ export interface StoryboardPreviewPayload {
   contactSheetUrl?: string | null;
   /** 合成时参与的帧签名（imageUrl 列表），变化后需重合成 */
   contactSheetSignature?: string | null;
+  /** 按集存储的故事板大图（支持多集不串图） */
+  contactSheetsByEpisode?: Record<string, {
+    url: string;
+    signature: string;
+    updatedAt?: string;
+  }>;
   /** 可加载至 3D 导演台的全景环境。 */
   panorama720?: StoryboardPreviewPanorama720 | null;
   /** 不同分集/场景独立保存，panorama720 是当前所选场景投影。 */
@@ -343,4 +349,15 @@ export function canRegenerateFrame(frame: StoryboardPreviewFrame): boolean {
 export function canConfirmStoryboardPreview(payload: StoryboardPreviewPayload): boolean {
   if (payload.frames.length === 0) return false;
   return payload.frames.every((f) => f.status === 'success' || f.status === 'locked');
+}
+
+export function getEpisodeContactSheet(
+  preview: StoryboardPreviewPayload | undefined,
+  episodeId: string | null,
+): { url: string | null; signature: string | null } {
+  if (!preview || !episodeId) return { url: null, signature: null };
+  const byEp = preview.contactSheetsByEpisode?.[episodeId];
+  if (byEp?.url) return { url: byEp.url, signature: byEp.signature };
+  if (preview.contactSheetUrl) return { url: preview.contactSheetUrl, signature: preview.contactSheetSignature ?? null };
+  return { url: null, signature: null };
 }

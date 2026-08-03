@@ -16,6 +16,7 @@ export interface EpisodeQueueBarProps {
   onResume: () => void;
   onSkip: () => void;
   onCancel: () => void;
+  onRetryFailed?: () => void;
 }
 
 export function EpisodeQueueBar({
@@ -26,6 +27,7 @@ export function EpisodeQueueBar({
   onResume,
   onSkip,
   onCancel,
+  onRetryFailed,
 }: EpisodeQueueBarProps) {
   const isRunning = state.status === 'running';
   const isPaused = state.status === 'paused';
@@ -150,6 +152,15 @@ export function EpisodeQueueBar({
             </span>
           )}
         </div>
+      )}
+      {isDone && Object.keys(state.errors).length > 0 && onRetryFailed && (
+        <button
+          type="button"
+          onClick={onRetryFailed}
+          className="w-full rounded-md border border-warn/30 bg-warn/5 text-warn py-1 text-[9px] hover:bg-warn/10 mt-1"
+        >
+          只重试失败 · {Object.keys(state.errors).length} 集
+        </button>
       )}
     </div>
   );

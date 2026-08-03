@@ -385,8 +385,52 @@ export function splitShotInBreakdown(
   return next;
 }
 
+export function removeShotFromBreakdown(
+  payload: ScriptBreakdownPayload,
+  shotId: string,
+): ScriptBreakdownPayload {
+  const next = clonePayload(payload);
+  const pos = findEpisodeForShot(next, shotId);
+  if (!pos) return payload;
+  const episode = next.episodes[pos.episodeIndex];
+  if (episode.shots.length <= 1) return payload;
+  episode.shots.splice(pos.shotIndex, 1);
+  episode.shots.forEach((s, i) => { s.index = i + 1; });
+  return next;
+}
+
+export function reorderShotsInBreakdown(
+  payload: ScriptBreakdownPayload,
+  episodeId: string,
+  orderedShotIds: string[],
+): ScriptBreakdownPayload {
+  const next = clonePayload(payload);
+  const episode = next.episodes.find((ep) => ep.id === episodeId);
+  if (!episode || episode.shots.length < 2) return payload;
+  const ordered = orderedShotIds
+    .map((id) => episode.shots.find((s) => s.id === id))
+    .filter(Boolean) as ScriptBreakdownShot[];
+  if (ordered.length !== episode.shots.length) return payload;
+  episode.shots = ordered;
+  episode.shots.forEach((s, i) => { s.index = i + 1; });
+  return next;
+}
+
 export function suggestedTrialCap(episodeShotCount: number): number {
   return Math.min(6, Math.max(2, Math.ceil(episodeShotCount * 0.2)));
+}
+
+export function stripEpisodeConfirmation(
+  data: Record<string, unknown> | null | undefined,
+  episodeId: string | null,
+): { gridConfirmed: boolean; confirmedEpisodeIds: string[] } {
+  const ids = Array.isArray((data as any)?.confirmedEpisodeIds)
+    ? ((data as any).confirmedEpisodeIds as string[]).filter((id: string) => id !== episodeId)
+    : [];
+  return {
+    gridConfirmed: false,
+    confirmedEpisodeIds: ids,
+  };
 }
 
 export function assembleScreenplaySourceText(pkg: ScreenplayPackage): string {

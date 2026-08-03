@@ -250,6 +250,7 @@ export {
   storyboardPreviewSummary,
   canRegenerateFrame,
   canConfirmStoryboardPreview,
+  getEpisodeContactSheet,
 } from './types/storyboard-preview';
 export {
   buildStoryboardFramePrompt,

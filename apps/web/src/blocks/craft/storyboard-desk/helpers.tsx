@@ -9,6 +9,8 @@ import {
   type ScriptBreakdownShot,
 } from '@nx9/shared';
 
+export type StudioTab = 'breakdown' | 'grid' | 'compose' | 'handoff';
+
 export function compact(text: string, max = 68) {
   const t = text.replace(/\s+/g, ' ').trim();
   return t.length > max ? `${t.slice(0, max)}…` : t;

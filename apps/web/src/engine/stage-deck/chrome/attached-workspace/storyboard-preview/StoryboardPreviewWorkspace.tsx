@@ -58,6 +58,8 @@ export interface StoryboardPreviewWorkspaceProps {
   onCollapse?: () => void;
   /** 内嵌于分镜台 ScreenModal 时隐藏底栏拖拽头，加高内容区 */
   embedded?: boolean;
+  /** X-16: 按当前集过滤 frames，仅展示属于这些 shotId 的帧 */
+  episodeShotIds?: Set<string>;
 }
 
 export function StoryboardPreviewWorkspace({
@@ -65,6 +67,7 @@ export function StoryboardPreviewWorkspace({
   kind,
   onCollapse,
   embedded = false,
+  episodeShotIds,
 }: StoryboardPreviewWorkspaceProps) {
   const collapsePromptBar = useDeckUi((s) => s.collapsePromptBar);
   const appendLog = useActivityLog((s) => s.append);
@@ -100,7 +103,21 @@ export function StoryboardPreviewWorkspace({
   const payload = actions.readPayload(data);
   const meta = lookupBlock(kind);
   const status = (data.status as string) ?? 'idle';
+  /** X-16: 按当前集过滤 frames */
+  const displayFrames = useMemo(
+    () => (episodeShotIds && episodeShotIds.size > 0
+      ? payload.frames.filter((f) => f.sourceShotId && episodeShotIds.has(f.sourceShotId))
+      : payload.frames),
+    [payload.frames, episodeShotIds],
+  );
   const summary = storyboardPreviewSummary(payload);
+  const displaySummary = useMemo(() => {
+    if (!episodeShotIds || episodeShotIds.size === 0) return summary;
+    const total = displayFrames.length;
+    const success = displayFrames.filter((f) => f.status === 'success' || f.status === 'locked').length;
+    const locked = displayFrames.filter((f) => f.locked).length;
+    return { total, success, locked, ready: total > 0 && success === total && Boolean(payload?.confirmed) };
+  }, [displayFrames, episodeShotIds, summary, payload?.confirmed]);
   const canConfirm = canConfirmStoryboardPreview(payload);
   const pictureNode = actions.connectedPictureNode();
   const director3dNode = actions.connectedDirector3dNode();
@@ -142,15 +159,15 @@ export function StoryboardPreviewWorkspace({
   }, [actions.activeEpisodeId]);
 
   const framesByScene = useMemo(() => {
-    const map = new Map<string, typeof payload.frames>();
-    for (const f of payload.frames) {
+    const map = new Map<string, typeof displayFrames>();
+    for (const f of displayFrames) {
       const key = f.sceneCode ?? f.sceneId ?? '未分场';
       const list = map.get(key) ?? [];
       list.push(f);
       map.set(key, list);
     }
     return map;
-  }, [payload.frames]);
+  }, [displayFrames]);
 
   const handleCollapse = useCallback(() => {
     collapsePromptBar();
@@ -311,8 +328,8 @@ export function StoryboardPreviewWorkspace({
   const lowCount = report?.suggestRegenerateFrameIds?.length
     ?? payload.frames.filter((f) => f.suggestRegenerate).length;
   const scoreLow = report ? (report.overallScore ?? 0) < KEYFRAME_SCORE_THRESHOLD : false;
-  const hasFrames = payload.frames.length > 0;
-  const missingCount = Math.max(0, summary.total - summary.success);
+  const hasFrames = displayFrames.length > 0;
+  const missingCount = Math.max(0, (episodeShotIds && episodeShotIds.size > 0 ? displaySummary : summary).total - (episodeShotIds && episodeShotIds.size > 0 ? displaySummary : summary).success);
   const readyImageCount = payload.frames.filter((f) => Boolean(f.imageUrl)).length;
   const contactSig = useMemo(
     () => buildContactSheetSignature(payload.frames, payload.gridColumns),
@@ -432,15 +449,15 @@ export function StoryboardPreviewWorkspace({
     </div>
   ) : payload.viewMode === 'timeline' ? (
     <StoryboardPreviewGrid
-      frames={[...payload.frames].sort((a, b) => a.startSec - b.startSec)}
+      frames={[...displayFrames].sort((a, b) => a.startSec - b.startSec)}
       columns={Math.min(4, Math.max(2, payload.gridColumns)) as StoryboardPreviewGridColumns}
       {...gridProps}
     />
   ) : gridEditMode ? (
-    <StoryboardPreviewGrid frames={payload.frames} columns={payload.gridColumns} {...gridProps} />
+    <StoryboardPreviewGrid frames={displayFrames} columns={payload.gridColumns} {...gridProps} />
   ) : (
     <StoryboardContactSheet
-      frames={payload.frames}
+      frames={displayFrames}
       columns={payload.gridColumns}
       shotById={shotById}
       showGuide={guideShowOverlay}
@@ -481,10 +498,10 @@ export function StoryboardPreviewWorkspace({
 
         <div className="kp__chips">
           <span className="kp__chip is-accent">
-            {summary.success}/{summary.total || 0} 已出
+            {displaySummary.success}/{displaySummary.total || 0} 已出
           </span>
           {missingCount > 0 && <span className="kp__chip is-warn">缺 {missingCount}</span>}
-          {summary.locked > 0 && <span className="kp__chip">锁 {summary.locked}</span>}
+          {displaySummary.locked > 0 && <span className="kp__chip">锁 {displaySummary.locked}</span>}
           <span className={`kp__chip ${pictureNode ? 'is-ok' : 'is-warn'}`}>
             {pictureNode ? '图像已连' : '未连图像'}
           </span>
@@ -497,7 +514,7 @@ export function StoryboardPreviewWorkspace({
               资产待绑 {unboundCharacterShotCount + unboundSceneShotCount}
             </span>
           )}
-          {report && (
+          {report && !embedded && (
             <span className={`kp__chip ${scoreLow ? 'is-warn' : 'is-ok'}`}>
               评分 {report.overallScore}
             </span>
@@ -515,18 +532,20 @@ export function StoryboardPreviewWorkspace({
             <Play size={11} fill="currentColor" />
             {hasFrames && missingCount > 0 ? `${embedded ? '补线稿' : '补生成'} · ${missingCount}` : embedded ? '全出线稿' : '生成全部'}
           </button>
-          <button
-            type="button"
-            className="kp__btn"
-            disabled={status === 'running' || !hasFrames}
-            onMouseDown={stop}
-            onClick={() => void actions.checkConsistency('full')}
-            title={`角色+场景+其它 · 低于 ${KEYFRAME_SCORE_THRESHOLD} 建议重生成`}
-          >
-            <Sparkles size={12} />
-            评分
-          </button>
-          {lowCount > 0 && (
+          {!embedded && (
+            <button
+              type="button"
+              className="kp__btn"
+              disabled={status === 'running' || !hasFrames}
+              onMouseDown={stop}
+              onClick={() => void actions.checkConsistency('full')}
+              title={`角色+场景+其它 · 低于 ${KEYFRAME_SCORE_THRESHOLD} 建议重生成`}
+            >
+              <Sparkles size={12} />
+              评分
+            </button>
+          )}
+          {lowCount > 0 && !embedded && (
             <button
               type="button"
               className="kp__btn is-warn"
@@ -551,7 +570,7 @@ export function StoryboardPreviewWorkspace({
         </div>
       </div>
 
-      {report && (
+      {report && !embedded && (
         <div className={`kp__score ${scoreLow ? 'is-low' : 'is-ok'}`}>
           <span className="kp__score-main">
             综合 {report.overallScore}/100
@@ -789,7 +808,7 @@ export function StoryboardPreviewWorkspace({
         {payload.viewMode === 'timeline' && hasFrames && !selectedFrame && !directorPanelOpen && (
           <div className="kp__timeline">
             <StoryboardPreviewTimeline
-              frames={payload.frames}
+              frames={displayFrames}
               totalDurationSec={payload.totalDurationSec}
               selectedFrameId={payload.selectedFrameId}
               onSelect={actions.selectFrame}
@@ -801,21 +820,10 @@ export function StoryboardPreviewWorkspace({
 
       <div className="kp__foot">
         <p className="kp__foot-meta">
-          {payload.frames.length} 镜 · {payload.totalDurationSec.toFixed(0)}s
+          {displayFrames.length} 镜 · {payload.totalDurationSec.toFixed(0)}s
           {pictureNode ? ' · 出图经图像生成节点' : ' · 请连接图像生成'}
           {selectedIds.size > 0 ? ` · 已选 ${selectedIds.size}` : ''}
         </p>
-        {embedded && (
-          <button
-            type="button"
-            className="kp__btn is-solid"
-            disabled={!canConfirm || status === 'running' || generating}
-            onMouseDown={stop}
-            onClick={actions.confirmAll}
-          >
-            提交分镜批审
-          </button>
-        )}
       </div>
     </div>
   );

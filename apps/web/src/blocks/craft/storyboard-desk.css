@@ -1612,3 +1612,116 @@
   border-color: #a8a29e;
   color: #e7e5e4;
 }
+
+/* X-01: Stale Banner */
+.sg3-stale-banner {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  padding: 8px 14px;
+  margin: 0 10px 8px;
+  background: #451a03;
+  border: 1px solid #b45309;
+  border-radius: 10px;
+  color: #fdba74;
+  font-size: 12px;
+  line-height: 1.45;
+}
+.sg3-stale-banner__icon {
+  flex-shrink: 0;
+}
+.sg3-stale-banner__msg {
+  flex: 1;
+  min-width: 180px;
+  font-weight: 650;
+}
+.sg3-stale-banner__acts {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.sg3-stale-banner__acts .sg3-btn--ghost {
+  font-size: 11px;
+  padding: 2px 10px;
+  border-radius: 6px;
+  border: 1px solid #b45309;
+  background: #451a03;
+  color: #fdba74;
+}
+.sg3-stale-banner__acts .sg3-btn--ghost:hover:not(:disabled) {
+  background: #5c2a0c;
+  color: #fcd9b8;
+}
+
+/* G-01/X-05: 镜卡片 ⋯ 菜单 */
+.sg-story-cell__menu-wrap {
+  position: relative;
+}
+.sg-story-cell__menu-drop {
+  position: absolute;
+  bottom: 100%;
+  right: 0;
+  margin-bottom: 4px;
+  background: #1c1917;
+  border: 1px solid #57534e;
+  border-radius: 8px;
+  padding: 4px;
+  min-width: 100px;
+  z-index: 30;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.35);
+}
+.sg-story-cell__menu-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 5px 10px;
+  border: none;
+  background: transparent;
+  color: #e7e5e4;
+  font-size: 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.sg-story-cell__menu-item:hover {
+  background: #292524;
+}
+.sg-story-cell__menu-item--danger {
+  color: #fca5a5;
+}
+.sg-story-cell__menu-item--danger:hover {
+  background: #450a0a;
+  color: #fecaca;
+}
+.sg-story-cell__menu-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 29;
+}
+
+/* X-02: 确认撤销 Banner */
+.sg3-unconfirm-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  background: rgba(180, 120, 20, 0.18);
+  border-bottom: 1px solid rgba(180, 120, 20, 0.35);
+  font-size: 12px;
+  color: #fcd34d;
+}
+.sg3-unconfirm-banner__msg {
+  flex: 1;
+  color: #fcd34d;
+}
+.sg3-unconfirm-banner .sg3-btn--ghost {
+  font-size: 11px;
+  padding: 2px 8px;
+  color: #fcd34d;
+}
+.sg3-unconfirm-banner .sg3-btn--ghost:hover {
+  background: rgba(180, 120, 20, 0.3);
+  color: #fef08a;
+}

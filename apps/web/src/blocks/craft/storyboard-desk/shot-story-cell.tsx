@@ -1,30 +1,46 @@
 import { useCallback, useRef, useState } from 'react';
-import { ImagePlus, Loader2, Pencil } from 'lucide-react';
+import { Ellipsis, ImagePlus, Loader2, Pencil, Sparkles, Trash2 } from 'lucide-react';
 import type { ScriptBreakdownShot } from '@nx9/shared';
 import { api } from '../../../api/client';
+import { confirmDelete } from '../../../stores/confirm-dialog';
 import { shotDialogueLine } from './helpers';
 
 export function ShotStoryCell({
   shot,
   selected,
+  checked,
   storyboardUrl,
   generating,
+  deskBusy,
   onSelect,
+  onToggleCheck,
   onUpload,
   onGenerateLineArt,
   onEdit,
+  onDelete,
+  onClearLineArt,
+  onDragStart,
+  onCopy,
 }: {
   shot: ScriptBreakdownShot;
   selected?: boolean;
+  checked?: boolean;
   storyboardUrl?: string | null;
   generating?: boolean;
+  deskBusy?: boolean;
   onSelect: () => void;
+  onToggleCheck?: () => void;
   onUpload: (url: string) => void;
   onGenerateLineArt: () => void;
   onEdit: () => void;
+  onDelete?: () => void;
+  onDragStart?: (e: React.DragEvent) => void;
+  onClearLineArt?: () => void;
+  onCopy?: () => void;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
   const url = shot.previewImageUrl || shot.referenceImageUrl || storyboardUrl || null;
   const busy = uploading || generating;
   const line = shotDialogueLine(shot);
@@ -60,6 +76,9 @@ export function ShotStoryCell({
   return (
     <article
       className={`sg-story-cell${selected ? ' is-on' : ''}${busy ? ' is-run' : ''}`}
+      data-shot-id={shot.id}
+      draggable
+      onDragStart={onDragStart}
     >
       <input
         ref={inputRef}
@@ -71,12 +90,26 @@ export function ShotStoryCell({
           if (f) void handleFile(f);
         }}
       />
+      {onToggleCheck ? (
+        <label className="sg-story-cell__check" onClick={(e) => e.stopPropagation()}>
+          <input type="checkbox" checked={checked ?? false} onChange={onToggleCheck} />
+        </label>
+      ) : null}
       <button type="button" className="sg-story-cell__hit" onClick={onSelect}>
         <div
           className="sg-story-cell__media"
-          onClick={(e) => {
+          onClick={async (e) => {
             e.stopPropagation();
-            if (!busy) inputRef.current?.click();
+            if (busy) return;
+            if (url) {
+              const ok = await confirmDelete({
+                title: '覆盖已有图片？',
+                description: '当前镜已有已上传或生成的图。继续将覆盖。',
+                confirmLabel: '继续覆盖',
+              });
+              if (!ok) return;
+            }
+            inputRef.current?.click();
           }}
         >
           {busy ? (
@@ -105,12 +138,68 @@ export function ShotStoryCell({
         </div>
       </button>
       <div className="sg-story-cell__acts">
-        <button type="button" className="sg-story-cell__act" title="生成线稿构图" disabled={busy} onClick={onGenerateLineArt}>
-          <Pencil size={11} />线稿
+        <button type="button" className="sg-story-cell__act" title="快捷出线稿 · 批量主路径在构图" disabled={busy || deskBusy} onClick={onGenerateLineArt}>
+          <Sparkles size={11} />线稿
         </button>
         <button type="button" className="sg-story-cell__act" title="编辑镜头字段" onClick={onEdit}>
           <Pencil size={11} />编辑
         </button>
+        {onDelete ? (
+          <span className="sg-story-cell__menu-wrap">
+            <button
+              type="button"
+              className="sg-story-cell__act"
+              title="更多"
+              onClick={(e) => { e.stopPropagation(); setMenuOpen((v) => !v); }}
+            >
+              <Ellipsis size={11} />
+            </button>
+            {menuOpen ? (
+              <>
+                <div className="sg-story-cell__menu-drop" onClick={() => setMenuOpen(false)}>
+                  {onClearLineArt ? (
+                    <button
+                      type="button"
+                      className="sg-story-cell__menu-item"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setMenuOpen(false);
+                        onClearLineArt();
+                      }}
+                    >
+                      清除线稿
+                    </button>
+                    ) : null}
+                  {onCopy ? (
+                    <button
+                      type="button"
+                      className="sg-story-cell__menu-item"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setMenuOpen(false);
+                        onCopy();
+                      }}
+                    >
+                      复制镜
+                    </button>
+                  ) : null}
+                  <button
+                    type="button"
+                    className="sg-story-cell__menu-item sg-story-cell__menu-item--danger"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setMenuOpen(false);
+                      onDelete();
+                    }}
+                  >
+                    <Trash2 size={12} /> 删镜
+                  </button>
+                </div>
+                <div className="sg-story-cell__menu-backdrop" onClick={() => setMenuOpen(false)} />
+              </>
+            ) : null}
+          </span>
+        ) : null}
       </div>
     </article>
   );
