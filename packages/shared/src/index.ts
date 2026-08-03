@@ -157,6 +157,12 @@ export {
   enrichBibleScenesFromPackage,
   migrateDialogueSheetDataToPackage,
   applyPackagePatch,
+  summarizePackagePatch,
+  removeScreenplayEpisode,
+  insertEmptyEpisodeAfter,
+  lintScreenplayFormat,
+  findReplaceInEpisode,
+  renameCharacterInPackage,
   extractScreenplayExcerpts,
   buildNarrativeConsistencyDiagnostics,
   DEFAULT_SCRIPT_DESK_SKILL_PROMPTS,
@@ -611,6 +617,9 @@ export {
   isScriptDeskFolderEmpty,
   trashScriptDeskFolder,
   restoreScriptDeskFolderFromTrash,
+  findMatchingWorkingDraft,
+  upsertScriptDeskWorkingDraft,
+  renameScriptDeskDraft,
   type ScriptDeskFolderSnapshot,
 } from './utils/script-desk-archives';
 export {

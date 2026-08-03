@@ -949,3 +949,13 @@
     max-height: 160px;
   }
 }
+
+/* ── H-04: 拆镜按钮高亮 pulse ── */
+.sg3-btn--handoff {
+  animation: sg3-handoff-pulse 1.2s ease-in-out 3;
+  box-shadow: 0 0 0 3px var(--desk-accent-soft, rgba(100, 160, 240, 0.35)), 0 0 12px var(--desk-accent, #6090e0);
+}
+@keyframes sg3-handoff-pulse {
+  0%, 100% { box-shadow: 0 0 0 3px var(--desk-accent-soft, rgba(100, 160, 240, 0.35)), 0 0 8px var(--desk-accent, #6090e0); }
+  50% { box-shadow: 0 0 0 6px var(--desk-accent-soft, rgba(100, 160, 240, 0.35)), 0 0 20px var(--desk-accent, #6090e0); }
+}

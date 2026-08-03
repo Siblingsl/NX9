@@ -96,8 +96,8 @@ export const AssetReadinessPanel = memo(function AssetReadinessPanel({
 
   if (!report) {
     return (
-      <div className="flex items-center justify-center py-4">
-        <Loader2 size={14} className="animate-spin text-ink/30" />
+      <div className="sd2-ready-loading">
+        <Loader2 size={14} className="sd2-spin" />
       </div>
     );
   }
@@ -105,35 +105,31 @@ export const AssetReadinessPanel = memo(function AssetReadinessPanel({
   const hasMissing = report.missingCharacters.length > 0 || report.missingScenes.length > 0;
 
   return (
-    <div className="space-y-3" data-block-id={blockId}>
-      <div className="flex items-center justify-between">
-        <span className="text-[11px] font-medium text-ink/60">Bible 设定就绪检查</span>
+    <div className="sd2-ready-body" data-block-id={blockId}>
+      <div className="sd2-ready-header">
+        <span className="sd2-ready-header__label">Bible 设定就绪检查</span>
         {report.ready ? (
-          <span className="flex items-center gap-1 text-[10px] text-ok">
+          <span className="sd2-ready-status sd2-ready-status--ok">
             <Check size={12} /> 已就绪
           </span>
         ) : (
-          <span className="flex items-center gap-1 text-[10px] text-warn">
+          <span className="sd2-ready-status sd2-ready-status--warn">
             <AlertTriangle size={12} /> 有缺口
           </span>
         )}
       </div>
 
       {/* 角色 */}
-      <div className="space-y-1">
-        <p className="text-[10px] text-ink/50">角色（{report.requiredCharacters.length}）</p>
+      <div className="sd2-ready-section">
+        <p className="sd2-ready-section__title">角色（{report.requiredCharacters.length}）</p>
         {report.requiredCharacters.length === 0 ? (
-          <p className="text-[9px] text-ink/30">Bible 中无角色</p>
+          <p className="sd2-ready-section__empty">Bible 中无角色</p>
         ) : (
-          <div className="flex flex-wrap gap-1">
+          <div className="sd2-ready-tags">
             {report.requiredCharacters.map((name) => (
               <span
                 key={name}
-                className={`text-[9px] px-1.5 py-0.5 rounded-full ${
-                  report.missingCharacters.includes(name)
-                    ? 'bg-warn/10 text-warn'
-                    : 'bg-ok/10 text-ok'
-                }`}
+                className={`sd2-ready-tag ${report.missingCharacters.includes(name) ? 'sd2-ready-tag--warn' : 'sd2-ready-tag--ok'}`}
               >
                 {name}
                 {report.missingCharacters.includes(name) ? ' ⚠' : ' ✓'}
@@ -144,20 +140,16 @@ export const AssetReadinessPanel = memo(function AssetReadinessPanel({
       </div>
 
       {/* 场景 */}
-      <div className="space-y-1">
-        <p className="text-[10px] text-ink/50">场景（{report.requiredScenes.length}）</p>
+      <div className="sd2-ready-section">
+        <p className="sd2-ready-section__title">场景（{report.requiredScenes.length}）</p>
         {report.requiredScenes.length === 0 ? (
-          <p className="text-[9px] text-ink/30">Bible 中无场景</p>
+          <p className="sd2-ready-section__empty">Bible 中无场景</p>
         ) : (
-          <div className="flex flex-wrap gap-1">
+          <div className="sd2-ready-tags">
             {report.requiredScenes.map((name) => (
               <span
                 key={name}
-                className={`text-[9px] px-1.5 py-0.5 rounded-full ${
-                  report.missingScenes.includes(name)
-                    ? 'bg-warn/10 text-warn'
-                    : 'bg-ok/10 text-ok'
-                }`}
+                className={`sd2-ready-tag ${report.missingScenes.includes(name) ? 'sd2-ready-tag--warn' : 'sd2-ready-tag--ok'}`}
               >
                 {name}
                 {report.missingScenes.includes(name) ? ' ⚠' : ' ✓'}
@@ -169,17 +161,17 @@ export const AssetReadinessPanel = memo(function AssetReadinessPanel({
 
       {/* 服装/道具（F-051） */}
       {report.missingCostumes && report.missingCostumes.length > 0 && (
-        <div className="space-y-1">
-          <p className="text-[10px] text-ink/50">
+        <div className="sd2-ready-section">
+          <p className="sd2-ready-section__title">
             服装参考（点击缺口打开服装库）
           </p>
-          <div className="flex flex-wrap gap-1">
+          <div className="sd2-ready-tags">
             {report.missingCostumes.map((name) => (
               <button
                 type="button"
                 key={name}
                 onClick={() => openAssetAt({ tab: 'costume' })}
-                className="text-[9px] px-1.5 py-0.5 rounded-full bg-warn/10 text-warn hover:bg-warn/20 cursor-pointer transition-colors"
+                className="sd2-ready-tag sd2-ready-tag--warn sd2-ready-tag--clickable"
                 title="点击打开服装库"
               >
                 {name} ⚠
@@ -189,17 +181,17 @@ export const AssetReadinessPanel = memo(function AssetReadinessPanel({
         </div>
       )}
       {report.missingProps && report.missingProps.length > 0 && (
-        <div className="space-y-1">
-          <p className="text-[10px] text-ink/50">
+        <div className="sd2-ready-section">
+          <p className="sd2-ready-section__title">
             道具参考（点击缺口打开场景库）
           </p>
-          <div className="flex flex-wrap gap-1">
+          <div className="sd2-ready-tags">
             {report.missingProps.map((name) => (
               <button
                 type="button"
                 key={name}
                 onClick={() => openAssetAt({ tab: 'scene' })}
-                className="text-[9px] px-1.5 py-0.5 rounded-full bg-warn/10 text-warn hover:bg-warn/20 cursor-pointer transition-colors"
+                className="sd2-ready-tag sd2-ready-tag--warn sd2-ready-tag--clickable"
                 title="点击打开场景库"
               >
                 {name} ⚠
@@ -210,31 +202,31 @@ export const AssetReadinessPanel = memo(function AssetReadinessPanel({
       )}
 
       {/* 操作按钮 */}
-      <div className="flex flex-wrap gap-2">
+      <div className="sd2-ready-actions">
         {hasMissing && (
           <button
             type="button"
             disabled={syncing}
             onClick={handleSync}
-            className="flex-1 rounded-lg bg-brand text-white text-[10px] py-1.5 disabled:opacity-50 flex items-center justify-center gap-1"
+            className="sd2-btn sd2-btn--primary"
           >
-            {syncing ? <Loader2 size={12} className="animate-spin" /> : <Sparkles size={12} />}
+            {syncing ? <Loader2 size={12} className="sd-spin" /> : <Sparkles size={12} />}
             {syncing ? '同步中…' : '同步缺失项到库'}
           </button>
         )}
         <button
           type="button"
           onClick={() => openAssetAt({ tab: 'character' })}
-          className="rounded-lg border border-ink/15 text-ink/70 text-[10px] px-2 py-1.5 flex items-center justify-center gap-1 hover:bg-ink/5"
+          className="sd2-btn sd2-btn--ghost"
         >
           <Library size={12} />
-          打开资产库
+          打开素材库
         </button>
         {!hasMissing || report.ready ? (
           <button
             type="button"
             onClick={() => handleMarkReady(false)}
-            className="flex-1 rounded-lg border border-ok/30 text-ok text-[10px] py-1.5 flex items-center justify-center gap-1 hover:bg-ok/5"
+            className="sd2-btn sd2-btn--ghost"
           >
             <Flag size={12} />
             标记设定就绪
@@ -243,7 +235,7 @@ export const AssetReadinessPanel = memo(function AssetReadinessPanel({
           <button
             type="button"
             onClick={() => handleMarkReady(true)}
-            className="flex-1 rounded-lg border border-warn/30 text-warn text-[10px] py-1.5 flex items-center justify-center gap-1 hover:bg-warn/5"
+            className="sd2-btn sd2-btn--ghost"
             title="有缺口时也可强制确认就绪"
           >
             <Flag size={12} />

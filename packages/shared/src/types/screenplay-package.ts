@@ -111,6 +111,8 @@ export interface ScriptDeskAgentMessage {
   /** 待应用的结构化补丁（JSON 字符串或对象） */
   pendingPatch?: Partial<ScreenplayPackage> | Record<string, unknown>;
   applied?: boolean;
+  /** C-02: 标记为已丢弃 */
+  discarded?: boolean;
 }
 
 export interface ScriptDeskAgentSession {
@@ -953,6 +955,223 @@ export function applyPackagePatch(
     next = unconfirmIfEdited(next);
   }
   return next;
+}
+
+/** F-03: 对比 package 与 patch，生成供用户确认的变更摘要列表 */
+
+/** E-01: 删除指定集并重排 index（1 起始） */
+export function removeScreenplayEpisode(
+  pkg: ScreenplayPackage,
+  episodeId: string,
+): ScreenplayPackage {
+  const episodes = pkg.screenplay.episodes
+    .filter((ep) => ep.id !== episodeId)
+    .sort((a, b) => a.index - b.index)
+    .map((ep, i) => ({ ...ep, index: i + 1 }));
+  return touchScreenplayPackage(pkg, {
+    screenplay: { ...pkg.screenplay, episodes },
+  });
+}
+
+/** E-02: 在指定集后插入空集并重排 index（1 起始） */
+export function insertEmptyEpisodeAfter(
+  pkg: ScreenplayPackage,
+  afterEpisodeId: string | null,
+): ScreenplayPackage {
+  const stamp = nowIso();
+  const episodes: ScreenplayEpisode[] = [];
+  let idx = 0;
+  for (const ep of pkg.screenplay.episodes) {
+    episodes.push({ ...ep, index: ++idx });
+    if (ep.id === afterEpisodeId) {
+      episodes.push({
+        id: makeId('ep'),
+        index: ++idx,
+        title: '',
+        bodyMd: '',
+        updatedAt: stamp,
+      });
+    }
+  }
+  if (afterEpisodeId === null && pkg.screenplay.episodes.length === 0) {
+    episodes.push({
+      id: makeId('ep'),
+      index: 1,
+      title: '',
+      bodyMd: '',
+      updatedAt: stamp,
+    });
+  }
+  return touchScreenplayPackage(pkg, {
+    screenplay: { ...pkg.screenplay, episodes },
+  });
+}
+
+/** D-04: 格式体例 linter —— 纯函数，返回诊断列表 */
+export function lintScreenplayFormat(pkg: ScreenplayPackage): ScreenplayDiagnostic[] {
+  const diag: ScreenplayDiagnostic[] = [];
+  const eps = pkg.screenplay.episodes;
+  for (const ep of eps) {
+    const body = ep.bodyMd;
+    if (!body.trim()) continue;
+    if (/【场景/.test(body)) {
+      diag.push({
+        level: 'warning',
+        code: 'legacy-scene-bracket',
+        message: `第${ep.index}集出现遗留【场景：】标记，建议替换为标准场头`,
+        episodeId: ep.id,
+      });
+    }
+    const dialogueQuote = /[「「""][\u4e00-\u9fff]{1,32}[：:]\s*/gu;
+    let dqCount = 0;
+    for (const _m of body.matchAll(dialogueQuote)) dqCount++;
+    if (dqCount > 0) {
+      diag.push({
+        level: 'info',
+        code: 'quoted-dialogue',
+        message: `第${ep.index}集出现 ${dqCount} 处引号对白「"角色：」，建议改为「角色名：台词」无引号格式`,
+        episodeId: ep.id,
+      });
+    }
+    if (ep.index < eps.length && /（完）/.test(body)) {
+      diag.push({
+        level: 'warning',
+        code: 'premature-end-marker',
+        message: `第${ep.index}集未到末集出现「（完）」结束标记`,
+        episodeId: ep.id,
+      });
+    }
+  }
+  return diag;
+}
+
+/** X-02: 在一集正文中查找并替换文本（返回新 bodyMd） */
+export function findReplaceInEpisode(
+  bodyMd: string,
+  find: string,
+  replace: string,
+): { bodyMd: string; count: number } {
+  if (!find) return { bodyMd, count: 0 };
+  const escaped = find.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const re = new RegExp(escaped, 'g');
+  let count = 0;
+  const result = bodyMd.replace(re, () => { count++; return replace; });
+  return { bodyMd: result, count };
+}
+
+/** B-08: 全局角色改名（整词优先）——更新所有集正文 + Bible character drafts */
+export function renameCharacterInPackage(
+  pkg: ScreenplayPackage,
+  oldName: string,
+  newName: string,
+): ScreenplayPackage {
+  if (!oldName.trim() || !newName.trim() || oldName.trim() === newName.trim()) return pkg;
+  const old = oldName.trim();
+  const nw = newName.trim();
+  const escaped = old.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const re = new RegExp(escaped, 'g');
+  const episodes = pkg.screenplay.episodes.map((ep) => ({
+    ...ep,
+    bodyMd: ep.bodyMd.replace(re, nw),
+    title: ep.title.replace(re, nw),
+  }));
+  const characters = pkg.bible.characters.map((c) => {
+    if (c.name.trim() !== old) return c;
+    return {
+      ...c,
+      name: nw,
+      identity: c.identity?.replace(re, nw),
+      personality: c.personality?.replace(re, nw),
+      appearance: c.appearance?.replace(re, nw),
+      relationships: c.relationships?.replace(re, nw),
+    };
+  });
+  return touchScreenplayPackage(pkg, {
+    screenplay: { ...pkg.screenplay, episodes },
+    bible: { ...pkg.bible, characters },
+  });
+}
+
+export function summarizePackagePatch(
+  pkg: ScreenplayPackage,
+  patch: Partial<ScreenplayPackage> | Record<string, unknown>,
+): string[] {
+  const lines: string[] = [];
+
+  const brief = (patch as ScreenplayPackage).brief;
+  if (brief) {
+    if (brief.title !== undefined && (brief.title || '') !== (pkg.brief.title || '')) {
+      lines.push(`brief.title ← 「${String(brief.title || '').slice(0, 40)}」`);
+    }
+    if (brief.logline !== undefined && (brief.logline || '') !== (pkg.brief.logline || '')) {
+      lines.push(`brief.logline ← 已更新`);
+    }
+    if (brief.episodeCount !== undefined && brief.episodeCount !== pkg.brief.episodeCount) {
+      lines.push(`brief.episodeCount ← ${brief.episodeCount}`);
+    }
+    if (brief.plotOutline !== undefined && brief.plotOutline !== pkg.brief.plotOutline) {
+      lines.push('brief.plotOutline ← 已更新');
+    }
+    if (brief.hooks && Array.isArray(brief.hooks) && brief.hooks.length !== (pkg.brief.hooks ?? []).length) {
+      lines.push(`brief.hooks: ${brief.hooks.length} 条`);
+    }
+  }
+
+  const bible = (patch as ScreenplayPackage).bible;
+  if (bible) {
+    const newChars = bible.characters ?? [];
+    const oldChars = pkg.bible.characters;
+    if (newChars.length > oldChars.length) {
+      lines.push(`bible.characters: +${newChars.length - oldChars.length}（共 ${newChars.length}）`);
+    } else if (newChars.length < oldChars.length) {
+      lines.push(`bible.characters: -${oldChars.length - newChars.length}（共 ${newChars.length}）`);
+    } else if (newChars.length > 0) {
+      const changed = newChars.filter((c) => {
+        const old = oldChars.find((o) => o.id === c.id);
+        return old && JSON.stringify(c) !== JSON.stringify(old);
+      });
+      if (changed.length > 0) lines.push(`bible.characters: ${changed.length} 个已修改`);
+    }
+    const newScenes = bible.scenes ?? [];
+    const oldScenes = pkg.bible.scenes;
+    if (newScenes.length > oldScenes.length) {
+      lines.push(`bible.scenes: +${newScenes.length - oldScenes.length}（共 ${newScenes.length}）`);
+    } else if (newScenes.length < oldScenes.length) {
+      lines.push(`bible.scenes: -${oldScenes.length - newScenes.length}（共 ${newScenes.length}）`);
+    } else if (newScenes.length > 0) {
+      const changed = newScenes.filter((s) => {
+        const old = oldScenes.find((o) => o.id === s.id);
+        return old && JSON.stringify(s) !== JSON.stringify(old);
+      });
+      if (changed.length > 0) lines.push(`bible.scenes: ${changed.length} 个已修改`);
+    }
+    if (bible.world && JSON.stringify(bible.world) !== JSON.stringify(pkg.bible.world)) {
+      lines.push('bible.world ← 已更新');
+    }
+  }
+
+  const screenplay = (patch as ScreenplayPackage).screenplay;
+  if (screenplay?.episodes) {
+    const oldLen = pkg.screenplay.episodes.length;
+    const newLen = screenplay.episodes.length;
+    if (newLen > oldLen) {
+      lines.push(`episodes: +${newLen - oldLen} 集（共 ${newLen} 集）`);
+    } else if (newLen < oldLen) {
+      lines.push(`episodes: -${oldLen - newLen} 集（共 ${newLen} 集）`);
+    } else {
+      lines.push(`episodes: ${newLen} 集（已修改）`);
+    }
+  }
+
+  const diagnostics = (patch as ScreenplayPackage).diagnostics;
+  if (diagnostics && Array.isArray(diagnostics)) {
+    lines.push(`diagnostics: ${diagnostics.length} 条`);
+  }
+
+  if (lines.length === 0) {
+    lines.push('无可见变更');
+  }
+  return lines;
 }
 
 /** 成稿中检索角色/场景摘录（素材库剧本支撑） */

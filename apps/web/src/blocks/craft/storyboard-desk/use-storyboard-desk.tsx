@@ -195,6 +195,20 @@ export function useStoryboardDesk(props: NodeProps) {
     Boolean(upstreamPackage)
     && upstreamPackage!.status === 'confirmed'
     && Boolean(upstreamPackage!.screenplay.episodes.some((ep) => ep.bodyMd.trim()));
+
+  // H-04: 从编剧台送分镜时高亮拆镜入口
+  const handoffData = (props.data as Record<string, unknown>)?.handoff as { autoOpenBreakdown?: boolean; sourceScriptBlockId?: string } | undefined;
+  const [handoffHighlight, setHandoffHighlight] = useState(false);
+  useEffect(() => {
+    if (handoffData?.autoOpenBreakdown) {
+      setHandoffHighlight(true);
+      // 自动打开时切换到拆镜 tab
+      if (studioOpen) {
+        setStudioTab('breakdown');
+      }
+    }
+  }, [handoffData?.autoOpenBreakdown]);
+  const studioBreakdownDefault = handoffData?.autoOpenBreakdown ? 'breakdown' : undefined;
   const packageStale = Boolean(
     payload
     && upstreamPackage
@@ -714,11 +728,13 @@ export function useStoryboardDesk(props: NodeProps) {
   }, []);
 
   const openStudio = useCallback((tab: StudioTab = 'grid') => {
-    // 无镜表时默认进拆镜 Tab
-    const next = !payload && (tab === 'grid' || tab === 'compose') ? 'breakdown' : tab;
+    // 无镜表时默认进拆镜 Tab；H-04：handoff 指定时优先
+    const next = studioBreakdownDefault
+      ? 'breakdown'
+      : !payload && (tab === 'grid' || tab === 'compose') ? 'breakdown' : tab;
     setStudioTab(next);
     setStudioOpen(true);
-  }, [payload]);
+  }, [payload, studioBreakdownDefault]);
 
   const openEdit = useCallback((shotId: string) => {
     setSelectedId(shotId);
@@ -1770,7 +1786,7 @@ export function useStoryboardDesk(props: NodeProps) {
                     <div className="sg3-hero__actions">
                       <button
                         type="button"
-                        className="sg3-btn sg3-btn--primary"
+                        className={`sg3-btn sg3-btn--primary${handoffHighlight ? ' sg3-btn--handoff' : ''}`}
                         disabled={!canBreakdownFromPackage || breakingDown || breakdownBlocked}
                         title={breakdownBlockedReason}
                         onClick={() => void breakdownFromPackage()}

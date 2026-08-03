@@ -11,6 +11,15 @@ import {
   sceneDraftsFromScreenplayText,
   screenplayFullText,
   screenplayWordCount,
+  removeScreenplayEpisode,
+  summarizePackagePatch,
+  findMatchingWorkingDraft,
+  upsertScriptDeskWorkingDraft,
+  touchScreenplayPackage,
+  insertEmptyEpisodeAfter,
+  lintScreenplayFormat,
+  findReplaceInEpisode,
+  renameCharacterInPackage,
 } from '@nx9/shared';
 
 describe('ScreenplayPackage / script-desk migration', () => {
@@ -135,5 +144,141 @@ describe('ScreenplayPackage / script-desk migration', () => {
     expect(nodes[0].type).toBe('script-desk');
     expect((nodes[0].data as { package?: { schema?: string } }).package?.schema).toBe('nx9-screenplay-package');
     expect((nodes[0].data as { legacyScriptBreakdown?: { version?: number } }).legacyScriptBreakdown?.version).toBe(1);
+  });
+
+  // Q-02: E-01 removeScreenplayEpisode
+  it('removeScreenplayEpisode 删除后重排 index 1..n', () => {
+    const pkg = ingestTextToPackage(emptyScreenplayPackage(), '第1集\na\n\n第2集\nb\n\n第3集\nc');
+    expect(pkg.screenplay.episodes).toHaveLength(3);
+    const ep2 = pkg.screenplay.episodes.find((ep) => ep.index === 2)!;
+    const next = removeScreenplayEpisode(pkg, ep2.id);
+    expect(next.screenplay.episodes).toHaveLength(2);
+    expect(next.screenplay.episodes[0].index).toBe(1);
+    expect(next.screenplay.episodes[1].index).toBe(2);
+    expect(next.screenplay.episodes[1].bodyMd).toContain('c');
+  });
+
+  // Q-02: F-03 summarizePackagePatch
+  it('summarizePackagePatch 包含 title 变动行', () => {
+    const pkg = touchScreenplayPackage(emptyScreenplayPackage(), { brief: { title: '旧名' } });
+    const lines = summarizePackagePatch(pkg, { brief: { title: '新名' } });
+    expect(lines.some((l) => l.includes('brief.title') && l.includes('新名'))).toBe(true);
+  });
+
+  // Q-02: S-06 upsert working draft
+  it('upsertScriptDeskWorkingDraft 同 workingKey 第二次 id 不变', () => {
+    const pkg = emptyScreenplayPackage();
+    const key = 'block-1';
+    const r1 = upsertScriptDeskWorkingDraft([], { package: pkg, sourceBlockId: key });
+    expect(r1.isNew).toBe(true);
+    const r2 = upsertScriptDeskWorkingDraft(r1.drafts, { package: pkg, sourceBlockId: key });
+    expect(r2.isNew).toBe(false);
+    expect(r2.folder.id).toBe(r1.folder.id);
+  });
+
+  it('findMatchingWorkingDraft 查找 autosave 草稿', () => {
+    const pkg = emptyScreenplayPackage();
+    const r = upsertScriptDeskWorkingDraft([], { package: pkg, sourceBlockId: 'b1', kind: 'autosave' });
+    const { index } = findMatchingWorkingDraft(r.drafts, 'b1');
+    expect(index).toBeGreaterThanOrEqual(0);
+    const { index: idx2 } = findMatchingWorkingDraft(r.drafts, 'nonexistent');
+    expect(idx2).toBe(-1);
+  });
+
+  // Q-02: E-02 insertEmptyEpisodeAfter
+  it('insertEmptyEpisodeAfter 在第二集后插入空集并重排 index', () => {
+    let pkg = ingestTextToPackage(emptyScreenplayPackage(), '第1集\na\n\n第2集\nb\n\n第3集\nc');
+    const ep2 = pkg.screenplay.episodes.find((ep) => ep.index === 2)!;
+    pkg = insertEmptyEpisodeAfter(pkg, ep2.id);
+    expect(pkg.screenplay.episodes).toHaveLength(4);
+    expect(pkg.screenplay.episodes[0].index).toBe(1);
+    expect(pkg.screenplay.episodes[1].index).toBe(2);
+    expect(pkg.screenplay.episodes[2].index).toBe(3);
+    expect(pkg.screenplay.episodes[2].bodyMd).toBe('');
+    expect(pkg.screenplay.episodes[3].index).toBe(4);
+    expect(pkg.screenplay.episodes[3].bodyMd).toContain('c');
+  });
+
+  it('insertEmptyEpisodeAfter null 空包返回一个空集', () => {
+    let pkg = emptyScreenplayPackage();
+    pkg = insertEmptyEpisodeAfter(pkg, null);
+    expect(pkg.screenplay.episodes).toHaveLength(1);
+    expect(pkg.screenplay.episodes[0].index).toBe(1);
+    expect(pkg.screenplay.episodes[0].bodyMd).toBe('');
+  });
+
+  // Q-02: D-04 lintScreenplayFormat
+  it('lintScreenplayFormat 捕获遗留【场景】标记', () => {
+    let pkg = ingestTextToPackage(emptyScreenplayPackage(), '第1集\n【场景：咖啡厅】\n');
+    const diag = lintScreenplayFormat(pkg);
+    expect(diag.some((d) => d.code === 'legacy-scene-bracket')).toBe(true);
+  });
+
+  it('lintScreenplayFormat 捕获引导引号对白', () => {
+    let pkg = ingestTextToPackage(emptyScreenplayPackage(), '第1集\n"林晓：你好"');
+    const diag = lintScreenplayFormat(pkg);
+    expect(diag.some((d) => d.code === 'quoted-dialogue')).toBe(true);
+  });
+
+  it('lintScreenplayFormat 捕获非末集（完）标记', () => {
+    let pkg = ingestTextToPackage(emptyScreenplayPackage(), '第1集\na\n\n第2集\nb（完）\n\n第3集\nc');
+    const diag = lintScreenplayFormat(pkg);
+    expect(diag.some((d) => d.code === 'premature-end-marker')).toBe(true);
+  });
+
+  it('lintScreenplayFormat 末集（完）不报警', () => {
+    let pkg = ingestTextToPackage(emptyScreenplayPackage(), '第1集\n开头\n\n第2集\n结尾\n（完）');
+    const diag = lintScreenplayFormat(pkg);
+    expect(diag.some((d) => d.code === 'premature-end-marker')).toBe(false);
+  });
+
+  // Q-02: X-02 findReplaceInEpisode
+  it('findReplaceInEpisode 单集查找替换并计数', () => {
+    const { bodyMd, count } = findReplaceInEpisode('林晓走进来。林晓坐下。', '林晓', '李稳');
+    expect(bodyMd).toBe('李稳走进来。李稳坐下。');
+    expect(count).toBe(2);
+  });
+
+  it('findReplaceInEpisode 空查找原样返回', () => {
+    const { bodyMd, count } = findReplaceInEpisode('原文', '', '新');
+    expect(bodyMd).toBe('原文');
+    expect(count).toBe(0);
+  });
+
+  // Q-02: B-08 renameCharacterInPackage
+  it('renameCharacterInPackage 整词替换成稿正文 + Bible', () => {
+    let pkg = ingestTextToPackage(emptyScreenplayPackage(), '第1集\n林晓走进来。');
+    pkg = touchScreenplayPackage(pkg, {
+      bible: {
+        characters: [{
+          id: 'c1',
+          name: '林晓',
+          identity: '主角林晓',
+          personality: '林晓很勇敢',
+        }],
+        scenes: [],
+      },
+    });
+    pkg = renameCharacterInPackage(pkg, '林晓', '李稳');
+    expect(pkg.screenplay.episodes[0].bodyMd).toContain('李稳');
+    expect(pkg.screenplay.episodes[0].bodyMd).not.toContain('林晓');
+    expect(pkg.bible.characters[0].name).toBe('李稳');
+    expect(pkg.bible.characters[0].identity).toContain('李稳');
+    expect(pkg.bible.characters[0].personality).toContain('李稳');
+  });
+
+  it('renameCharacterInPackage 仅改匹配角色不碰其他', () => {
+    let pkg = touchScreenplayPackage(emptyScreenplayPackage(), {
+      bible: {
+        characters: [
+          { id: 'c1', name: '林晓' },
+          { id: 'c2', name: '阿强' },
+        ],
+        scenes: [],
+      },
+    });
+    pkg = renameCharacterInPackage(pkg, '林晓', '李稳');
+    expect(pkg.bible.characters[0].name).toBe('李稳');
+    expect(pkg.bible.characters[1].name).toBe('阿强');
   });
 });

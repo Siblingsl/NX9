@@ -32,14 +32,16 @@ function userHeaders(): Record<string, string> {
   }
 }
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
+async function request<T>(path: string, init?: RequestInit & { signal?: AbortSignal }): Promise<T> {
+  const { signal, ...restInit } = init ?? {};
   const res = await fetch(path, {
     headers: {
       'Content-Type': 'application/json',
       ...userHeaders(),
-      ...(init?.headers ?? {}),
+      ...(restInit.headers ?? {}),
     },
-    ...init,
+    ...restInit,
+    signal,
   });
   if (!res.ok) {
     const text = await res.text();
@@ -657,10 +659,11 @@ export const api = {
       body: JSON.stringify(body),
     }),
 
-  scriptScreenplay: (body: { sourceText: string }) =>
+  scriptScreenplay: (body: { sourceText: string }, options?: { signal?: AbortSignal }) =>
     request<{ ok: boolean; screenplay: string }>('/api/agent/script/screenplay', {
       method: 'POST',
       body: JSON.stringify(body),
+      signal: options?.signal,
     }),
 
   directorPlan: (body: { sourceText: string }) =>
@@ -675,10 +678,11 @@ export const api = {
       body: JSON.stringify(body),
     }),
 
-  extractAssets: (body: { sourceText: string }) =>
+  extractAssets: (body: { sourceText: string }, options?: { signal?: AbortSignal }) =>
     request<{ ok: boolean; characters: import('@nx9/shared').CharacterProfile[]; scenes: { id: string; name: string; description: string }[] }>('/api/agent/extract-assets', {
       method: 'POST',
       body: JSON.stringify(body),
+      signal: options?.signal,
     }),
 
   sceneSplit: (body: { sourceText: string; mode?: 'llm' | 'rule' }) =>
@@ -699,10 +703,11 @@ export const api = {
       body: JSON.stringify(body),
     }),
 
-  scriptDeskChat: (body: { skillId: string; userInstruction?: string; package: Record<string, unknown> }) =>
+  scriptDeskChat: (body: { skillId: string; userInstruction?: string; package: Record<string, unknown> }, options?: { signal?: AbortSignal }) =>
     request<{ ok: boolean; patch: Record<string, unknown>; explanation: string }>('/api/agent/script-desk/chat', {
       method: 'POST',
       body: JSON.stringify(body),
+      signal: options?.signal,
     }),
 
   scriptExport: async (pkg: import('@nx9/shared').ScreenplayPackage) => {

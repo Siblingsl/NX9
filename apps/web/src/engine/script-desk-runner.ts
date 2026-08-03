@@ -278,8 +278,11 @@ export async function runAppendEpisodeSkill(
   options: {
     nextEpisodeIndex: number;
     userInstruction?: string;
+    signal?: AbortSignal;
   },
 ): Promise<{ assistantText: string; patch: Partial<ScreenplayPackage> }> {
+  const signal = options.signal;
+  if (signal?.aborted) throw new DOMException('已中止', 'AbortError');
   const sorted = [...pkg.screenplay.episodes]
     .filter((ep) => ep.bodyMd.trim())
     .sort((a, b) => a.index - b.index);
@@ -305,7 +308,8 @@ export async function runAppendEpisodeSkill(
       || `请续写第 ${options.nextEpisodeIndex} 集。`,
   ].filter(Boolean).join('\n\n');
 
-  const res = await api.scriptScreenplay({ sourceText: context });
+  if (signal?.aborted) throw new DOMException('已中止', 'AbortError');
+  const res = await api.scriptScreenplay({ sourceText: context }, { signal });
   const raw = res as { screenplay?: string; script?: string };
   const text = String(raw.screenplay ?? raw.script ?? '').trim();
   if (!text) throw new Error('剧本生成未返回正文');
@@ -343,8 +347,12 @@ export async function runRewriteEpisodeSkill(
   options: {
     episodeIndex: number;
     userInstruction?: string;
+    signal?: AbortSignal;
   },
 ): Promise<{ assistantText: string; patch: Partial<ScreenplayPackage> }> {
+  const signal = options.signal;
+  if (signal?.aborted) throw new DOMException('已中止', 'AbortError');
+
   const sorted = [...pkg.screenplay.episodes].sort((a, b) => a.index - b.index);
   const target = sorted.find((ep) => ep.index === options.episodeIndex);
   if (!target) throw new Error(`第 ${options.episodeIndex} 集不存在`);
@@ -381,7 +389,9 @@ export async function runRewriteEpisodeSkill(
       : `请重写第 ${options.episodeIndex} 集。`,
   ].filter(Boolean).join('\n\n');
 
-  const res = await api.scriptScreenplay({ sourceText: context });
+  if (signal?.aborted) throw new DOMException('已中止', 'AbortError');
+  const res = await api.scriptScreenplay({ sourceText: context }, { signal });
+
   const raw = res as { screenplay?: string; script?: string };
   const text = String(raw.screenplay ?? raw.script ?? '').trim();
   if (!text) throw new Error('重写未返回正文');
@@ -416,7 +426,9 @@ export async function runGenerateScreenplaySkill(
   pkg: ScreenplayPackage,
   userInstruction: string,
   episodeIndex?: number,
+  signal?: AbortSignal,
 ): Promise<{ assistantText: string; patch: Partial<ScreenplayPackage> }> {
+  if (signal?.aborted) throw new DOMException('已中止', 'AbortError');
   const existingText = screenplayFullText(pkg);
   const context = [
     SCREENPLAY_FORMAT_LOCK,
@@ -437,7 +449,8 @@ export async function runGenerateScreenplaySkill(
         : '',
   ].filter(Boolean).join('\n\n');
 
-  const res = await api.scriptScreenplay({ sourceText: context });
+  if (signal?.aborted) throw new DOMException('已中止', 'AbortError');
+  const res = await api.scriptScreenplay({ sourceText: context }, { signal });
   const raw = res as { screenplay?: string; script?: string };
   const text = String(raw.screenplay ?? raw.script ?? '').trim();
   if (!text) throw new Error('剧本生成未返回正文');
@@ -483,7 +496,9 @@ export async function runGenerateScreenplaySkill(
 export async function runCharacterSceneSkill(
   pkg: ScreenplayPackage,
   userInstruction: string,
+  signal?: AbortSignal,
 ): Promise<{ assistantText: string; patch: Partial<ScreenplayPackage> }> {
+  if (signal?.aborted) throw new DOMException('已中止', 'AbortError');
   const source = [
     userInstruction.trim(),
     screenplayFullText(pkg),
@@ -564,13 +579,15 @@ export async function runScriptDeskSkill(
   skillId: ScriptDeskSkillId,
   pkg: ScreenplayPackage,
   userInstruction: string,
+  signal?: AbortSignal,
 ): Promise<{ assistantText: string; patch?: Partial<ScreenplayPackage> }> {
   try {
+    if (signal?.aborted) throw new DOMException('已中止', 'AbortError');
     const res = await api.scriptDeskChat({
       skillId,
       userInstruction: userInstruction.trim() || undefined,
       package: pkg as unknown as Record<string, unknown>,
-    });
+    }, { signal });
     const rawPatch = (res.patch ?? {}) as Record<string, unknown>;
 
     if (skillId === 'consistency') {
@@ -635,7 +652,7 @@ export async function runScriptDeskSkill(
     // 生成类：旧路径兜底，避免完全不可用
     if (skillId === 'generate' || skillId === 'dialogue' || skillId === 'ingest') {
       try {
-        const local = await runGenerateScreenplaySkill(pkg, userInstruction);
+        const local = await runGenerateScreenplaySkill(pkg, userInstruction, undefined, signal);
         return {
           assistantText: `Skill 通道失败，已降级为成稿生成：${fallback}\n${local.assistantText}`,
           patch: local.patch,
@@ -646,7 +663,7 @@ export async function runScriptDeskSkill(
     }
     if (skillId === 'character' || skillId === 'world') {
       try {
-        const local = await runCharacterSceneSkill(pkg, userInstruction);
+        const local = await runCharacterSceneSkill(pkg, userInstruction, signal);
         return {
           assistantText: `Skill 通道失败，已降级为资产抽取：${fallback}\n${local.assistantText}`,
           patch: local.patch,

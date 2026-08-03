@@ -52,6 +52,8 @@ import {
   createScriptDeskFolderSnapshot,
   trashScriptDeskFolder,
   restoreScriptDeskFolderFromTrash,
+  upsertScriptDeskWorkingDraft,
+  renameScriptDeskDraft,
   type PlaybookReadinessContext,
   type EpisodeMeta,
   type MediaTrashItem,
@@ -137,6 +139,13 @@ interface WorkspaceDocumentState {
     entryMode?: 'agent' | 'ingest';
     sourceBlockId?: string;
   }) => ScriptDeskFolderSnapshot;
+  /** 编剧台：自动存储工作草稿（同 workingKey 原地更新，不存在则新建） */
+  upsertScriptDeskWorkingDraft: (input: {
+    package: ScreenplayPackage;
+    agentSession?: ScriptDeskAgentSession;
+    entryMode?: 'agent' | 'ingest';
+    sourceBlockId?: string;
+  }) => { folder: ScriptDeskFolderSnapshot; isNew: boolean };
   /** 编剧台：进私有回收站 */
   trashScriptDeskSnapshot: (input: {
     package: ScreenplayPackage;
@@ -151,6 +160,8 @@ interface WorkspaceDocumentState {
   /** 回收站恢复 → 草稿箱 */
   restoreScriptDeskTrashToDrafts: (id: string) => ScriptDeskFolderSnapshot | null;
   purgeScriptDeskTrash: (id: string) => void;
+  /** S-03: 重命名草稿文件夹 */
+  renameScriptDeskDraft: (id: string, title: string) => boolean;
   /** F-010: 清理过期资产（≥30天） */
   purgeExpiredTrashedAssets: () => number;
   setCanvasAppearance: (appearance: CanvasAppearance) => void;
@@ -707,6 +718,16 @@ export const useWorkspaceDocument = create<WorkspaceDocumentState>((set, get) =>
     return folder;
   },
 
+  upsertScriptDeskWorkingDraft: (input) => {
+    let result: { folder: ScriptDeskFolderSnapshot; isNew: boolean } = { folder: null as unknown as ScriptDeskFolderSnapshot, isNew: false };
+    set((s) => {
+      const out = upsertScriptDeskWorkingDraft(s.scriptDeskDrafts, input);
+      result = { folder: out.folder, isNew: out.isNew };
+      return { scriptDeskDrafts: out.drafts };
+    });
+    return result;
+  },
+
   trashScriptDeskSnapshot: (input) => {
     const folder = 'package' in input && 'id' in input && 'savedAt' in input
       ? trashScriptDeskFolder(input as ScriptDeskFolderSnapshot)
@@ -756,6 +777,20 @@ export const useWorkspaceDocument = create<WorkspaceDocumentState>((set, get) =>
     set((s) => ({
       scriptDeskTrash: purgeAssetById(s.scriptDeskTrash, id),
     })),
+
+  renameScriptDeskDraft: (id, title) => {
+    let renamed = false;
+    set((s) => {
+      const hit = s.scriptDeskDrafts.find((d) => d.id === id);
+      if (!hit) return s;
+      renamed = true;
+      const updated = renameScriptDeskDraft(hit, title);
+      return {
+        scriptDeskDrafts: s.scriptDeskDrafts.map((d) => (d.id === id ? updated : d)),
+      };
+    });
+    return renamed;
+  },
 
   purgeExpiredTrashedAssets: () => {
     let total = 0;
