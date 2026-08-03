@@ -1475,8 +1475,10 @@ body.sd2-splitting * {
 .sd2-header-right .sd2-tool-strip {
   flex: 0 1 auto;
   min-width: 0;
-  overflow-x: auto;
-  overflow-y: hidden;
+  /* 给角标留出上下空间，避免 overflow 裁切数字 */
+  padding: 4px 6px;
+  margin: -4px -2px;
+  overflow: visible;
   scrollbar-width: none;
 }
 
@@ -1586,19 +1588,21 @@ body.sd2-splitting * {
 
 .sd2-tool__badge {
   position: absolute;
-  top: 2px;
-  right: 2px;
-  min-width: 14px;
-  height: 14px;
-  padding: 0 3px;
-  border-radius: 7px;
+  top: -3px;
+  right: -4px;
+  z-index: 1;
+  min-width: 15px;
+  height: 15px;
+  padding: 0 4px;
+  border-radius: 8px;
   background: var(--desk-accent);
   color: #1a1610;
   font-size: 9px;
   font-weight: 700;
-  line-height: 14px;
+  line-height: 15px;
   text-align: center;
   pointer-events: none;
+  box-shadow: 0 0 0 1.5px var(--desk-panel, #1e1c18);
 }
 
 .sd2-tool__badge--warn {
@@ -2283,9 +2287,8 @@ body.sd2-splitting * {
 .sd2-skill-seg__label {
   font-size: 9px;
   font-weight: 600;
-  text-transform: uppercase;
   color: var(--sd2-muted);
-  letter-spacing: 0.5px;
+  letter-spacing: 0.02em;
   margin-right: 2px;
   white-space: nowrap;
 }
@@ -2786,7 +2789,7 @@ body.sd2-splitting * {
     grid-template-columns: minmax(0, 1fr);
   }
 }
-/* ── F-05: 顶栏 icon + 文字标签（必须解开 32px 宽度锁） ── */
+/* ── F-05: 顶栏「稿纸」等仍带文字标签时解开 32px 宽度锁 ── */
 .sd2-tool__label {
   font-size: 11px;
   font-weight: 600;
@@ -2800,11 +2803,6 @@ body.sd2-splitting * {
   height: 32px;
   padding: 0 8px;
   gap: 5px;
-}
-
-.sd2-tool:has(.sd2-tool__label) .sd2-tool__badge {
-  top: -3px;
-  right: -3px;
 }
 
 .sd2-ep__stats {

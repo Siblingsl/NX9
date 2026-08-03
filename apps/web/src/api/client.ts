@@ -259,11 +259,14 @@ export const api = {
       body: JSON.stringify(body),
     }),
 
-  productionScriptBreakdown: (body: {
-    sourceText: string;
-    config?: Partial<import('@nx9/shared').ScriptBreakdownConfig>;
-    prompts?: Partial<import('@nx9/shared').ScriptBreakdownPromptTemplates>;
-  }) =>
+  productionScriptBreakdown: (
+    body: {
+      sourceText: string;
+      config?: Partial<import('@nx9/shared').ScriptBreakdownConfig>;
+      prompts?: Partial<import('@nx9/shared').ScriptBreakdownPromptTemplates>;
+    },
+    options?: { signal?: AbortSignal },
+  ) =>
     request<{
       ok: boolean;
       payload: import('@nx9/shared').ScriptBreakdownPayload;
@@ -271,6 +274,7 @@ export const api = {
     }>('/api/agent/production/script-breakdown', {
       method: 'POST',
       body: JSON.stringify(body),
+      signal: options?.signal,
     }),
 
   seedSeedanceSkills: () =>

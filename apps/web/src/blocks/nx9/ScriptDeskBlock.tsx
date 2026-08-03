@@ -186,6 +186,24 @@ function ScriptDeskBlock(props: NodeProps) {
   const autoSaveTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const prevConfirmedRef = useRef(false);
+  const lastOpenStudioRequestAtRef = useRef<string | null>(null);
+
+  // 分镜台「打开上游编剧台」：写入 openStudioRequest 后自动展开本台
+  useEffect(() => {
+    const req = nodeData?.openStudioRequest as
+      | { at?: string; reason?: string; fromId?: string }
+      | null
+      | undefined;
+    if (!req?.at || req.at === lastOpenStudioRequestAtRef.current) return;
+    lastOpenStudioRequestAtRef.current = req.at;
+    setStudioOpen(true);
+    if (req.reason === 'confirm-for-breakdown' && pkg.status !== 'confirmed') {
+      setTip('分镜台等待本稿确认：请点顶栏「确认成稿」，再回分镜台同步最新成稿');
+    } else if (req.reason === 'confirm-for-breakdown' && pkg.status === 'confirmed') {
+      setTip('成稿已确认：可点「送到分镜台」，或直接回分镜台点「同步最新成稿」');
+    }
+    updateNodeData(props.id, { openStudioRequest: null });
+  }, [nodeData?.openStudioRequest, pkg.status, props.id, updateNodeData]);
 
   const scriptDeskDrafts = useWorkspaceDocument((s) => s.scriptDeskDrafts);
   const saveScriptDeskDraft = useWorkspaceDocument((s) => s.saveScriptDeskDraft);
@@ -355,14 +373,14 @@ function ScriptDeskBlock(props: NodeProps) {
       return;
     }
     setBusy(true);
-    setTip('抽取 Bible 中…');
+    setTip('抽取设定中…');
     try {
       updateNodeData(props.id, { status: 'running' });
       const next = await extractBibleFromPackage(pkg);
       savePkg(next);
       setRightTab('bible');
-      setTip(`Bible 已更新 · 角 ${next.bible.characters.length} / 场 ${next.bible.scenes.length}`);
-      appendLog(`编剧台：抽取 Bible · 角 ${next.bible.characters.length} / 场 ${next.bible.scenes.length}`);
+      setTip(`设定已更新 · 角 ${next.bible.characters.length} / 场 ${next.bible.scenes.length}`);
+      appendLog(`编剧台：抽取设定 · 角 ${next.bible.characters.length} / 场 ${next.bible.scenes.length}`);
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       updateNodeData(props.id, { status: 'error', error: msg });
@@ -382,9 +400,9 @@ function ScriptDeskBlock(props: NodeProps) {
       && screenplayWordCount(enriched) > 200;
     if (needsBibleCheck) {
       const result = await askConfirmWithOption({
-        title: 'Bible 尚未抽取',
-        description: '确认成稿前建议先抽取人物与场景到 Bible。跳过抽取继续确认？',
-        confirmLabel: '先抽取 Bible',
+        title: '设定尚未抽取',
+        description: '确认成稿前建议先抽取人物与场景到设定。跳过抽取继续确认？',
+        confirmLabel: '先抽取设定',
         cancelLabel: '取消',
         tone: 'neutral',
         option: { label: '跳过抽取，直接确认', defaultChecked: false },
@@ -403,7 +421,7 @@ function ScriptDeskBlock(props: NodeProps) {
         }
       }
     } else if (sceneCountAfter > sceneCountBefore) {
-      setTip(`从成稿中补了 ${sceneCountAfter - sceneCountBefore} 个场景 draft`);
+      setTip(`从成稿中补了 ${sceneCountAfter - sceneCountBefore} 个场景草稿`);
     }
     const next = confirmPackage(enriched);
     if (next.status !== 'confirmed') {
@@ -416,8 +434,8 @@ function ScriptDeskBlock(props: NodeProps) {
     setRightTab('readiness');
     setTip(
       readiness.ready
-        ? '成稿已确认，设定已就绪'
-        : `成稿已确认 · 设定缺口：角色 ${readiness.missingCharacters.length} / 场景 ${readiness.missingScenes.length}`,
+        ? '成稿已确认，设定已就绪 · 可回分镜台点「同步最新成稿」'
+        : `成稿已确认 · 设定缺口：角色 ${readiness.missingCharacters.length} / 场景 ${readiness.missingScenes.length} · 可回分镜台同步`,
     );
     appendLog(`编剧台：确认成稿 · ${packageSummaryLine(next)}`);
   }, [appendLog, pkg, savePkg]);
@@ -439,38 +457,39 @@ function ScriptDeskBlock(props: NodeProps) {
   // B-07/H-01: 实际送分镜（从 checklist 触发）
   const doHandoffToStoryboard = useCallback(() => {
     setHandoffOpen(false);
+    const handoff = {
+      from: 'script-desk',
+      to: 'storyboard-desk',
+      fromId: props.id,
+      at: new Date().toISOString(),
+      autoOpenBreakdown: true,
+      sourceScriptBlockId: props.id,
+      episodeRange: {
+        count: pkg.screenplay.episodes.length,
+        firstId: pkg.screenplay.episodes[0]?.id ?? null,
+        lastId: pkg.screenplay.episodes[pkg.screenplay.episodes.length - 1]?.id ?? null,
+        titles: pkg.screenplay.episodes.map((e) => e.title || `第${e.index}集`),
+      },
+      scriptTitle: pkg.brief.title || pkg.screenplay.episodes[0]?.title || '',
+      scriptWordCount: screenplayWordCount(pkg),
+    };
     const runtime = useFlowRuntime.getState().runtime;
     const nodes = runtime?.getNodes() ?? [];
     const storyboardDesk = nodes.find((n) => n.type === 'storyboard-desk');
     if (storyboardDesk) {
+      updateNodeData(storyboardDesk.id, { handoff });
       runtime?.focusBlock(storyboardDesk.id);
-      setTip('已打开分镜台 · 请在「拆镜」页点「从成稿拆镜」');
-      appendLog(`编剧台：打开分镜台 · 请手动从成稿拆镜`);
+      setTip(`已送到分镜台 · ${pkg.screenplay.episodes.length} 集 · 请在「拆镜」页点「只拆新增」`);
+      appendLog(`编剧台：送到分镜台 · ${pkg.screenplay.episodes.length} 集 · 打开拆镜页只拆新增`);
     } else {
-        const handoffData = {
-          connectToSource: props.id,
-          handoff: {
-            from: 'script-desk',
-            to: 'storyboard-desk',
-            fromId: props.id,
-            at: new Date().toISOString(),
-            autoOpenBreakdown: true,
-            sourceScriptBlockId: props.id,
-            episodeRange: {
-              count: pkg.screenplay.episodes.length,
-              firstId: pkg.screenplay.episodes[0]?.id ?? null,
-              lastId: pkg.screenplay.episodes[pkg.screenplay.episodes.length - 1]?.id ?? null,
-              titles: pkg.screenplay.episodes.map((e) => e.title || `第${e.index}集`),
-            },
-            scriptTitle: pkg.brief.title || pkg.screenplay.episodes[0]?.title || '',
-            scriptWordCount: screenplayWordCount(pkg),
-          },
-        };
-      useFlowCommands.getState().requestSpawn('storyboard-desk', undefined, handoffData);
-      setTip('已创建分镜台并连线 · 打开后请在「拆镜」页点「从成稿拆镜」');
-      appendLog(`编剧台：送至分镜 · 一键创建并连线分镜台`);
+      useFlowCommands.getState().requestSpawn('storyboard-desk', undefined, {
+        connectToSource: props.id,
+        handoff,
+      });
+      setTip(`已创建分镜台并连线 · ${pkg.screenplay.episodes.length} 集 · 打开后请在「拆镜」页点「从成稿拆镜」`);
+      appendLog(`编剧台：送至分镜 · 一键创建并连线分镜台 · ${pkg.screenplay.episodes.length} 集`);
     }
-  }, [appendLog, props.id]);
+  }, [appendLog, pkg, props.id, updateNodeData]);
 
   const handleReadinessChange = useCallback((state: AssetReadinessState) => {
     updateNodeData(props.id, { assetReadiness: state });
@@ -531,7 +550,7 @@ function ScriptDeskBlock(props: NodeProps) {
       return false;
     }
     if (!isBriefReadyForFirstGen(fromPkg)) {
-      setTip('请先共创并应用 Brief（至少剧名或 logline）');
+      setTip('请先共创并应用大纲（至少剧名或一句话故事）');
       return false;
     }
     setFirstGenFloatDeferred(false);
@@ -657,10 +676,10 @@ function ScriptDeskBlock(props: NodeProps) {
       '',
       screenplayFullText(pkg),
       '',
-      '## Bible · 人物',
+      '## 设定 · 人物',
       ...pkg.bible.characters.map((c) => `- **${c.name}**：${[c.identity, c.personality, c.appearance].filter(Boolean).join(' · ')}`),
       '',
-      '## Bible · 场景',
+      '## 设定 · 场景',
       ...pkg.bible.scenes.map((s) => `- **${s.name}**：${[s.location, s.summary].filter(Boolean).join(' · ')}`),
     ].filter(Boolean).join('\n');
     const blob = new Blob([md], { type: 'text/markdown' });
@@ -688,7 +707,7 @@ function ScriptDeskBlock(props: NodeProps) {
       return;
     }
     if (!isBriefReadyForFirstGen(pkg)) {
-      setTip('请先共创并应用 Brief（至少剧名或 logline）');
+      setTip('请先共创并应用大纲（至少剧名或一句话故事）');
       return;
     }
     setGenFloatExpanded(false);
@@ -1111,7 +1130,7 @@ function ScriptDeskBlock(props: NodeProps) {
 
   // B-01: 删除 Bible 人物
   const removeBibleCharacter = useCallback(async (charId: string, name: string) => {
-    const ok = await confirmDelete({ title: `删除 Bible 人物「${name}」？`, description: '此操作不可撤销。' });
+    const ok = await confirmDelete({ title: `删除设定人物「${name}」？`, description: '此操作不可撤销。' });
     if (!ok) return;
     dirtyRef.current = true;
     const chars = pkg.bible.characters.filter((c) => c.id !== charId);
@@ -1121,7 +1140,7 @@ function ScriptDeskBlock(props: NodeProps) {
 
   // B-01: 删除 Bible 场景
   const removeBibleScene = useCallback(async (sceneId: string, name: string) => {
-    const ok = await confirmDelete({ title: `删除 Bible 场景「${name}」？`, description: '此操作不可撤销。' });
+    const ok = await confirmDelete({ title: `删除设定场景「${name}」？`, description: '此操作不可撤销。' });
     if (!ok) return;
     dirtyRef.current = true;
     const scenes = pkg.bible.scenes.filter((s) => s.id !== sceneId);
@@ -1330,7 +1349,7 @@ function ScriptDeskBlock(props: NodeProps) {
     }
     const result = await askConfirmWithOption({
       title: '确定重置编剧台？',
-      description: '将清空当前剧集、Bible、对话与相关成稿内容，此操作不可就地撤销。',
+      description: '将清空当前剧集、设定、对话与相关成稿内容，此操作不可就地撤销。',
       confirmLabel: '确认重置',
       cancelLabel: '取消',
       tone: 'danger',
@@ -1465,7 +1484,7 @@ function ScriptDeskBlock(props: NodeProps) {
             </span>
           </div>
           <div className="sd2-card__title">{title}</div>
-          <div className="sd2-card__meta">{epCount} 集 · Bible 角 {charCount} · 场 {sceneCount}</div>
+          <div className="sd2-card__meta">{epCount} 集 · 设定 角 {charCount} · 场 {sceneCount}</div>
           <div className="sd2-card__logline">{logline ? compact(logline, 72) : '点击打开编剧台 · Agent 共创或上传成稿'}</div>
           <div className="sd2-card__actions">
             <button type="button" className="sd2-btn sd2-btn--ghost" onClick={(e) => { e.stopPropagation(); setStudioOpen(true); }}>打开编剧台</button>
@@ -1477,7 +1496,7 @@ function ScriptDeskBlock(props: NodeProps) {
         open={studioOpen}
         onClose={handleCloseStudio}
         title="编剧台"
-        subtitle="共创成稿 → 抽取 Bible → 确认交付"
+        subtitle="共创成稿 → 抽取设定 → 确认交付"
         width="min(1180px, 100vw - 32px)"
         variant="default"
         className="sd2-modal"
@@ -1519,7 +1538,6 @@ function ScriptDeskBlock(props: NodeProps) {
                 aria-pressed={rightDrawerOpen}
               >
                 <FileText size={15} strokeWidth={1.75} />
-                <span className="sd2-tool__label">稿纸</span>
               </button>
               <button
                 type="button"
@@ -1532,7 +1550,6 @@ function ScriptDeskBlock(props: NodeProps) {
                 aria-label={diagCount > 0 ? `诊断，${diagCount} 条` : '诊断'}
               >
                 <Stethoscope size={15} strokeWidth={1.75} />
-                <span className="sd2-tool__label">诊断</span>
                 {diagCount > 0 ? (
                   <span className="sd2-tool__badge sd2-tool__badge--warn">{diagCount}</span>
                 ) : null}
@@ -1542,11 +1559,10 @@ function ScriptDeskBlock(props: NodeProps) {
                 className="sd2-tool"
                 disabled={busy || continueBusy || rewritingEpIndex != null}
                 onClick={() => void handleExtractBible()}
-                title="抽取 Bible"
-                aria-label="抽取 Bible"
+                title="抽取设定"
+                aria-label="抽取设定"
               >
                 <Sparkles size={15} strokeWidth={1.75} />
-                <span className="sd2-tool__label">Bible</span>
               </button>
               <button
                 type="button"
@@ -1557,7 +1573,6 @@ function ScriptDeskBlock(props: NodeProps) {
                 aria-label={`草稿箱${scriptDeskDrafts.length > 0 ? `，${scriptDeskDrafts.length} 份` : ''}`}
               >
                 <FolderOpen size={15} strokeWidth={1.75} />
-                <span className="sd2-tool__label">草稿</span>
                 {scriptDeskDrafts.length > 0 ? (
                   <span className="sd2-tool__badge">{scriptDeskDrafts.length}</span>
                 ) : null}
@@ -1571,7 +1586,6 @@ function ScriptDeskBlock(props: NodeProps) {
                 aria-label="重置编剧台"
               >
                 <RotateCcw size={15} strokeWidth={1.75} />
-                <span className="sd2-tool__label">重置</span>
               </button>
             </div>
 
@@ -1724,7 +1738,7 @@ function ScriptDeskBlock(props: NodeProps) {
             {(['brief', 'draft', 'qa'] as const).map((seg) => (
               <div className="sd2-skill-seg" key={seg}>
                 <span className="sd2-skill-seg__label">
-                  {seg === 'brief' ? 'Brief' : seg === 'draft' ? '成稿' : '质检'}
+                  {seg === 'brief' ? '大纲' : seg === 'draft' ? '成稿' : '质检'}
                 </span>
                 {SKILL_CHIPS.filter((skill) => skill.segment === seg && skill.id !== 'generate').map((skill) => (
                   <button
@@ -1756,7 +1770,7 @@ function ScriptDeskBlock(props: NodeProps) {
                 <div className="sd2-ingest">
                   <div className="sd2-ingest__intro">
                     <h3>导入已有成稿</h3>
-                    <p>支持拖放或粘贴；写入后可抽取 Bible，再确认交付。</p>
+                    <p>支持拖放或粘贴；写入后可抽取设定，再确认交付。</p>
                   </div>
                   <div className="sd2-ingest__drop">
                     <FileUp size={22} strokeWidth={1.5} />
@@ -1801,7 +1815,7 @@ function ScriptDeskBlock(props: NodeProps) {
                           >
                             <FileUp size={18} strokeWidth={1.5} />
                             <span>上传成稿</span>
-                            <small>已有小说/剧本，导入后抽 Bible 再确认交付</small>
+                            <small>已有小说/剧本，导入后抽设定再确认交付</small>
                           </button>
                           <button
                             type="button"
@@ -1964,7 +1978,7 @@ function ScriptDeskBlock(props: NodeProps) {
                       {atOpen && (pkg.bible.characters.length > 0 || pkg.bible.scenes.length > 0 || hasLibraryItems) && (
                         <div className="sd2-at-dropdown">
                           {(pkg.bible.characters.length > 0 || pkg.bible.scenes.length > 0) && (
-                            <div className="sd2-at-dropdown__group">Bible draft</div>
+                            <div className="sd2-at-dropdown__group">设定草稿</div>
                           )}
                           {pkg.bible.characters.map((c) => (
                             <button key={c.id} type="button" className="sd2-at-dropdown__item" onClick={() => { setChatInput((prev) => prev.replace(/@\s*$/, `@${c.name} `)); setAtOpen(false); }}>人物：{c.name}</button>
@@ -2027,7 +2041,7 @@ function ScriptDeskBlock(props: NodeProps) {
               <aside className="sd2-drawer" aria-label="成稿稿纸">
                 <div className="sd2-drawer__tabs">
                   <button type="button" className={rightTab === 'screenplay' ? 'is-on' : ''} onClick={() => setRightTab('screenplay')}>成稿</button>
-                  <button type="button" className={rightTab === 'bible' ? 'is-on' : ''} onClick={() => setRightTab('bible')}>Bible</button>
+                  <button type="button" className={rightTab === 'bible' ? 'is-on' : ''} onClick={() => setRightTab('bible')}>设定</button>
                   <button type="button" className={rightTab === 'readiness' ? 'is-on' : ''} onClick={() => setRightTab('readiness')}>设定就绪</button>
                   <button type="button" className={rightTab === 'diagnostics' ? 'is-on' : ''} onClick={() => setRightTab('diagnostics')}>诊断</button>
                 </div>
@@ -2048,7 +2062,7 @@ function ScriptDeskBlock(props: NodeProps) {
                           <input value={pkg.brief.title ?? ''} onChange={(e) => patchBriefTitle(e.target.value)} placeholder="剧名" />
                         </label>
                         <label className="sd2-field">
-                          <span className="sd2-field__label">logline</span>
+                          <span className="sd2-field__label">一句话故事</span>
                           <input value={pkg.brief.logline ?? ''} onChange={(e) => { dirtyRef.current = true; let next = touchScreenplayPackage(pkg, { brief: { ...pkg.brief, logline: e.target.value } }); if (pkg.status === 'confirmed') next = unconfirmIfEdited(next); savePkg(next); }} placeholder="一句话故事" />
                         </label>
                         <label className="sd2-field sd2-field--count">
@@ -2414,7 +2428,7 @@ function ScriptDeskBlock(props: NodeProps) {
                           <button type="button" className="sd2-btn sd2-btn--ghost" onClick={() => { setMergeSelection([]); setMergeType(null); }}>取消</button>
                         </div>
                       )}
-                      <div className="sd2-section-label">人物 draft（叙事层 · 不入库）</div>
+                      <div className="sd2-section-label">人物草稿（叙事层 · 不入库）</div>
                       {pkg.bible.characters.length === 0 && <div className="sd2-empty">暂无人物</div>}
                       {pkg.bible.characters.map((c) => {
                         const isEdit = editingBibleId === c.id;
@@ -2459,14 +2473,20 @@ function ScriptDeskBlock(props: NodeProps) {
                                   >
                                     合并
                                   </button>
+                                  <button
+                                    type="button"
+                                    className="sd2-btn sd2-btn--primary"
+                                    onClick={() => setEditingBibleId(null)}
+                                  >
+                                    保存
+                                  </button>
                                 </div>
                               </div>
                             )}
-                            <div className="sd2-bible-card__tag">{c.libraryStatus ?? 'draft'}</div>
                           </div>
                         );
                       })}
-                      <div className="sd2-section-label">场景 draft</div>
+                      <div className="sd2-section-label">场景草稿</div>
                       {pkg.bible.scenes.length === 0 && <div className="sd2-empty">暂无场景</div>}
                       {pkg.bible.scenes.map((s) => {
                         const isEdit = editingBibleId === s.id;
@@ -2511,10 +2531,16 @@ function ScriptDeskBlock(props: NodeProps) {
                                   >
                                     合并
                                   </button>
+                                  <button
+                                    type="button"
+                                    className="sd2-btn sd2-btn--primary"
+                                    onClick={() => setEditingBibleId(null)}
+                                  >
+                                    保存
+                                  </button>
                                 </div>
                               </div>
                             )}
-                            <div className="sd2-bible-card__tag">{s.libraryStatus ?? 'draft'}</div>
                           </div>
                         );
                       })}
@@ -2547,6 +2573,15 @@ function ScriptDeskBlock(props: NodeProps) {
                                     <span className="sd2-field__label">世界观</span>
                                     <input value={pkg.bible.world.worldview ?? ''} onChange={(e) => patchBibleWorld('worldview', e.target.value)} />
                                   </label>
+                                  <div className="sd2-bible-card__acts">
+                                    <button
+                                      type="button"
+                                      className="sd2-btn sd2-btn--primary"
+                                      onClick={() => setEditingBibleId(null)}
+                                    >
+                                      保存
+                                    </button>
+                                  </div>
                                 </div>
                               )}
                             </div>
@@ -2579,7 +2614,7 @@ function ScriptDeskBlock(props: NodeProps) {
                         <div
                           key={`${d.code}-${i}`}
                           className={`sd2-diag sd2-diag--${d.level}${(d.entityId || d.episodeId) ? ' sd2-diag--clickable' : ''}`}
-                          title={d.episodeId ? `点击定位到「第${pkg.screenplay.episodes.find((e) => e.id === d.episodeId)?.index ?? '?'}集」` : (d.entityId ? `点击定位到 Bible「${d.entityId}」` : undefined)}
+                          title={d.episodeId ? `点击定位到「第${pkg.screenplay.episodes.find((e) => e.id === d.episodeId)?.index ?? '?'}集」` : (d.entityId ? `点击定位到设定「${d.entityId}」` : undefined)}
                           onClick={() => handleDiagClick(d)}
                           role={(d.entityId || d.episodeId) ? 'button' : undefined}
                           tabIndex={(d.entityId || d.episodeId) ? 0 : undefined}
@@ -2603,7 +2638,7 @@ function ScriptDeskBlock(props: NodeProps) {
                           title={
                             isBriefReadyForFirstGen(pkg)
                               ? busy ? '停止生成' : '打开左侧选集框，确认集数后开始'
-                              : '请先共创并应用 Brief（至少剧名或 logline）'
+                              : '请先共创并应用大纲（至少剧名或一句话故事）'
                           }
                           onClick={busy ? () => abortRef.current?.abort() : () => {
                             openFirstGenFloat(pkg);
@@ -2659,7 +2694,7 @@ function ScriptDeskBlock(props: NodeProps) {
                                 </button>
                               </div>
                               <div className="sd2-continue-pop__all-desc">
-                                全部 = 补齐 Brief 目标集数；无目标则续写 10 集
+                                全部 = 补齐大纲目标集数；无目标则续写 10 集
                               </div>
                               <div className="sd2-continue-pop__acts">
                                 <button type="button" className="sd2-btn sd2-btn--ghost" onClick={() => setContinueOpen(false)}>取消</button>
@@ -2739,7 +2774,7 @@ function ScriptDeskBlock(props: NodeProps) {
               className="sd2-ctx-menu__item"
               onClick={async () => {
                 setChatMenu(null);
-                const ok = await confirmDelete({ title: '清空左侧对话？', description: '此操作仅清空对话记录，不影响已成稿与 Bible。', confirmLabel: '仅清对话', cancelLabel: '保留' });
+                const ok = await confirmDelete({ title: '清空左侧对话？', description: '此操作仅清空对话记录，不影响已成稿与设定。', confirmLabel: '仅清对话', cancelLabel: '保留' });
                 if (ok) {
                   updateNodeData(props.id, {
                     agentSession: {

@@ -62,6 +62,14 @@ export function normalizeScriptBreakdownConfig(
   };
 }
 
+/** 软建议镜数区间（按硬上限推算；默认 24 → 12–20） */
+export function suggestedShotsPerEpisodeRange(maxShotsPerEpisode: number): { min: number; max: number } {
+  const hardMax = Math.max(3, Math.min(100, Math.round(maxShotsPerEpisode) || 24));
+  const softMin = Math.max(3, Math.min(hardMax - 1, Math.round(hardMax * 0.5)));
+  const softMax = Math.max(softMin, Math.min(hardMax, Math.round(hardMax * 5 / 6)));
+  return { min: softMin, max: softMax };
+}
+
 function buildDirectorControlDirective(config: ScriptBreakdownConfig): string {
   const entries: Array<[string, string[]]> = [
     ['剧情类型', config.directorControls.storyGenres],
@@ -226,6 +234,7 @@ export function buildEpisodeBreakdownUserPrompt(args: {
   config?: Partial<ScriptBreakdownConfig>;
 }): string {
   const config = normalizeScriptBreakdownConfig(args.config);
+  const softShots = suggestedShotsPerEpisodeRange(config.maxShotsPerEpisode);
   return [
     `只拆分第 ${args.episodeIndex} 集《${args.title}》，不要输出其他集。`,
     args.logline ? `本集梗概：${args.logline}` : '',
@@ -243,7 +252,8 @@ export function buildEpisodeBreakdownUserPrompt(args: {
       '"audiovisualLanguage":"视听语言：1-3句中文成段描写，写运镜如何服务情绪与戏剧信息、景别功能、光色/材质对比、声画关系；禁止只罗列景别运镜词条",',
       '"imagePrompt":"可直接生成单帧的完整提示词","videoPrompt":"动作+运镜+时长+连续性提示词","sketchPrompt":"黑白线稿分镜构图提示词","negativePrompt":"排除项",',
       '"continuityNotes":["服装/道具/位置/朝向/光线延续"]}]}]}。',
-      `每镜 ${config.minShotDurationSec}-${config.maxShotDurationSec} 秒；本集最多 ${config.maxShotsPerEpisode} 镜；目标总时长约 ${config.targetEpisodeDurationSec} 秒。`,
+      `每镜 ${config.minShotDurationSec}-${config.maxShotDurationSec} 秒；目标总时长约 ${config.targetEpisodeDurationSec} 秒。`,
+      `按剧情密度拆镜：建议 ${softShots.min}-${softShots.max} 镜；硬上限 ${config.maxShotsPerEpisode} 镜。禁止为凑满上限灌水或拆碎无效镜；内容少则少拆，宁缺毋滥。`,
       `画幅 ${config.aspectRatio}；目标形态 ${config.targetFormat}；节奏 ${config.pacing}；改编忠实度 ${config.adaptationFidelity}；对白密度 ${config.dialogueDensity}。`,
       `imagePrompt/videoPrompt 语言：${config.promptLanguage}；统一视觉风格：${config.visualStyle}。`,
       '【audiovisualLanguage 强制要求】必须是完整句子组成的视听叙述，不是标签。',

@@ -607,6 +607,8 @@ export class AgentService {
     const chunks = splitSourceIntoEpisodeChunks(sourceText, config);
     if (chunks.length === 0) throw new BadRequestException('无法从原文规划分集');
     const diagnostics: ScriptBreakdownDiagnostic[] = [];
+    // eslint-disable-next-line no-console
+    console.log(`[script-breakdown] start · chars=${sourceText.length} · chunks=${chunks.length}`);
 
     let plan: Record<string, unknown> | null = null;
     try {
@@ -637,6 +639,8 @@ export class AgentService {
       const episodeId = `ep-${episodeIndex}`;
       let scenes: ScriptBreakdownScene[] = [];
       let shots: ScriptBreakdownShot[] = [];
+      // eslint-disable-next-line no-console
+      console.log(`[script-breakdown] episode ${episodeIndex}/${chunks.length} · ${title}`);
 
       try {
         const windows = splitLongEpisodeText(chunk.text);

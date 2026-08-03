@@ -37,7 +37,11 @@ import { ScreenModal } from '../../../components/ui/ScreenModal';
 import { useActivityLog } from '../../../stores/activity-log';
 import { useWorkspaceDocument } from '../../../stores/workspace-document';
 import { isDevPromptEnabled, useDevPromptOverrides } from '../../../stores/dev-prompt-overrides';
-import { applyScriptBreakdownPayload, runProductionScriptBreakdownForEpisodes } from '../../../engine/script-breakdown-runner';
+import {
+  applyScriptBreakdownPayload,
+  runProductionScriptBreakdownForEpisodes,
+  stableSourceResultEpisodeId,
+} from '../../../engine/script-breakdown-runner';
 import {
   addShotToBreakdown,
   applyDeskBreakdown,
@@ -45,6 +49,7 @@ import {
   buildEpisodeReadyMeta,
   computeCompositionStats,
   filterShots,
+  isShotBound,
   isShotComposed,
   mergeIncrementalBreakdown,
   mergeShotsInBreakdown,
@@ -92,7 +97,7 @@ import { useFlowCommands } from '../../../stores/flow-commands';
 import '../storyboard-desk.css';
 import '../storyboard-desk.v2.css';
 
-import { useUpstreamBreakdown, useUpstreamScreenplay, compact, clonePayload, namesToText, textToNames, stripMentionToken, scenePresetName, characterMeta, GLOBAL_MENTION_KINDS, CHARACTER_MENTION_KINDS, SCENE_MENTION_KINDS, patchShotInPayload, createShotEditDraft, shotDialogueLine, SHOT_SIZES, CAMERA_MOVES, type ShotEditDraft, type StudioTab } from './helpers';
+import { useUpstreamBreakdown, useUpstreamScreenplay, findUpstreamScriptDeskId, compact, clonePayload, namesToText, textToNames, stripMentionToken, scenePresetName, characterMeta, GLOBAL_MENTION_KINDS, CHARACTER_MENTION_KINDS, SCENE_MENTION_KINDS, patchShotInPayload, createShotEditDraft, shotDialogueLine, SHOT_SIZES, CAMERA_MOVES, type ShotEditDraft, type StudioTab } from './helpers';
 import { ShotStoryCell } from './shot-story-cell';
 import HandoffPanel from './handoff-panel';
 import BreakdownPanel from './breakdown-panel';
@@ -108,9 +113,40 @@ export function useStoryboardDesk(props: NodeProps) {
   const local = props.data?.scriptBreakdown as ScriptBreakdownPayload | undefined;
   const payload = local ?? undefined;
   const [breakingDown, setBreakingDown] = useState(false);
+  const breakdownAbortRef = useRef<AbortController | null>(null);
+  /** 每次开始/取消同步自增；完成后若不匹配则丢弃写回 */
+  const breakdownEpochRef = useRef(0);
+  const [breakdownElapsedSec, setBreakdownElapsedSec] = useState(0);
   const [shotFilter, setShotFilter] = useState<ShotListFilter>('all');
   const [incrementalText, setIncrementalText] = useState('');
   const [incrementalBusy, setIncrementalBusy] = useState(false);
+  const breakdownProgressText = typeof (props.data as Record<string, unknown> | undefined)?.breakdownProgress === 'string'
+    ? String((props.data as Record<string, unknown>).breakdownProgress)
+    : null;
+
+  // 同步中心跳：避免长时间 AI 调用看起来像卡死
+  useEffect(() => {
+    if (!breakingDown) {
+      setBreakdownElapsedSec(0);
+      return;
+    }
+    const t0 = Date.now();
+    setBreakdownElapsedSec(0);
+    const id = window.setInterval(() => {
+      setBreakdownElapsedSec(Math.floor((Date.now() - t0) / 1000));
+    }, 1000);
+    return () => window.clearInterval(id);
+  }, [breakingDown]);
+
+  // 挂载时若遗留 running 且无本地同步任务，清掉脏状态
+  useEffect(() => {
+    const status = (props.data as Record<string, unknown> | undefined)?.status;
+    if (status === 'running' && !breakingDown) {
+      updateNodeData(props.id, { status: 'idle', breakdownProgress: null });
+    }
+    // 仅挂载时检查一次
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const shots = useMemo(() => flattenScriptBreakdownShots(payload), [payload]);
   const activeEpisodeId = useWorkspaceDocument((state) => state.storyboard.activeEpisodeId);
   const setActiveEpisodeId = useWorkspaceDocument((state) => state.setActiveEpisodeId);
@@ -180,6 +216,12 @@ export function useStoryboardDesk(props: NodeProps) {
     [visibleShots],
   );
   const [studioOpen, setStudioOpen] = useState(false);
+  const studioOpenRef = useRef(false);
+  useEffect(() => { studioOpenRef.current = studioOpen; }, [studioOpen]);
+  // 重新打开分镜台时收起「后台拆镜」常驻提示
+  useEffect(() => {
+    if (studioOpen) useToast.getState().dismiss('sb-breakdown-bg');
+  }, [studioOpen]);
   const [studioTab, setStudioTab] = useState<StudioTab>('grid');
   /** 构图区子页：关键帧预览 / 故事板大图 */
   const [composeViewTab, setComposeViewTab] = useState<'preview' | 'sheet'>('preview');
@@ -228,6 +270,9 @@ export function useStoryboardDesk(props: NodeProps) {
   const queueStateRef = useRef(queueState);
   useEffect(() => { queueStateRef.current = queueState; }, [queueState]);
   const deskBusy = batchRunning || sheetComposing || queueState.status === 'running' || generatingShotId !== null || breakingDown || incrementalBusy;
+  const breakdownBusy = breakingDown
+    || queueState.status === 'running'
+    || queueState.status === 'paused';
 
   const undo = useCallback(() => {
     const stack = undoStackRef.current;
@@ -247,18 +292,87 @@ export function useStoryboardDesk(props: NodeProps) {
     return () => window.removeEventListener('beforeunload', handler);
   }, [deskBusy]);
 
+  /** 拆镜结束后：若弹窗已关，询问是否回到分镜台 */
+  const offerReturnAfterBreakdown = useCallback(async (result: 'ok' | 'fail', detail?: string) => {
+    if (studioOpenRef.current) {
+      if (result === 'ok') setStudioTab('grid');
+      return;
+    }
+    if (result === 'ok') {
+      setStudioTab('grid');
+      const go = await askConfirm({
+        title: '拆镜已完成',
+        description: '后台拆镜已结束，是否返回分镜台查看镜表？',
+        confirmLabel: '打开分镜台',
+        cancelLabel: '稍后',
+        tone: 'neutral',
+      });
+      if (go) {
+        setStudioOpen(true);
+        focusBlock?.(props.id);
+      } else {
+        toastSuccess('拆镜已完成，可随时打开分镜台查看');
+      }
+      return;
+    }
+    const go = await askConfirm({
+      title: '拆镜失败',
+      description: detail?.trim()
+        ? `${detail.trim()}\n\n是否打开分镜台查看详情？`
+        : '后台拆镜失败。是否打开分镜台查看详情？',
+      confirmLabel: '打开分镜台',
+      cancelLabel: '稍后',
+      tone: 'danger',
+    });
+    if (go) {
+      setStudioOpen(true);
+      focusBlock?.(props.id);
+    }
+  }, [focusBlock, props.id]);
+
   const handleCloseStudio = useCallback(async () => {
+    // 拆镜中：可后台继续，不中止请求（节点组件仍挂载，任务不受弹窗关闭影响）
+    if (breakdownBusy) {
+      const bg = await askConfirm({
+        title: '拆镜进行中',
+        description: '可关闭弹窗，让拆镜在后台继续；完成后会询问是否返回分镜台。选择「留下等待」则保持打开。',
+        confirmLabel: '后台继续',
+        cancelLabel: '留下等待',
+        tone: 'neutral',
+      });
+      if (!bg) return;
+      appendLog('分镜台：拆镜转入后台继续（关闭弹窗不会中止）');
+      useToast.getState().push({
+        id: 'sb-breakdown-bg',
+        message: '拆镜后台进行中… 可继续操作画布',
+        variant: 'info',
+        actionLabel: '打开分镜台',
+        onAction: () => {
+          setStudioOpen(true);
+          focusBlock?.(props.id);
+        },
+      });
+      setStudioOpen(false);
+      return;
+    }
     if (deskBusy) {
       const ok = await askConfirm({
         title: '任务进行中，确定关闭？',
-        description: '关闭不会撤销已成功的线稿。',
+        description: '关闭会取消进行中的线稿/构图任务；已成功的线稿不会撤销。',
         confirmLabel: '仍要关闭',
         cancelLabel: '继续任务',
       });
       if (!ok) return;
+      lineArtAbortRef.current?.abort();
+      lineArtAbortRef.current = null;
+      setBatchMode(null);
+      setBatchProgress(null);
+      setGeneratingShotId(null);
+      setSheetComposing(false);
+      setIncrementalBusy(false);
     }
     setStudioOpen(false);
-  }, [deskBusy]);
+  }, [appendLog, breakdownBusy, deskBusy, focusBlock, props.id]);
 
   const updateShot = useWorkspaceDocument((s) => s.updateShot);
   // Q-04: chainStoryboard 是 SSOT；全局 storyboard.shots 不得伪装成 chain 流入优先级 2
@@ -300,20 +414,22 @@ export function useStoryboardDesk(props: NodeProps) {
     && upstreamPackage!.status === 'confirmed'
     && Boolean(upstreamPackage!.screenplay.episodes.some((ep) => ep.bodyMd.trim()));
 
-  // H-04: 从编剧台送分镜时高亮拆镜入口
-  const handoffData = (props.data as Record<string, unknown>)?.handoff as { autoOpenBreakdown?: boolean; sourceScriptBlockId?: string } | undefined;
+  // H-04: 从编剧台送分镜时高亮拆镜入口并打开工作室
+  const handoffData = (props.data as Record<string, unknown>)?.handoff as {
+    autoOpenBreakdown?: boolean;
+    sourceScriptBlockId?: string;
+    at?: string;
+  } | undefined;
   const [handoffHighlight, setHandoffHighlight] = useState(false);
-  useEffect(() => {
-    if (handoffData?.autoOpenBreakdown) {
-      setHandoffHighlight(true);
-      // 自动打开时切换到拆镜 tab
-      if (studioOpen) {
-        setStudioTab('breakdown');
-      }
-    }
-  }, [handoffData?.autoOpenBreakdown]);
   const [staleBannerDismissed, setStaleBannerDismissed] = useState(false);
   const [staleBannerShowDiff, setStaleBannerShowDiff] = useState(false);
+  useEffect(() => {
+    if (!handoffData?.autoOpenBreakdown) return;
+    setHandoffHighlight(true);
+    setStudioTab('breakdown');
+    setStudioOpen(true);
+    setStaleBannerDismissed(false);
+  }, [handoffData?.autoOpenBreakdown, handoffData?.at]);
   const studioBreakdownDefault = handoffData?.autoOpenBreakdown ? 'breakdown' : undefined;
   const packageStale = Boolean(
     payload
@@ -324,6 +440,19 @@ export function useStoryboardDesk(props: NodeProps) {
   useEffect(() => {
     if (!packageStale) { setStaleBannerDismissed(false); setStaleBannerShowDiff(false); }
   }, [packageStale]);
+
+  /** 上游有、本地镜表还没有的集（按 source / stable id 对齐） */
+  const missingUpstreamEpisodes = useMemo(() => {
+    if (!upstreamPackage) return [];
+    const localEps = local?.episodes ?? [];
+    return upstreamPackage.screenplay.episodes.filter((ep) => {
+      const stableId = stableSourceResultEpisodeId(ep.id);
+      return !localEps.some((e) => e.id === ep.id || e.id === stableId);
+    });
+  }, [local?.episodes, upstreamPackage]);
+  /** 本地已有镜表时，才把 missing 当成「只拆新增」；空台一律走「从成稿拆镜」 */
+  const hasLocalBreakdownEpisodes = (local?.episodes?.length ?? 0) > 0;
+  const incrementalNewEpisodeCount = hasLocalBreakdownEpisodes ? missingUpstreamEpisodes.length : 0;
   const sceneNameSet = useMemo(
     () => new Set([
       ...environments.map((e) => e.name.trim()),
@@ -364,8 +493,15 @@ export function useStoryboardDesk(props: NodeProps) {
   );
 
   const diagnostics = useMemo(
-    () => buildBreakdownDiagnostics(payload, characterNameSet, sceneNameSet),
-    [characterNameSet, payload, sceneNameSet],
+    () => {
+      const list = buildBreakdownDiagnostics(payload, characterNameSet, sceneNameSet);
+      // 拆镜进行中会先清空镜表再逐集写入，此时「镜表为空」是中间态，不当错误展示
+      if (breakingDown || queueState.status === 'running' || queueState.status === 'paused') {
+        return list.filter((d) => d.code !== 'no-shots');
+      }
+      return list;
+    },
+    [breakingDown, characterNameSet, payload, queueState.status, sceneNameSet],
   );
 
   const filteredShots = useMemo(
@@ -517,11 +653,19 @@ export function useStoryboardDesk(props: NodeProps) {
       });
       if (!ok) return;
     }
+    breakdownAbortRef.current?.abort();
+    const controller = new AbortController();
+    breakdownAbortRef.current = controller;
+    const epoch = ++breakdownEpochRef.current;
     setBreakingDown(true);
+    appendLog('分镜台：开始从成稿同步（AI 拆镜可能需数分钟，进度秒数会跳动）…');
     try {
-      if (multiEpisode && upstreamPackage.screenplay.episodes.length > 1) {
-        // F-016: 队列化多集拆镜（支持暂停/继续/跳过/取消）
-        await runQueueForEpisodes(upstreamPackage.screenplay.episodes);
+      // 多集一律走队列，便于看到 0/N → 1/N 推进，避免整包一次请求像卡死
+      const useQueue = upstreamPackage.screenplay.episodes.length > 1
+        && (multiEpisode !== false);
+      if (useQueue) {
+        // F-016: 队列化多集拆镜（按集合并，禁止整表覆盖；支持暂停/继续/跳过/取消）
+        await runQueueForEpisodes(upstreamPackage.screenplay.episodes, controller.signal, { replaceAll: true });
       } else {
         await runBreakdownFromPackage({
           blockId: props.id,
@@ -530,18 +674,34 @@ export function useStoryboardDesk(props: NodeProps) {
           getLiveBreakdown: () => (
             getNodes().find((n) => n.id === props.id)?.data as Record<string, unknown> | undefined
           )?.scriptBreakdown as ScriptBreakdownPayload | undefined,
+          signal: controller.signal,
         });
-        appendLog('从成稿拆镜完成');
+        if (epoch === breakdownEpochRef.current) appendLog('从成稿拆镜完成');
       }
-      setStudioTab('grid');
-      setStudioOpen(true);
+      if (epoch === breakdownEpochRef.current && !controller.signal.aborted) {
+        useToast.getState().dismiss('sb-breakdown-bg');
+        await offerReturnAfterBreakdown('ok');
+      }
     } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      appendLog(`[SB_BREAKDOWN_FAIL] 从成稿拆镜失败：${msg}`);
+      if (epoch !== breakdownEpochRef.current) return;
+      const aborted = controller.signal.aborted
+        || (e instanceof DOMException && e.name === 'AbortError')
+        || (e instanceof Error && e.name === 'AbortError');
+      if (aborted) {
+        appendLog('分镜台：同步已取消');
+        useToast.getState().dismiss('sb-breakdown-bg');
+      } else {
+        const msg = e instanceof Error ? e.message : String(e);
+        appendLog(`[SB_BREAKDOWN_FAIL] 从成稿拆镜失败：${msg}`);
+        useToast.getState().dismiss('sb-breakdown-bg');
+        await offerReturnAfterBreakdown('fail', msg);
+      }
     } finally {
-      setBreakingDown(false);
+      if (breakdownAbortRef.current === controller) breakdownAbortRef.current = null;
+      if (epoch === breakdownEpochRef.current) setBreakingDown(false);
     }
-  }, [appendLog, confirmedEpisodeIds.length, getNodes, local, preflightMode, props.id, readiness, updateNodeData, upstreamPackage]);
+  }, [appendLog, confirmedEpisodeIds.length, getNodes, local, offerReturnAfterBreakdown, preflightMode, props.id, readiness, updateNodeData, upstreamPackage]);
+  // runQueueForEpisodes 在下方定义；回调执行时取当次闭包，勿写入 deps 以免 TDZ
 
   /** 增量补拆：按用户指定的文本补拆镜并合并进现有镜表 */
   const runIncrementalBreakdown = useCallback(async () => {
@@ -637,13 +797,35 @@ export function useStoryboardDesk(props: NodeProps) {
 
   const handleQueueCancel = useCallback(() => {
     queueCancelRef.current = true;
+    breakdownAbortRef.current?.abort();
     setQueueState((prev) => { const s = queueCancel(prev); setQueueProgress(buildProgress(s)); return s; });
     queueResumeRef.current?.();
   }, [buildProgress]);
 
-  /** F-016: 运行队列化拆镜 （支持暂停/继续/跳过/取消） */
+  const cancelBreakdown = useCallback(() => {
+    if (!breakingDown && queueState.status !== 'running' && queueState.status !== 'paused') return;
+    breakdownEpochRef.current += 1;
+    appendLog('分镜台：正在取消同步…');
+    handleQueueCancel();
+    breakdownAbortRef.current?.abort();
+    breakdownAbortRef.current = null;
+    setBreakingDown(false);
+    useToast.getState().dismiss('sb-breakdown-bg');
+    updateNodeData(props.id, {
+      status: 'idle',
+      breakdownProgress: null,
+      breakdownJob: {
+        phase: 'cancelled',
+        error: '用户取消',
+      },
+    });
+  }, [appendLog, breakingDown, handleQueueCancel, props.id, queueState.status, updateNodeData]);
+
+  /** F-016: 运行队列化拆镜（按集合并写入，禁止整表覆盖；支持暂停/继续/跳过/取消） */
   const runQueueForEpisodes = useCallback(async (
-    episodes: Array<{ id: string; title: string; index?: number }>,
+    episodes: Array<{ id: string; title: string; index?: number; bodyMd?: string }>,
+    signal?: AbortSignal,
+    opts?: { replaceAll?: boolean },
   ) => {
     const episodeIds = episodes.map((ep) => ep.id);
     const initQs = createEpisodeQueue(episodeIds);
@@ -652,9 +834,31 @@ export function useStoryboardDesk(props: NodeProps) {
     setQueueProgress(buildProgress(initQs));
     queueCancelRef.current = false;
 
+    const fullHash = upstreamPackage ? packageSourceHash(upstreamPackage) : '';
+    const fullSourceText = upstreamPackage ? screenplayFullText(upstreamPackage) : '';
+    const cfg = (props.data as Record<string, unknown>)?.scriptBreakdownConfig as
+      import('@nx9/shared').ScriptBreakdownConfig | undefined;
+    const pro = (props.data as Record<string, unknown>)?.scriptBreakdownPrompts as
+      import('@nx9/shared').ScriptBreakdownPromptTemplates | undefined;
+
+    // 全量重拆：清空旧镜表，避免与按集 stable id 合并后残留幽灵集
+    if (opts?.replaceAll) {
+      updateNodeData(props.id, {
+        scriptBreakdown: {
+          version: 1,
+          title: upstreamPackage?.brief?.title || '',
+          sourceText: fullSourceText,
+          generatedAt: new Date().toISOString(),
+          episodes: [],
+        } satisfies ScriptBreakdownPayload,
+        confirmedEpisodeIds: [],
+        gridConfirmed: false,
+      });
+    }
+
     let idx = 0;
     while (idx < episodes.length) {
-      if (queueCancelRef.current) {
+      if (queueCancelRef.current || signal?.aborted) {
         const cancelled = queueCancel(initQs);
         setQueueState(cancelled);
         setQueueProgress(buildProgress(cancelled));
@@ -671,7 +875,10 @@ export function useStoryboardDesk(props: NodeProps) {
       }
 
       const ep = episodes[idx];
-      const epTitle = ep.title || `第${(ep.index ?? idx) + 1}集`;
+      const episodeData = upstreamPackage?.screenplay?.episodes?.find((e) => e.id === ep.id);
+      const listIndex = Math.max(0, (episodeData?.index ?? ep.index ?? idx + 1) - 1);
+      const epTitle = (episodeData?.title || ep.title || `第${listIndex + 1}集`).trim();
+      const body = (episodeData?.bodyMd ?? ep.bodyMd ?? '').trim();
       setQueueCurrentTitle(epTitle);
 
       const progress: QueueProgress = {
@@ -687,26 +894,80 @@ export function useStoryboardDesk(props: NodeProps) {
       setQueueProgress(progress);
 
       appendLog(`分镜台 · 拆镜第 ${idx + 1}/${episodes.length} 集：${epTitle}`);
-      updateNodeData(props.id, { content: `拆镜中 ${idx + 1}/${episodes.length}…` });
+      updateNodeData(props.id, {
+        content: `拆镜中 ${idx + 1}/${episodes.length}…`,
+        breakdownProgress: `正在拆第 ${idx + 1}/${episodes.length} 集「${epTitle}」（AI 调用中）…`,
+      });
 
-      const episodeData = upstreamPackage?.screenplay?.episodes?.find((e) => e.id === ep.id);
-      const singleEpPkg = upstreamPackage && episodeData
-        ? { ...upstreamPackage, screenplay: { ...upstreamPackage.screenplay, episodes: [episodeData] } }
-        : null;
+      if (!body) {
+        initQs.errors[ep.id] = '该集正文为空';
+        initQs.results[ep.id] = false;
+        appendLog(`[SB_BREAKDOWN_FAIL] 分镜台 · 第 ${idx + 1} 集拆镜失败：该集正文为空`);
+        idx++;
+        initQs.index = idx;
+        if (idx >= episodes.length) initQs.status = 'done';
+        const snap = { ...initQs };
+        setQueueState(snap);
+        setQueueProgress(buildProgress(snap));
+        continue;
+      }
 
       try {
-        if (singleEpPkg) {
-          await runBreakdownFromPackage({
-            blockId: props.id,
-            pkg: singleEpPkg,
-            updateNodeData,
-            getLiveBreakdown: () => (
-              getNodes().find((n) => n.id === props.id)?.data as Record<string, unknown> | undefined
-            )?.scriptBreakdown as ScriptBreakdownPayload | undefined,
-          });
+        const live = (
+          getNodes().find((n) => n.id === props.id)?.data as Record<string, unknown> | undefined
+        )?.scriptBreakdown as ScriptBreakdownPayload | undefined;
+        // 去掉本集旧结果（含 AI 自建 id / 旧 stable id），再合并写入
+        const replaceId = stableSourceResultEpisodeId(ep.id);
+        const existingPayload = live
+          ? {
+            ...live,
+            episodes: (live.episodes ?? []).filter((e) => (
+              e.id !== replaceId
+              && e.id !== ep.id
+              && (e.index ?? -1) !== listIndex + 1
+            )),
+          }
+          : undefined;
+
+        const merged = await runProductionScriptBreakdownForEpisodes({
+          blockId: props.id,
+          episodes: [{
+            id: ep.id,
+            title: epTitle,
+            text: body,
+            listIndex,
+          }],
+          fullSourceText,
+          existingPayload,
+          config: cfg ? normalizeScriptBreakdownConfig(cfg) : undefined,
+          prompts: pro ? normalizeScriptBreakdownPrompts(pro) : undefined,
+          signal,
+        });
+
+        if (signal?.aborted || queueCancelRef.current) {
+          initQs.results[ep.id] = false;
+          break;
         }
+
+        applyDeskBreakdown(props.id, merged, updateNodeData, {
+          breakdownJob: {
+            phase: idx + 1 >= episodes.length ? 'done' : 'running',
+            sourcePackageId: upstreamPackage?.brief?.title || 'package',
+            // 必须用完整成稿包 hash，否则逐集拆完会误报「成稿不同步」
+            sourcePackageHash: fullHash,
+            startedAt: new Date().toISOString(),
+          },
+          gridConfirmed: false,
+        });
         initQs.results[ep.id] = true;
       } catch (e) {
+        const aborted = signal?.aborted
+          || (e instanceof DOMException && e.name === 'AbortError')
+          || (e instanceof Error && e.name === 'AbortError');
+        if (aborted || queueCancelRef.current) {
+          appendLog(`分镜台 · 第 ${idx + 1} 集拆镜已取消`);
+          break;
+        }
         const msg = e instanceof Error ? e.message : String(e);
         initQs.errors[ep.id] = msg;
         initQs.results[ep.id] = false;
@@ -725,6 +986,12 @@ export function useStoryboardDesk(props: NodeProps) {
       setQueueProgress(buildProgress(snap));
     }
 
+    if (signal?.aborted || queueCancelRef.current) {
+      const cancelled = queueCancel(initQs);
+      setQueueState(cancelled);
+      setQueueProgress(buildProgress(cancelled));
+    }
+
     const finalQ = queueStateRef.current;
     const final: QueueProgress = {
       total: episodes.length,
@@ -739,7 +1006,7 @@ export function useStoryboardDesk(props: NodeProps) {
     setQueueProgress(final);
     appendLog(`分镜台 · 队列完成 · 成功 ${final.succeeded} · 失败 ${final.failed} · 跳过 ${final.skipped}`);
     setQueueCurrentTitle('');
-  }, [props.id, upstreamPackage, updateNodeData, getNodes, appendLog, buildProgress]);
+  }, [props.id, props.data, upstreamPackage, updateNodeData, getNodes, appendLog, buildProgress]);
 
   /** B-05: 重试失败集 */
   const handleRetryFailed = useCallback(() => {
@@ -749,6 +1016,93 @@ export function useStoryboardDesk(props: NodeProps) {
     if (!failedEps.length) return;
     void runQueueForEpisodes(failedEps);
   }, [queueState.errors, upstreamPackage, runQueueForEpisodes]);
+
+  /** 只拆上游新增集，保留已有镜表（不 replaceAll）；本地空台请走从成稿拆镜 */
+  const breakdownNewEpisodesOnly = useCallback(async () => {
+    if (!upstreamPackage) { appendLog('分镜台：上游无编剧台成稿包'); return; }
+    if (!hasLocalBreakdownEpisodes) {
+      appendLog('分镜台：本地尚无镜表，改走从成稿拆镜');
+      await breakdownFromPackage();
+      return;
+    }
+    const newEps = missingUpstreamEpisodes;
+    if (newEps.length === 0) {
+      appendLog('分镜台：没有新增集可拆（若旧集正文有变，请用「仅重拆未确认」或「全量重拆」）');
+      useToast.getState().push({
+        message: '没有新增集。旧集有改动时请用「仅重拆未确认」或「全量重拆」',
+        variant: 'info',
+      });
+      return;
+    }
+    const gate = runStoryboardPreflight(readiness, preflightMode);
+    updateNodeData(props.id, {
+      preflight: { mode: preflightMode, lastReport: readiness ?? undefined },
+    });
+    if (gate.blocking) {
+      appendLog(`分镜台：硬预检阻断 · ${gate.reason ?? '设定未就绪'}`);
+      useToast.getState().push({
+        message: gate.reason ?? '硬模式下设定未就绪，无法拆镜',
+        variant: 'error',
+      });
+      return;
+    }
+    if (!gate.ok || gate.reason) {
+      useToast.getState().push({
+        message: gate.reason ?? '设定未完全就绪（软模式可继续）',
+        variant: 'info',
+      });
+    }
+    const titles = newEps.map((ep) => ep.title || `第${ep.index}集`).join('、');
+    const ok = await askConfirm({
+      title: `只拆新增 ${newEps.length} 集`,
+      description: `将拆：${titles}。已有镜表（第 1…集）会保留，不会覆盖。`,
+      confirmLabel: '开始拆新增',
+    });
+    if (!ok) return;
+    breakdownAbortRef.current?.abort();
+    const controller = new AbortController();
+    breakdownAbortRef.current = controller;
+    const epoch = ++breakdownEpochRef.current;
+    setBreakingDown(true);
+    appendLog(`分镜台：只拆新增 ${newEps.length} 集（保留已有镜表）…`);
+    try {
+      await runQueueForEpisodes(newEps, controller.signal);
+      if (epoch === breakdownEpochRef.current && !controller.signal.aborted) {
+        appendLog(`只拆新增集完成 · ${newEps.length} 集`);
+        useToast.getState().dismiss('sb-breakdown-bg');
+        await offerReturnAfterBreakdown('ok');
+      }
+    } catch (e) {
+      if (epoch !== breakdownEpochRef.current) return;
+      const aborted = controller.signal.aborted
+        || (e instanceof DOMException && e.name === 'AbortError')
+        || (e instanceof Error && e.name === 'AbortError');
+      if (aborted) {
+        appendLog('分镜台：拆新增集已取消');
+        useToast.getState().dismiss('sb-breakdown-bg');
+      } else {
+        const msg = e instanceof Error ? e.message : String(e);
+        appendLog(`[SB_BREAKDOWN_FAIL] 拆新增集失败：${msg}`);
+        useToast.getState().dismiss('sb-breakdown-bg');
+        await offerReturnAfterBreakdown('fail', msg);
+      }
+    } finally {
+      if (breakdownAbortRef.current === controller) breakdownAbortRef.current = null;
+      if (epoch === breakdownEpochRef.current) setBreakingDown(false);
+    }
+  }, [
+    appendLog,
+    breakdownFromPackage,
+    hasLocalBreakdownEpisodes,
+    missingUpstreamEpisodes,
+    offerReturnAfterBreakdown,
+    preflightMode,
+    props.id,
+    readiness,
+    runQueueForEpisodes,
+    updateNodeData,
+    upstreamPackage,
+  ]);
 
   /** B-04: 仅重拆未确认的集 */
   const breakdownUnconfirmedOnly = useCallback(async () => {
@@ -768,23 +1122,53 @@ export function useStoryboardDesk(props: NodeProps) {
       tone: 'danger',
     });
     if (!ok) return;
+    breakdownAbortRef.current?.abort();
+    const controller = new AbortController();
+    breakdownAbortRef.current = controller;
+    const epoch = ++breakdownEpochRef.current;
     setBreakingDown(true);
+    appendLog(`分镜台：开始仅重拆未确认集（${unconfirmedEps.length}）…`);
     try {
-      await runQueueForEpisodes(unconfirmedEps);
-      appendLog('仅重拆未确认集完成');
-      setStudioTab('grid');
-      setStudioOpen(true);
+      await runQueueForEpisodes(unconfirmedEps, controller.signal);
+      if (epoch === breakdownEpochRef.current && !controller.signal.aborted) {
+        appendLog('仅重拆未确认集完成');
+        useToast.getState().dismiss('sb-breakdown-bg');
+        await offerReturnAfterBreakdown('ok');
+      }
     } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      appendLog(`[SB_BREAKDOWN_FAIL] 重拆未确认集失败：${msg}`);
+      if (epoch !== breakdownEpochRef.current) return;
+      const aborted = controller.signal.aborted
+        || (e instanceof DOMException && e.name === 'AbortError')
+        || (e instanceof Error && e.name === 'AbortError');
+      if (aborted) {
+        appendLog('分镜台：重拆未确认集已取消');
+        useToast.getState().dismiss('sb-breakdown-bg');
+      } else {
+        const msg = e instanceof Error ? e.message : String(e);
+        appendLog(`[SB_BREAKDOWN_FAIL] 重拆未确认集失败：${msg}`);
+        useToast.getState().dismiss('sb-breakdown-bg');
+        await offerReturnAfterBreakdown('fail', msg);
+      }
     } finally {
-      setBreakingDown(false);
+      if (breakdownAbortRef.current === controller) breakdownAbortRef.current = null;
+      if (epoch === breakdownEpochRef.current) setBreakingDown(false);
     }
-  }, [appendLog, confirmedEpisodeIds, upstreamPackage, runQueueForEpisodes]);
+  }, [appendLog, confirmedEpisodeIds, offerReturnAfterBreakdown, upstreamPackage, runQueueForEpisodes]);
 
   const confirmCurrentEpisode = useCallback(async () => {
     if (!currentEpisodeId || visibleShots.length === 0) return;
     if (deskBusy) return;
+
+    if (packageStale) {
+      const ok = await askConfirm({
+        title: '上游成稿已更新',
+        description: '当前镜表与上游成稿不同步。建议先重拆本集，再确认交接。仍要按现状确认？',
+        confirmLabel: '仍要确认',
+        cancelLabel: '取消',
+      });
+      if (!ok) return;
+    }
+
     const preview = props.data?.storyboardPreview as StoryboardPreviewPayload | undefined;
     const urlMap = new Map<string, string | undefined>();
     // Q-04 优先级 1: 本节点 storyboardPreview 帧（SSOT）
@@ -812,6 +1196,29 @@ export function useStoryboardDesk(props: NodeProps) {
       characterNameSet,
       sceneNameSet,
     );
+    const unboundShots = visibleShots.filter(
+      (s) => !isShotBound(s, characterNameSet, sceneNameSet),
+    );
+    if (unboundShots.length > 0) {
+      const unboundList = unboundShots
+        .slice(0, 12)
+        .map((s) => s.sceneCode || `#${s.index}`)
+        .join(', ');
+      const more = unboundShots.length > 12 ? ` 等 ${unboundShots.length} 镜` : '';
+      const ok = await askConfirm({
+        title: '仍有未绑定镜头',
+        description: !ready
+          ? `上游设定未就绪，${unboundShots.length} 镜的角色/场景无法匹配素材库（${unboundList}${more}）。建议先在编剧台标记设定就绪，或在编辑里修正 @角色/@场景。仍要确认？`
+          : `${unboundShots.length} 镜未绑定角色或场景：${unboundList}${more}\n建议先在镜表编辑里补齐。仍要确认？`,
+        confirmLabel: '仍要确认',
+        cancelLabel: '去处理',
+      });
+      if (!ok) {
+        setShotFilter('unbound');
+        setStudioTab('grid');
+        return;
+      }
+    }
     const missingShots = visibleShots.filter(
       (s) => !isShotComposed(s, preview, urlMap.get(s.id)),
     );
@@ -855,12 +1262,15 @@ export function useStoryboardDesk(props: NodeProps) {
   }, [
     appendLog,
     characterNameSet,
+    confirmHardThreshold,
     confirmedEpisodeIds,
     currentEpisodeId,
     deskBusy,
     environments,
+    packageStale,
     props.data?.storyboardPreview,
     props.id,
+    ready,
     updateNodeData,
     visibleEpisodes,
     visibleShots,
@@ -992,6 +1402,35 @@ export function useStoryboardDesk(props: NodeProps) {
     setStudioTab(next);
     setStudioOpen(true);
   }, [payload, studioBreakdownDefault]);
+
+  /** 打开连线上游编剧台并请求展开（确认成稿后再回分镜同步） */
+  const openUpstreamScriptDeskForConfirm = useCallback(() => {
+    const nodes = getAllNodes?.() ?? getNodes();
+    const edges = getEdges();
+    const scriptDeskId = findUpstreamScriptDeskId(props.id, nodes, edges);
+    if (!scriptDeskId) {
+      appendLog('分镜台：未找到连线上游编剧台');
+      return;
+    }
+    const title = upstreamPackage?.brief?.title?.trim() || '上游成稿';
+    updateNodeData(scriptDeskId, {
+      openStudioRequest: {
+        at: new Date().toISOString(),
+        reason: 'confirm-for-breakdown',
+        fromId: props.id,
+        title,
+      },
+    });
+    setStudioOpen(false);
+    focusBlock?.(scriptDeskId);
+    appendLog(`已打开上游编剧台 · ${title} · 请确认成稿后回分镜台同步`);
+  }, [appendLog, focusBlock, getAllNodes, getEdges, getNodes, props.id, updateNodeData, upstreamPackage?.brief?.title]);
+
+  const upstreamNeedsConfirm = Boolean(
+    upstreamPackage && upstreamPackage.status !== 'confirmed',
+  );
+  const canSyncLatest = Boolean(canBreakdownFromPackage && !breakdownBlocked && !deskBusy);
+  const upstreamTitleShort = compact(upstreamPackage?.brief?.title?.trim() || '上游成稿', 12);
 
   const openEdit = useCallback((shotId: string) => {
     setSelectedId(shotId);
@@ -2141,8 +2580,14 @@ export function useStoryboardDesk(props: NodeProps) {
           >
             <div className="sg3-card__header">
               <span className="sg3-card__eyebrow">分镜台 · 拆镜</span>
-              <span className={`sg3-card__badge ${currentEpisodeConfirmed ? 'is-ok' : ''}`}>
-                {currentEpisodeConfirmed ? '已确认' : payload ? '未确认' : '待拆镜'}
+              <span className={`sg3-card__badge ${breakingDown ? 'is-run' : currentEpisodeConfirmed ? 'is-ok' : ''}`}>
+                {breakingDown
+                  ? (studioOpen ? '拆镜中' : '后台拆镜中')
+                  : currentEpisodeConfirmed
+                    ? '已确认'
+                    : payload
+                      ? '未确认'
+                      : '待拆镜'}
               </span>
             </div>
             <div className="sg3-card__title">
@@ -2153,22 +2598,26 @@ export function useStoryboardDesk(props: NodeProps) {
                   : '分镜台'}
             </div>
             <div className="sg3-card__meta">
-              {payload
-                ? `${shots.length} 镜 · 构图 ${compositionStats.composed}/${compositionStats.total}`
-                : canBreakdownFromPackage
-                  ? '上游成稿已确认'
-                  : '等待编剧台成稿'}
+              {breakingDown
+                ? (breakdownProgressText || `AI 拆镜中 · 已等待 ${breakdownElapsedSec}s`)
+                : payload
+                  ? `${shots.length} 镜 · 构图 ${compositionStats.composed}/${compositionStats.total}`
+                  : canBreakdownFromPackage
+                    ? '上游成稿已确认'
+                    : '等待编剧台成稿'}
             </div>
             <div className="sg3-card__logline">
-              {packageStale
-                ? '成稿已更新，建议重拆'
-                : hasSource && !ready
-                  ? '上游设定未就绪（请在编剧台标记设定就绪）'
-                  : payload
-                    ? '点击打开分镜台 · 镜表与构图'
-                    : canBreakdownFromPackage
-                      ? '点开台即可从成稿拆镜'
-                      : '连接编剧台确认成稿后拆镜'}
+              {breakingDown && !studioOpen
+                ? '后台拆镜进行中 · 点开可查看进度或取消'
+                : packageStale
+                  ? '成稿已更新，建议重拆'
+                  : hasSource && !ready
+                    ? '上游设定未就绪（请在编剧台标记设定就绪）'
+                    : payload
+                      ? '点击打开分镜台 · 镜表与构图'
+                      : canBreakdownFromPackage
+                        ? '点开台即可从成稿拆镜'
+                        : '连接编剧台确认成稿后拆镜'}
             </div>
             <div className="sg3-card__actions">
               <button
@@ -2194,19 +2643,19 @@ export function useStoryboardDesk(props: NodeProps) {
         width="min(1280px, 100vw - 24px)"
         variant="default"
         className="sg3-modal"
-        headerRight={(
+        headerRight={!showShotNav ? (
           <div className="sg3-header-right">
-            {payload ? (
+            {(payload?.episodes?.length ?? 0) > 0 ? (
               <select
                 className="sg3-episode-select"
-                value={activeEpisodeId ?? payload.episodes[0]?.id ?? ''}
+                value={activeEpisodeId ?? payload!.episodes[0]?.id ?? ''}
                 onChange={(event) => {
                   setActiveEpisodeId(event.target.value || null);
                   setSelectedId(null);
                 }}
                 aria-label="选择集"
               >
-                {payload.episodes.map((episode) => {
+                {payload!.episodes.map((episode) => {
                   const done = confirmedEpisodeIds.includes(episode.id);
                   return (
                     <option key={episode.id} value={episode.id}>
@@ -2217,14 +2666,24 @@ export function useStoryboardDesk(props: NodeProps) {
                   );
                 })}
               </select>
+            ) : breakdownBusy ? (
+              <span className="sg3-episode-select sg3-episode-select--busy" aria-live="polite">
+                {queueProgress.total > 0
+                  ? `拆镜中 ${Math.min(queueProgress.current + 1, queueProgress.total)}/${queueProgress.total} 集`
+                  : '拆镜中…'}
+              </span>
             ) : null}
             <span className={`sg3-header-status ${currentEpisodeConfirmed ? 'is-ok' : ''}`}>
-              {(payload?.episodes?.length ?? 0) > 1
-                ? `已确认 ${(payload?.episodes ?? []).filter((ep) => confirmedEpisodeIds.includes(ep.id)).length}/${payload?.episodes?.length ?? 0} · 本集构图 ${Math.round(compositionStats.coverage * 100)}%`
-                : currentEpisodeConfirmed ? '本集已确认' : '本集未确认'}
+              {breakdownBusy
+                ? (queueProgress.total > 0
+                  ? `队列 ${Math.min(queueProgress.current + 1, queueProgress.total)}/${queueProgress.total}`
+                  : '拆镜进行中')
+                : (payload?.episodes?.length ?? 0) > 1
+                  ? `已确认 ${(payload?.episodes ?? []).filter((ep) => confirmedEpisodeIds.includes(ep.id)).length}/${payload?.episodes?.length ?? 0} · 本集构图 ${Math.round(compositionStats.coverage * 100)}%`
+                  : currentEpisodeConfirmed ? '本集已确认' : '本集未确认'}
             </span>
           </div>
-        )}
+        ) : undefined}
       >
         {/* F-005: 上游设定就绪预检条 */}
         <div className={`sg3-readiness-bar${ready ? ' sg3-readiness-bar--ready' : ''}`}>
@@ -2233,65 +2692,93 @@ export function useStoryboardDesk(props: NodeProps) {
           ) : readiness ? (
             <span className="sg3-readiness-bar__warn">
               上游设定未就绪
-              {(readiness.missingCharacters?.length ?? 0) > 0 && ` · ${readiness.missingCharacters!.length} 角色`}
-              {(readiness.missingScenes?.length ?? 0) > 0 && ` · ${readiness.missingScenes!.length} 场景`}
-              {(readiness.missingCostumes?.length ?? 0) > 0 && ` · ${readiness.missingCostumes!.length} 服装`}
-              {(readiness.missingProps?.length ?? 0) > 0 && ` · ${readiness.missingProps!.length} 道具`}
-              {breakdownBlocked ? ' · 硬模式阻断' : ' · 软模式（仍可拆）'}
+              {(readiness.missingCharacters?.length ?? 0) > 0 && ` · 缺 ${readiness.missingCharacters!.length} 角色`}
+              {(readiness.missingScenes?.length ?? 0) > 0 && ` · 缺 ${readiness.missingScenes!.length} 场景`}
+              {(readiness.missingCostumes?.length ?? 0) > 0 && ` · 缺 ${readiness.missingCostumes!.length} 服装`}
+              {(readiness.missingProps?.length ?? 0) > 0 && ` · 缺 ${readiness.missingProps!.length} 道具`}
+              {breakdownBlocked ? ' · 硬模式阻断拆镜' : ' · 软模式仍可拆镜'}
             </span>
           ) : (
             <span className="sg3-readiness-bar__unknown">未检测到上游设定 · 请连接编剧台并确认成稿</span>
           )}
           <button
             type="button"
-            className="sg3-readiness-bar__mode"
+            className={`sg3-readiness-bar__mode ${preflightMode === 'hard' ? 'is-hard' : 'is-soft'}`}
             onClick={togglePreflightMode}
-            title="切换预检软/硬模式"
+            title="切换拆镜预检软/硬模式：硬模式在设定未就绪时阻断拆镜"
           >
-            {preflightMode === 'hard' ? '(硬)' : '(软)'}
+            {preflightMode === 'hard' ? '预检:硬' : '预检:软'}
           </button>
           {/* F-017: 构图强约束开关 */}
           <button
             type="button"
-            className="sg3-readiness-bar__mode"
+            className={`sg3-readiness-bar__mode ${enforceComposition ? 'is-on' : 'is-off'}`}
             onClick={toggleEnforceComposition}
-            title={enforceComposition ? '构图强约束：开启（无模板阻发）' : '构图强约束：关闭'}
+            title={enforceComposition ? '构图强约束：开启（无模板阻发出线稿）' : '构图强约束：关闭（无模板仍可出线稿）'}
           >
-            {enforceComposition ? '约束:开' : '约束:关'}
+            {enforceComposition ? '构图约束:开' : '构图约束:关'}
           </button>
         </div>
         {packageStale && upstreamPackage && !staleBannerDismissed ? (
           <div className="sg3-stale-banner">
             <span className="sg3-stale-banner__icon">&#x26A0;&#xFE0F;</span>
-            <span className="sg3-stale-banner__msg">上游成稿已更新（与当前镜表不同步）</span>
+            <span className="sg3-stale-banner__msg">
+              {upstreamNeedsConfirm
+                ? `上游「${upstreamTitleShort}」已更新，但尚未确认成稿 · 先确认再同步`
+                : incrementalNewEpisodeCount > 0
+                  ? `上游新增 ${incrementalNewEpisodeCount} 集（可只拆新增，保留现有 1…集镜表）`
+                  : '上游成稿已更新（与当前镜表不同步）'}
+            </span>
             <div className="sg3-stale-banner__acts">
               <button type="button" className="sg3-btn sg3-btn--ghost" onClick={() => setStaleBannerShowDiff((v) => !v)}>
                 {staleBannerShowDiff ? '收起差异' : '查看差异摘要'}
               </button>
-              <button type="button" className="sg3-btn sg3-btn--ghost" disabled={breakingDown || breakdownBlocked} onClick={() => {
-                setStaleBannerDismissed(true);
-                void breakdownFromPackage();
-              }}>
-                重拆本集
-              </button>
-              {upstreamPackage.screenplay.episodes.length > 1 ? (
+              {upstreamNeedsConfirm ? (
+                <button
+                  type="button"
+                  className="sg3-btn sg3-btn--primary"
+                  disabled={deskBusy}
+                  onClick={openUpstreamScriptDeskForConfirm}
+                >
+                  打开上游编剧台 · 确认成稿
+                </button>
+              ) : (
                 <>
-                  <button type="button" className="sg3-btn sg3-btn--ghost" disabled={breakingDown || breakdownBlocked} onClick={() => {
-                    setStaleBannerDismissed(true);
-                    void breakdownFromPackage(undefined, true);
-                  }}>
-                    重拆全部
-                  </button>
-                  {upstreamPackage.screenplay.episodes.some((ep) => !confirmedEpisodeIds.includes(ep.id)) ? (
-                    <button type="button" className="sg3-btn sg3-btn--ghost" disabled={breakingDown || breakdownBlocked} onClick={() => {
+                  {incrementalNewEpisodeCount > 0 ? (
+                    <button type="button" className="sg3-btn sg3-btn--primary" disabled={breakingDown || breakdownBlocked || deskBusy} onClick={() => {
                       setStaleBannerDismissed(true);
-                      void breakdownUnconfirmedOnly();
+                      void breakdownNewEpisodesOnly();
                     }}>
-                      重拆仅未确认
+                      只拆新增 {incrementalNewEpisodeCount} 集
                     </button>
+                  ) : (
+                    <button type="button" className="sg3-btn sg3-btn--ghost" disabled={breakingDown || breakdownBlocked || deskBusy} onClick={() => {
+                      setStaleBannerDismissed(true);
+                      void breakdownFromPackage();
+                    }}>
+                      同步最新成稿
+                    </button>
+                  )}
+                  {upstreamPackage.screenplay.episodes.length > 1 ? (
+                    <>
+                      <button type="button" className="sg3-btn sg3-btn--ghost" disabled={breakingDown || breakdownBlocked || deskBusy} onClick={() => {
+                        setStaleBannerDismissed(true);
+                        void breakdownFromPackage(undefined, true);
+                      }}>
+                        重拆全部
+                      </button>
+                      {upstreamPackage.screenplay.episodes.some((ep) => !confirmedEpisodeIds.includes(ep.id)) ? (
+                        <button type="button" className="sg3-btn sg3-btn--ghost" disabled={breakingDown || breakdownBlocked || deskBusy} onClick={() => {
+                          setStaleBannerDismissed(true);
+                          void breakdownUnconfirmedOnly();
+                        }}>
+                          重拆仅未确认
+                        </button>
+                      ) : null}
+                    </>
                   ) : null}
                 </>
-              ) : null}
+              )}
               <button type="button" className="sg3-btn sg3-btn--ghost" onClick={() => setStaleBannerDismissed(true)}>
                 稍后
               </button>
@@ -2300,6 +2787,7 @@ export function useStoryboardDesk(props: NodeProps) {
               <div className="sg3-stale-banner__diff" style={{ width: '100%', marginTop: 6, padding: 8, background: 'rgba(0,0,0,0.25)', borderRadius: 8, fontSize: 11, lineHeight: 1.6 }}>
                 <div>上游集数: {upstreamPackage.screenplay.episodes.length}</div>
                 <div>上游标题: {upstreamPackage.brief.title || '-'}</div>
+                <div>上游状态: {upstreamPackage.status}</div>
                 <div>上游 hash: {packageSourceHash(upstreamPackage).slice(0, 16)}...</div>
                 <div>本地 hash: {(breakdownJob?.sourcePackageHash ?? '-').slice(0, 16)}...</div>
               </div>
@@ -2310,6 +2798,8 @@ export function useStoryboardDesk(props: NodeProps) {
           <div className="sg3-pipeline" aria-label="分镜流程">
             {(() => {
               const hasBreakdown = Boolean(payload?.episodes?.length);
+              // F-01：有镜表 → 1/2 done；有线稿 → 3 done；已确认 → 4 done
+              // 未绑定是设定/梳表质量信号，不挡「镜表」步骤完成态（否则设定未就绪时会出现 3 亮而 2 不亮）
               const hasLineArt = compositionStats.composed > 0;
               const stepDone: Record<string, boolean> = {
                 breakdown: hasBreakdown,
@@ -2365,19 +2855,58 @@ export function useStoryboardDesk(props: NodeProps) {
           <div className={`sg3-body ${showShotNav ? 'has-nav' : 'is-wide'}`}>
             {showShotNav && (
               <aside className="sg3-nav" aria-label="镜头导航">
-                <div className="sg3-filters">
+                <div className="sg3-nav__episode">
+                  <div className="sg3-nav__section-label">当前集</div>
+                  {(payload?.episodes?.length ?? 0) > 0 ? (
+                    <select
+                      className="sg3-episode-select sg3-episode-select--nav"
+                      value={activeEpisodeId ?? payload!.episodes[0]?.id ?? ''}
+                      onChange={(event) => {
+                        setActiveEpisodeId(event.target.value || null);
+                        setSelectedId(null);
+                      }}
+                      aria-label="选择集"
+                    >
+                      {payload!.episodes.map((episode) => {
+                        const done = confirmedEpisodeIds.includes(episode.id);
+                        return (
+                          <option key={episode.id} value={episode.id}>
+                            {episode.title}
+                            {done ? ' · 已确认' : ''}
+                            {` · ${episode.shots.length} 镜`}
+                          </option>
+                        );
+                      })}
+                    </select>
+                  ) : breakdownBusy ? (
+                    <span className="sg3-episode-select sg3-episode-select--nav sg3-episode-select--busy" aria-live="polite">
+                      {queueProgress.total > 0
+                        ? `拆镜中 ${Math.min(queueProgress.current + 1, queueProgress.total)}/${queueProgress.total} 集`
+                        : '拆镜中…'}
+                    </span>
+                  ) : (
+                    <span className="sg3-episode-select sg3-episode-select--nav sg3-episode-select--empty">暂无集</span>
+                  )}
+                  <span className={`sg3-nav__episode-meta ${currentEpisodeConfirmed ? 'is-ok' : ''}`}>
+                    {breakdownBusy
+                      ? (queueProgress.total > 0
+                        ? `队列 ${Math.min(queueProgress.current + 1, queueProgress.total)}/${queueProgress.total}`
+                        : '拆镜进行中')
+                      : (payload?.episodes?.length ?? 0) > 1
+                        ? `已确认 ${(payload?.episodes ?? []).filter((ep) => confirmedEpisodeIds.includes(ep.id)).length}/${payload?.episodes?.length ?? 0} · 本集构图 ${Math.round(compositionStats.coverage * 100)}%`
+                        : currentEpisodeConfirmed ? '本集已确认' : '本集未确认'}
+                  </span>
+                </div>
+                <div className="sg3-nav__filter-block">
+                  <div className="sg3-nav__section-label">镜头筛选</div>
+                  <div className="sg3-filters">
                   {([
                     ['all', '全部', visibleShots.length],
                     ['uncomposed', '未构图', visibleShots.filter(
                       (s) => !isShotComposed(s, previewPayloadEarly, storyboardUrlMapEarly.get(s.id)),
                     ).length],
                     ['unbound', '未绑定', visibleShots.filter(
-                      (s) => {
-                        const shotChars = s.characters ?? [];
-                        const hasBoundChar = shotChars.some((c) => characterNameSet.has(c));
-                        const hasScene = Boolean(s.scene?.trim());
-                        return !hasBoundChar || !hasScene;
-                      },
+                      (s) => !isShotBound(s, characterNameSet, sceneNameSet),
                     ).length],
                   ] as const).map(([id, label, count]) => (
                     <button
@@ -2389,7 +2918,13 @@ export function useStoryboardDesk(props: NodeProps) {
                       {label} ({count})
                     </button>
                   ))}
+                  </div>
                 </div>
+                {!ready && visibleShots.some((s) => !isShotBound(s, characterNameSet, sceneNameSet)) ? (
+                  <p className="sg3-nav__bind-hint">
+                    设定未就绪时角色/场景无法匹配素材库，故显示未绑定。可先软拆，或回编剧台补设定。
+                  </p>
+                ) : null}
                 <div className="sg3-nav__list">
                   {!payload || filteredShots.length === 0 ? (
                     <div className="sg3-empty">暂无镜头</div>
@@ -2415,7 +2950,10 @@ export function useStoryboardDesk(props: NodeProps) {
                           }}
                         >
                           <span className="sg3-nav__dot" />
-                          <span className="sg3-nav__code">{shot.sceneCode || `#${shot.index}`}</span>
+                          <span className="sg3-nav__code" title={shot.sceneCode || undefined}>
+                            #{shot.index}
+                            {shot.sceneCode ? ` · ${shot.sceneCode}` : ''}
+                          </span>
                           <span className="sg3-nav__title">
                             {compact(shot.title || shot.scene || shot.action || '—', 16)}
                           </span>
@@ -2435,6 +2973,9 @@ export function useStoryboardDesk(props: NodeProps) {
                   canBreakdownFromPackage={canBreakdownFromPackage}
                   breakdownBlockedReason={breakdownBlockedReason}
                   breakingDown={breakingDown}
+                  breakdownProgressText={breakdownProgressText}
+                  breakdownElapsedSec={breakdownElapsedSec}
+                  cancelBreakdown={cancelBreakdown}
                   breakdownBlocked={breakdownBlocked}
                   deskBusy={deskBusy}
                   handoffHighlight={handoffHighlight}
@@ -2451,7 +2992,9 @@ export function useStoryboardDesk(props: NodeProps) {
                   setStudioTab={setStudioTab}
                   setSelectedId={setSelectedId}
                   breakdownFromPackage={breakdownFromPackage}
+                  breakdownNewEpisodesOnly={breakdownNewEpisodesOnly}
                   breakdownUnconfirmedOnly={breakdownUnconfirmedOnly}
+                  missingUpstreamEpisodeCount={incrementalNewEpisodeCount}
                   runIncrementalBreakdown={runIncrementalBreakdown}
                   importLegacyBreakdown={importLegacyBreakdown}
                   handleRetryFailed={handleRetryFailed}
@@ -2459,6 +3002,9 @@ export function useStoryboardDesk(props: NodeProps) {
                   handleQueueResume={handleQueueResume}
                   handleQueueSkip={handleQueueSkip}
                   handleQueueCancel={handleQueueCancel}
+                  upstreamNeedsConfirm={upstreamNeedsConfirm}
+                  upstreamTitleShort={upstreamTitleShort}
+                  openUpstreamScriptDeskForConfirm={openUpstreamScriptDeskForConfirm}
                 />
               )}
 
@@ -2562,6 +3108,9 @@ export function useStoryboardDesk(props: NodeProps) {
               const min = Math.floor(totalSec / 60);
               const sec = totalSec % 60;
               const durStr = min > 0 ? `${min}m${sec}s` : `${sec}s`;
+              const unboundCount = visibleShots.filter(
+                (s) => !isShotBound(s, characterNameSet, sceneNameSet),
+              ).length;
               return (
                 <p className="sg3-foot__hint">
                   {visibleEpisodes[0]?.title ?? '本集'}
@@ -2569,12 +3118,14 @@ export function useStoryboardDesk(props: NodeProps) {
                   {visibleShots.length} 镜 · 总 {durStr} · 均 {avgSec}s
                   {' · '}
                   构图 {Math.round(compositionStats.coverage * 100)}%
+                  {unboundCount > 0 ? ` · 未绑定 ${unboundCount}` : ''}
+                  {packageStale ? ' · 成稿不同步' : ''}
                   {currentEpisodeConfirmed ? ' · 已确认可交导演台' : ' · 确认后交导演台批出'}
                 </p>
               );
             })()}
             <div className="sg3-foot__actions">
-              {currentEpisodeConfirmed && currentEpisodeId ? (
+              {currentEpisodeConfirmed && currentEpisodeId && studioTab === 'handoff' ? (
                 <button
                   type="button"
                   className="sg3-btn sg3-btn--ghost"
@@ -2588,16 +3139,100 @@ export function useStoryboardDesk(props: NodeProps) {
                 >
                   撤回确认
                 </button>
-              ) : (
+              ) : null}
+              {studioTab === 'breakdown' ? (
+                breakingDown ? (
+                  <button
+                    type="button"
+                    className="sg3-btn sg3-btn--primary"
+                    onClick={cancelBreakdown}
+                  >
+                    取消同步
+                  </button>
+                ) : upstreamNeedsConfirm ? (
+                  <button
+                    type="button"
+                    className="sg3-btn sg3-btn--primary"
+                    disabled={deskBusy}
+                    onClick={openUpstreamScriptDeskForConfirm}
+                    title={`打开上游编剧台「${upstreamPackage?.brief?.title || '未命名'}」`}
+                  >
+                    打开上游编剧台 · 确认成稿
+                  </button>
+                ) : packageStale && canSyncLatest ? (
+                  <button
+                    type="button"
+                    className="sg3-btn sg3-btn--primary"
+                    disabled={breakingDown || deskBusy}
+                    onClick={() => void (
+                      incrementalNewEpisodeCount > 0
+                        ? breakdownNewEpisodesOnly()
+                        : breakdownFromPackage()
+                    )}
+                  >
+                    {breakingDown
+                      ? '同步中…'
+                      : incrementalNewEpisodeCount > 0
+                        ? `只拆新增 ${incrementalNewEpisodeCount} 集`
+                        : '同步最新成稿'}
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    className="sg3-btn sg3-btn--primary"
+                    disabled={deskBusy || !payload}
+                    onClick={() => setStudioTab(payload ? 'grid' : 'breakdown')}
+                  >
+                    {payload ? '去镜表' : '先完成拆镜'}
+                  </button>
+                )
+              ) : null}
+              {studioTab === 'grid' ? (
                 <button
                   type="button"
                   className="sg3-btn sg3-btn--primary"
-                  disabled={currentEpisodeConfirmed || visibleShots.length === 0 || deskBusy}
+                  disabled={deskBusy || visibleShots.length === 0}
+                  onClick={() => setStudioTab('compose')}
+                >
+                  {compositionStats.coverage < 1 ? '去构图补线稿' : '去构图'}
+                </button>
+              ) : null}
+              {studioTab === 'compose' ? (
+                compositionStats.coverage < 1 ? (
+                  <button
+                    type="button"
+                    className="sg3-btn sg3-btn--primary"
+                    disabled={deskBusy || visibleShots.length === 0 || Boolean(batchMode)}
+                    onClick={() => void generateBatchLineArt('visible')}
+                  >
+                    {batchMode === 'line-art' ? `批量线稿 ${batchProgress ?? ''}…` : '缺图批量线稿'}
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    className="sg3-btn sg3-btn--primary"
+                    disabled={deskBusy}
+                    onClick={() => setStudioTab('handoff')}
+                  >
+                    去交接确认
+                  </button>
+                )
+              ) : null}
+              {studioTab === 'handoff' && !currentEpisodeConfirmed ? (
+                <button
+                  type="button"
+                  className="sg3-btn sg3-btn--primary"
+                  disabled={visibleShots.length === 0 || deskBusy}
                   onClick={confirmCurrentEpisode}
+                  title={
+                    packageStale
+                      ? '成稿不同步：确认前会再次提示'
+                      : undefined
+                  }
                 >
                   确认本集
                 </button>
-              )}
+              ) : null}
             </div>
           </div>
         </div>

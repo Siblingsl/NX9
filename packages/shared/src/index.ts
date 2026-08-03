@@ -203,6 +203,7 @@ export { buildScriptBreakdownFromText } from './utils/script-breakdown';
 export {
   normalizeScriptBreakdownConfig,
   normalizeScriptBreakdownPrompts,
+  suggestedShotsPerEpisodeRange,
   splitSourceIntoEpisodeChunks,
   splitLongEpisodeText,
   buildEpisodePlannerUserPrompt,

@@ -284,19 +284,34 @@ export class GatewayService {
     const model = (body.model as string) || this.settings.getRaw().llmModel || 'auto';
     const messages = body.messages;
 
-    const res = await fetch(`${baseUrl}/chat/completions`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        model,
-        messages,
-        stream: false,
-        ...(body.response_format ? { response_format: body.response_format } : {}),
-      }),
-    });
+    // 单次 chat/completions 上限 3 分钟，避免上游挂死拖垮拆镜等长链路
+    let res: Response;
+    try {
+      res = await this.fetchWithTimeout(
+        `${baseUrl}/chat/completions`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${apiKey}`,
+          },
+          body: JSON.stringify({
+            model,
+            messages,
+            stream: false,
+            ...(body.response_format ? { response_format: body.response_format } : {}),
+          }),
+        },
+        180_000,
+      );
+    } catch (error) {
+      const aborted = (error instanceof DOMException && error.name === 'AbortError')
+        || (error instanceof Error && error.name === 'AbortError');
+      if (aborted) {
+        throw new ServiceUnavailableException('LLM 调用超时（180s），请缩短成稿或稍后重试');
+      }
+      throw error;
+    }
 
     if (!res.ok) {
       const text = await res.text();

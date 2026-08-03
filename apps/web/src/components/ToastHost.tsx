@@ -6,6 +6,8 @@ import { useToast, type ToastItem } from '../stores/toast';
 function ToastCard({ item, onDismiss }: { item: ToastItem; onDismiss: () => void }) {
   useEffect(() => {
     if (item.variant === 'error' && item.actionLabel) return;
+    // 带操作按钮的提示（如后台拆镜）不自动消失，由用户点开或关闭
+    if (item.actionLabel) return;
     const t = setTimeout(onDismiss, item.variant === 'success' ? 2800 : 4500);
     return () => clearTimeout(t);
   }, [item, onDismiss]);

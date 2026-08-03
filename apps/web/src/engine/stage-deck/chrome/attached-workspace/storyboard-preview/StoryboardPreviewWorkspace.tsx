@@ -754,6 +754,26 @@ export function StoryboardPreviewWorkspace({
             settings={payload.pictureSettings}
             onChange={actions.updatePictureSettings}
             hideModel={embedded}
+            endSlot={(
+              <button
+                type="button"
+                className="kp__btn"
+                disabled={!payload.contactSheetUrl}
+                onMouseDown={stop}
+                title={payload.contactSheetUrl ? '下载已合成的宫格/故事板大图' : '尚无合成大图可导出'}
+                onClick={() => {
+                  if (!payload.contactSheetUrl) return;
+                  const a = document.createElement('a');
+                  a.href = payload.contactSheetUrl;
+                  a.download = `storyboard-${Date.now()}.png`;
+                  a.target = '_blank';
+                  a.rel = 'noreferrer';
+                  a.click();
+                }}
+              >
+                导出图片
+              </button>
+            )}
           />
         </div>
       )}

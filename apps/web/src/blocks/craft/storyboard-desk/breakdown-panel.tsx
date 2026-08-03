@@ -7,6 +7,9 @@ interface BreakdownPanelProps {
   canBreakdownFromPackage: boolean;
   breakdownBlockedReason: string | undefined;
   breakingDown: boolean;
+  breakdownProgressText: string | null;
+  breakdownElapsedSec: number;
+  cancelBreakdown: () => void;
   breakdownBlocked: boolean;
   deskBusy: boolean;
   handoffHighlight: boolean;
@@ -23,7 +26,9 @@ interface BreakdownPanelProps {
   setStudioTab: React.Dispatch<React.SetStateAction<any>>;
   setSelectedId: React.Dispatch<React.SetStateAction<string | null>>;
   breakdownFromPackage: (epIndex?: number, multiEpisode?: boolean) => Promise<void>;
+  breakdownNewEpisodesOnly: () => Promise<void>;
   breakdownUnconfirmedOnly: () => Promise<void>;
+  missingUpstreamEpisodeCount: number;
   runIncrementalBreakdown: () => Promise<void>;
   importLegacyBreakdown: () => Promise<void>;
   handleRetryFailed: () => void;
@@ -31,6 +36,9 @@ interface BreakdownPanelProps {
   handleQueueResume: () => void;
   handleQueueSkip: () => void;
   handleQueueCancel: () => void;
+  upstreamNeedsConfirm: boolean;
+  upstreamTitleShort: string;
+  openUpstreamScriptDeskForConfirm: () => void;
 }
 
 const BreakdownPanel: React.FC<BreakdownPanelProps> = ({
@@ -39,6 +47,9 @@ const BreakdownPanel: React.FC<BreakdownPanelProps> = ({
   canBreakdownFromPackage,
   breakdownBlockedReason,
   breakingDown,
+  breakdownProgressText,
+  breakdownElapsedSec,
+  cancelBreakdown,
   breakdownBlocked,
   deskBusy,
   handoffHighlight,
@@ -55,7 +66,9 @@ const BreakdownPanel: React.FC<BreakdownPanelProps> = ({
   setStudioTab,
   setSelectedId,
   breakdownFromPackage,
+  breakdownNewEpisodesOnly,
   breakdownUnconfirmedOnly,
+  missingUpstreamEpisodeCount,
   runIncrementalBreakdown,
   importLegacyBreakdown,
   handleRetryFailed,
@@ -63,6 +76,9 @@ const BreakdownPanel: React.FC<BreakdownPanelProps> = ({
   handleQueueResume,
   handleQueueSkip,
   handleQueueCancel,
+  upstreamNeedsConfirm,
+  upstreamTitleShort,
+  openUpstreamScriptDeskForConfirm,
 }) => {
   return (
     <div className="sg3-pane sg3-pane--center">
@@ -76,29 +92,66 @@ const BreakdownPanel: React.FC<BreakdownPanelProps> = ({
         </p>
         {!canBreakdownFromPackage && breakdownBlockedReason ? (
           <p className="sg3-muted" style={{ color: 'var(--nx9-danger, #c45c5c)' }}>
-            无法拆镜：{breakdownBlockedReason}
+            {upstreamNeedsConfirm
+              ? `无法同步：上游「${upstreamTitleShort}」尚未确认成稿`
+              : `无法拆镜：${breakdownBlockedReason}`}
           </p>
         ) : null}
         <div className="sg3-hero__actions">
-          <button
-            type="button"
-            className={`sg3-btn sg3-btn--primary${handoffHighlight ? ' sg3-btn--handoff' : ''}`}
-            disabled={!canBreakdownFromPackage || breakingDown || breakdownBlocked || deskBusy}
-            title={breakdownBlockedReason || (deskBusy ? '任务进行中' : undefined)}
-            onClick={() => void breakdownFromPackage()}
-          >
-            {breakingDown ? '拆镜中…' : breakdownBlocked ? '设定未就绪（硬模式）' : '从成稿拆镜'}
-          </button>
-          {upstreamPackage && upstreamPackage.screenplay.episodes.length > 1 && (
+          {upstreamNeedsConfirm ? (
+            <button
+              type="button"
+              className="sg3-btn sg3-btn--primary"
+              disabled={deskBusy}
+              onClick={openUpstreamScriptDeskForConfirm}
+              title={`打开连线上游编剧台「${upstreamPackage?.brief?.title || '未命名'}」并确认成稿`}
+            >
+              打开上游编剧台 · 确认成稿
+            </button>
+          ) : (
+            <button
+              type="button"
+              className={`sg3-btn sg3-btn--primary${handoffHighlight ? ' sg3-btn--handoff' : ''}`}
+              disabled={!canBreakdownFromPackage || breakingDown || breakdownBlocked || deskBusy}
+              title={breakdownBlockedReason || (deskBusy ? '任务进行中' : undefined)}
+              onClick={() => void (
+                packageStale && missingUpstreamEpisodeCount > 0
+                  ? breakdownNewEpisodesOnly()
+                  : breakdownFromPackage()
+              )}
+            >
+              {breakingDown
+                ? '同步中…'
+                : breakdownBlocked
+                  ? '设定未就绪（硬模式）'
+                  : packageStale && missingUpstreamEpisodeCount > 0
+                    ? `只拆新增 ${missingUpstreamEpisodeCount} 集`
+                    : packageStale
+                      ? '同步最新成稿'
+                      : '从成稿拆镜'}
+            </button>
+          )}
+          {upstreamPackage && !upstreamNeedsConfirm && upstreamPackage.screenplay.episodes.length > 1 && (
             <>
+              {missingUpstreamEpisodeCount > 0 && !packageStale ? (
+                <button
+                  type="button"
+                  className="sg3-btn sg3-btn--ghost"
+                  disabled={!canBreakdownFromPackage || breakingDown || breakdownBlocked || deskBusy}
+                  title={breakdownBlockedReason || (deskBusy ? '任务进行中' : undefined)}
+                  onClick={() => void breakdownNewEpisodesOnly()}
+                >
+                  {breakingDown ? '同步中…' : `只拆新增 ${missingUpstreamEpisodeCount} 集`}
+                </button>
+              ) : null}
               <button
                 type="button"
                 className="sg3-btn sg3-btn--ghost"
                 disabled={!canBreakdownFromPackage || breakingDown || breakdownBlocked || deskBusy}
-                title={breakdownBlockedReason || (deskBusy ? '任务进行中' : undefined)}
+                title={breakdownBlockedReason || '将清空并重拆全部集'}
                 onClick={() => void breakdownFromPackage(undefined, true)}
               >
-                {breakingDown ? '拆镜中…' : `全 ${upstreamPackage.screenplay.episodes.length} 集拆镜`}
+                {breakingDown ? '同步中…' : `全 ${upstreamPackage.screenplay.episodes.length} 集重拆`}
               </button>
               {upstreamPackage.screenplay.episodes.some((ep: any) => !confirmedEpisodeIds.includes(ep.id)) ? (
                 <button
@@ -113,6 +166,16 @@ const BreakdownPanel: React.FC<BreakdownPanelProps> = ({
               ) : null}
             </>
           )}
+          {breakingDown ? (
+            <button
+              type="button"
+              className="sg3-btn sg3-btn--ghost"
+              onClick={cancelBreakdown}
+              title="取消当前同步/拆镜请求"
+            >
+              取消同步
+            </button>
+          ) : null}
           {queueState.status !== 'idle' && (
             <EpisodeQueueBar
               state={queueState}
@@ -136,6 +199,14 @@ const BreakdownPanel: React.FC<BreakdownPanelProps> = ({
             </button>
           ) : null}
         </div>
+        {breakingDown ? (
+          <p className="sg3-muted" style={{ marginTop: 10 }}>
+            {breakdownProgressText || 'AI 拆镜进行中，成稿较长时可能需数分钟…'}
+            {breakdownElapsedSec > 0 ? ` · 已等待 ${breakdownElapsedSec}s` : ''}
+            {' · '}
+            秒数在跳说明仍在请求中；可点「取消同步」中止
+          </p>
+        ) : null}
       </div>
 
       {payload && (
@@ -161,9 +232,9 @@ const BreakdownPanel: React.FC<BreakdownPanelProps> = ({
 
       {diagnostics.length > 0 ? (
         <div className="sg3-diag-block">
-          <h4>诊断</h4>
+          <h4>诊断 · {diagnostics.length}</h4>
           <ul>
-            {diagnostics.slice(0, 12).map((d, i) => (
+            {diagnostics.map((d, i) => (
               <li
                 key={`${d.code}-${i}`}
                 style={d.shotId ? { cursor: 'pointer', textDecoration: 'underline' } : undefined}

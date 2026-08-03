@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import {
   IMAGE_ASPECT_OPTIONS,
   IMAGE_QUALITY_OPTIONS,
@@ -7,8 +7,6 @@ import {
 import { useConnectedPictureModels } from '../../../../../hooks/use-connected-picture-models';
 import { ComposerModelSelect } from '../composer/ComposerModelSelect';
 import { VideoPopover, PopoverItem } from '../generation/video/VideoPopover';
-import { PictureGenModeChip } from '../generation/picture/PictureGenModeChip';
-import type { PictureGenMode } from '../generation/picture/picture-gen-modes';
 
 function stop(e: React.SyntheticEvent) {
   e.stopPropagation();
@@ -64,12 +62,15 @@ export interface StoryboardPreviewGenSettingsProps {
   settings: StoryboardPreviewPictureSettings;
   onChange: (patch: Partial<StoryboardPreviewPictureSettings>) => void;
   hideModel?: boolean;
+  /** 工具条右侧附加操作（如导出），与参数 chips 同一行 */
+  endSlot?: ReactNode;
 }
 
 export function StoryboardPreviewGenSettings({
   settings,
   onChange,
   hideModel = false,
+  endSlot,
 }: StoryboardPreviewGenSettingsProps) {
   const qualityLabel =
     IMAGE_QUALITY_OPTIONS.find((o) => o.id === settings.quality)?.label ?? settings.quality;
@@ -117,16 +118,6 @@ export function StoryboardPreviewGenSettings({
           <span className="kp__sep" />
         </>
       )}
-      <PictureGenModeChip
-        mode={settings.pictureGenMode as PictureGenMode}
-        modes={['text-to-image', 'image-to-image']}
-        onChange={(mode) => {
-          if (mode === 'text-to-image' || mode === 'image-to-image') {
-            onChange({ pictureGenMode: mode });
-          }
-        }}
-      />
-      <span className="kp__sep" />
       <ParamChip
         label={qualityLabel}
         active={settings.quality}
@@ -140,7 +131,13 @@ export function StoryboardPreviewGenSettings({
         onSelect={(aspectRatio) => onChange({ aspectRatio })}
         width={152}
       />
-      <span className="kp__hint" style={{ marginLeft: 'auto' }}>每镜 ×1</span>
+      <span className="kp__hint">每镜 ×1</span>
+      {endSlot ? (
+        <>
+          <span className="kp__toolbar-spacer" style={{ flex: 1, minWidth: 12 }} />
+          <div className="sb-preview-gen__end flex items-center gap-2 shrink-0">{endSlot}</div>
+        </>
+      ) : null}
     </div>
   );
 }

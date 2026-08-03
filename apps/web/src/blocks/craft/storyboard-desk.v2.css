@@ -8,16 +8,21 @@
   border: 1px solid var(--desk-line-strong) !important;
   color: var(--desk-ink) !important;
   box-shadow: var(--desk-shadow) !important;
-  max-height: min(92vh, 900px);
+  /* 固定外框高度，否则内容撑开后被 overflow 裁切、主栏不出滚动条 */
   width: min(1280px, calc(100vw - 24px)) !important;
   max-width: min(1280px, calc(100vw - 24px)) !important;
+  height: min(92vh, 900px) !important;
+  max-height: min(92vh, 900px) !important;
+  min-height: min(92vh, 900px) !important;
   border-radius: 16px !important;
 }
 
 .nx9-screen-modal__panel.sg3-modal--edit {
   width: min(860px, calc(100vw - 24px)) !important;
   max-width: min(860px, calc(100vw - 24px)) !important;
-  max-height: min(88vh, 800px);
+  height: auto !important;
+  min-height: 0 !important;
+  max-height: min(88vh, 800px) !important;
 }
 
 .nx9-screen-modal__panel.sg3-modal .nx9-screen-modal__chrome {
@@ -50,7 +55,9 @@
   overflow: hidden !important;
   display: flex !important;
   flex-direction: column !important;
+  flex: 1 1 auto !important;
   min-height: 0 !important;
+  height: auto !important;
 }
 
 /* ── 摘要卡 ── */
@@ -105,6 +112,11 @@
 .sg3-card__badge.is-ok {
   color: var(--desk-ok);
   border-color: color-mix(in srgb, var(--desk-ok) 45%, transparent);
+}
+
+.sg3-card__badge.is-run {
+  color: var(--desk-accent, #d4a017);
+  border-color: color-mix(in srgb, var(--desk-accent, #d4a017) 45%, transparent);
 }
 
 .sg3-card__title {
@@ -214,9 +226,9 @@
 .sg3-studio {
   display: flex;
   flex-direction: column;
-  flex: 1;
+  flex: 1 1 auto;
   min-height: 0;
-  height: 100%;
+  overflow: hidden;
   color: var(--desk-ink);
   background: var(--desk-bg);
   font-variant-numeric: tabular-nums;
@@ -228,8 +240,8 @@
 .sg3-modal .sg-studio__body {
   scrollbar-gutter: stable;
   scrollbar-width: thin;
-  scrollbar-color: color-mix(in srgb, var(--desk-accent) 55%, transparent)
-    color-mix(in srgb, var(--desk-ink) 6%, transparent);
+  scrollbar-color: color-mix(in srgb, var(--desk-accent) 80%, #78716c)
+    color-mix(in srgb, var(--desk-ink) 10%, transparent);
 }
 
 .sg3-nav__list::-webkit-scrollbar,
@@ -242,14 +254,14 @@
 .sg3-nav__list::-webkit-scrollbar-track,
 .sg3-pane::-webkit-scrollbar-track,
 .sg3-modal .sg-studio__body::-webkit-scrollbar-track {
-  background: color-mix(in srgb, var(--desk-ink) 6%, transparent);
+  background: color-mix(in srgb, var(--desk-ink) 10%, transparent);
   border-radius: 8px;
 }
 
 .sg3-nav__list::-webkit-scrollbar-thumb,
 .sg3-pane::-webkit-scrollbar-thumb,
 .sg3-modal .sg-studio__body::-webkit-scrollbar-thumb {
-  background: color-mix(in srgb, var(--desk-accent) 55%, transparent);
+  background: color-mix(in srgb, var(--desk-accent) 85%, #a8a29e);
   border-radius: 8px;
   border: 2px solid transparent;
   background-clip: content-box;
@@ -258,7 +270,7 @@
 .sg3-nav__list::-webkit-scrollbar-thumb:hover,
 .sg3-pane::-webkit-scrollbar-thumb:hover,
 .sg3-modal .sg-studio__body::-webkit-scrollbar-thumb:hover {
-  background: color-mix(in srgb, var(--desk-accent) 75%, transparent);
+  background: var(--desk-accent);
   border: 2px solid transparent;
   background-clip: content-box;
 }
@@ -273,13 +285,25 @@
   height: 32px;
   min-width: 160px;
   max-width: 240px;
-  padding: 0 10px;
+  padding: 0 28px 0 10px;
   border-radius: 8px;
   border: 1px solid var(--desk-line);
   background: var(--desk-bg);
   color: var(--desk-ink);
   font-size: 12px;
   outline: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sg3-episode-select--busy {
+  display: inline-flex;
+  align-items: center;
+  color: var(--desk-accent, #d4a017);
+  border-color: color-mix(in srgb, var(--desk-accent, #d4a017) 45%, transparent);
+  white-space: nowrap;
+  max-width: 280px;
 }
 
 .sg3-header-status {
@@ -357,10 +381,12 @@
   color: var(--desk-btn-primary-ink);
 }
 
-.sg3-pipeline__step.is-done {
-  border-color: var(--desk-ok);
+/* 完成态弱于当前态：避免 is-done 盖住 is-on 导致「当前步」看不清 */
+.sg3-pipeline__step.is-done:not(.is-on) {
+  color: var(--desk-ink);
+  border-color: color-mix(in srgb, var(--desk-ok) 55%, transparent);
 }
-.sg3-pipeline__step.is-done b {
+.sg3-pipeline__step.is-done:not(.is-on) b {
   background: var(--desk-ok);
   color: #0a1a0a;
 }
@@ -376,19 +402,22 @@
 
 .sg3-body {
   display: flex;
-  flex: 1;
+  flex: 1 1 auto;
   min-height: 0;
   overflow: hidden;
 }
 
 .sg3-body.has-nav {
   display: grid;
-  grid-template-columns: 200px minmax(0, 1fr);
+  grid-template-columns: 216px minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
   min-height: 0;
 }
 
 .sg3-body.is-wide .sg3-main {
   width: 100%;
+  flex: 1 1 auto;
+  min-height: 0;
 }
 
 .sg3-nav {
@@ -401,28 +430,100 @@
   background: var(--desk-bg-2);
 }
 
+.sg3-nav__episode {
+  flex: 0 0 auto;
+  padding: 10px 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  border-bottom: 1px solid var(--desk-line);
+  background: color-mix(in srgb, var(--desk-bg) 55%, var(--desk-bg-2));
+}
+
+.sg3-nav__filter-block {
+  flex: 0 0 auto;
+  padding: 10px 8px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  border-bottom: 1px solid var(--desk-line);
+}
+
+.sg3-nav__section-label {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: var(--desk-faint, var(--desk-muted));
+  line-height: 1;
+}
+
+.sg3-episode-select--nav {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  max-width: none;
+  box-sizing: border-box;
+  height: 30px;
+  padding-right: 28px;
+  font-weight: 600;
+}
+
+.sg3-episode-select--empty {
+  display: flex;
+  align-items: center;
+  color: var(--desk-muted);
+}
+
+.sg3-nav__episode-meta {
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1.35;
+  color: var(--desk-muted);
+}
+
+.sg3-nav__episode-meta.is-ok {
+  color: var(--desk-ok);
+}
+
 .sg3-filters {
   display: flex;
-  gap: 4px;
-  padding: 10px 8px 8px;
-  flex-wrap: wrap;
+  gap: 0;
+  margin: 0;
+  padding: 2px;
+  flex-wrap: nowrap;
+  border: 1px solid var(--desk-line);
+  border-radius: 9px;
+  background: var(--desk-bg);
 }
 
 .sg3-filters button {
-  border: 1px solid var(--desk-line);
-  background: var(--desk-bg);
+  flex: 1 1 0;
+  min-width: 0;
+  border: none;
+  background: transparent;
   color: var(--desk-muted);
-  border-radius: 8px;
-  padding: 4px 9px;
+  border-radius: 7px;
+  padding: 5px 4px;
   font-size: 11px;
   font-weight: 600;
   cursor: pointer;
+  white-space: nowrap;
 }
 
 .sg3-filters button.is-on {
-  border-color: var(--desk-accent-line);
+  border: none;
   background: var(--desk-accent-soft);
   color: var(--desk-ink);
+  box-shadow: inset 0 0 0 1px var(--desk-accent-line);
+}
+
+.sg3-nav__bind-hint {
+  margin: 0;
+  padding: 6px 8px 8px;
+  font-size: 11px;
+  line-height: 1.45;
+  color: #fbbf24;
+  border-bottom: 1px solid var(--desk-line);
 }
 
 .sg3-nav__list {
@@ -470,6 +571,11 @@
 }
 
 .sg3-nav__code {
+  flex: 0 0 auto;
+  max-width: 7.5em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-weight: 700;
   color: var(--desk-muted);
   font-variant-numeric: tabular-nums;
@@ -485,7 +591,7 @@
 .sg3-main {
   min-width: 0;
   min-height: 0;
-  height: 100%;
+  flex: 1 1 auto;
   overflow: hidden;
   display: flex;
   flex-direction: column;
@@ -594,19 +700,28 @@
 .sg3-diag-block {
   width: 100%;
   max-width: 560px;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
 }
 
 .sg3-diag-block h4 {
   margin: 0 0 8px;
   font-size: 13px;
+  flex: 0 0 auto;
 }
 
 .sg3-diag-block ul {
   margin: 0;
   padding-left: 18px;
+  padding-right: 6px;
   font-size: 12px;
   color: var(--desk-warn);
   line-height: 1.55;
+  max-height: min(280px, 40vh);
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .sg3-empty,
@@ -668,6 +783,7 @@
 }
 
 .sg3-modal .sg-story-cell {
+  position: relative;
   border-radius: 14px;
   border: 1px solid var(--desk-line);
   background: var(--desk-bg-2);
@@ -701,13 +817,18 @@
 
 .sg3-modal .sg-story-cell__acts {
   border-top: 1px solid var(--desk-line);
-  background: var(--desk-bg);
+  background: var(--desk-bg-2);
 }
 
 .sg3-modal .sg-story-cell__act {
-  font-size: 11px;
-  font-weight: 650;
+  min-height: 34px;
   color: var(--desk-muted);
+  border-right-color: var(--desk-line);
+}
+
+.sg3-modal .sg-story-cell__act:hover:not(:disabled) {
+  color: var(--desk-ink);
+  background: var(--desk-accent-soft);
 }
 
 /* G-03: 多选复选框 */
@@ -897,6 +1018,7 @@
   width: 100%;
   max-width: 560px;
   margin: 0 0 16px;
+  flex: 0 0 auto;
 }
 
 .sg3-sheet--handoff .sg3-sheet__preview {

@@ -83,12 +83,12 @@ export const AssetReadinessPanel = memo(function AssetReadinessPanel({
         <BookOpen size={16} aria-hidden />
         <p className="sd2-readiness-gate__title">设定就绪尚未解锁</p>
         <p className="sd2-readiness-gate__desc">
-          本页检查的是 Bible 人物/场景是否已入库、能否交给分镜台。
+          本页检查的是设定中人物/场景是否已入库、能否交给分镜台。
           请先点顶栏「确认成稿」，再回到这里查看缺口并同步到资产库。
         </p>
         <p className="sd2-readiness-gate__meta">
-          当前 Bible：人物 {charN} · 场景 {sceneN}
-          {charN === 0 && sceneN === 0 ? '（可先点「抽取 Bible」）' : ''}
+          当前设定：人物 {charN} · 场景 {sceneN}
+          {charN === 0 && sceneN === 0 ? '（可先点「抽取设定」）' : ''}
         </p>
       </div>
     );
@@ -107,7 +107,7 @@ export const AssetReadinessPanel = memo(function AssetReadinessPanel({
   return (
     <div className="sd2-ready-body" data-block-id={blockId}>
       <div className="sd2-ready-header">
-        <span className="sd2-ready-header__label">Bible 设定就绪检查</span>
+        <span className="sd2-ready-header__label">设定就绪检查</span>
         {report.ready ? (
           <span className="sd2-ready-status sd2-ready-status--ok">
             <Check size={12} /> 已就绪
@@ -123,7 +123,7 @@ export const AssetReadinessPanel = memo(function AssetReadinessPanel({
       <div className="sd2-ready-section">
         <p className="sd2-ready-section__title">角色（{report.requiredCharacters.length}）</p>
         {report.requiredCharacters.length === 0 ? (
-          <p className="sd2-ready-section__empty">Bible 中无角色</p>
+          <p className="sd2-ready-section__empty">设定中无角色</p>
         ) : (
           <div className="sd2-ready-tags">
             {report.requiredCharacters.map((name) => (
@@ -143,7 +143,7 @@ export const AssetReadinessPanel = memo(function AssetReadinessPanel({
       <div className="sd2-ready-section">
         <p className="sd2-ready-section__title">场景（{report.requiredScenes.length}）</p>
         {report.requiredScenes.length === 0 ? (
-          <p className="sd2-ready-section__empty">Bible 中无场景</p>
+          <p className="sd2-ready-section__empty">设定中无场景</p>
         ) : (
           <div className="sd2-ready-tags">
             {report.requiredScenes.map((name) => (

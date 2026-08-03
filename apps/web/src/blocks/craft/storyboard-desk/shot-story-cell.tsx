@@ -138,11 +138,24 @@ export function ShotStoryCell({
         </div>
       </button>
       <div className="sg-story-cell__acts">
-        <button type="button" className="sg-story-cell__act" title="快捷出线稿 · 批量主路径在构图" disabled={busy || deskBusy} onClick={onGenerateLineArt}>
-          <Sparkles size={11} />线稿
+        <button
+          type="button"
+          className="sg-story-cell__act"
+          title="快捷出线稿 · 批量主路径在构图"
+          aria-label="出线稿"
+          disabled={busy || deskBusy}
+          onClick={onGenerateLineArt}
+        >
+          <Sparkles size={14} strokeWidth={2} />
         </button>
-        <button type="button" className="sg-story-cell__act" title="编辑镜头字段" onClick={onEdit}>
-          <Pencil size={11} />编辑
+        <button
+          type="button"
+          className="sg-story-cell__act"
+          title="编辑镜头字段"
+          aria-label="编辑"
+          onClick={onEdit}
+        >
+          <Pencil size={14} strokeWidth={2} />
         </button>
         {onDelete ? (
           <span className="sg-story-cell__menu-wrap">
@@ -150,9 +163,10 @@ export function ShotStoryCell({
               type="button"
               className="sg-story-cell__act"
               title="更多"
+              aria-label="更多"
               onClick={(e) => { e.stopPropagation(); setMenuOpen((v) => !v); }}
             >
-              <Ellipsis size={11} />
+              <Ellipsis size={14} strokeWidth={2} />
             </button>
             {menuOpen ? (
               <>

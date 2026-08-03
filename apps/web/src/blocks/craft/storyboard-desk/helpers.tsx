@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import { useReactFlow } from '@xyflow/react';
+import { useEdges, useNodes } from '@xyflow/react';
 import {
   type AssetLibraryKind,
   type BacklotWorkspaceItem,
@@ -17,11 +17,11 @@ export function compact(text: string, max = 68) {
 }
 
 export function useUpstreamBreakdown(blockId: string): ScriptBreakdownPayload | undefined {
-  const { getEdges, getNodes } = useReactFlow();
+  const nodes = useNodes();
+  const edges = useEdges();
   return useMemo(() => {
-    const nodes = getNodes();
     const byId = new Map(nodes.map((n) => [n.id, n]));
-    const incoming = getEdges().filter((e) => e.target === blockId);
+    const incoming = edges.filter((e) => e.target === blockId);
     for (const edge of incoming) {
       const data = byId.get(edge.source)?.data as Record<string, unknown> | undefined;
       const payload = (
@@ -31,15 +31,15 @@ export function useUpstreamBreakdown(blockId: string): ScriptBreakdownPayload | 
       if (payload?.version === 1) return payload;
     }
     return undefined;
-  }, [blockId, getEdges, getNodes]);
+  }, [blockId, edges, nodes]);
 }
 
 export function useUpstreamScreenplay(blockId: string): import('@nx9/shared').ScreenplayPackage | undefined {
-  const { getEdges, getNodes } = useReactFlow();
+  const nodes = useNodes();
+  const edges = useEdges();
   return useMemo(() => {
-    const nodes = getNodes();
     const byId = new Map(nodes.map((n) => [n.id, n]));
-    const incoming = getEdges().filter((e) => e.target === blockId);
+    const incoming = edges.filter((e) => e.target === blockId);
     for (const edge of incoming) {
       const data = byId.get(edge.source)?.data as Record<string, unknown> | undefined;
       const pkg = data?.package;
@@ -53,7 +53,27 @@ export function useUpstreamScreenplay(blockId: string): import('@nx9/shared').Sc
       }
     }
     return undefined;
-  }, [blockId, getEdges, getNodes]);
+  }, [blockId, edges, nodes]);
+}
+
+/** 沿入边找连到本分镜台的编剧台节点 id（优先带合法 package 的 script-desk） */
+export function findUpstreamScriptDeskId(
+  blockId: string,
+  nodes: Array<{ id: string; type?: string; data?: unknown }>,
+  edges: Array<{ source: string; target: string }>,
+): string | undefined {
+  const byId = new Map(nodes.map((n) => [n.id, n]));
+  const incoming = edges.filter((e) => e.target === blockId);
+  let fallback: string | undefined;
+  for (const edge of incoming) {
+    const source = byId.get(edge.source);
+    if (source?.type !== 'script-desk' && source?.type !== 'script') continue;
+    const data = source.data as Record<string, unknown> | undefined;
+    const pkg = data?.package as { schema?: string; version?: number } | undefined;
+    if (pkg?.schema === 'nx9-screenplay-package' && pkg.version === 1) return source.id;
+    fallback ??= source.id;
+  }
+  return fallback;
 }
 
 export function clonePayload(payload: ScriptBreakdownPayload): ScriptBreakdownPayload {

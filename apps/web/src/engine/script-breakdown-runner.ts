@@ -215,10 +215,15 @@ export async function runProductionScriptBreakdown(args: {
   sourceText: string;
   config?: Partial<ScriptBreakdownConfig>;
   prompts?: Partial<ScriptBreakdownPromptTemplates>;
+  signal?: AbortSignal;
 }): Promise<ScriptBreakdownPayload> {
   const runtime = useFlowRuntime.getState().runtime;
   const sourceText = args.sourceText.trim();
   if (!sourceText) throw new Error('请先输入剧本原文');
+  if (args.signal?.aborted) {
+    const err = new DOMException('拆镜已取消', 'AbortError');
+    throw err;
+  }
   const config = normalizeScriptBreakdownConfig(args.config);
   const prompts = normalizeScriptBreakdownPrompts(args.prompts);
   runtime?.updateNodeData(args.blockId, {
@@ -226,24 +231,55 @@ export async function runProductionScriptBreakdown(args: {
     sourceText,
     scriptBreakdownConfig: config,
     scriptBreakdownPrompts: prompts,
-    breakdownProgress: '正在规划分集，再逐集拆分场景和镜头…',
+    breakdownProgress: '正在调用 AI 拆镜（规划分集 → 逐场拆镜），请稍候…',
     error: undefined,
   });
+  // 单次拆镜请求上限 8 分钟；超时自动中止，避免 UI 永久「同步中」
+  const timeoutMs = 8 * 60 * 1000;
+  const timeoutCtrl = new AbortController();
+  const onOuterAbort = () => timeoutCtrl.abort();
+  if (args.signal) {
+    if (args.signal.aborted) timeoutCtrl.abort();
+    else args.signal.addEventListener('abort', onOuterAbort, { once: true });
+  }
+  const timer = setTimeout(() => timeoutCtrl.abort(), timeoutMs);
   try {
-    const result = await api.productionScriptBreakdown({ sourceText, config, prompts });
+    const result = await api.productionScriptBreakdown(
+      { sourceText, config, prompts },
+      { signal: timeoutCtrl.signal },
+    );
     applyScriptBreakdownPayload(args.blockId, result.payload);
     useActivityLog.getState().append(
       `生产级剧本拆分完成 · ${result.stats.episodeCount} 集 / ${result.stats.sceneCount} 场 / ${result.stats.shotCount} 镜`,
     );
     return result.payload;
   } catch (error) {
+    const userCancelled = Boolean(args.signal?.aborted);
+    const aborted = userCancelled
+      || (error instanceof DOMException && error.name === 'AbortError')
+      || (error instanceof Error && error.name === 'AbortError');
+    const timedOut = aborted && !userCancelled;
+    const failMsg = timedOut
+      ? '拆镜超时（单次超过 8 分钟）。可点「取消同步」后缩短成稿，或分集拆镜重试。'
+      : String(error);
     runtime?.updateNodeData(args.blockId, {
-      status: 'error',
+      status: userCancelled ? 'idle' : 'error',
       breakdownProgress: null,
-      error: String(error),
+      error: userCancelled ? undefined : failMsg,
     });
+    if (userCancelled) {
+      useActivityLog.getState().append('生产级剧本拆分已取消');
+      throw new DOMException('拆镜已取消', 'AbortError');
+    }
+    if (timedOut) {
+      useActivityLog.getState().append(`生产级剧本拆分失败: ${failMsg}`);
+      throw new Error(failMsg);
+    }
     useActivityLog.getState().append(`生产级剧本拆分失败: ${String(error)}`);
     throw error;
+  } finally {
+    clearTimeout(timer);
+    args.signal?.removeEventListener('abort', onOuterAbort);
   }
 }
 
@@ -275,10 +311,15 @@ function bindPayloadEpisodeToSource(
   const id = stableSourceResultEpisodeId(source.id);
   const shots = flattenScriptBreakdownShots(payload);
   const base = payload.episodes[0];
+  const rawTitle = source.title.trim() || base?.title?.trim() || '';
+  const epNo = source.listIndex + 1;
+  const title = /^第\s*[一二三四五六七八九十百千\d]+\s*集/.test(rawTitle)
+    ? rawTitle
+    : `第${epNo}集：${rawTitle || '未命名'}`;
   return {
     id,
-    index: source.listIndex + 1,
-    title: source.title.trim() || base?.title || `第${source.listIndex + 1}集`,
+    index: epNo,
+    title,
     logline: base?.logline,
     sourceText: base?.sourceText,
     scenes: (payload.episodes ?? []).flatMap((ep, epIndex) =>
@@ -291,7 +332,7 @@ function bindPayloadEpisodeToSource(
       ...shot,
       id: `${id}-shot-${shot.index ?? shotIndex + 1}`,
       episodeId: id,
-      episodeIndex: source.listIndex + 1,
+      episodeIndex: epNo,
     })),
   };
 }
@@ -323,9 +364,11 @@ export async function runProductionScriptBreakdownForEpisodes(args: {
   existingPayload?: ScriptBreakdownPayload;
   config?: Partial<ScriptBreakdownConfig>;
   prompts?: Partial<ScriptBreakdownPromptTemplates>;
+  signal?: AbortSignal;
 }): Promise<ScriptBreakdownPayload> {
   const runtime = useFlowRuntime.getState().runtime;
   if (!args.episodes.length) throw new Error('请至少选择一集再生成');
+  if (args.signal?.aborted) throw new DOMException('拆镜已取消', 'AbortError');
   const sliceText = composeEpisodeSourceText(args.episodes);
   if (!sliceText.trim()) throw new Error('所选分集没有正文');
   const config = normalizeScriptBreakdownConfig(args.config);
@@ -350,20 +393,26 @@ export async function runProductionScriptBreakdownForEpisodes(args: {
     let batchShotCount = 0;
     // 逐集请求，保证一源集对应一结果集，避免多选时被模型拆乱
     for (let i = 0; i < args.episodes.length; i += 1) {
+      if (args.signal?.aborted) throw new DOMException('拆镜已取消', 'AbortError');
       const source = args.episodes[i]!;
       const oneText = composeEpisodeSourceText([source]);
       runtime?.updateNodeData(args.blockId, {
         breakdownProgress: `正在生成（${i + 1}/${args.episodes.length}）：${source.title.trim() || `第${source.listIndex + 1}集`}…`,
       });
-      const result = await api.productionScriptBreakdown({
-        sourceText: oneText,
-        config,
-        prompts,
-      });
+      const result = await api.productionScriptBreakdown(
+        { sourceText: oneText, config, prompts },
+        { signal: args.signal },
+      );
+      if (args.signal?.aborted) throw new DOMException('拆镜已取消', 'AbortError');
       const bound = bindPayloadEpisodeToSource(result.payload, source);
       batchShotCount += bound.shots?.length ?? 0;
       const replaceId = stableSourceResultEpisodeId(source.id);
-      const kept = (existing?.episodes ?? []).filter((ep) => ep.id !== replaceId);
+      // 同时清掉同源旧 id / 同序号旧集，避免整包覆盖时代的 AI 自建 id 残留成「幽灵集」
+      const kept = (existing?.episodes ?? []).filter((ep) => (
+        ep.id !== replaceId
+        && ep.id !== source.id
+        && (ep.index ?? -1) !== source.listIndex + 1
+      ));
       const mergedEpisodes = [...kept, bound].sort((a, b) => (a.index ?? 0) - (b.index ?? 0));
       existing = {
         version: 1,
@@ -387,6 +436,18 @@ export async function runProductionScriptBreakdownForEpisodes(args: {
     );
     return existing;
   } catch (error) {
+    const aborted = args.signal?.aborted
+      || (error instanceof DOMException && error.name === 'AbortError')
+      || (error instanceof Error && error.name === 'AbortError');
+    if (aborted) {
+      runtime?.updateNodeData(args.blockId, {
+        status: 'idle',
+        breakdownProgress: null,
+        error: undefined,
+      });
+      useActivityLog.getState().append('分集生成已取消');
+      throw new DOMException('拆镜已取消', 'AbortError');
+    }
     runtime?.updateNodeData(args.blockId, {
       status: 'error',
       breakdownProgress: null,

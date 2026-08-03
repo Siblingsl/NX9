@@ -442,10 +442,12 @@ export async function runBreakdownFromPackage(opts: {
   pkg: ScreenplayPackage;
   updateNodeData: (id: string, data: Record<string, unknown>) => void;
   getLiveBreakdown: () => ScriptBreakdownPayload | undefined;
+  signal?: AbortSignal;
 }): Promise<ScriptBreakdownPayload> {
   const sourceText = assembleScreenplaySourceText(opts.pkg);
   if (!sourceText) throw new Error('成稿正文为空');
   if (opts.pkg.status !== 'confirmed') throw new Error('请先在编剧台确认成稿');
+  if (opts.signal?.aborted) throw new DOMException('拆镜已取消', 'AbortError');
 
   const hash = packageSourceHash(opts.pkg);
   opts.updateNodeData(opts.blockId, {
@@ -459,10 +461,30 @@ export async function runBreakdownFromPackage(opts: {
   });
 
   const { runProductionScriptBreakdown } = await import('./script-breakdown-runner');
-  await runProductionScriptBreakdown({
-    blockId: opts.blockId,
-    sourceText,
-  });
+  try {
+    await runProductionScriptBreakdown({
+      blockId: opts.blockId,
+      sourceText,
+      signal: opts.signal,
+    });
+  } catch (error) {
+    const aborted = opts.signal?.aborted
+      || (error instanceof DOMException && error.name === 'AbortError')
+      || (error instanceof Error && error.name === 'AbortError');
+    if (aborted) {
+      opts.updateNodeData(opts.blockId, {
+        status: 'idle',
+        breakdownJob: {
+          phase: 'cancelled',
+          sourcePackageHash: hash,
+          error: '用户取消',
+        },
+      });
+    }
+    throw error;
+  }
+
+  if (opts.signal?.aborted) throw new DOMException('拆镜已取消', 'AbortError');
 
   const live = opts.getLiveBreakdown();
   if (!live?.version) {
