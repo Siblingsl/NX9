@@ -89,13 +89,17 @@ export function enrichPromptWithCharacters(
   return trimmed ? `${trimmed}\n\n${suffix}` : suffix;
 }
 
-/** Prefer character reference image, then upstream picture. */
+/** Prefer character reference image (含设定板/正面回填), then upstream picture. */
 export function pickReferenceImage(
   characters: CharacterProfile[],
   upstreamPictures: string[],
 ): string | undefined {
   for (const c of characters) {
-    if (c.referenceImageUrl) return c.referenceImageUrl;
+    const url =
+      c.referenceImageUrl?.trim() ||
+      c.creative?.fullSheetUrl?.trim() ||
+      c.creative?.frontViewUrl?.trim();
+    if (url) return url;
   }
   return upstreamPictures[0];
 }

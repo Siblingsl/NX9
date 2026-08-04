@@ -3,7 +3,11 @@ import type {
   StoryboardPreviewFrame,
   StoryboardPreviewPictureSettings,
 } from '../types/storyboard-preview';
-import { EXEC_PICTURE_HANDLES, isStoryboardPreviewHostKind } from '../catalog/socket-registry';
+import {
+  EXEC_PICTURE_HANDLES,
+  isAssetSheetPictureHostKind,
+  isStoryboardPreviewHostKind,
+} from '../catalog/socket-registry';
 import type { StoryboardDirector3dGuide } from '../types/storyboard';
 import { buildKeyframeNoGuidePromptSuffix } from './storyboard-guide';
 
@@ -143,11 +147,6 @@ export function resolveConnectedPictureGenId(
   const edge = findStoryboardExecEdge(previewBlockId, nodes, edges);
   if (!edge) return undefined;
   return edge.source === previewBlockId ? edge.target : edge.source;
-}
-
-function isAssetSheetPictureHostKind(kind?: string | null): boolean {
-  void kind;
-  return false;
 }
 
 function isPictureExecHostKind(kind?: string | null): boolean {

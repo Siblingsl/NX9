@@ -106,6 +106,7 @@ import { StageDeckInteractionBridge } from './stage-deck/StageDeckInteractionBri
 import { normalizeDirectorProject } from '@nx9/director3d';
 import { useDirector3dUi } from '../stores/director3d-ui';
 import { openDirector3dStage } from './director3d-open';
+import { DIRECTOR_3D_ENABLED } from './director3d-feature';
 const CANVAS_GRID = {
   light: {
     background: '#E8E4DB',
@@ -1915,7 +1916,7 @@ const FlowSurfaceInner = memo(function FlowSurfaceInner({
     (_e: ReactMouseEvent, node: Node) => {
       setNodes((prev) => prev.map((n) => ({ ...n, selected: n.id === node.id })));
       syncSelectedBlockId(node.id);
-      if (isStageDeck && node.type === 'director-3d') {
+      if (DIRECTOR_3D_ENABLED && isStageDeck && node.type === 'director-3d') {
         openDirector3dStage({
           blockId: node.id,
           nodes: nodesRef.current,

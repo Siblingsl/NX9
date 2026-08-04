@@ -88,6 +88,19 @@ export function InspectorCard() {
                   onChange={(e) => updateCamera(cam.id, { fov: Number(e.target.value) || 50 })}
                 />
               </label>
+              <label className="nx9-stage-field">
+                目标点 X / Y / Z
+                <input
+                  type="text"
+                  value={cam.target.join(', ')}
+                  onChange={(e) => {
+                    const values = e.target.value.split(',').map((item) => Number(item.trim()));
+                    if (values.length === 3 && values.every(Number.isFinite)) {
+                      updateCamera(cam.id, { target: values as [number, number, number] });
+                    }
+                  }}
+                />
+              </label>
             </>
           )}
         </div>

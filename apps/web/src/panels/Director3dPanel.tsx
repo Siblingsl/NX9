@@ -1,338 +1,215 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef } from 'react';
-import type { Director3dCapturePayload, DirectorProject } from '@nx9/director3d';
-import { normalizeDirectorProject, isWebGLAvailable } from '@nx9/director3d';
-import { useToast } from '../stores/toast';
-import { toastSuccess } from '../stores/toast';
+import type { Director3dCommitPayload, DirectorProject } from '@nx9/director3d';
 import {
-  emptyStoryboardPreview,
-  newBacklotWorkspaceItem,
-  resolvePerfToast,
-  type StoryboardPreviewPayload,
-} from '@nx9/shared';
+  emptyDirectorProject,
+  normalizeDirectorProject,
+  normalizeShotState,
+  projectFromShotState,
+  type Director3dSceneTemplate,
+} from '@nx9/director3d';
+import { activeChainEpisodeShots, resolveBlockCharacters } from '@nx9/shared';
 import { useDirector3dUi } from '../stores/director3d-ui';
 import { useFlowRuntime } from '../stores/flow-runtime';
-import { useFlowGraphMirror } from '../stores/flow-graph-mirror';
-import { useWorkspaceDocument } from '../stores/workspace-document';
 import { useAssetLibraryModalUi } from '../stores/asset-library-modal-ui';
 import { useActivityLog } from '../stores/activity-log';
 import { api } from '../api/client';
-import { useTakeStore } from '../engine/stage-deck/stores/take-store';
-import { applyPrimaryTakeToNodeData } from '../engine/stage-deck/utils/take-utils';
-import { isStageDeckEnabled } from '../stores/stage-deck-flag';
-import { syncDirector3dToBlocking } from '../engine/blocking-3d-sync';
-import { extractDirectorCharacterPlacements } from '../engine/director3d-character-sync';
 import { disposeDirectorWebGLLifecycle } from '../engine/director-webgl-lifecycle';
+import { createDirector3dCommitAdapter, sceneByShotFromNodeData } from '../engine/director3d-commit-adapter';
+import { readUpstreamChainStoryboard, resolveUpstreamChainDesk } from '../engine/chain-storyboard-utils';
+import { prepareDirectorProjectForShot } from '../engine/director3d-character-sync';
+import { useWorkspaceDocument } from '../stores/workspace-document';
 
 const Director3dShell = lazy(() =>
-  import('@nx9/director3d').then((m) => ({ default: m.Director3dShell })),
+  import('@nx9/director3d').then((module) => ({ default: module.Director3dShell })),
 );
 
-async function dataUrlToFile(dataUrl: string, name: string) {
-  const res = await fetch(dataUrl);
-  const blob = await res.blob();
-  return new File([blob], name, { type: 'image/png' });
-}
-
 export function Director3dPanel() {
-  const open = useDirector3dUi((s) => s.open);
-  const blockId = useDirector3dUi((s) => s.blockId);
-  const linkedShotId = useDirector3dUi((s) => s.linkedShotId);
-  const linkedStoryboardPreviewId = useDirector3dUi((s) => s.linkedStoryboardPreviewId);
-  const linkedStoryboardPreviewFrameId = useDirector3dUi(
-    (s) => s.linkedStoryboardPreviewFrameId,
-  );
-  const project = useDirector3dUi((s) => s.project);
-  const close = useDirector3dUi((s) => s.close);
-  const setProject = useDirector3dUi((s) => s.setProject);
-  const runtime = useFlowRuntime((s) => s.runtime);
-  const updateShot = useWorkspaceDocument((s) => s.updateShot);
-  const upsertBacklotWorkspace = useWorkspaceDocument((s) => s.upsertBacklotWorkspace);
-  const openAssetAt = useAssetLibraryModalUi((s) => s.openAt);
-  const appendLog = useActivityLog((s) => s.append);
-  const intensive = runtime?.intensive ?? false;
-  const webglOk = useMemo(() => isWebGLAvailable(), [open]);
+  const open = useDirector3dUi((state) => state.open);
+  const blockId = useDirector3dUi((state) => state.blockId);
+  const linkedShotId = useDirector3dUi((state) => state.linkedShotId);
+  const baseProject = useDirector3dUi((state) => state.project);
+  const close = useDirector3dUi((state) => state.close);
+  const selectShot = useDirector3dUi((state) => state.selectShot);
+  const runtime = useFlowRuntime((state) => state.runtime);
+  const appendLog = useActivityLog((state) => state.append);
+  const characters = useWorkspaceDocument((state) => state.characters.characters);
   const disposeRef = useRef<(() => void) | undefined>(undefined);
-  // F-012: 仅当节点/连线达阈值时提示「3D 预览降质」；制作模式 forced intensive 不误报
-  const graphNodeCount = useFlowGraphMirror((s) => s.nodes.length);
-  const graphEdgeCount = useFlowGraphMirror((s) => s.edges.length);
-  const intensiveShownRef = useRef(false);
+  const nodes = runtime?.getNodes() ?? [];
+  const edges = runtime?.getEdges() ?? [];
+  const hostNode = blockId ? nodes.find((node) => node.id === blockId) : undefined;
+  const nodeData = (hostNode?.data ?? {}) as Record<string, unknown>;
+  const upstreamDeskId = useMemo(
+    () => blockId ? resolveUpstreamChainDesk(blockId, nodes, edges) : null,
+    [blockId, edges, nodes],
+  );
+  const chain = useMemo(
+    () => blockId ? readUpstreamChainStoryboard(blockId, nodes, edges) : undefined,
+    [blockId, edges, nodes],
+  );
+  const episodeId = (nodeData.lastHandoff as { episodeId?: string } | undefined)?.episodeId ?? chain?.activeEpisodeId;
+  const episodeConfirmed = Boolean(
+    (nodeData.lastHandoff as { confirmed?: boolean; confirmedEpisodeIds?: string[] } | undefined)?.confirmed ||
+      (episodeId && (nodeData.lastHandoff as { confirmedEpisodeIds?: string[] } | undefined)?.confirmedEpisodeIds?.includes(episodeId)) ||
+      (episodeId && chain?.confirmedEpisodeIds?.includes(episodeId)),
+  );
+  const shots = useMemo(() => {
+    if (!chain) return [];
+    return activeChainEpisodeShots({ ...chain, activeEpisodeId: episodeId ?? chain.activeEpisodeId });
+  }, [chain, episodeId]);
+  const lineArtByShotId = useMemo(() => {
+    const map: Record<string, string> = {};
+    const handoff = nodeData.lastHandoff as { lineArtFrames?: Array<{ shotId?: string; sourceShotId?: string; imageUrl?: string }> } | undefined;
+    for (const frame of handoff?.lineArtFrames ?? []) {
+      const id = frame.shotId ?? frame.sourceShotId;
+      if (id && frame.imageUrl) map[id] = frame.imageUrl;
+    }
+    const upstream = upstreamDeskId ? nodes.find((node) => node.id === upstreamDeskId) : undefined;
+    const preview = (upstream?.data as Record<string, unknown> | undefined)?.storyboardPreview as
+      { frames?: Array<{ sourceShotId?: string; imageUrl?: string; lineArtUrl?: string }> } | undefined;
+    for (const frame of preview?.frames ?? []) {
+      const id = frame.sourceShotId;
+      const url = frame.lineArtUrl ?? frame.imageUrl;
+      if (id && url && !map[id]) map[id] = url;
+    }
+    return map;
+  }, [nodeData.lastHandoff, nodes, upstreamDeskId]);
+  const shotId = linkedShotId ?? undefined;
+  const storedState = shotId ? sceneByShotFromNodeData(nodeData)[shotId] : undefined;
+  const state = useMemo(
+    () => {
+      const normalized = normalizeShotState(storedState, shotId ?? '__standalone__', normalizeDirectorProject(baseProject ?? emptyDirectorProject()));
+      const shot = shots.find((item) => item.id === shotId);
+      if (!shot || storedState) return normalized;
+      const shotCharacters = resolveBlockCharacters(nodeData, shot, characters);
+      const shotCharacterIds = shot.characterIds?.length
+        ? shot.characterIds
+        : shotCharacters.map((character) => character.id);
+      const shotCharacterNames = shot.characterNames?.length
+        ? shot.characterNames
+        : shotCharacters.map((character) => character.name);
+      const prepared = prepareDirectorProjectForShot(
+        projectFromShotState(normalized, normalizeDirectorProject(baseProject ?? emptyDirectorProject())),
+        shotCharacterIds,
+        characters,
+        shot.director3dGuide?.characterPlacements,
+        shotCharacterNames,
+      );
+      return { ...normalized, episodeId, sourceChainDeskId: upstreamDeskId ?? undefined, objects: prepared.objects };
+    },
+    [baseProject, characters, episodeId, nodeData, shotId, shots, upstreamDeskId, storedState],
+  );
+  const project = useMemo(
+    () => projectFromShotState(state, normalizeDirectorProject(baseProject ?? emptyDirectorProject())),
+    [baseProject, state],
+  );
 
   useEffect(() => {
-    if (!intensive || intensiveShownRef.current) return;
-    const hit = resolvePerfToast(graphNodeCount, graphEdgeCount);
-    if (!hit) return;
-    intensiveShownRef.current = true;
-    useToast.getState().push({
-      id: 'perf-3d-downgrade',
-      message: '3D 预览已降质以保障画布流畅',
-      variant: 'info',
+    if (!blockId || !runtime || !shotId || storedState) return;
+    runtime.updateNodeData(blockId, { sceneByShot: { ...sceneByShotFromNodeData(nodeData), [shotId]: state } });
+  }, [blockId, nodeData, runtime, sceneByShotFromNodeData, shotId, state, storedState]);
+
+  const persistState = useCallback((next: typeof state) => {
+    if (!blockId || !runtime) return;
+    const current = sceneByShotFromNodeData((runtime.getNodes().find((node) => node.id === blockId)?.data ?? {}) as Record<string, unknown>);
+    runtime.updateNodeData(blockId, { sceneByShot: { ...current, [next.shotId]: next } });
+  }, [blockId, runtime]);
+
+  const commit = useMemo(() => createDirector3dCommitAdapter({
+    blockId: blockId ?? '__standalone__',
+    nodes,
+    edges,
+    updateNodeData: (id, patch) => runtime?.updateNodeData(id, patch),
+    currentSourceShotRevision: state.sourceShotRevision,
+    onCommitted: (payload) => appendLog(`3D 构图已提交，可进入彩色关键帧批出 · 镜 ${payload.shotId}`),
+  }), [appendLog, blockId, edges, nodes, runtime, state.sourceShotRevision]);
+
+  const handleCommit = useCallback((payload: Director3dCommitPayload) => {
+    const result = commit(payload);
+    if (!result.ok) throw new Error(result.error ?? '3D 构图提交失败');
+  }, [commit]);
+
+  const handleCandidate = useCallback(async (payload: { dataUrl: string; shotId: string }) => {
+    if (payload.shotId !== (shotId ?? '__standalone__')) throw new Error('镜头已切换，请重新记录候选帧');
+    const blob = await (await fetch(payload.dataUrl)).blob();
+    const file = new File([blob], `director3d-${payload.shotId}-${Date.now()}.png`, { type: 'image/png' });
+    const uploaded = await api.uploadAsset(file);
+    return { imageUrl: uploaded.url };
+  }, [shotId]);
+
+  const handleTemplate = useCallback((template: Director3dSceneTemplate) => {
+    if (!blockId || !runtime) return;
+    const item = {
+      id: `scene-${Date.now().toString(36)}`,
+      kind: 'scene',
+      label: template.name,
+      promptEn: `NX9 scene template with ${template.objects.length} reusable objects`,
+      stageDeckScene: template,
+    };
+    runtime.updateNodeData(blockId, {
+      sceneTemplates: { ...((nodeData.sceneTemplates as Record<string, unknown> | undefined) ?? {}), [template.id]: template },
     });
-  }, [intensive, graphNodeCount, graphEdgeCount]);
-
-  const persistProject = useCallback(
-    (next: DirectorProject) => {
-      setProject(next);
-      if (blockId && runtime) {
-        runtime.updateNodeData(blockId, {
-          scene: next,
-          sceneVersion: 1,
-        });
-      }
-    },
-    [blockId, runtime, setProject],
-  );
-
-  const handleCapture = useCallback(
-    async (payload: Director3dCapturePayload) => {
-      try {
-        const file = await dataUrlToFile(payload.dataUrl, `director3d-${Date.now()}.png`);
-        const uploaded = await api.uploadAsset(file);
-        appendLog(`3D 截图已上传 · ${uploaded.url}`);
-
-        if (blockId && runtime) {
-          const patch: Record<string, unknown> = {
-            lastCaptureUrl: uploaded.url,
-            lastCameraPrompt: payload.cameraPrompt,
-            previewUrl: uploaded.url,
-            content: payload.cameraPrompt ?? '',
-            outputPrompt: payload.cameraPrompt ?? '',
-            status: 'done',
-            linkedStoryboardPreviewId,
-            linkedStoryboardPreviewFrameId,
-          };
-          if (isStageDeckEnabled()) {
-            const take = useTakeStore.getState().appendTake(
-              blockId,
-              uploaded.url,
-              uploaded.url,
-              {
-                mediaKind: 'picture',
-                source: 'director3d',
-                cameraPosition: payload.cameraPosition,
-                cameraRotation: payload.cameraRotation,
-                cameraFov: payload.cameraFov,
-              },
-            );
-            if (take.picked) {
-              Object.assign(patch, applyPrimaryTakeToNodeData(take));
-            }
-          }
-          runtime.updateNodeData(blockId, patch);
-        }
-
-        const characterPlacements = extractDirectorCharacterPlacements(project);
-        const panoramaUrl = project.panorama?.url;
-        let appliedToStoryboardPreview = false;
-        if (linkedStoryboardPreviewId && linkedStoryboardPreviewFrameId && runtime && blockId) {
-          const previewNode = runtime
-            .getNodes()
-            .find((node) => node.id === linkedStoryboardPreviewId);
-          const previewData = (previewNode?.data ?? {}) as Record<string, unknown>;
-          const raw = previewData.storyboardPreview as StoryboardPreviewPayload | undefined;
-          const current =
-            raw?.version === 1 && Array.isArray(raw.frames)
-              ? { ...emptyStoryboardPreview(), ...raw }
-              : undefined;
-          const target = current?.frames.find(
-            (frame) => frame.id === linkedStoryboardPreviewFrameId,
-          );
-
-          if (current && target && !target.locked) {
-            const frames = current.frames.map((frame) =>
-              frame.id === linkedStoryboardPreviewFrameId
-                ? {
-                    ...frame,
-                    referenceImageUrl: uploaded.url,
-                    director3dGuide: {
-                      sourceBlockId: blockId,
-                      captureId: payload.captureId,
-                      captureUrl: uploaded.url,
-                      cameraPrompt: payload.cameraPrompt,
-                      cameraPosition: payload.cameraPosition,
-                      cameraRotation: payload.cameraRotation,
-                      cameraFov: payload.cameraFov,
-                      panoramaUrl,
-                      characterPlacements,
-                      appliedAt: new Date().toISOString(),
-                    },
-                    userModified: true,
-                    status: 'modified' as const,
-                    errorMessage: null,
-                  }
-                : frame,
-            );
-            runtime.updateNodeData(linkedStoryboardPreviewId, {
-              storyboardPreview: {
-                ...current,
-                frames,
-                selectedFrameId: linkedStoryboardPreviewFrameId,
-                confirmed: false,
-                confirmedAt: null,
-              },
-              status: 'idle',
-            });
-            appliedToStoryboardPreview = true;
-            appendLog(`3D 机位已应用到 ${target.label}，可返回分镜预览正式出图`);
-          } else if (target?.locked) {
-            appendLog(`${target.label} 已锁定，3D 截图仅保存在导演台节点`);
-          }
-        }
-
-        if (linkedShotId) {
-          const reviewMode = useWorkspaceDocument.getState().storyboard.reviewMode;
-          const linkedShot = useWorkspaceDocument
-            .getState()
-            .storyboard.shots.find((shot) => shot.id === linkedShotId);
-          const cameraJson = JSON.stringify({
-            position: payload.cameraPosition,
-            rotation: payload.cameraRotation,
-            fov: payload.cameraFov,
-          });
-          updateShot(linkedShotId, {
-            firstFrameAssetId: appliedToStoryboardPreview
-              ? linkedShot?.firstFrameAssetId
-              : uploaded.url,
-            status: appliedToStoryboardPreview
-              ? linkedShot?.status
-              : reviewMode === 'manual'
-                ? 'review'
-                : 'approved',
-            notes: cameraJson,
-            director3dGuide: {
-              sourceBlockId: blockId ?? 'director-3d',
-              captureId: payload.captureId,
-              captureUrl: uploaded.url,
-              cameraPrompt: payload.cameraPrompt,
-              cameraPosition: payload.cameraPosition,
-              cameraRotation: payload.cameraRotation,
-              cameraFov: payload.cameraFov,
-              panoramaUrl,
-              characterPlacements,
-              appliedAt: new Date().toISOString(),
-            },
-            promptEn: payload.cameraPrompt
-              ? `${linkedShot?.promptEn ?? ''} ${payload.cameraPrompt}`.trim()
-              : undefined,
-          });
-          syncDirector3dToBlocking(cameraJson);
-          appendLog(
-            appliedToStoryboardPreview
-              ? '机位数据已写入故事板镜头'
-              : '截图已写入故事板镜头',
-          );
-        }
-      } catch (e) {
-        appendLog(`3D 截图上传失败: ${String(e)}`);
-      }
-    },
-    [
-      blockId,
-      runtime,
-      linkedShotId,
-      linkedStoryboardPreviewId,
-      linkedStoryboardPreviewFrameId,
-      project,
-      updateShot,
-      appendLog,
-    ],
-  );
-
-  const handleSaveSceneTemplate = useCallback(
-    (sceneProject: DirectorProject, label: string) => {
-      const sceneLabel = label.trim() || 'Stage Deck 场景';
-      const item = {
-        ...newBacklotWorkspaceItem('scene'),
-        label: sceneLabel,
-        promptEn: sceneProject.panorama?.url
-          ? `Panorama scene, ${sceneProject.objects.length} objects placed`
-          : `Stage Deck scene, ${sceneProject.objects.length} objects`,
-        stageDeckScene: sceneProject,
-      };
-      upsertBacklotWorkspace(item);
-      openAssetAt({ tab: 'scene', itemId: item.id, scope: 'private' });
-      appendLog('场景已载入工作区，请在素材库中编辑保存');
-      toastSuccess('场景已载入工作区，请选择分组保存');
-    },
-    [upsertBacklotWorkspace, openAssetAt, appendLog],
-  );
-
-  const handleClose = useCallback(() => {
-    close();
-  }, [close]);
+    runtime.updateNodeData(blockId, { lastSceneTemplateId: template.id });
+    useAssetLibraryModalUi.getState().openAt({ tab: 'scene', itemId: item.id, scope: 'private' });
+    appendLog(`已保存场景模板「${template.name}」`);
+  }, [appendLog, blockId, nodeData.sceneTemplates, runtime]);
 
   const handleRendererReady = useCallback((renderer: { dispose: () => void }) => {
     disposeRef.current = renderer.dispose;
   }, []);
 
-  useEffect(() => {
-    return () => {
-      disposeRef.current?.();
-      disposeDirectorWebGLLifecycle();
-    };
+  useEffect(() => () => {
+    disposeRef.current?.();
+    disposeDirectorWebGLLifecycle();
   }, []);
 
   useEffect(() => {
     if (!open) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') handleClose();
-    };
+    const onKey = (event: KeyboardEvent) => { if (event.key === 'Escape') close(); };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [open, handleClose]);
+  }, [close, open]);
 
   if (!open) return null;
 
-  if (!webglOk) {
-    return (
-      <div className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-[#fafaf8] px-8 text-center">
-        <p className="text-lg font-semibold text-ink mb-2">无法启动 Stage Deck</p>
-        <p className="text-sm text-ink/60 max-w-md mb-6">
-          当前环境不支持 WebGL。请使用支持硬件加速的桌面浏览器（Chrome / Edge / Firefox），或在系统设置中启用 GPU 加速后重试。
-        </p>
-        <div className="flex gap-2">
-          <button
-            type="button"
-            onClick={handleClose}
-            className="rounded-xl bg-brand text-white px-4 py-2 text-sm"
-          >
-            关闭
-          </button>
-          <button
-            type="button"
-            onClick={() => window.open('https://get.webgl.org/', '_blank')}
-            className="rounded-xl border border-line px-4 py-2 text-sm"
-          >
-            检测 WebGL 支持
-          </button>
-        </div>
-      </div>
-    );
-  }
-
   return (
     <div className="fixed inset-0 z-50 flex flex-col">
-      <Suspense
-        fallback={
-          <div className="flex-1 flex items-center justify-center bg-[#fafaf8] text-ink/50 text-sm">
-            加载 Stage Deck…
-          </div>
-        }
-      >
+      <Suspense fallback={<div className="flex-1 flex items-center justify-center bg-[#fafaf8] text-ink/50 text-sm">加载 3D 导演台…</div>}>
         <Director3dShell
           options={{
-            project: normalizeDirectorProject(project),
-            linkedShotId: linkedShotId ?? undefined,
-            performanceMode: intensive ? 'low' : 'normal',
-            nodeCount: runtime?.getNodes()?.length ?? 0,
-            crowdMax: 20,
-            onProjectChange: persistProject,
-            onCapture: handleCapture,
+            project,
+            shotState: state,
+            shotContext: {
+              shotId,
+              episodeId,
+              sourceChainDeskId: upstreamDeskId ?? undefined,
+              sourceShotRevision: state.sourceShotRevision,
+              sourceLabel: upstreamDeskId ? '分镜台链镜表' : undefined,
+              episodeLabel: episodeId ? `第 ${chain?.episodes?.find((episode) => episode.id === episodeId)?.index ?? '?'} 集` : undefined,
+              lineArtUrl: shotId ? lineArtByShotId[shotId] : undefined,
+              confirmed: episodeConfirmed,
+              upstreamConnected: Boolean(upstreamDeskId && shotId),
+              shots: shots.map((shot) => ({
+                id: shot.id,
+                index: shot.index,
+                label: shot.descriptionZh,
+                episodeId: shot.episodeId,
+                status: shot.status,
+                has3dGuide: Boolean(shot.director3dGuide?.captureUrl),
+                lineArtUrl: lineArtByShotId[shot.id],
+              })),
+            },
+            performanceMode: runtime?.intensive ? 'low' : 'normal',
+            nodeCount: nodes.length,
+            onShotStateChange: persistState,
+            onSelectShot: selectShot,
+            onCandidateCreated: handleCandidate,
+            onCommit: handleCommit,
             onUploadFile: async (file) => {
               const uploaded = await api.uploadAsset(file);
               return { url: uploaded.url, filename: uploaded.filename };
             },
-            onSaveSceneTemplate: handleSaveSceneTemplate,
-            onClose: handleClose,
+            onSaveSceneTemplate: handleTemplate,
+            onClose: close,
             onRendererReady: handleRendererReady,
           }}
         />

@@ -43,6 +43,30 @@
 .nx9-stage-title { font-weight: 600; font-size: 14px; }
 .nx9-stage-sub { font-size: 11px; color: var(--stage-muted); }
 
+.nx9-stage-context {
+  min-height: 38px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 14px;
+  background: var(--stage-panel);
+  border-bottom: 1px solid var(--stage-line);
+  font-size: 11px;
+  color: var(--stage-muted);
+}
+
+.nx9-stage-context strong { color: var(--stage-ink); }
+.nx9-stage-context span { white-space: nowrap; }
+.nx9-stage-switch-warning {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 14px;
+  background: var(--desk-warn-soft, #fff7ed);
+  border-bottom: 1px solid var(--stage-line);
+  font-size: 11px;
+}
+
 .nx9-stage-pill {
   border: 1px solid var(--stage-line);
   background: var(--desk-panel, #fff);
@@ -74,6 +98,14 @@
 .nx9-stage-cta:disabled { opacity: 0.55; cursor: not-allowed; }
 
 .nx9-stage-body { flex: 1; min-height: 0; display: flex; }
+.nx9-stage-shot-list {
+  width: 210px;
+  flex-shrink: 0;
+  background: var(--stage-panel);
+  border-right: 1px solid var(--stage-line);
+  display: flex;
+  flex-direction: column;
+}
 
 .nx9-stage-rail {
   width: 52px;
@@ -126,6 +158,36 @@
 }
 
 .nx9-stage-canvas { width: 100%; height: 100%; }
+.nx9-stage-canvas-wrap { position: relative; width: 100%; height: 100%; }
+.nx9-stage-line-art-overlay {
+  position: absolute;
+  inset: 8% 10%;
+  width: 80%;
+  height: 84%;
+  object-fit: contain;
+  opacity: 0.48;
+  mix-blend-mode: screen;
+  pointer-events: none;
+}
+.nx9-stage-diagnostic {
+  position: absolute;
+  left: 12px;
+  bottom: 12px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  background: rgb(0 0 0 / 0.65);
+  color: #fff;
+  font-size: 10px;
+  pointer-events: none;
+}
+.nx9-stage-error {
+  flex-shrink: 0;
+  padding: 8px 14px;
+  color: var(--desk-warn, #b91c1c);
+  background: var(--desk-warn-soft, #fff1f2);
+  border-top: 1px solid var(--stage-line);
+  font-size: 11px;
+}
 
 .nx9-stage-drawer {
   position: absolute;
@@ -330,7 +392,13 @@
 }
 
 .nx9-stage-frame-thumb.is-latest { border-color: var(--stage-brand); }
+.nx9-stage-frame { border: 0; background: transparent; padding: 0; display: grid; gap: 2px; cursor: pointer; color: var(--stage-muted); font-size: 9px; }
+.nx9-stage-frame.is-selected { color: var(--stage-brand); font-weight: 700; }
+.nx9-stage-frame.is-selected .nx9-stage-frame-thumb { border-color: var(--stage-brand); }
 
 .nx9-stage-hint { font-size: 11px; color: var(--stage-muted); line-height: 1.45; }
 
 .nx9-stage-danger { color: var(--desk-warn, #dc2626); }
+
+.nx9-stage-empty { align-items: center; justify-content: center; gap: 10px; padding: 32px; text-align: center; }
+.nx9-stage-empty span { color: var(--stage-muted); font-size: 12px; }

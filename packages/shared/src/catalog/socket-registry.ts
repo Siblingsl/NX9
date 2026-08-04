@@ -26,8 +26,9 @@ export const SOCKET_REGISTRY: Record<string, SocketProfile> = {
   'shot-script': { accepts: ['prompt'], emits: ['prompt', 'meta'] },
   'reference-board': { accepts: ['prompt', 'picture', 'clip'], emits: ['prompt', 'picture', 'clip'] },
   'continuity-check': { accepts: ['prompt', 'picture', 'clip'], emits: ['prompt', 'meta'] },
-  'script-desk': { accepts: ['prompt'], emits: ['prompt', 'meta'] },
-  'dialogue-sheet': { accepts: ['prompt'], emits: ['prompt', 'meta'] },
+  /** 编剧台：左右 prompt 交分镜；picture / 顶口 exec-picture 交图像生成（设定板/定妆） */
+  'script-desk': { accepts: ['prompt', 'picture'], emits: ['prompt', 'picture', 'meta'] },
+  'dialogue-sheet': { accepts: ['prompt', 'picture'], emits: ['prompt', 'picture', 'meta'] },
   // F-005: asset-gate 已删除 — 能力拆并到编剧台/分镜台
   'voice-cast': { accepts: ['prompt', 'sound'], emits: ['sound', 'meta'] },
   'bridge-clip': { accepts: ['prompt', 'clip'], emits: ['prompt', 'picture', 'meta'] },
@@ -263,6 +264,15 @@ export const VERTICAL_SOCKETS: Record<string, VerticalSocketSpec[]> = {
       id: 'exec-picture',
     },
   ],
+  /** 编剧台顶口：连接图像生成，供素材库一键设定板/定妆出图 */
+  'script-desk': [
+    {
+      kind: 'picture',
+      position: 'top',
+      type: 'target',
+      id: 'exec-picture',
+    },
+  ],
   // F-005: asset-gate 已删除，上下口能力拆并到编剧台/分镜台
 };
 
@@ -270,9 +280,14 @@ export function resolveVerticalSockets(kind: string): VerticalSocketSpec[] {
   return VERTICAL_SOCKETS[kind] ?? [];
 }
 
-/** F-006: 上下能力口仅当 data.showExecPorts === true 时启用（缺省 false） */
-export function isExecPortsEnabled(data?: Record<string, unknown> | null): boolean {
-  return data?.showExecPorts === true;
+/** F-006: 上下能力口仅当 data.showExecPorts === true 时启用（缺省 false；设定板宿主默认开启） */
+export function isExecPortsEnabled(
+  data?: Record<string, unknown> | null,
+  kind?: string | null,
+): boolean {
+  if (data?.showExecPorts === true) return true;
+  if (data?.showExecPorts === false) return false;
+  return isAssetSheetPictureHostKind(kind);
 }
 
 /** F-006: 当前节点可见的竖直能力口（未开启时返回空，供吸附/渲染共用） */
@@ -280,7 +295,7 @@ export function resolveVisibleVerticalSockets(
   kind: string,
   data?: Record<string, unknown> | null,
 ): VerticalSocketSpec[] {
-  if (!isExecPortsEnabled(data)) return [];
+  if (!isExecPortsEnabled(data, kind)) return [];
   return resolveVerticalSockets(kind);
 }
 
@@ -314,14 +329,14 @@ export function validateConnectionWithHandles(
   if (
     sourceExec &&
     resolveVerticalSockets(sourceKind).length > 0 &&
-    !isExecPortsEnabled(sourceData)
+    !isExecPortsEnabled(sourceData, sourceKind)
   ) {
     return { ok: false, reason: 'exec_ports_disabled' };
   }
   if (
     targetExec &&
     resolveVerticalSockets(targetKind).length > 0 &&
-    !isExecPortsEnabled(targetData)
+    !isExecPortsEnabled(targetData, targetKind)
   ) {
     return { ok: false, reason: 'exec_ports_disabled' };
   }
@@ -411,10 +426,9 @@ export function isStoryboardPreviewHostKind(kind?: string | null): boolean {
   return kind === 'storyboard-desk' || kind === 'storyboard-preview' || kind === 'story-grid';
 }
 
+/** 资产设定板宿主：可连 picture-gen 出角色/场景设定图（含普通 picture 口与 exec-picture） */
 export function isAssetSheetPictureHostKind(kind?: string | null): boolean {
-  void kind;
-  return false;
-}
+  return kind === 'script-desk' || kind === 'dialogue-sheet';}
 
 export function isStoryboardExecLink(
   sourceKind: string,

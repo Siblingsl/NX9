@@ -64,7 +64,8 @@ export const ToastHost = memo(function ToastHost() {
   if (items.length === 0) return null;
 
   return createPortal(
-    <div className="fixed bottom-20 left-1/2 -translate-x-1/2 z-[85] flex flex-col gap-2 items-center pointer-events-auto">
+    // 须高于 ScreenModal(240)、素材库(260)，否则编剧台全屏弹层会挡住成功/失败提示
+    <div className="fixed bottom-20 left-1/2 -translate-x-1/2 z-[300] flex flex-col gap-2 items-center pointer-events-auto">
       {items.map((item) => (
         <ToastCard key={item.id} item={item} onDismiss={() => dismiss(item.id)} />
       ))}

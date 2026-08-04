@@ -4,6 +4,9 @@ import {
   emptyScreenplayPackage,
   enrichBibleScenesFromPackage,
   episodesFromIngestText,
+  bibleDraftsFromExtract,
+  calibrateCharacterRolesByScreenplay,
+  characterDraftFromPartial,
   ingestTextToPackage,
   migrateBlockKinds,
   migrateDialogueSheetDataToPackage,
@@ -280,5 +283,128 @@ describe('ScreenplayPackage / script-desk migration', () => {
     pkg = renameCharacterInPackage(pkg, '林晓', '李稳');
     expect(pkg.bible.characters[0].name).toBe('李稳');
     expect(pkg.bible.characters[1].name).toBe('阿强');
+  });
+
+  it('bibleDraftsFromExtract 映射 aliases / background / archetype', () => {
+    const drafts = bibleDraftsFromExtract({
+      characters: [
+        {
+          name: '林晓',
+          aliases: ['老林', '林侦探'],
+          archetype: '女主',
+          description: '短发黑瞳',
+          traits: '冷静',
+          fixedVisualKeywords: '黑色风衣',
+          goal: '查清真相',
+          bible: {
+            identity: '女主 · 刑警',
+            appearance: '短发',
+            personality: '冷静克制',
+            background: '孤儿院长大',
+            voice: '低沉',
+            relationships: '搭档苏曼',
+          },
+        },
+      ],
+      locations: ['咖啡厅'],
+    });
+    expect(drafts.characters).toHaveLength(1);
+    const c = drafts.characters[0];
+    expect(c.name).toBe('林晓');
+    expect(c.aliases).toEqual(['老林', '林侦探']);
+    expect(c.identity).toContain('女主');
+    expect(c.background).toBe('孤儿院长大');
+    expect(c.appearance).toBeTruthy();
+    expect(c.personality).toBeTruthy();
+    expect(c.voiceNotes).toBe('低沉');
+    expect(c.fixedVisualKeywords).toBe('黑色风衣');
+    expect(c.goal).toBe('查清真相');
+  });
+
+  it('bibleDraftsFromExtract 兼容 alias(单数) 字段', () => {
+    const drafts = bibleDraftsFromExtract({
+      characters: [
+        {
+          name: '林晓',
+          alias: '老林、林侦探',
+          archetype: 'support',
+          bible: {
+            background: '孤儿院长大',
+          },
+        },
+      ],
+      locations: [],
+    });
+    const c = drafts.characters[0];
+    expect(c.aliases).toEqual(['老林', '林侦探']);
+    expect(c.identity).toContain('support');
+    expect(c.background).toBe('孤儿院长大');
+  });
+
+  it('characterDraftFromPartial 从「化名」括号拆别名', () => {
+    const c = characterDraftFromPartial({
+      name: '苏黛 (化名苏曼)',
+      identity: '配角',
+    });
+    expect(c.name).toBe('苏黛');
+    expect(c.aliases).toEqual(['苏曼']);
+  });
+
+  it('bibleDraftsFromExtract 合并同人：脏名 + 干净名', () => {
+    const drafts = bibleDraftsFromExtract({
+      characters: [
+        { name: '李稳 (化名陈默)', identity: '配角' },
+        { name: '李稳', identity: '主角', aliases: ['陈默'] },
+        { name: '苏盈', identity: '女主' },
+      ],
+    });
+    expect(drafts.characters).toHaveLength(2);
+    const li = drafts.characters.find((c) => c.name === '李稳');
+    expect(li).toBeTruthy();
+    expect(li?.aliases).toEqual(expect.arrayContaining(['陈默']));
+    expect(li?.identity).toMatch(/主角/);
+    expect(drafts.characters.some((c) => c.name.includes('化名'))).toBe(false);
+  });
+
+  it('bibleDraftsFromExtract 合并同人：真名条目 + 别名条目', () => {
+    const drafts = bibleDraftsFromExtract({
+      characters: [
+        { name: '李稳', aliases: ['陈默'], identity: '主角' },
+        { name: '陈默', identity: '配角 · 化名出场' },
+      ],
+    });
+    expect(drafts.characters).toHaveLength(1);
+    expect(drafts.characters[0].name).toBe('李稳');
+    expect(drafts.characters[0].aliases).toEqual(expect.arrayContaining(['陈默']));
+    expect(drafts.characters[0].identity).toMatch(/主角/);
+  });
+
+  it('calibrateCharacterRolesByScreenplay 根据正文命中自动收敛主/配角', () => {
+    const drafts = bibleDraftsFromExtract({
+      characters: [
+        { name: '李稳', identity: '刑警' },
+        { name: '苏曼', identity: '记者' },
+        { name: '红姨', identity: '房东' },
+        { name: '刀疤', identity: '反派打手' },
+      ],
+    }).characters;
+    const text = [
+      '第1集',
+      '李稳：我来查案。',
+      '苏曼：我跟你一起。',
+      '李稳：先去仓库。',
+      '苏曼：收到。',
+      '红姨：房租别忘了。',
+      '第2集',
+      '李稳：目标出现。',
+      '苏曼：我在门口接应。',
+      '刀疤：上。',
+    ].join('\n');
+    const calibrated = calibrateCharacterRolesByScreenplay(drafts, text);
+    const byName = new Map(calibrated.map((c) => [c.name, c.identity ?? '']));
+    expect(byName.get('李稳')).toMatch(/^主角/);
+    expect(byName.get('苏曼')).toMatch(/^主角/);
+    expect(byName.get('红姨')).toMatch(/^配角/);
+    expect(byName.get('刀疤')).toMatch(/^配角/);
   });
 });

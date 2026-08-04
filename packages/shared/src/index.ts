@@ -148,10 +148,14 @@ export {
   normalizeScreenplayEpisodes,
   ingestTextToPackage,
   mergeCharacterDrafts,
+  dedupeCharacterDrafts,
+  normalizeScreenplayBibleCharacters,
   mergeSceneDrafts,
   characterDraftFromPartial,
   sceneDraftFromPartial,
+  splitCharacterDisplayName,
   bibleDraftsFromExtract,
+  calibrateCharacterRolesByScreenplay,
   bibleDraftsFromBreakdown,
   sceneDraftsFromScreenplayText,
   enrichBibleScenesFromPackage,
@@ -475,6 +479,7 @@ export {
   isStoryboardExecLink,
   isDirector3dDeskLink,
   isStoryboardPreviewHostKind,
+  isAssetSheetPictureHostKind,
 } from './catalog/socket-registry';
 export type { VerticalSocketSpec } from './catalog/socket-registry';
 
@@ -929,6 +934,9 @@ export type {
 } from './constants/perf-thresholds';
 export {
   LINE_ART_SUFFIX,
+  LINE_ART_GRID_ROWS,
+  LINE_ART_GRID_COLS,
+  LINE_ART_GRID_PAGE_SIZE,
   buildLineArtGridPrompt,
   buildLineArtPanelGridPrompt,
   buildLineArtShotPrompt,

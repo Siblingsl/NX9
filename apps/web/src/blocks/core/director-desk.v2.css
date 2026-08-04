@@ -335,6 +335,15 @@
   color: var(--desk-btn-primary-ink);
 }
 
+.dd2-pipeline__step.is-done {
+  color: var(--desk-ok);
+}
+
+.dd2-pipeline__step.is-done b {
+  background: var(--desk-ok);
+  color: var(--desk-btn-primary-ink);
+}
+
 .dd2-pipeline__sep {
   width: 18px;
   height: 1px;
@@ -459,6 +468,68 @@
   background: var(--desk-accent-soft);
 }
 
+.dd2-frame.is-focus {
+  border-color: var(--desk-accent-line);
+  background: var(--desk-accent-soft);
+}
+
+.dd2-frame.is-selected {
+  border-color: var(--desk-ok);
+  background: color-mix(in srgb, var(--desk-ok) 10%, transparent);
+}
+
+.dd2-frame__check {
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.55);
+  cursor: pointer;
+}
+
+.dd2-frame__check input {
+  accent-color: var(--desk-accent);
+  width: 14px;
+  height: 14px;
+  cursor: pointer;
+  margin: 0;
+}
+
+.dd2-filmstrip__select-acts {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 6px;
+}
+
+.dd2-filmstrip__sel-btn {
+  font-size: 10px;
+  font-weight: 650;
+  padding: 2px 6px;
+  border-radius: 6px;
+  border: 1px solid var(--desk-line);
+  background: var(--desk-panel);
+  color: var(--desk-muted);
+  cursor: pointer;
+}
+
+.dd2-filmstrip__sel-btn:hover {
+  border-color: var(--desk-accent-line);
+  color: var(--desk-ink);
+}
+
+.dd2-filmstrip__sel-count {
+  font-size: 10px;
+  color: var(--desk-faint);
+  margin-left: auto;
+}
+
 .dd2-frame.is-run {
   box-shadow: 0 0 0 1px var(--desk-run);
 }
@@ -483,6 +554,23 @@
   height: 100%;
   object-fit: cover;
   display: block;
+}
+
+.dd2-frame__produce {
+  align-self: stretch;
+  margin: 0 4px 4px;
+  padding: 3px 6px;
+  border: 1px solid var(--desk-line);
+  border-radius: 5px;
+  background: var(--desk-panel);
+  color: var(--desk-muted);
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.dd2-frame__produce:hover {
+  border-color: var(--desk-accent-line);
+  color: var(--desk-ink);
 }
 
 .dd2-frame__3d {
@@ -909,6 +997,11 @@
   background: var(--desk-bg);
 }
 
+.dd2-stage__header--compact {
+  min-height: 4px;
+  padding: 3px 8px;
+}
+
 .dd2-stage__title {
   font-size: 12px;
   font-weight: 650;
@@ -1166,6 +1259,18 @@
   gap: 6px;
 }
 
+.dd2-review__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.dd2-review__chips .dd2-btn {
+  min-height: 24px;
+  padding: 0 7px;
+  font-size: 10px;
+}
+
 .dd2-review__reject textarea {
   width: 100%;
   resize: vertical;
@@ -1212,9 +1317,111 @@
   background: var(--desk-bg);
 }
 
+.dd2-studio__footer .dd2-btn {
+  margin-left: auto;
+  min-height: 26px;
+  padding: 0 8px;
+  font-size: 10px;
+}
+
 /* 兼容旧类名（避免残留引用崩） */
 .dd2-studio__tabs,
 .dd2-queue-panel,
 .dd2-produce {
   display: none;
+}
+
+.dd2-output-strip,
+.dd2-reference-gaps,
+.dd2-batch-summary,
+.dd2-push-receipt {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 7px 10px;
+  border: 1px solid var(--desk-line);
+  border-radius: 7px;
+  color: var(--desk-muted);
+  font-size: 11px;
+}
+
+.dd2-output-strip select {
+  min-width: 112px;
+  border: 1px solid var(--desk-line);
+  border-radius: 5px;
+  padding: 3px 5px;
+  background: var(--desk-panel);
+  color: var(--desk-ink);
+  font-size: 11px;
+}
+
+.dd2-output-strip small,
+.dd2-reference-gaps small {
+  color: var(--desk-faint);
+}
+
+.dd2-reference-gaps {
+  flex-direction: column;
+  align-items: flex-start;
+  color: var(--desk-warn);
+}
+
+.dd2-reference-gaps button,
+.dd2-batch-summary button,
+.dd2-review-mode {
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.dd2-batch-summary {
+  color: var(--desk-ink);
+}
+
+.dd2-push-receipt {
+  color: var(--desk-ok);
+}
+
+.dd2-review__hint-btn {
+  width: 100%;
+  border: 0;
+  text-align: left;
+  cursor: pointer;
+}
+
+.dd2-review__cell-acts {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+/* ── 顶栏集上下文 (X-26) ── */
+
+.dd2-episode-ctx {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--desk-line);
+  background: var(--desk-bg-2);
+  flex-shrink: 0;
+  font-size: 12px;
+  color: var(--desk-ink);
+}
+
+.dd2-episode-ctx--warn {
+  background: color-mix(in srgb, var(--desk-warn) 8%, var(--desk-bg-2));
+}
+
+.dd2-episode-ctx__info {
+  font-weight: 650;
+  color: var(--desk-ink);
+}
+
+.dd2-episode-ctx--warn .dd2-episode-ctx__info {
+  color: var(--desk-warn);
 }

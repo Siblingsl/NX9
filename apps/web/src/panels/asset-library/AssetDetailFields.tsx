@@ -214,10 +214,19 @@ export function CharacterDetailFields({
           <button
             type="button"
             disabled={!onGenerateMasterSheet || generatingMasterSheet}
+            title={
+              !onGenerateMasterSheet
+                ? '当前项目不可生成（无权限/只读）'
+                : undefined
+            }
             onClick={() => onGenerateMasterSheet?.()}
             className="rounded-lg border border-brand/30 bg-brand/5 px-3 py-1.5 text-[11px] font-medium text-brand hover:border-brand/50 disabled:opacity-45"
           >
-            {generatingMasterSheet ? (masterSheetProgress || '生成并裁切中…') : '一键生成角色设定板'}
+            {generatingMasterSheet
+              ? (masterSheetProgress || '生成并裁切中…')
+              : onGenerateMasterSheet
+                ? '一键生成角色设定板'
+                : '当前项目不可生成'}
           </button>
           <button
             type="button"
@@ -855,6 +864,7 @@ export function CostumeDetailFields({
   onGenerateSheet,
   generatingSheet = false,
   genSettingsSlot,
+  generateSheetLockedReason,
 }: {
   item: BacklotWorkspaceItem;
   onChange: (next: BacklotWorkspaceItem) => void;
@@ -865,6 +875,8 @@ export function CostumeDetailFields({
   onGenerateSheet?: () => void;
   generatingSheet?: boolean;
   genSettingsSlot?: ReactNode;
+  /** 未连接图像生成时的锁定说明；有值时仍展示生成按钮但禁用 */
+  generateSheetLockedReason?: string;
 }) {
   const ext = getCostumeCreative(item);
   const [costumePreviewOpen, setCostumePreviewOpen] = useState(false);
@@ -1009,15 +1021,22 @@ export function CostumeDetailFields({
           <button type="button" className="rounded-lg border border-line px-2.5 py-1 text-[11px] text-ink/70 hover:border-brand/40" onClick={onRefreshPrompts}>
             刷新专业 Prompt
           </button>
-          {onGenerateSheet ? (
+          {onGenerateSheet || generateSheetLockedReason ? (
             <button
               type="button"
               className="rounded-lg border border-brand/30 bg-brand/5 px-2.5 py-1 text-[11px] text-brand hover:border-brand/50 disabled:opacity-45"
-              disabled={generatingSheet}
+              disabled={!onGenerateSheet || generatingSheet}
               onClick={onGenerateSheet}
-              title="需在画布连接「图像生成」节点；素材库会请求最近的角色设定/分镜台连接链路，或使用全局可用图像节点"
+              title={
+                generateSheetLockedReason
+                || '当前项目不可生成（无权限/只读）'
+              }
             >
-              {generatingSheet ? '设定板生成中…' : '生成服装设定板'}
+              {generatingSheet
+                ? '设定板生成中…'
+                : onGenerateSheet
+                  ? '生成服装设定板'
+                  : '当前项目不可生成'}
             </button>
           ) : null}
           <button

@@ -62,6 +62,9 @@ export interface StoryboardPreviewGenSettingsProps {
   settings: StoryboardPreviewPictureSettings;
   onChange: (patch: Partial<StoryboardPreviewPictureSettings>) => void;
   hideModel?: boolean;
+  modelWidth?: number;
+  /** 构图工具条：隐藏「每镜×1」等次要提示，间距更紧 */
+  compact?: boolean;
   /** 工具条右侧附加操作（如导出），与参数 chips 同一行 */
   endSlot?: ReactNode;
 }
@@ -70,6 +73,8 @@ export function StoryboardPreviewGenSettings({
   settings,
   onChange,
   hideModel = false,
+  modelWidth = 260,
+  compact = false,
   endSlot,
 }: StoryboardPreviewGenSettingsProps) {
   const qualityLabel =
@@ -93,7 +98,7 @@ export function StoryboardPreviewGenSettings({
 
   return (
     <div
-      className="sb-preview-gen shrink-0 flex flex-wrap items-center gap-2 px-3 py-1.5"
+      className={`sb-preview-gen shrink-0 flex flex-wrap items-center ${compact ? 'gap-1.5 px-0 py-0' : 'gap-2 px-3 py-1.5'}`}
       onMouseDown={stop}
     >
       {!hideModel && (
@@ -112,10 +117,9 @@ export function StoryboardPreviewGenSettings({
               }
               void selectPictureModel(model, (id) => onChange({ model: id }));
             }}
-            width={260}
+            width={modelWidth}
             tone="desk"
           />
-          <span className="kp__sep" />
         </>
       )}
       <ParamChip
@@ -131,7 +135,7 @@ export function StoryboardPreviewGenSettings({
         onSelect={(aspectRatio) => onChange({ aspectRatio })}
         width={152}
       />
-      <span className="kp__hint">每镜 ×1</span>
+      {!compact ? <span className="kp__hint">每镜 ×1</span> : null}
       {endSlot ? (
         <>
           <span className="kp__toolbar-spacer" style={{ flex: 1, minWidth: 12 }} />

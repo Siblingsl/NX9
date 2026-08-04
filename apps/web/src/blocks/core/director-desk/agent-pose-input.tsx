@@ -1,9 +1,10 @@
 import React, { memo, useState } from 'react';
 import type { Director3dPoseCommand } from '@nx9/shared';
 import { parseAgentPoseCommand } from '../../../engine/agent-director3d-bridge';
-function AgentPoseInput({ onPose }: { onPose: (cmd: Director3dPoseCommand & { summary?: string } | null) => void }) {
+function AgentPoseInput({ onPose }: { onPose: (cmd: Director3dPoseCommand & { summary?: string } | null) => void | Promise<void> }) {
   const [raw, setRaw] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [pending, setPending] = useState<(Director3dPoseCommand & { summary?: string }) | null>(null);
 
   const handleApply = () => {
     setError(null);
@@ -13,8 +14,14 @@ function AgentPoseInput({ onPose }: { onPose: (cmd: Director3dPoseCommand & { su
       setError(result.errors.join('；'));
       return;
     }
-    onPose(result.command ? { ...result.command, summary: result.summary } : null);
+    setPending(result.command ? { ...result.command, summary: result.summary } : null);
     setRaw('');
+  };
+
+  const confirm = async () => {
+    if (!pending) return;
+    await onPose(pending);
+    setPending(null);
   };
 
   return (
@@ -31,12 +38,18 @@ function AgentPoseInput({ onPose }: { onPose: (cmd: Director3dPoseCommand & { su
         className="px-2 py-0.5 rounded text-[9px] border border-line bg-surface/50 hover:bg-surface shrink-0"
         onClick={handleApply}
       >
-        应用
+        预览
       </button>
       {error && <span className="text-[8px] text-warn truncate max-w-[120px]">{error}</span>}
+      {pending && (
+        <>
+          <span className="text-[8px] text-ink/60 truncate max-w-[180px]">将应用：{pending.summary}</span>
+          <button type="button" className="px-2 py-0.5 rounded text-[9px] border border-brand bg-brand/10 shrink-0" onClick={() => void confirm()}>确认应用</button>
+          <button type="button" className="px-2 py-0.5 rounded text-[9px] border border-line shrink-0" onClick={() => setPending(null)}>取消</button>
+        </>
+      )}
     </div>
   );
 }
 
-export default memo(DirectorDeskBlock);
-
+export default memo(AgentPoseInput);

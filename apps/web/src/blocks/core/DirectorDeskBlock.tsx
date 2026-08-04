@@ -1,6 +1,6 @@
-import { memo, useCallback, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useMemo, useRef, useState, useEffect } from 'react';
 import { type NodeProps, useEdges, useNodes, useReactFlow } from '@xyflow/react';
-import { activeEpisodeShots } from '@nx9/shared';
+import { activeEpisodeShots, activeChainEpisodeShots } from '@nx9/shared';
 import { normalizeDirectorProject } from '@nx9/director3d';
 import { BlockShell } from '../shared/BlockShell';
 import { ScreenModal } from '../../components/ui/ScreenModal';
@@ -9,10 +9,17 @@ import { useWorkspaceDocument } from '../../stores/workspace-document';
 import { useStoryboardUi } from '../../stores/flow-runtime';
 import { checkAssetReadinessInEdges } from '../../engine/asset-readiness';
 import {
+  readUpstreamChainStoryboard,
+  resolveUpstreamChainDesk,
+  patchUpstreamShot,
+} from '../../engine/chain-storyboard-utils';
+import { askConfirm } from '../../stores/confirm-dialog';
+import {
   findDirectorClipGenNode,
   findDirectorPictureGenNode,
   approveAllDirectorKeyframes,
   approveDirectorKeyframe,
+  unapproveDirectorKeyframe,
   isDirectorKeyframeGatePassed,
   isShotKeyframeApproved,
   isShotKeyframeFailed,
@@ -24,16 +31,19 @@ import {
   summarizeDirectorKeyframeReview,
   summarizeDirectorQueue,
   summarizePendingKeyframeGate,
+  resolveDirectorQueueShots,
+  previewDirectorReferenceGaps,
   syncStyleToPictureGen,
   type DirectorDeskQueueFilter,
   type DirectorDeskShotResult,
   type DirectorShotPhase,
 } from '../../engine/director-desk-runner';
 import { Director3dStageEmbed } from './director-desk/director-3d-stage-embed';
+import { DIRECTOR_3D_ENABLED } from '../../engine/director3d-feature';
 import { DirectorFilmstrip } from './director-desk/director-filmstrip';
 import { DirectorMainPanel } from './director-desk/director-main-panel';
 import { DirectorDeliverTab } from './director-desk/director-deliver-tab';
-import { buildBatchOpts } from './director-desk/director-batch-opts';
+import { buildBatchOpts, buildDirectorBatchLabel } from './director-desk/director-batch-opts';
 import './director-desk.css';
 import './director-desk.v2.css';
 
@@ -45,6 +55,9 @@ function DirectorDeskBlock(props: NodeProps) {
   const appendLog = useActivityLog((s) => s.append);
   const storyboard = useWorkspaceDocument((s) => s.storyboard);
   const characters = useWorkspaceDocument((s) => s.characters.characters);
+  // 勿在 selector 内 `?? []`：每次新建数组会使 getSnapshot 不稳定 → 无限重渲染
+  const environmentLibrary = useWorkspaceDocument((s) => s.environments);
+  const environments = useMemo(() => environmentLibrary?.environments ?? [], [environmentLibrary]);
   const selectShot = useStoryboardUi((s) => s.selectShot);
 
   const data = (props.data ?? {}) as Record<string, unknown>;
@@ -59,6 +72,7 @@ function DirectorDeskBlock(props: NodeProps) {
   const forceSceneRef = (data.forceSceneRef as boolean | undefined) ?? true;
   const styleLock = (data.styleLock as boolean | undefined) ?? true;
   const prefer3dRef = (data.prefer3dRef as boolean | undefined) ?? true;
+  const preferLineArtRef = (data.preferLineArtRef as boolean | undefined) ?? true;
   /** 批出完成后自动打开审片模式 */
   const autoOpenReview = (data.autoOpenReview as boolean | undefined) ?? true;
   /** 批出前把 seed/风格写回图像生成节点 */
@@ -71,13 +85,91 @@ function DirectorDeskBlock(props: NodeProps) {
   const scene = useMemo(() => normalizeDirectorProject(data.scene), [data.scene]);
   const filter = ((data.queueFilter as DirectorDeskQueueFilter) ?? 'missing') as DirectorDeskQueueFilter;
 
+  // D-01: 镜头源从上游链镜表读取
+  const chain = useMemo(
+    () => readUpstreamChainStoryboard(props.id, nodes as any, edges as any),
+    [props.id, nodes, edges],
+  );
+  const upstreamDeskId = useMemo(
+    () => resolveUpstreamChainDesk(props.id, nodes as any, edges as any),
+    [props.id, nodes, edges],
+  );
+
+  // X-41: 从 lastHandoff 读取当前集
+  const handoffEpisodeId = useMemo(
+    () => (data.lastHandoff as Record<string, unknown> | undefined)?.episodeId as string | undefined,
+    [data.lastHandoff],
+  );
+  const episodeId = handoffEpisodeId || chain?.activeEpisodeId;
+  const episodeArtDirection = useMemo(
+    () => chain?.episodes?.find((episode) => episode.id === episodeId)?.artDirection,
+    [chain, episodeId],
+  );
+
+  // X-26: 解析上游 desk 标题
+  const upstreamDeskTitle = useMemo(() => {
+    if (!upstreamDeskId) return undefined;
+    const nodeMap = new Map(nodes.map((n) => [n.id, n]));
+    const deskNode = nodeMap.get(upstreamDeskId);
+    const deskData = deskNode?.data as Record<string, unknown> | undefined;
+    return (deskData?.chainStoryboard as Record<string, unknown> | undefined)?.title as string | undefined
+      || deskData?.title as string | undefined
+      || data.sourceDeskName as string | undefined;
+  }, [upstreamDeskId, nodes, data.sourceDeskName]);
+
+  // D-01: activeShots = 链镜表本集镜（禁止全局回退批出）
+  const activeShots = useMemo(() => {
+    if (chain && chain.shots.length > 0) {
+      const byEpisode = episodeId
+        ? chain.shots.filter((s) => s.episodeId === episodeId)
+        : activeChainEpisodeShots(chain);
+      return byEpisode.length > 0 ? byEpisode : chain.shots;
+    }
+    return [];
+  }, [chain, episodeId]);
+
+  // D-03/R-01: 线稿帧映射 shotId → url
+  const lineArtByShotId = useMemo(() => {
+    const map: Record<string, string> = {};
+    const handoff = data.lastHandoff as Record<string, unknown> | undefined;
+    const frames = handoff?.lineArtFrames as Array<{ shotId: string; imageUrl: string }> | undefined;
+    if (frames && frames.length > 0) {
+      for (const f of frames) {
+        if (f.shotId && f.imageUrl) map[f.shotId] = f.imageUrl;
+      }
+    }
+    if (upstreamDeskId) {
+      const upstream = nodes.find((node) => node.id === upstreamDeskId);
+      const preview = (upstream?.data as Record<string, unknown> | undefined)?.storyboardPreview as
+        { frames?: Array<{ sourceShotId?: string; id?: string; imageUrl?: string; lineArtUrl?: string }> } | undefined;
+      for (const frame of preview?.frames ?? []) {
+        const shotId = frame.sourceShotId || frame.id;
+        const url = frame.lineArtUrl || frame.imageUrl;
+        if (shotId && url && !map[shotId]) map[shotId] = url;
+      }
+    }
+    return map;
+  }, [data.lastHandoff, upstreamDeskId, nodes]);
+
+  // X-41/D-04: 本集是否已确认
+  const episodeConfirmed = useMemo(() => {
+    const handoff = data.lastHandoff as Record<string, unknown> | undefined;
+    if (handoff?.confirmed === true) return true;
+    const confirmedIds = handoff?.confirmedEpisodeIds as string[] | undefined;
+    if (confirmedIds && episodeId && confirmedIds.includes(episodeId)) return true;
+    if (chain?.confirmedEpisodeIds && episodeId && chain.confirmedEpisodeIds.includes(episodeId)) return true;
+    return false;
+  }, [data.lastHandoff, episodeId, chain]);
+
+  const lineArtCount = Object.keys(lineArtByShotId).length;
+
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
   const [runningShotId, setRunningShotId] = useState<string | null>(null);
   const [phaseHint, setPhaseHint] = useState<string>('');
   const [liveProgress, setLiveProgress] = useState({ done: 0, total: 0, failed: 0 });
   const [studioOpen, setStudioOpen] = useState(false);
   const [studioTab, setStudioTab] = useState<'produce' | 'stage3d' | 'deliver'>('produce');
-  const [previewMode, setPreviewMode] = useState<'keyframe' | 'guide3d' | 'compare'>('keyframe');
+  const [previewMode, setPreviewMode] = useState<'keyframe' | 'lineart' | 'guide3d' | 'compare'>('compare');
   const [immersed3d, setImmersed3d] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [rejectDrafts, setRejectDrafts] = useState<Record<string, string>>({});
@@ -86,13 +178,26 @@ function DirectorDeskBlock(props: NodeProps) {
   const abortRef = useRef(false);
   const failedCountRef = useRef(0);
 
-  const activeShots = useMemo(() => activeEpisodeShots(storyboard), [storyboard]);
   const stats = useMemo(() => summarizeDirectorQueue(activeShots), [activeShots]);
+  const queueCounts = useMemo(() => ({
+    missing: activeShots.filter((shot) => isShotMissingKeyframe(shot)).length,
+    failed: activeShots.filter((shot) => isShotKeyframeFailed(shot)).length,
+    selected: activeShots.filter((shot) => selectedIds.has(shot.id)).length,
+    all: activeShots.length,
+  }), [activeShots, selectedIds]);
   const reviewStats = useMemo(() => summarizeDirectorKeyframeReview(activeShots), [activeShots]);
   const keyframeGatePassed = useMemo(
     () => isDirectorKeyframeGatePassed(activeShots),
     [activeShots],
   );
+  const reviewMode = (data.reviewMode as 'manual' | 'auto' | undefined) ?? 'manual';
+  const batchSummary = data.batchSummary as { done?: number; failed?: number; skipped?: number } | undefined;
+  const lastResults = Array.isArray(data.lastResults)
+    ? (data.lastResults as Array<{ shotId: string; ok?: boolean; error?: string }>).map((result) => ({
+      ...result,
+      index: activeShots.find((shot) => shot.id === result.shotId)?.index,
+    }))
+    : [];
 
   const pictureNode = useMemo(
     () => findDirectorPictureGenNode(props.id, nodes, edges),
@@ -119,6 +224,7 @@ function DirectorDeskBlock(props: NodeProps) {
     return sid ? sortedShots.find((s) => s.id === sid) ?? null : null;
   }, [sortedShots, data.linkedShotId]);
   const guideUrl = currentShot?.director3dGuide?.captureUrl as string | undefined;
+  const currentLineArtUrl = currentShot ? lineArtByShotId[currentShot.id] : undefined;
 
   const visibleShots = useMemo(() => {
     if (filter === 'selected') return sortedShots.filter((s) => selectedIds.has(s.id));
@@ -130,10 +236,43 @@ function DirectorDeskBlock(props: NodeProps) {
     return sortedShots;
   }, [sortedShots, filter, selectedIds]);
 
+  const referenceGaps = useMemo(() => {
+    const queueShots = filter === 'selected'
+      ? sortedShots.filter((shot) => selectedIds.has(shot.id))
+      : resolveDirectorQueueShots(sortedShots, {
+        filter,
+        selectedIds: [...selectedIds],
+        skipExisting,
+        skipApproved,
+      });
+    return previewDirectorReferenceGaps(queueShots, {
+      blockData: data,
+      pictureNodeData: (pictureNode?.data ?? {}) as Record<string, unknown>,
+      forceCharacterRef,
+      forceSceneRef,
+      prefer3dRef,
+      preferLineArtRef,
+       lineArtByShotId,
+       styleLock,
+       globalArtDirection: storyboard.globalArtDirection,
+       episodeArtDirection,
+       stylePrompt,
+       styleSeed,
+       characters,
+       environments,
+       reviewMode,
+     });
+  }, [filter, sortedShots, selectedIds, skipExisting, skipApproved, data, pictureNode?.data, forceCharacterRef, forceSceneRef, prefer3dRef, preferLineArtRef, lineArtByShotId, styleLock, storyboard.globalArtDirection, episodeArtDirection, stylePrompt, styleSeed, characters, environments, reviewMode]);
+
   const progressPct =
     stats.total === 0 ? 0 : Math.round((stats.withFrame / stats.total) * 100);
   const running = status === 'running';
-  const cardTitle = useMemo(() => { const epId = storyboard.activeEpisodeId; const ep = (storyboard.episodes ?? []).find((e) => e.id === epId); return ep?.title || storyboard.title || '关键帧导演'; }, [storyboard.activeEpisodeId, storyboard.episodes, storyboard.title]);
+  const cardTitle = useMemo(() => {
+    if (upstreamDeskTitle) return upstreamDeskTitle;
+    const epId = handoffEpisodeId || chain?.activeEpisodeId;
+    const epMeta = (chain?.episodes ?? storyboard.episodes ?? []).find((e) => e.id === epId);
+    return epMeta?.title || storyboard.title || '关键帧导演';
+  }, [upstreamDeskTitle, handoffEpisodeId, chain, storyboard.episodes, storyboard.title]);
 
   const toggleSelect = useCallback((id: string) => {
     setSelectedIds((prev) => {
@@ -158,6 +297,16 @@ function DirectorDeskBlock(props: NodeProps) {
     [selectShot, updateNodeData, props.id],
   );
 
+  // D-02: 写回上游链镜表
+  const patchShot = useCallback(
+    (shotId: string, patch: Partial<import('@nx9/shared').StoryboardShot>) => {
+      const ok = patchUpstreamShot(updateNodeData, props.id, nodes as any, edges as any, shotId, patch);
+      if (!ok) appendLog('导演台：无法写回上游链镜表（未连接分镜台？）');
+      return ok;
+    },
+    [updateNodeData, props.id, nodes, edges, appendLog],
+  );
+
   const runBatch = useCallback(
     async (mode: 'filter' | 'selected' | 'one' | 'failed', oneId?: string) => {
       // O-14：门禁未放行时硬阻断（导演台锁参考）
@@ -165,6 +314,32 @@ function DirectorDeskBlock(props: NodeProps) {
         appendLog('导演台：上游设定未就绪，锁参考模式下禁止批出。请先在编剧台「设定就绪」标记放行。');
         updateNodeData(props.id, { status: 'error', error: '设定未就绪，锁参考禁止批出' });
         return;
+      }
+      const relevantReferenceGaps = mode === 'one'
+        ? referenceGaps.filter((gap) => gap.shotId === oneId)
+        : referenceGaps;
+      if (relevantReferenceGaps.length > 0 && (forceCharacterRef || forceSceneRef)) {
+        appendLog(`导演台：${relevantReferenceGaps.length} 镜参考缺失，已阻止批出`);
+        return;
+      }
+      const selectedShotsForWarning = mode === 'one' && oneId
+        ? activeShots.filter((shot) => shot.id === oneId)
+        : mode === 'selected'
+          ? activeShots.filter((shot) => selectedIds.has(shot.id))
+          : activeShots;
+      const without3d = selectedShotsForWarning.filter((shot) => !shot.director3dGuide?.captureUrl);
+      if (without3d.length > 0) {
+        appendLog(`导演台：${without3d.length} 镜没有 3D 构图参考，仍可继续批出彩色关键帧`);
+      }
+      // D-04/X-42: 未确认本集二次确认
+      if (!episodeConfirmed && activeShots.length > 0) {
+        const ok = await askConfirm({
+          title: '本集尚未在分镜台确认',
+          description: '仍要批出彩色关键帧？',
+          confirmLabel: '仍要批出',
+          tone: 'danger',
+        });
+        if (!ok) return;
       }
       abortRef.current = false;
       const shotIds =
@@ -244,15 +419,24 @@ function DirectorDeskBlock(props: NodeProps) {
             maxRetries,
             forceCharacterRef,
             forceSceneRef,
-            styleLock,
-            prefer3dRef,
-            stylePrompt,
+             styleLock,
+             globalArtDirection: storyboard.globalArtDirection,
+             episodeArtDirection,
+             prefer3dRef,
+            preferLineArtRef,
+             lineArtByShotId,
+             stylePrompt,
             styleSeed,
             pictureNodeData: (pictureNode?.data ?? {}) as Record<string, unknown>,
-            blockData: data,
+             blockData: data,
+             characters,
+             environments,
             nodes,
             edges,
           }),
+           shots: activeShots,
+           patchShot,
+           reviewMode,
           pictureNodeData: {
             ...((livePicture?.data ?? pictureNode?.data ?? {}) as Record<string, unknown>),
             ...(styleSeed != null && Number.isFinite(styleSeed) ? { seed: styleSeed } : {}),
@@ -383,37 +567,21 @@ function DirectorDeskBlock(props: NodeProps) {
       ready,
       forceCharacterRef,
       forceSceneRef,
+      preferLineArtRef,
+      lineArtByShotId,
+      patchShot,
+       episodeConfirmed,
+       characters,
+       environments,
+       episodeArtDirection,
+      referenceGaps,
     ],
   );
 
   const stopBatch = useCallback(() => {
     abortRef.current = true;
-    appendLog('导演台 · 请求停止（当前镜完成后生效）');
+    appendLog('导演台 · 尽快停止：不再开新镜');
   }, [appendLog]);
-
-  const sendToVideo = useCallback(() => {
-    const ids = selectedIds.size > 0 ? [...selectedIds] : undefined;
-    const res = pushKeyframesToClipGen({
-      deskBlockId: props.id,
-      nodes,
-      edges,
-      updateNodeData: (id, patch) => updateNodeData(id, patch),
-      shotIds: ids,
-    });
-    if (!res.clipGenId) {
-      appendLog('导演台：画布上没有视频生成节点');
-      return;
-    }
-    if (res.shotCount === 0) {
-      appendLog('导演台：没有可送出的关键帧（请先批出）');
-      return;
-    }
-    fitView({ nodes: [{ id: res.clipGenId }], duration: 300 });
-    appendLog(
-      `导演台 · 已聚焦视频生成节点 · 写入 ${res.shotCount} 镜关键帧` +
-        (res.firstShotId ? ` · 首镜 ${res.firstShotId.slice(0, 8)}` : ''),
-    );
-  }, [selectedIds, props.id, nodes, edges, updateNodeData, appendLog, fitView]);
 
   const syncStyleNow = useCallback(() => {
     const sync = syncStyleToPictureGen({
@@ -447,21 +615,19 @@ function DirectorDeskBlock(props: NodeProps) {
     data.negativePrompt,
   ]);
 
-  const refreshKeyframeGate = useCallback(() => summarizePendingKeyframeGate(), []);
-
   const handleApproveShot = useCallback(
     (shotId: string) => {
-      if (!approveDirectorKeyframe(shotId)) {
+       if (!approveDirectorKeyframe(shotId, nodes as any, patchShot)) {
         appendLog('导演台 · 无法批准（缺关键帧）');
         return;
       }
-      const synced = refreshKeyframeGate();
+      const synced = summarizePendingKeyframeGate(undefined, activeShots);
       appendLog(
         `导演台 · 已批准关键帧` +
           (synced.gatePassed ? ' · 本集审阅已放行' : ` · 仍待审 ${synced.pendingIndices.length}`),
       );
     },
-    [appendLog, refreshKeyframeGate],
+    [appendLog, patchShot, activeShots],
   );
 
   const handleApproveAll = useCallback(() => {
@@ -469,8 +635,8 @@ function DirectorDeskBlock(props: NodeProps) {
       appendLog(`导演台 · 还有 ${reviewStats.missing} 镜缺图，无法全部通过`);
       return;
     }
-    const n = approveAllDirectorKeyframes();
-    const synced = refreshKeyframeGate();
+    const n = approveAllDirectorKeyframes(patchShot, activeShots);
+    const synced = summarizePendingKeyframeGate(undefined, activeShots);
     appendLog(
       n > 0
         ? `导演台 · 全部通过 ${n} 镜` + (synced.gatePassed ? ' · 已放行' : '')
@@ -478,7 +644,51 @@ function DirectorDeskBlock(props: NodeProps) {
           ? '导演台 · 本集已全部通过'
           : '导演台 · 无可批准镜头',
     );
-  }, [appendLog, keyframeGatePassed, reviewStats.missing, refreshKeyframeGate]);
+  }, [appendLog, keyframeGatePassed, reviewStats.missing, patchShot, activeShots]);
+
+  const handleUnapproveShot = useCallback((shotId: string) => {
+    if (!unapproveDirectorKeyframe(shotId, nodes as any, patchShot)) {
+      appendLog('导演台 · 无法撤回批准');
+      return;
+    }
+    appendLog('导演台 · 已撤回批准，可重新审阅');
+  }, [nodes, patchShot, appendLog]);
+
+  const handleUnapproveAll = useCallback(async () => {
+    if (!keyframeGatePassed) return;
+    const ok = await askConfirm({
+      title: '撤销本集全部通过？',
+      description: '所有关键帧将恢复为待审状态。',
+      confirmLabel: '撤销全部通过',
+      tone: 'danger',
+    });
+    if (!ok) return;
+    for (const shot of activeShots) {
+      unapproveDirectorKeyframe(shot.id, nodes as any, patchShot);
+    }
+    appendLog('导演台 · 已撤销本集全部通过');
+  }, [keyframeGatePassed, activeShots, nodes, patchShot, appendLog]);
+
+  const handleRestoreShot = useCallback((shotId: string) => {
+    const shot = activeShots.find((item) => item.id === shotId);
+    if (!shot?.keyframePreviousUrl) return;
+    patchShot(shotId, {
+      firstFrameAssetId: shot.keyframePreviousUrl,
+      keyframePreviousUrl: null,
+      status: 'review',
+      keyframeStatus: 'review',
+    });
+    appendLog(`导演台 · 已恢复镜 #${shot.index} 上一版关键帧`);
+  }, [activeShots, patchShot, appendLog]);
+
+  const focusFirstMissing = useCallback(() => {
+    const first = sortedShots.find((shot) => isShotMissingKeyframe(shot) || isShotKeyframeFailed(shot));
+    if (first) focusShot(first.id);
+  }, [sortedShots, focusShot]);
+
+  const focusUpstream = useCallback(() => {
+    if (upstreamDeskId) fitView({ nodes: [{ id: upstreamDeskId }], duration: 300 });
+  }, [upstreamDeskId, fitView]);
 
   const handleRejectShot = useCallback(
     async (shotId: string, regenerate: boolean) => {
@@ -489,12 +699,30 @@ function DirectorDeskBlock(props: NodeProps) {
       }
       setRejectBusyId(shotId);
       try {
-        const res = await rejectDirectorKeyframe({ shotId, comment, regenerate });
+        const res = await rejectDirectorKeyframe({
+          shotId,
+          comment,
+          regenerate,
+          nodes: nodes as any,
+          patchShot,
+          batchOptions: {
+            blockData: data,
+            pictureNodeData: (pictureNode?.data ?? {}) as Record<string, unknown>,
+            forceCharacterRef,
+            forceSceneRef,
+            prefer3dRef,
+            preferLineArtRef,
+            lineArtByShotId,
+            styleLock,
+            stylePrompt,
+            styleSeed,
+            reviewMode: (data.reviewMode as 'manual' | 'auto' | undefined),
+          },
+        });
         if (!res.ok) {
           appendLog('导演台 · 打回失败');
           return;
         }
-        refreshKeyframeGate();
         setRejectEditingId(null);
         setRejectDrafts((prev) => {
           const next = { ...prev };
@@ -510,16 +738,33 @@ function DirectorDeskBlock(props: NodeProps) {
         setRejectBusyId(null);
       }
     },
-    [appendLog, rejectDrafts, refreshKeyframeGate],
+    [appendLog, rejectDrafts, patchShot, nodes, data, pictureNode?.data, forceCharacterRef, forceSceneRef, prefer3dRef, preferLineArtRef, lineArtByShotId, styleLock, stylePrompt, styleSeed],
   );
 
   const handlePushClipGen = useCallback(
-    (force = false) => {
+    async (force = false) => {
       if (!force && !keyframeGatePassed) {
         appendLog(
           `导演台 · 审阅未放行（缺图 ${reviewStats.missing} · 待审 ${reviewStats.pending + reviewStats.failed}），未推送`,
         );
         return;
+      }
+      // H-03: 强制推送二次确认
+      if (force) {
+        const pendingList = activeShots
+          .filter((s) => !isShotKeyframeApproved(s))
+          .map((s) => `#${s.index}`);
+        const shown = pendingList.slice(0, 12);
+        const desc =
+          `门禁未放行。未批准镜号：${shown.join(' ')}` +
+          (pendingList.length > 12 ? ` 等 ${pendingList.length} 镜` : '');
+        const ok = await askConfirm({
+          title: '强制推送到视频生成？',
+          description: desc,
+          confirmLabel: '仍要推送',
+          tone: 'danger',
+        });
+        if (!ok) return;
       }
       pushKeyframesToClipGen({
         deskBlockId: props.id,
@@ -527,6 +772,7 @@ function DirectorDeskBlock(props: NodeProps) {
         edges,
         updateNodeData,
         bypassKeyframeGate: force,
+        shots: activeShots,
       });
       appendLog(force ? '导演台 · 已强制推送 clip-gen（未批完）' : '关键帧已推送 clip-gen');
     },
@@ -535,6 +781,7 @@ function DirectorDeskBlock(props: NodeProps) {
       reviewStats.missing,
       reviewStats.pending,
       reviewStats.failed,
+      activeShots,
       props.id,
       nodes,
       edges,
@@ -543,6 +790,59 @@ function DirectorDeskBlock(props: NodeProps) {
     ],
   );
 
+  useEffect(() => {
+    if (!studioOpen || immersed3d) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (target?.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target?.tagName ?? '')) return;
+      const index = currentShot ? sortedShots.findIndex((shot) => shot.id === currentShot.id) : -1;
+      if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+        const nextIndex = Math.max(0, Math.min(sortedShots.length - 1, index + (event.key === 'ArrowLeft' ? -1 : 1)));
+        const nextShot = sortedShots[nextIndex];
+        if (nextShot) {
+          event.preventDefault();
+          focusShot(nextShot.id);
+        }
+      } else if (event.key.toLowerCase() === 'a' && currentShot) {
+        event.preventDefault();
+        handleApproveShot(currentShot.id);
+      } else if (event.key === 'Enter' && event.shiftKey && currentShot) {
+        event.preventDefault();
+        void runBatch('one', currentShot.id);
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [studioOpen, immersed3d, currentShot, sortedShots, focusShot, handleApproveShot, runBatch]);
+
+  const exportKeyframeUrls = useCallback(() => {
+    const rows = activeShots
+      .filter((shot) => shot.firstFrameAssetId)
+      .map((shot) => `#${shot.index}\t${shot.firstFrameAssetId}`);
+    if (rows.length === 0) {
+      appendLog('导演台：没有可导出的关键帧 URL');
+      return;
+    }
+    const blob = new Blob([`NX9 关键帧 URL\n${rows.join('\n')}\n`], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `${episodeId || 'episode'}-keyframes.txt`;
+    link.click();
+    URL.revokeObjectURL(url);
+    appendLog(`导演台 · 已导出 ${rows.length} 镜关键帧 URL`);
+  }, [activeShots, appendLog, episodeId]);
+
+  const footerReason = !chain || activeShots.length === 0
+    ? '阻断：未连接分镜台或暂无链镜表'
+    : !ready && (forceCharacterRef || forceSceneRef)
+      ? '阻断：设定未就绪，参考锁未放行'
+      : studioTab === 'deliver' && !keyframeGatePassed
+        ? '阻断：关键帧门禁未放行'
+        : lineArtCount === 0
+          ? '提示：无线稿，线稿参考为可选'
+          : null;
+
   const primaryLabel = useMemo(() => {
     if (running) {
       if (liveProgress.total > 0) {
@@ -550,11 +850,15 @@ function DirectorDeskBlock(props: NodeProps) {
       }
       return '出图中…';
     }
-    if (filter === 'selected') return `批出选中（${selectedIds.size}）`;
-    if (filter === 'failed') return `重出失败（${stats.failed}）`;
-    if (filter === 'missing') return `批出未完成（${stats.missing + stats.failed}）`;
-    return '批出本集（跳过已出）';
-  }, [running, liveProgress, filter, selectedIds.size, stats]);
+    return buildDirectorBatchLabel({
+      filter,
+      selectedCount: selectedIds.size,
+      failedCount: stats.failed,
+      missingCount: stats.missing + stats.failed,
+      skipExisting,
+      skipApproved,
+    });
+  }, [running, liveProgress, filter, selectedIds.size, skipExisting, skipApproved, stats]);
 
   const barPct =
     running && liveProgress.total > 0
@@ -562,7 +866,31 @@ function DirectorDeskBlock(props: NodeProps) {
       : progressPct;
 
   const openStudio = useCallback(() => setStudioOpen(true), []);
-  const closeStudio = useCallback(() => setStudioOpen(false), []);
+  const closeStudio = useCallback(async () => {
+    if (running) {
+      const ok = await askConfirm({
+        title: '批出仍在进行，确定关闭导演台？',
+        description: '关闭不会自动停止已请求的出图；建议先点「停止」。',
+        confirmLabel: '仍要关闭',
+        cancelLabel: '继续批出',
+        tone: 'danger',
+      });
+      if (!ok) return;
+      abortRef.current = true;
+    }
+    setStudioOpen(false);
+    setImmersed3d(false);
+  }, [running]);
+
+  // S-01: 批出中刷新拦截
+  useEffect(() => {
+    if (!running) return;
+    const onUnload = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+    };
+    window.addEventListener('beforeunload', onUnload);
+    return () => window.removeEventListener('beforeunload', onUnload);
+  }, [running]);
 
   return (
     <>
@@ -591,8 +919,10 @@ function DirectorDeskBlock(props: NodeProps) {
                   ? '批出中'
                   : stats.total === 0
                     ? '待接入'
-                    : progressPct >= 100
-                      ? '已完成'
+                    : keyframeGatePassed
+                      ? '可交视频'
+                      : progressPct >= 100
+                        ? '已出齐'
                       : '进行中'}
               </span>
             </div>
@@ -602,7 +932,7 @@ function DirectorDeskBlock(props: NodeProps) {
                 ? `批出中 ${liveProgress.done}/${liveProgress.total}`
                 : stats.total === 0
                   ? '先完成分镜台'
-                  : `已出 ${stats.withFrame}/${stats.total}${stats.with3d > 0 ? ` · 3D ${stats.with3d}` : ''}`}
+                   : `${keyframeGatePassed ? '可交视频' : progressPct >= 100 ? '已出齐' : '已出'} ${stats.withFrame}/${stats.total}${stats.with3d > 0 ? ` · 3D ${stats.with3d}` : ''}`}
             </div>
             <div className="dd2-card__logline">
               {batchError
@@ -631,7 +961,7 @@ function DirectorDeskBlock(props: NodeProps) {
 
       <ScreenModal
         open={studioOpen}
-        onClose={() => { closeStudio(); setImmersed3d(false); }}
+        onClose={() => { void closeStudio(); }}
         title={immersed3d ? undefined : '导演台'}
         subtitle={immersed3d ? undefined : '选镜 → 3D 机位 → 批出关键帧 → 审阅送出'}
         width={immersed3d ? 'min(1440px, 100vw - 12px)' : 'min(1280px, calc(100vw - 24px))'}
@@ -640,27 +970,50 @@ function DirectorDeskBlock(props: NodeProps) {
         className={`dd2-modal ${immersed3d ? 'is-immersed' : ''}`}
       >
         <div className="dd2-studio">
+          {!immersed3d && chain && (
+            <div className="dd2-episode-ctx">
+              <span className="dd2-episode-ctx__info">
+                第{episodeId ? chain.episodes?.find((e) => e.id === episodeId)?.index ?? '?' : '?'}集{upstreamDeskTitle ? ` · 来自「${upstreamDeskTitle}」` : ''}
+                {episodeConfirmed ? ' · 已确认' : ' · 未确认'}
+                {' · '}线稿 {lineArtCount}/{activeShots.length}
+                 {' · '}关键帧 {stats.withFrame}/{stats.total}
+                 {' · '}3D 构图 {stats.with3d}/{stats.total}
+              </span>
+            </div>
+          )}
+          {!immersed3d && (!chain || chain.shots.length === 0) && (
+            <div className="dd2-episode-ctx dd2-episode-ctx--warn">
+              <span className="dd2-episode-ctx__info">
+                ⚠ 未连接分镜台 · 无链镜表
+              </span>
+              <button type="button" className="dd2-btn dd2-btn--ghost" onClick={focusUpstream} disabled={!upstreamDeskId}>
+                聚焦上游分镜台
+              </button>
+            </div>
+          )}
           {!immersed3d && (
             <div className="dd2-pipeline" aria-label="导演流程">
               <button
                 type="button"
-                className={`dd2-pipeline__step ${studioTab === 'produce' ? 'is-on' : ''}`}
+                className={`dd2-pipeline__step ${studioTab === 'produce' ? 'is-on' : ''} ${stats.withFrame > 0 ? 'is-done' : ''}`}
                 onClick={() => { setStudioTab('produce'); setImmersed3d(false); setShowSettings(false); }}
               >
                 <b>1</b> 选镜批出
               </button>
               <span className="dd2-pipeline__sep" aria-hidden />
-              <button
-                type="button"
-                className={`dd2-pipeline__step ${studioTab === 'stage3d' ? 'is-on' : ''}`}
-                onClick={() => { setStudioTab('stage3d'); setShowSettings(false); }}
-              >
-                <b>2</b> 3D 机位
-              </button>
+               <button
+                 type="button"
+                 className={`dd2-pipeline__step ${studioTab === 'stage3d' ? 'is-on' : ''}`}
+                 onClick={() => { if (DIRECTOR_3D_ENABLED) { setStudioTab('stage3d'); setShowSettings(false); } }}
+                 disabled={!DIRECTOR_3D_ENABLED}
+                 title={DIRECTOR_3D_ENABLED ? undefined : '3D 导演台暂未开放'}
+               >
+                  <b>2</b> 3D 构图（暂未开放）
+               </button>
               <span className="dd2-pipeline__sep" aria-hidden />
               <button
                 type="button"
-                className={`dd2-pipeline__step ${studioTab === 'deliver' ? 'is-on' : ''}`}
+                className={`dd2-pipeline__step ${studioTab === 'deliver' ? 'is-on' : ''} ${keyframeGatePassed ? 'is-done' : ''}`}
                 onClick={() => { setStudioTab('deliver'); setShowSettings(false); }}
               >
                 <b>3</b> 审阅送出
@@ -668,32 +1021,40 @@ function DirectorDeskBlock(props: NodeProps) {
             </div>
           )}
           <div className="dd2-studio__main">
-            {!immersed3d && (
+            {!immersed3d && studioTab !== 'stage3d' && (
               <DirectorFilmstrip
                 running={running}
                 liveProgress={liveProgress}
                 barPct={barPct}
-                stats={stats}
-                visibleShots={visibleShots}
+                 stats={stats}
+                 queueCounts={queueCounts}
+                  visibleShots={visibleShots}
+                 lineArtByShotId={lineArtByShotId}
                 filter={filter}
                 selectedIds={selectedIds}
                 currentShotId={currentShot?.id}
                 runningShotId={runningShotId}
                 blockId={props.id}
                 focusShot={focusShot}
-                updateNodeData={updateNodeData}
+                toggleSelect={toggleSelect}
+                selectAllVisible={selectAllVisible}
+                 clearSelect={clearSelect}
+                 onGenerateShot={(shotId) => { void runBatch('one', shotId); }}
+                 updateNodeData={updateNodeData}
                 onFilterChange={(v) => updateNodeData(props.id, { queueFilter: v })}
               />
             )}
             <div className="dd2-work-area">
               {studioTab === 'produce' && (
-                <DirectorMainPanel
+                  <DirectorMainPanel
+                   director3dEnabled={DIRECTOR_3D_ENABLED}
                   previewUrl={previewUrl}
-                  guideUrl={guideUrl}
+                   guideUrl={guideUrl}
+                   lineArtUrl={currentLineArtUrl}
                   currentShotIndex={currentShot?.index != null ? String(currentShot.index) : '—'}
                   currentShotDesc={currentShot?.descriptionZh as string | undefined}
                   previewMode={previewMode}
-                  setPreviewMode={setPreviewMode}
+                   setPreviewMode={setPreviewMode}
                   setStudioTab={setStudioTab}
                   showSettings={showSettings}
                   setShowSettings={setShowSettings}
@@ -701,6 +1062,7 @@ function DirectorDeskBlock(props: NodeProps) {
                   running={running}
                   stats={stats}
                   filter={filter}
+                  selectedIds={selectedIds}
                   runBatch={runBatch}
                   stopBatch={stopBatch}
                   primaryLabel={primaryLabel}
@@ -710,6 +1072,7 @@ function DirectorDeskBlock(props: NodeProps) {
                   forceSceneRef={forceSceneRef}
                   styleLock={styleLock}
                   prefer3dRef={prefer3dRef}
+                  preferLineArtRef={preferLineArtRef}
                   concurrency={concurrency}
                   maxRetries={maxRetries}
                   stylePrompt={stylePrompt}
@@ -717,17 +1080,22 @@ function DirectorDeskBlock(props: NodeProps) {
                   syncStyleToPicture={syncStyleToPicture}
                   autoOpenReview={autoOpenReview}
                   globalArtDirection={storyboard.globalArtDirection}
-                  blockId={props.id}
+                   blockId={props.id}
+                   pictureGenId={pictureNode?.id}
+                   pictureNodeData={(pictureNode?.data ?? {}) as Record<string, unknown>}
+                   pictureConnected={Boolean(pictureNode)}
                   updateNodeData={updateNodeData}
-                  syncStyleNow={syncStyleNow}
-                />
+                   syncStyleNow={syncStyleNow}
+                   referenceGaps={referenceGaps}
+                   reviewMode={reviewMode}
+                   batchSummary={batchSummary}
+                   lastResults={lastResults}
+                   focusShot={focusShot}
+                 />
               )}
-              {studioTab === 'stage3d' && (
+               {studioTab === 'stage3d' && DIRECTOR_3D_ENABLED && (
                 <div className="dd2-stage">
-                  <div className="dd2-stage__header">
-                    <span className="dd2-stage__title">
-                      3D 舞台{currentShot ? ` · 镜 #${currentShot.index}` : ''}
-                    </span>
+                  <div className="dd2-stage__header dd2-stage__header--compact">
                     {immersed3d ? (
                       <button type="button" className="dd2-btn dd2-btn--ghost" onClick={() => setImmersed3d(false)}>
                         ← 返回
@@ -748,6 +1116,12 @@ function DirectorDeskBlock(props: NodeProps) {
                     updateNodeData={updateNodeData}
                     appendLog={appendLog}
                     focusShot={focusShot}
+                    nodes={nodes}
+                    edges={edges}
+                    sourceChainDeskId={upstreamDeskId ?? undefined}
+                    episodeLabel={episodeId ? `第${chain?.episodes?.find((episode) => episode.id === episodeId)?.index ?? '?'}集` : undefined}
+                    episodeConfirmed={episodeConfirmed}
+                    lineArtByShotId={lineArtByShotId}
                   />
                 </div>
               )}
@@ -758,8 +1132,11 @@ function DirectorDeskBlock(props: NodeProps) {
                   reviewStats={reviewStats}
                   keyframeGatePassed={keyframeGatePassed}
                   running={running}
-                  handleApproveShot={handleApproveShot}
-                  handleApproveAll={handleApproveAll}
+                   handleApproveShot={handleApproveShot}
+                   handleApproveAll={handleApproveAll}
+                   handleUnapproveShot={handleUnapproveShot}
+                   handleUnapproveAll={handleUnapproveAll}
+                   handleRestoreShot={handleRestoreShot}
                   handleRejectShot={handleRejectShot}
                   rejectDrafts={rejectDrafts}
                   setRejectDrafts={setRejectDrafts}
@@ -767,7 +1144,7 @@ function DirectorDeskBlock(props: NodeProps) {
                   setRejectEditingId={setRejectEditingId}
                   rejectBusyId={rejectBusyId}
                   pictureNode={pictureNode as { data: Record<string, unknown> } | null}
-                  clipNode={clipNode}
+                  clipNode={clipNode ? { id: clipNode.id } : null}
                   stats={stats}
                   nodes={nodes}
                   edges={edges as unknown[]}
@@ -776,8 +1153,11 @@ function DirectorDeskBlock(props: NodeProps) {
                   focusShot={focusShot}
                   styleSeed={styleSeed}
                   stylePrompt={stylePrompt}
-                  handlePushClipGen={handlePushClipGen}
-                />
+                   handlePushClipGen={handlePushClipGen}
+                   onGoToMissing={() => { setStudioTab('produce'); updateNodeData(props.id, { queueFilter: 'missing' }); focusFirstMissing(); }}
+                   lastPushReceipt={data.lastPushReceipt as { at?: string; shotCount?: number; clipGenId?: string } | undefined}
+                   reviewMode={reviewMode}
+                 />
               )}
             </div>
           </div>
@@ -786,7 +1166,12 @@ function DirectorDeskBlock(props: NodeProps) {
               {pictureNode ? `出图 · ${(pictureNode.data as Record<string, unknown>)?.model ?? '默认'}` : '出图 · Gemini 2.5 Flash Image'}
               {clipNode ? ' · 可送视频' : ''}
               {currentShot ? ` · 当前镜 #${currentShot.index}` : ''}
-              {phaseHint ? ` · ${phaseHint}` : running ? ' · 批出中…' : ''}
+               {phaseHint ? ` · ${phaseHint}` : running ? ' · 批出中…' : footerReason ? ` · ${footerReason}` : ''}
+               {studioTab === 'produce' ? (
+                 <button type="button" className="dd2-btn dd2-btn--ghost" onClick={exportKeyframeUrls} disabled={stats.withFrame === 0}>
+                   导出本集关键帧 URL
+                 </button>
+               ) : null}
             </div>
           )}
         </div>

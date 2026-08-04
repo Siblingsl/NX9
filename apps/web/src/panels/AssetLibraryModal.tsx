@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { createPortal } from 'react-dom';
 import type {
   AssetLibraryKind,
   AssetScope,
@@ -23,7 +24,6 @@ import {
   buildCharacterSheetGenerationPrompt,
   applyCroppedPanelsToCharacter,
   CHARACTER_SHEET_PANEL_LAYOUT,
-  resolveConnectedPictureGenId,
   getSceneCreative,
 } from '@nx9/shared';
 import {
@@ -287,7 +287,6 @@ export function AssetLibraryModal() {
   const [costumeGenProgress, setCostumeGenProgress] = useState<string | null>(null);
   const [charSheetGenBusy, setCharSheetGenBusy] = useState(false);
   const [charSheetGenProgress, setCharSheetGenProgress] = useState<string | null>(null);
-  const runtime = useFlowRuntime((s) => s.runtime);
   const characterSheetGen = useAssetLibraryGenSettings((s) => s.characterSheet);
   const costumeSheetGen = useAssetLibraryGenSettings((s) => s.costumeSheet);
   const setCharacterSheetGen = useAssetLibraryGenSettings((s) => s.setCharacterSheet);
@@ -659,49 +658,10 @@ export function AssetLibraryModal() {
   );
 
 
-  const findPictureGenNode = useCallback(() => {
-    const nodes = runtime?.getNodes() ?? [];
-    const edges = runtime?.getEdges() ?? [];
-    // 1) 选中节点若连着图像生成
-    const selectedId = useFlowRuntime.getState().selectedBlockId;
-    if (selectedId) {
-      const via = resolveConnectedPictureGenId(selectedId, nodes, edges);
-      if (via) {
-        const n = nodes.find((x) => x.id === via);
-        if (n?.type === 'picture-gen') return n;
-      }
-      const self = nodes.find((x) => x.id === selectedId);
-      if (self?.type === 'picture-gen') return self;
-    }
-    // 2) 分镜台已连接的图像节点
-    for (const n of nodes) {
-      if (n.type !== 'storyboard-desk') continue;
-      const via = resolveConnectedPictureGenId(n.id, nodes, edges);
-      if (via) {
-        const pic = nodes.find((x) => x.id === via);
-        if (pic?.type === 'picture-gen') return pic;
-      }
-    }
-    // 3) 画布上第一个图像生成节点
-    return nodes.find((n) => n.type === 'picture-gen');
-  }, [runtime]);
-
-
-  const resolveAssetGenRequest = useCallback((
-    kind: 'character-sheet' | 'costume-sheet',
-    pictureNode?: { data?: Record<string, unknown> } | null,
-  ) => {
+  /** 素材库出图：直接走设置连接中的模型 + 本地面板参数，不依赖画布 picture-gen 实体节点 */
+  const resolveAssetGenRequest = useCallback((kind: 'character-sheet' | 'costume-sheet') => {
     const ui = kind === 'character-sheet' ? characterSheetGen : costumeSheetGen;
-    const picData = (pictureNode?.data ?? {}) as Record<string, unknown>;
-    // 素材库 UI 选择优先；图像节点参数仅作缺省回填
-    return resolveAssetLibraryImageRequest(ui, {
-      model: (picData.model as string) || undefined,
-      quality: (picData.quality as string) || undefined,
-      aspectRatio: (picData.aspectRatio as string) || (kind === 'character-sheet' ? '4:3' : '1:1'),
-      resolutionTier: (picData.resolutionTier as string) || undefined,
-      width: (picData.width as number) || undefined,
-      height: (picData.height as number) || undefined,
-    });
+    return resolveAssetLibraryImageRequest(ui);
   }, [characterSheetGen, costumeSheetGen]);
 
   const generateCostumeSheets = useCallback(
@@ -719,17 +679,11 @@ export function AssetLibraryModal() {
         appendLog('服装设定板：没有可生成的服装条目');
         return;
       }
-      const pictureNode = findPictureGenNode();
-      if (!pictureNode) {
-        appendLog('服装设定板：画布上未找到「图像生成」节点。请先在画布添加「图像生成」。');
-        return;
-      }
-
       setCostumeGenBusy(true);
       setCostumeGenProgress(`0/${targets.length}`);
-      appendLog(`开始生成服装设定板 · ${targets.length} 件 · 经节点 ${pictureNode.id}`);
+      appendLog(`开始生成服装设定板 · ${targets.length} 件`);
 
-      const { modelId, quality, aspectRatio, size, resolutionTier } = resolveAssetGenRequest('costume-sheet', pictureNode);
+      const { modelId, quality, aspectRatio, size, resolutionTier } = resolveAssetGenRequest('costume-sheet');
       appendLog(`服装设定板参数 · 模型 ${modelId} · 清晰度 ${resolutionTier} · 质量 ${quality} · 比例 ${aspectRatio} · ${size}`);
 
       let ok = 0;
@@ -770,18 +724,13 @@ export function AssetLibraryModal() {
       appendLog(`服装设定板批量结束 · 成功 ${ok} · 失败 ${fail}`);
       if (ok > 0) toastSuccess(`服装设定板完成 ${ok}/${targets.length}`);
     },
-    [appendLog, canEditPrivate, findPictureGenNode, resolveAssetGenRequest, saveWorkspaceItem, scope],
+    [appendLog, canEditPrivate, resolveAssetGenRequest, saveWorkspaceItem, scope],
   );
 
   const generateCharacterMasterSheet = useCallback(
     async (char: CharacterProfile) => {
       if (scope === 'private' && !canEditPrivate) {
         appendLog('角色设定板：当前项目不可编辑');
-        return;
-      }
-      const pictureNode = findPictureGenNode();
-      if (!pictureNode) {
-        appendLog('角色设定板：画布上未找到「图像生成」节点。请先在画布添加「图像生成」。');
         return;
       }
 
@@ -793,7 +742,7 @@ export function AssetLibraryModal() {
         const refreshed = refreshCharacterPrompts(char);
         const masterPack = await getGenPack('gen-character-sheet-master');
         const prompt = buildCharacterSheetGenerationPrompt(refreshed, masterPack);
-        const { modelId, quality, aspectRatio, size, resolutionTier } = resolveAssetGenRequest('character-sheet', pictureNode);
+        const { modelId, quality, aspectRatio, size, resolutionTier } = resolveAssetGenRequest('character-sheet');
         appendLog(`角色设定板参数 · 模型 ${modelId} · 清晰度 ${resolutionTier} · 质量 ${quality} · 比例 ${aspectRatio} · ${size}`);
         const refUrl =
           refreshed.creative?.fullSheetUrl
@@ -840,7 +789,7 @@ export function AssetLibraryModal() {
         setCharSheetGenProgress(null);
       }
     },
-    [appendLog, canEditPrivate, findPictureGenNode, resolveAssetGenRequest, saveCharacter, scope],
+    [appendLog, canEditPrivate, resolveAssetGenRequest, saveCharacter, scope],
   );
 
   const handleUploadWorkspaceMedia = useCallback(
@@ -935,8 +884,10 @@ export function AssetLibraryModal() {
 
   if (!open) return null;
 
-  return (
-    <div className="fixed inset-0 z-[80] flex items-center justify-center p-4">
+  // 须高于 ScreenModal(240)：从编剧台「设定就绪」打开时不能被挡住；低于 confirm(280)/lightbox(300)
+  // portal 到 body，避免被 main/画布 stacking context 压住
+  return createPortal(
+    <div className="fixed inset-0 z-[260] flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-label="素材库">
       <button
         type="button"
         className="absolute inset-0 bg-ink/40 backdrop-blur-sm"
@@ -1053,7 +1004,7 @@ export function AssetLibraryModal() {
                         disabled={costumeGenBusy || workspaceItems.filter((i) => i.kind === 'costume').length === 0}
                         onClick={() => void generateCostumeSheets(workspaceItems.filter((i) => i.kind === 'costume'))}
                         className="shrink-0 flex items-center gap-1 text-xs px-3 py-1.5 rounded-lg border border-brand/30 bg-brand/5 text-brand disabled:opacity-45"
-                        title="批量生成当前私有库全部服装设定板（需画布有图像生成节点）"
+                        title="批量生成当前私有库全部服装设定板"
                       >
                         {costumeGenBusy ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
                         {costumeGenBusy ? (costumeGenProgress || '生成中') : '批量设定板'}
@@ -1073,7 +1024,7 @@ export function AssetLibraryModal() {
 
                   {costumeGenBusy ? (
                     <div className="shrink-0 px-4 py-1.5 text-[11px] text-brand bg-brand/5 border-b border-brand/15">
-                      服装设定板生成中 {costumeGenProgress || ''} · 请保持画布图像生成节点可用
+                      服装设定板生成中 {costumeGenProgress || ''} · 请稍候
                     </div>
                   ) : null}
                   {charSheetGenBusy ? (
@@ -1159,13 +1110,14 @@ export function AssetLibraryModal() {
                           costumeOptions={costumeBindOptions}
                           generatingMasterSheet={charSheetGenBusy}
                           masterSheetProgress={charSheetGenProgress}
-                          onGenerateMasterSheet={() => void generateCharacterMasterSheet(selectedChar)}
+                          onGenerateMasterSheet={
+                            canCreateAsset ? () => void generateCharacterMasterSheet(selectedChar) : undefined
+                          }
                           genSettingsSlot={(
                             <AssetLibraryGenSettings
                               preset="character-sheet"
                               value={characterSheetGen}
                               onChange={setCharacterSheetGen}
-                              hint="与图像生成节点同级：模型 / 清晰度 / 质量 / 比例"
                             />
                           )}
                         />
@@ -1286,7 +1238,6 @@ export function AssetLibraryModal() {
                               preset="costume-sheet"
                               value={costumeSheetGen}
                               onChange={setCostumeSheetGen}
-                              hint="与图像生成节点同级：模型 / 清晰度 / 质量 / 比例；批量设定板共用此参数"
                             />
                           )}
                           onGenerateSheet={
@@ -1353,7 +1304,8 @@ export function AssetLibraryModal() {
         </div>
         )}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 

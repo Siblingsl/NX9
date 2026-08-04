@@ -851,9 +851,9 @@ export class AgentService {
     const system = this.systemFrom(
       resolveAgentSkillName('extract-assets'),
       [
-        '你是剧本资产抽取器。从剧本/小说文本中提取角色和场景，并为每个角色填写六层设定。',
-        'JSON 格式: {"characters":[{"name":"角色名","archetype":"主角/配角/反派","traits":"性格特征","description":"外观描述","bible":{"identity":"身份","appearance":"外貌","personality":"性格","background":"背景","voice":"声音","relationships":"关系"}}],"locations":["场景1","场景2"],"environments":["场景1","场景2"],"scenes":[{"name":"场景1","location":"场景1","summary":"摘要"}]}',
-        'locations 必填（有场所时）；environments 与 locations 同义可并列；bible 六层尽量填写。只输出 JSON。',
+        '你是剧本资产抽取器。从剧本/小说文本中提取角色和场景，并为每个角色填写完整设定。',
+        'JSON 格式: {"characters":[{"name":"角色真名","aliases":["别名1","化名"],"archetype":"主角/配角","traits":"性格特征","description":"外观描述","goal":"角色目标","fixedVisualKeywords":"发型/瞳色/标志物等定妆关键词","bible":{"identity":"身份（只能输出「主角」或「配角」；不要用 主视角/leading/main/hero 等词替代）","appearance":"外貌","personality":"性格","background":"背景","voice":"声音","relationships":"关系"}}],"locations":["场景1","场景2"],"environments":["场景1","场景2"],"scenes":[{"name":"场景1","location":"场景1","summary":"摘要"}]}',
+        '硬约束：同一人只输出一条（化名/别名写入 aliases，禁止再单独列一条，禁止 name 写成「真名 (化名××)」）；identity/archetype 必须只输出「主角」或「配角」（反派/龙套信息写在 traits/description/goal/bible 其他字段中，但不得影响主配角门槛）；禁止因跨集出场滥标主角；aliases、fixedVisualKeywords、goal、bible 六层尽量填写。locations 必填（有场所时）；environments 与 locations 同义可并列。只输出 JSON。',
       ].join('\n'),
     );
     const res = (await this.gateway.proxyLlm({

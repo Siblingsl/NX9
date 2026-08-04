@@ -2,14 +2,14 @@ import { useDirectorStore } from '../store/directorStore';
 import { LayersDrawer } from '../panels/LayersDrawer';
 import { AddDrawer } from '../panels/AddDrawer';
 import { EnvDrawer } from '../panels/EnvDrawer';
-import type { DirectorProject } from '../schema/directorProject';
+import type { Director3dSceneTemplate } from '../schema/directorProject';
 
 export function StageRail({
   onUploadFile,
   onSaveSceneTemplate,
 }: {
   onUploadFile?: (file: File) => Promise<{ url: string; filename?: string }>;
-  onSaveSceneTemplate?: (project: DirectorProject, label: string) => void;
+    onSaveSceneTemplate?: (template: Director3dSceneTemplate) => void;
 }) {
   const drawer = useDirectorStore((s) => s.activeDrawer);
   const setDrawer = useDirectorStore((s) => s.setActiveDrawer);

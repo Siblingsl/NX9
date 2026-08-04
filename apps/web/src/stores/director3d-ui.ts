@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import type { DirectorProject } from '@nx9/director3d';
 import { emptyDirectorProject } from '@nx9/director3d';
+import { DIRECTOR_3D_ENABLED } from '../engine/director3d-feature';
 
 interface Director3dUiState {
   open: boolean;
@@ -19,6 +20,7 @@ interface Director3dUiState {
   openStandalone: () => void;
   close: () => void;
   setProject: (project: DirectorProject) => void;
+  selectShot: (shotId: string | null) => void;
   setHostBridge: (url: string | null) => void;
 }
 
@@ -31,7 +33,8 @@ export const useDirector3dUi = create<Director3dUiState>((set) => ({
   project: emptyDirectorProject(),
   hostBridge: null,
 
-  openForBlock: (blockId, project, linkedShotId, storyboardLink) =>
+  openForBlock: (blockId, project, linkedShotId, storyboardLink) => {
+    if (!DIRECTOR_3D_ENABLED) return;
     set({
       open: true,
       blockId,
@@ -39,9 +42,11 @@ export const useDirector3dUi = create<Director3dUiState>((set) => ({
       linkedStoryboardPreviewId: storyboardLink?.previewBlockId ?? null,
       linkedStoryboardPreviewFrameId: storyboardLink?.frameId ?? null,
       project: project ?? emptyDirectorProject(),
-    }),
+    });
+  },
 
-  openStandalone: () =>
+  openStandalone: () => {
+    if (!DIRECTOR_3D_ENABLED) return;
     set({
       open: true,
       blockId: null,
@@ -49,7 +54,8 @@ export const useDirector3dUi = create<Director3dUiState>((set) => ({
       linkedStoryboardPreviewId: null,
       linkedStoryboardPreviewFrameId: null,
       project: emptyDirectorProject(),
-    }),
+    });
+  },
 
   close: () =>
     set({
@@ -61,6 +67,8 @@ export const useDirector3dUi = create<Director3dUiState>((set) => ({
     }),
 
   setProject: (project) => set({ project }),
+
+  selectShot: (shotId) => set({ linkedShotId: shotId }),
 
   setHostBridge: (url) => set({ hostBridge: url }),
 }));

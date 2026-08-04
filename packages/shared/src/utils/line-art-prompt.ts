@@ -10,13 +10,14 @@ export interface LineArtGridPanel {
   prompt: string;
 }
 
-/** 按镜头数量选最紧凑的等分宫格（最多 3×3）。 */
-export function pickLineArtGridLayout(count: number): { rows: number; cols: number } {
-  const n = Math.max(1, Math.floor(count));
-  if (n <= 1) return { rows: 1, cols: 1 };
-  if (n <= 4) return { rows: 2, cols: 2 };
-  if (n <= 6) return { rows: 2, cols: 3 };
-  return { rows: 3, cols: 3 };
+/** 宫格线稿固定 2×2（4 格），便于等分裁切；不足 4 镜时空位留白。 */
+export const LINE_ART_GRID_ROWS = 2;
+export const LINE_ART_GRID_COLS = 2;
+export const LINE_ART_GRID_PAGE_SIZE = LINE_ART_GRID_ROWS * LINE_ART_GRID_COLS;
+
+/** 宫格线稿布局：始终 2×2，忽略 count（保留参数以兼容旧调用）。 */
+export function pickLineArtGridLayout(_count?: number): { rows: number; cols: number } {
+  return { rows: LINE_ART_GRID_ROWS, cols: LINE_ART_GRID_COLS };
 }
 
 /** 宫格线稿：统一人物剪影与编号分镜格，便于快速审构图。 */
@@ -32,24 +33,32 @@ export function buildLineArtGridPrompt(scenePrompt: string, rows: number, cols: 
 
 /**
  * 多镜提示词拼成一张 contact sheet：每格对应一镜，便于一次出图后等分裁切回填。
- * 空余格要求留白，避免模型乱画。
+ * 固定填满 rows×cols；无镜头的格强制白板，禁止破坏等分布局。
  */
 export function buildLineArtPanelGridPrompt(
   panels: LineArtGridPanel[],
-  rows: number,
-  cols: number,
+  rows: number = LINE_ART_GRID_ROWS,
+  cols: number = LINE_ART_GRID_COLS,
 ): string {
   const capacity = Math.max(1, rows) * Math.max(1, cols);
   const cells = panels.slice(0, capacity);
   const panelLines = Array.from({ length: capacity }, (_, i) => {
     const cell = cells[i];
-    if (!cell) return `Panel ${i + 1}: leave completely blank white, no drawing.`;
+    if (!cell) {
+      return (
+        `Panel ${i + 1}: EMPTY SLOT — solid blank white panel only, ` +
+        'no drawing, no characters, no props, no text, no symbols.'
+      );
+    }
     const body = cell.prompt.trim().replace(/\s+/g, ' ').slice(0, 280);
     return `Panel ${i + 1} (${cell.label}): ${body}`;
   });
   return [
-    `Single image: ${rows}x${cols} equal storyboard panel grid.`,
+    `Single image: strict ${rows}x${cols} equal storyboard panel grid (exactly ${capacity} cells).`,
+    'Whole image and every panel are landscape widescreen (cinema 16:9 framing), not square.',
+    'Do not change to any other grid size or irregular layout.',
     'Panels ordered left-to-right, top-to-bottom. Equal cell size, thin black gutters, no captions or watermarks inside panels.',
+    'Do not merge, stretch, or omit cells. Empty slots stay pure blank white so equal-split crop stays aligned.',
     'Keep character silhouettes and costume landmarks consistent across panels when the same character appears.',
     ...panelLines,
     LINE_ART_SUFFIX,

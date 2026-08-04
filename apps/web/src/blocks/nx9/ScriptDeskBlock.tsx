@@ -37,8 +37,9 @@ import {
   screenplayWordCount,
   touchScreenplayPackage,
   unconfirmIfEdited,
+  normalizeScreenplayBibleCharacters,
 } from '@nx9/shared';
-import { enrichPromptWithAssetMentions, summarizePackagePatch } from '@nx9/shared';
+import { enrichPromptWithAssetMentions, summarizePackagePatch, resolveConnectedPictureGenId } from '@nx9/shared';
 import { enrichBibleScenesFromPackage } from '@nx9/shared';
 import { api } from '../../api/client';
 import { useAllAssetLibraryItems } from '../../hooks/use-asset-library-items';
@@ -117,11 +118,15 @@ function episodeDisplayTitle(index: number, title?: string): string {
 }
 
 function ScriptDeskBlock(props: NodeProps) {
-  const { updateNodeData } = useReactFlow();
+  const { updateNodeData, getNodes, getEdges } = useReactFlow();
   const appendLog = useActivityLog((s) => s.append);
   const openAssetAt = useAssetLibraryModalUi((s) => s.openAt);
   const nodeData = props.data as Record<string, unknown> | undefined;
   const pkg = useMemo(() => readScriptDeskPackage(nodeData), [nodeData]);
+  const connectedPictureGenId = useMemo(
+    () => resolveConnectedPictureGenId(props.id, getNodes(), getEdges()),
+    [props.id, getNodes, getEdges],
+  );
   const session = (nodeData?.agentSession as ScriptDeskAgentSession | undefined) ?? {
     messages: [],
     updatedAt: new Date().toISOString(),
@@ -423,7 +428,7 @@ function ScriptDeskBlock(props: NodeProps) {
     } else if (sceneCountAfter > sceneCountBefore) {
       setTip(`从成稿中补了 ${sceneCountAfter - sceneCountBefore} 个场景草稿`);
     }
-    const next = confirmPackage(enriched);
+    const next = confirmPackage(normalizeScreenplayBibleCharacters(enriched));
     if (next.status !== 'confirmed') {
       setTip(next.diagnostics?.find((d) => d.code === 'empty-screenplay')?.message || '无法确认');
       savePkg(next);
@@ -432,10 +437,13 @@ function ScriptDeskBlock(props: NodeProps) {
     const readiness = inspectBibleAssets(next);
     savePkg(next, { assetReadiness: readiness });
     setRightTab('readiness');
+    const visualGaps =
+      (readiness.missingCharacterRefs?.length ?? 0) +
+      (readiness.missingCharacterTurnarounds?.length ?? 0);
     setTip(
       readiness.ready
         ? '成稿已确认，设定已就绪 · 可回分镜台点「同步最新成稿」'
-        : `成稿已确认 · 设定缺口：角色 ${readiness.missingCharacters.length} / 场景 ${readiness.missingScenes.length} · 可回分镜台同步`,
+        : `成稿已确认 · 设定缺口：角色 ${readiness.missingCharacters.length} / 场景 ${readiness.missingScenes.length} / 视觉 ${visualGaps} · 请在设定就绪补齐`,
     );
     appendLog(`编剧台：确认成稿 · ${packageSummaryLine(next)}`);
   }, [appendLog, pkg, savePkg]);
@@ -498,6 +506,11 @@ function ScriptDeskBlock(props: NodeProps) {
       appendLog('编剧台：已标记设定就绪');
     }
   }, [appendLog, props.id, updateNodeData]);
+
+  const handleReadinessPackageChange = useCallback((next: ScreenplayPackage) => {
+    dirtyRef.current = true;
+    savePkg(next);
+  }, [savePkg]);
 
   const handleManualConsistencyCheck = useCallback(() => {
     const next = runConsistencyCheck(pkg);
@@ -1484,7 +1497,10 @@ function ScriptDeskBlock(props: NodeProps) {
             </span>
           </div>
           <div className="sd2-card__title">{title}</div>
-          <div className="sd2-card__meta">{epCount} 集 · 设定 角 {charCount} · 场 {sceneCount}</div>
+          <div className="sd2-card__meta">
+            {epCount} 集 · 设定 角 {charCount} · 场 {sceneCount}
+            {connectedPictureGenId ? ' · 已连出图' : ''}
+          </div>
           <div className="sd2-card__logline">{logline ? compact(logline, 72) : '点击打开编剧台 · Agent 共创或上传成稿'}</div>
           <div className="sd2-card__actions">
             <button type="button" className="sd2-btn sd2-btn--ghost" onClick={(e) => { e.stopPropagation(); setStudioOpen(true); }}>打开编剧台</button>
@@ -2595,6 +2611,8 @@ function ScriptDeskBlock(props: NodeProps) {
                       blockId={props.id}
                       pkg={pkg}
                       onReadinessChange={handleReadinessChange}
+                      onPackageChange={handleReadinessPackageChange}
+                      connectedPictureGenId={connectedPictureGenId}
                     />
                   )}
                   {rightTab === 'diagnostics' && (
@@ -2746,8 +2764,14 @@ function ScriptDeskBlock(props: NodeProps) {
                   const readiness = inspectBibleAssets(pkg);
                   if (!readiness.ready) {
                     const gaps: string[] = [];
-                    if (readiness.missingCharacters.length > 0) gaps.push(`角色 ${readiness.missingCharacters.length}`);
+                    if (readiness.missingCharacters.length > 0) gaps.push(`角色入库 ${readiness.missingCharacters.length}`);
                     if (readiness.missingScenes.length > 0) gaps.push(`场景 ${readiness.missingScenes.length}`);
+                    if ((readiness.missingCharacterTurnarounds?.length ?? 0) > 0) {
+                      gaps.push(`主角三视图 ${readiness.missingCharacterTurnarounds!.length}`);
+                    }
+                    if ((readiness.missingCharacterRefs?.length ?? 0) > 0) {
+                      gaps.push(`定妆 ${readiness.missingCharacterRefs!.length}`);
+                    }
                     items.push(`就绪缺口：${gaps.join(' / ')}`);
                   } else {
                     items.push('设定已就绪');

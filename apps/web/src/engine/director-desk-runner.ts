@@ -5,7 +5,6 @@
 import type { Edge, Node } from '@xyflow/react';
 import { findChainShot } from './chain-storyboard-aggregate';
 import {
-  activeEpisodeShots,
   appendStoryboardReviewEvent,
   enrichPromptWithCharacters,
   enrichPromptWithEnvironment,
@@ -25,7 +24,6 @@ import {
 import { useWorkspaceDocument } from '../stores/workspace-document';
 import { resolvePictureGenSettings } from './storyboard-preview-runner';
 import { runPictureGenJob } from './picture-gen-runner';
-import { batchGenerateKeyframesFromShots } from './core-pipeline-runner';
 import { getGenPack } from './gen-skill-runtime';
 import {
   collectPendingKeyframeIndices,
@@ -60,8 +58,10 @@ export interface DirectorDeskBatchOptions {
   forceCharacterRef?: boolean;
   /** P2：强制注入场景一致性文案 + 场景参考 */
   forceSceneRef?: boolean;
-  /** P2：统一风格锁：globalArtDirection + stylePrompt + seed */
+  /** P2：统一风格锁：显式 global/episode direction + stylePrompt + seed */
   styleLock?: boolean;
+  globalArtDirection?: string;
+  episodeArtDirection?: string;
   /** P2：全局风格补充文案 */
   stylePrompt?: string;
   /** P2：统一 seed（数字）；空则用 picture-gen 的 seed */
@@ -70,8 +70,19 @@ export interface DirectorDeskBatchOptions {
   prefer3dRef?: boolean;
   /** P3：无 3D 参考时仍允许出图（默认 true）；false 则缺 3D 记失败 */
   allowWithout3d?: boolean;
+  /** 线稿构图参考（默认 true，从导演台 data 传入） */
+  preferLineArtRef?: boolean;
+  /** 线稿帧映射 shotId → url */
+  lineArtByShotId?: Record<string, string>;
+  /** 台内审阅模式，节点 data 优先；未提供时默认手动 */
+  reviewMode?: 'manual' | 'auto';
+  /** 打回重出时注入当前生成提示词 */
+  revisionNote?: string;
   pictureNodeData?: Record<string, unknown>;
   upstreamPictures?: string[];
+  /** 显式注入资产库；未提供时仅回退读取资产库，不读取全局镜表。 */
+  characters?: CharacterProfile[];
+  environments?: EnvironmentProfile[];
   blockData?: Record<string, unknown>;
   /** F-017/F-032: 参考板约束（从上游 reference-board 节点提取） */
   referenceConstraint?: ReferenceConstraint | null;
@@ -79,6 +90,10 @@ export interface DirectorDeskBatchOptions {
   compositionTemplate?: CompositionTemplate;
   /** F-017: 构图强约束 — 启用后无模板阻发 */
   enforceComposition?: boolean;
+  /** D-01: 预计算的镜头队列（必须从 chain 传入） */
+  shots?: StoryboardShot[];
+  /** D-02: 写回 shot patch 到上游 chain */
+  patchShot?: (shotId: string, patch: Partial<StoryboardShot>) => void;
   onShotStart?: (shot: StoryboardShot, index: number, total: number) => void;
   onShotPhase?: (shot: StoryboardShot, phase: DirectorShotPhase, detail?: string) => void;
   onShotDone?: (
@@ -113,6 +128,19 @@ export interface DirectorDeskBatchSummary {
   retried?: number;
 }
 
+function buildDirectorReviewPatch(
+  shot: StoryboardShot,
+  event: Parameters<typeof appendStoryboardReviewEvent>[1],
+  status: 'approved' | 'failed',
+): Partial<StoryboardShot> {
+  return {
+    status,
+    keyframeStatus: status,
+    keyframeReviewNote: event.decision === 'rejected' ? event.comment ?? null : null,
+    reviewHistory: appendStoryboardReviewEvent(shot, event),
+  };
+}
+
 export function findDirectorPictureGenNode(
   deskBlockId: string,
   nodes: Node[],
@@ -128,6 +156,7 @@ export function findDirectorPictureGenNode(
       if (n) return n;
     }
   }
+  // D-06/X-35: 禁止画布级回落；只认连线（含经分镜间接）
   // F-006: 出图挂在上游分镜台能力口时，经分镜间接定位
   for (const edge of edges) {
     if (edge.target !== deskBlockId) continue;
@@ -150,7 +179,7 @@ export function findDirectorPictureGenNode(
       }
     }
   }
-  return nodes.find((n) => n.type === 'picture-gen');
+  return undefined;
 }
 
 export function findDirectorClipGenNode(
@@ -336,6 +365,8 @@ export function isDirectorKeyframeGatePassed(shots: StoryboardShot[]): boolean {
 /** 当前集关键帧待审 index + 是否放行（替代原审阅关卡节点同步） */
 export function summarizePendingKeyframeGate(
   chainShots?: Array<{ id: string; index: number; keyframeStatus?: string; status?: string }>,
+  /** D-01: 显式提供镜头列表替代全局 */
+  explicitShots?: Array<{ id: string; index: number; keyframeStatus?: string; status?: string }>,
 ): {
   pendingIndices: number[];
   gatePassed: boolean;
@@ -343,7 +374,9 @@ export function summarizePendingKeyframeGate(
   // F-003: 优先使用链镜表
   const shots = chainShots?.length
     ? chainShots
-    : activeEpisodeShots(useWorkspaceDocument.getState().storyboard);
+    : explicitShots?.length
+      ? explicitShots
+      : [];
   const pending = shots
     .filter((s) => s.keyframeStatus !== 'approved' && s.status !== 'approved')
     .map((s) => s.index)
@@ -365,10 +398,14 @@ export function syncDirectorReviewGateFromShots(_args?: {
   return { pendingIndices: synced.pendingIndices, gatePassed: synced.gatePassed };
 }
 
-export function approveDirectorKeyframe(shotId: string, nodes?: Array<{ id: string; type?: string | null; data?: Record<string, unknown> }>): boolean {
-  const doc = useWorkspaceDocument.getState();
-  // F-003: 优先从链镜表查找（回退全局）
-  const shot = (nodes ? findChainShot(shotId, nodes) : undefined) ?? doc.storyboard.shots.find((s) => s.id === shotId);
+export function approveDirectorKeyframe(
+  shotId: string,
+  nodes?: Array<{ id: string; type?: string | null; data?: Record<string, unknown> }>,
+  patchShot?: (shotId: string, patch: Partial<StoryboardShot>) => void,
+): boolean {
+  if (!patchShot || !nodes) return false;
+  // F-003: 只从显式上游链镜表查找；写回由调用方显式提供上游适配器。
+  const shot = findChainShot(shotId, nodes);
   if (!shot?.firstFrameAssetId) return false;
   const event = {
     id: `review-${shot.id}-${Date.now()}`,
@@ -376,22 +413,21 @@ export function approveDirectorKeyframe(shotId: string, nodes?: Array<{ id: stri
     decision: 'approved' as const,
     createdAt: new Date().toISOString(),
   };
-  doc.updateShot(shot.id, {
-    status: 'approved',
-    keyframeStatus: 'approved',
-    keyframeReviewNote: null,
-    reviewHistory: appendStoryboardReviewEvent(shot, event),
-  });
+  const patch = buildDirectorReviewPatch(shot, event, 'approved');
+  patchShot(shot.id, patch);
   return true;
 }
 
 /** 有图且未批准的镜头全部通过；缺图时返回 0（与审阅关卡「全部通过」一致） */
-export function approveAllDirectorKeyframes(): number {
-  const doc = useWorkspaceDocument.getState();
-  const shots = activeEpisodeShots(doc.storyboard);
-  if (shots.some((s) => !s.firstFrameAssetId)) return 0;
+export function approveAllDirectorKeyframes(
+  patchShot?: (shotId: string, patch: Partial<StoryboardShot>) => void,
+  shots?: StoryboardShot[],
+): number {
+  if (!patchShot || !shots) return 0;
+  const active = shots;
+  if (active.some((s) => !s.firstFrameAssetId)) return 0;
   let n = 0;
-  for (const shot of shots) {
+  for (const shot of active) {
     if (isShotKeyframeApproved(shot)) continue;
     if (!shot.firstFrameAssetId) continue;
     const event = {
@@ -400,12 +436,8 @@ export function approveAllDirectorKeyframes(): number {
       decision: 'approved' as const,
       createdAt: new Date().toISOString(),
     };
-    doc.updateShot(shot.id, {
-      keyframeStatus: 'approved',
-      status: 'approved',
-      keyframeReviewNote: null,
-      reviewHistory: appendStoryboardReviewEvent(shot, event),
-    });
+    const patch = buildDirectorReviewPatch(shot, event, 'approved');
+    patchShot(shot.id, patch);
     n += 1;
   }
   return n;
@@ -416,12 +448,13 @@ export async function rejectDirectorKeyframe(args: {
   comment: string;
   regenerate?: boolean;
   nodes?: Array<{ id: string; type?: string | null; data?: Record<string, unknown> }>;
+  patchShot?: (shotId: string, patch: Partial<StoryboardShot>) => void;
+  batchOptions?: Partial<DirectorDeskBatchOptions>;
 }): Promise<{ ok: boolean; regenerated?: boolean }> {
   const comment = args.comment.trim();
-  if (!comment) return { ok: false };
-  const doc = useWorkspaceDocument.getState();
-  // F-003: 优先从链镜表查找（回退全局）
-  const shot = (args.nodes ? findChainShot(args.shotId, args.nodes) : undefined) ?? doc.storyboard.shots.find((s) => s.id === args.shotId);
+  if (!comment || !args.patchShot || !args.nodes) return { ok: false };
+  // F-003: 只从显式上游链镜表查找；写回由调用方显式提供上游适配器。
+  const shot = findChainShot(args.shotId, args.nodes);
   if (!shot) return { ok: false };
   const event = {
     id: `review-${shot.id}-${Date.now()}`,
@@ -430,15 +463,34 @@ export async function rejectDirectorKeyframe(args: {
     comment,
     createdAt: new Date().toISOString(),
   };
-  doc.updateShot(shot.id, {
-    status: 'failed',
-    keyframeStatus: 'failed',
-    keyframeReviewNote: comment,
-    reviewHistory: appendStoryboardReviewEvent(shot, event),
-  });
+  const patch = buildDirectorReviewPatch(shot, event, 'failed');
+  args.patchShot(shot.id, patch);
   if (!args.regenerate) return { ok: true, regenerated: false };
-  await batchGenerateKeyframesFromShots([shot.id], true);
+  await runDirectorDeskBatch({
+    ...args.batchOptions,
+    shots: [shot],
+    shotIds: [shot.id],
+    filter: 'selected',
+    skipExisting: false,
+    skipApproved: false,
+    patchShot: args.patchShot,
+    revisionNote: comment,
+  });
   return { ok: true, regenerated: true };
+}
+
+/** 撤回单镜批准，恢复为待审状态。 */
+export function unapproveDirectorKeyframe(
+  shotId: string,
+  nodes?: Array<{ id: string; type?: string | null; data?: Record<string, unknown> }>,
+  patchShot?: (shotId: string, patch: Partial<StoryboardShot>) => void,
+): boolean {
+  if (!patchShot || !nodes) return false;
+  const shot = findChainShot(shotId, nodes);
+  if (!shot || !isShotKeyframeApproved(shot) || !shot.firstFrameAssetId) return false;
+  const patch = { status: 'review' as const, keyframeStatus: 'review' as const };
+  patchShot(shot.id, patch);
+  return true;
 }
 
 export function resolveDirectorQueueShots(
@@ -486,6 +538,22 @@ export function resolveDirectorQueueShots(
   });
 }
 
+/** 批出前同步预检每镜强制参考缺失项。 */
+export function previewDirectorReferenceGaps(
+  shots: StoryboardShot[],
+  opts: DirectorDeskBatchOptions,
+): Array<{ shotId: string; index: number; missingForced: string[] }> {
+  const doc = useWorkspaceDocument.getState();
+  const characterLibrary = opts.characters ?? doc.characters.characters;
+  return shots.flatMap((shot) => {
+    const characters = resolveBlockCharacters(opts.blockData, shot, characterLibrary);
+    const built = buildShotPrompt(shot, characters, opts);
+    return built.missingForced.length > 0
+      ? [{ shotId: shot.id, index: shot.index, missingForced: built.missingForced }]
+      : [];
+  });
+}
+
 function resolveShotEnvironment(
   shot: StoryboardShot,
   environments: EnvironmentProfile[],
@@ -514,14 +582,14 @@ interface BuiltShotPrompt {
   missingForced: string[];
 }
 
-function buildShotPrompt(
+export function buildShotPrompt(
   shot: StoryboardShot,
   characters: CharacterProfile[],
   opts: DirectorDeskBatchOptions,
   pack?: GenPromptPack | null,
 ): BuiltShotPrompt {
   const doc = useWorkspaceDocument.getState();
-  const environments = doc.environments?.environments ?? [];
+  const environments = opts.environments ?? doc.environments?.environments ?? [];
   const env = resolveShotEnvironment(shot, environments);
   const forceChar = opts.forceCharacterRef ?? true;
   const forceScene = opts.forceSceneRef ?? true;
@@ -529,6 +597,9 @@ function buildShotPrompt(
   const prefer3d = opts.prefer3dRef ?? true;
 
   let prompt = shotKeyframePrompt(shot);
+  if (opts.revisionNote?.trim()) {
+    prompt = `${prompt}\n\n[Revision note from director: ${opts.revisionNote.trim()}]`;
+  }
   const missingForced: string[] = [];
   const usedRefs: string[] = [];
   const referenceImageUrls: string[] = [];
@@ -560,9 +631,8 @@ function buildShotPrompt(
 
   // P2 风格锁
   if (styleLock) {
-    const globalStyle = doc.storyboard.globalArtDirection?.trim();
-    const ep = doc.storyboard.episodes?.find((e) => e.id === shot.episodeId);
-    const epStyle = ep?.artDirection?.trim();
+    const globalStyle = opts.globalArtDirection?.trim();
+    const epStyle = opts.episodeArtDirection?.trim();
     const custom = opts.stylePrompt?.trim() || (opts.blockData?.stylePrompt as string | undefined)?.trim();
     const styleBits = [globalStyle, epStyle, custom].filter(Boolean);
     if (styleBits.length) {
@@ -571,15 +641,28 @@ function buildShotPrompt(
     }
   }
 
-  // 参考图优先级：3D → 角色 → 场景 → 上游
+  // 参考图优先级：默认 3D → 线稿 → 角色 → 场景；关闭 3D 时线稿优先。
+  // D-03/R-01: 线稿构图参考（preferLineArtRef 默认 true）
+  const preferLineArt = opts.preferLineArtRef ?? true;
+  const lineArtUrl = opts.lineArtByShotId?.[shot.id]?.trim();
   const d3 = shot.director3dGuide?.captureUrl?.trim();
   const charRef = pickReferenceImage(characters, []);
   const envRef = env?.referenceImageUrl?.trim() || env?.referenceUrls?.[0]?.trim();
   const upstream = opts.upstreamPictures?.find((u) => u?.trim());
 
+  // §5 优先级：若 prefer3dRef && 有3D截图 → 3D > 线稿 > 角色 > 场景
+  // 否则 → 线稿 > 角色 > 场景（3D 有则仍可附带）
   if (prefer3d && d3) {
     referenceImageUrls.push(d3);
     usedRefs.push('3d');
+  }
+  if (preferLineArt && lineArtUrl) {
+    if (!referenceImageUrls.includes(lineArtUrl)) referenceImageUrls.push(lineArtUrl);
+    usedRefs.push('line-art');
+  }
+  if (!prefer3d && d3) {
+    if (!referenceImageUrls.includes(d3)) referenceImageUrls.push(d3);
+    usedRefs.push('3d-secondary');
   }
   if (charRef) {
     if (!referenceImageUrls.includes(charRef)) referenceImageUrls.push(charRef);
@@ -616,6 +699,13 @@ function buildShotPrompt(
     const camHint =
       pack?.camera3dHint?.trim() || '[Match 3D blocking camera composition and staging]';
     prompt = `${prompt}\n\n${camHint}`;
+  }
+  // D-03/R-01: 线稿构图提示
+  if (preferLineArt && lineArtUrl) {
+    const lineArtHint =
+      pack?.lineArtHint?.trim() ||
+      '[Match the line-art composition and camera framing; colorize consistently]';
+    prompt = `${prompt}\n\n${lineArtHint}`;
   }
   if (pack?.overlay?.trim()) {
     prompt = `${prompt}\n\n${pack.overlay.trim()}`;
@@ -665,10 +755,11 @@ async function attemptGenerate(
   attempt: number,
 ): Promise<DirectorDeskShotResult> {
   const doc = useWorkspaceDocument.getState();
+  const characterLibrary = opts.characters ?? doc.characters.characters;
   const characters = resolveBlockCharacters(
     opts.blockData,
     shot,
-    doc.characters.characters,
+    characterLibrary,
   );
   const built = buildShotPrompt(
     shot,
@@ -677,8 +768,21 @@ async function attemptGenerate(
     await getGenPack('gen-director-batch-shot'),
   );
 
+  if (!opts.patchShot) {
+    return {
+      shotId: shot.id,
+      index: shot.index,
+      ok: false,
+      error: '缺少上游链镜表写回适配器',
+      prompt: built.prompt,
+      attempts: attempt,
+      phase: 'failed',
+      usedRefs: built.usedRefs,
+    };
+  }
+
   if (opts.allowWithout3d === false && !shot.director3dGuide?.captureUrl) {
-    doc.updateShot(shot.id, { status: 'failed', keyframeStatus: 'failed' });
+    opts.patchShot(shot.id, { status: 'failed', keyframeStatus: 'failed' });
     return {
       shotId: shot.id,
       index: shot.index,
@@ -692,7 +796,11 @@ async function attemptGenerate(
   }
 
   const pictureData = opts.pictureNodeData ?? {};
-  const { modelId, size } = resolvePictureGenSettings(pictureData);
+  const resolvedPictureSettings = resolvePictureGenSettings(pictureData);
+  const modelId = resolvedPictureSettings.modelId;
+  const size = typeof pictureData.size === 'string' && pictureData.size.trim()
+    ? pictureData.size
+    : resolvedPictureSettings.size;
   const seedFromPicture =
     typeof pictureData.seed === 'number' && Number.isFinite(pictureData.seed)
       ? (pictureData.seed as number)
@@ -705,9 +813,10 @@ async function attemptGenerate(
     (pictureData.negativePrompt as string | undefined) ||
     (opts.blockData?.negativePrompt as string | undefined);
 
-  doc.updateShot(shot.id, {
+  opts.patchShot(shot.id, {
     status: 'generating',
     keyframeStatus: 'draft',
+    ...(shot.firstFrameAssetId ? { keyframePreviousUrl: shot.firstFrameAssetId } : {}),
   });
   opts.onShotPhase?.(shot, attempt > 1 ? 'retrying' : 'generating', `attempt ${attempt}`);
 
@@ -726,9 +835,9 @@ async function attemptGenerate(
     const url = urls[0];
     if (!url) throw new Error('图像生成未返回 URL');
 
-    const reviewMode = doc.storyboard.reviewMode;
+    const reviewMode = opts.reviewMode ?? (opts.blockData?.reviewMode as 'manual' | 'auto' | undefined) ?? 'manual';
     const nextStatus = reviewMode === 'manual' ? 'review' : 'approved';
-    doc.updateShot(shot.id, {
+    opts.patchShot(shot.id, {
       status: nextStatus,
       keyframeStatus: nextStatus,
       firstFrameAssetId: url,
@@ -753,7 +862,7 @@ async function attemptGenerate(
       built.missingForced.length > 0
         ? `${message}（提示: ${built.missingForced.join('、')}）`
         : message;
-    doc.updateShot(shot.id, {
+    opts.patchShot(shot.id, {
       status: 'failed',
       keyframeStatus: 'failed',
     });
@@ -831,9 +940,12 @@ async function mapPool<T, R>(
   return results.filter((r) => r !== undefined);
 }
 
+function resolveActiveShots(opts: DirectorDeskBatchOptions): StoryboardShot[] {
+  return opts.shots ?? [];
+}
+
 function buildQueue(opts: DirectorDeskBatchOptions): StoryboardShot[] {
-  const storyboard = useWorkspaceDocument.getState().storyboard;
-  const active = activeEpisodeShots(storyboard);
+  const active = resolveActiveShots(opts);
   const filter = opts.filter ?? (opts.shotIds?.length ? 'selected' : 'missing');
 
   if (opts.shotIds && opts.shotIds.length > 0 && filter === 'selected') {
@@ -920,8 +1032,8 @@ export async function runDirectorDeskBatch(
   };
 }
 
-export function getActiveEpisodeShots(): StoryboardShot[] {
-  return activeEpisodeShots(useWorkspaceDocument.getState().storyboard);
+export function getActiveEpisodeShots(shots?: StoryboardShot[]): StoryboardShot[] {
+  return shots ?? [];
 }
 
 /**
@@ -934,13 +1046,15 @@ export function pushKeyframesToClipGen(args: {
   edges: Edge[];
   updateNodeData: (id: string, patch: Record<string, unknown>) => void;
   shotIds?: string[];
+  /** D-01: 预计算的镜头队列（从 chain 传入） */
+  shots?: StoryboardShot[];
   /** 强制推送时跳过 clip-gen 关键帧门禁 */
   bypassKeyframeGate?: boolean;
 }): { clipGenId?: string; shotCount: number; firstShotId?: string } {
   const clip = findDirectorClipGenNode(args.deskBlockId, args.nodes, args.edges);
   if (!clip) return { shotCount: 0 };
 
-  const active = activeEpisodeShots(useWorkspaceDocument.getState().storyboard);
+  const active = args.shots ?? [];
   const targets = (args.shotIds?.length
     ? active.filter((s) => args.shotIds!.includes(s.id))
     : active
@@ -963,6 +1077,13 @@ export function pushKeyframesToClipGen(args: {
     directorDeskRefs: pictures,
     message: `已从导演台写入 ${targets.length} 镜关键帧参考`,
     bypassKeyframeGate: args.bypassKeyframeGate === true,
+  });
+  args.updateNodeData(args.deskBlockId, {
+    lastPushReceipt: {
+      at: new Date().toISOString(),
+      shotCount: targets.length,
+      clipGenId: clip.id,
+    },
   });
 
   return { clipGenId: clip.id, shotCount: targets.length, firstShotId: first.id };

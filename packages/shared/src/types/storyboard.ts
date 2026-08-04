@@ -73,6 +73,10 @@ export interface StoryboardDirector3dGuide {
   sourceBlockId: string;
   captureId: string;
   captureUrl: string;
+  commitId?: string;
+  shotId?: string;
+  sourceShotRevision?: number;
+  episodeId?: string | null;
   cameraPrompt?: string;
   cameraPosition?: [number, number, number];
   cameraRotation?: [number, number, number];
@@ -95,6 +99,8 @@ export interface StoryboardShot {
   promptEn: string;
   videoPromptEn?: string;
   firstFrameAssetId?: string | null;
+  /** 导演台重出前保留的一档关键帧 URL，可恢复。 */
+  keyframePreviousUrl?: string | null;
   lastFrameAssetId?: string | null;
   videoAssetId?: string | null;
   /** 所有生成版本；videoAssetId 继续投影当前预览/采用版本以兼容既有执行链。 */

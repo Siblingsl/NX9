@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Box, ChevronDown, GripVertical, Play, Sparkles } from 'lucide-react';
 import {
   canConfirmStoryboardPreview,
@@ -15,6 +15,7 @@ import { normalizeDirectorProject } from '@nx9/director3d';
 import { useDeckUi } from '../../../stores/deck-ui';
 import { useActivityLog } from '../../../../../stores/activity-log';
 import { useDirector3dUi } from '../../../../../stores/director3d-ui';
+import { DIRECTOR_3D_ENABLED } from '../../../../director3d-feature';
 import { useStoryboardGuidePrefs } from '../../../../../stores/storyboard-guide-prefs';
 import {
   buildContactSheetSignature,
@@ -26,6 +27,7 @@ import { StoryboardPreviewTimeline } from './StoryboardPreviewTimeline';
 import { StoryboardPreviewFrameEditor } from './StoryboardPreviewFrameEditor';
 import { StoryboardPreviewGenSettings } from './StoryboardPreviewGenSettings';
 import { StoryboardPreviewDirector3dPanel } from './StoryboardPreviewDirector3dPanel';
+import { VideoPopover } from '../generation/video/VideoPopover';
 import { useWorkspaceDocument } from '../../../../../stores/workspace-document';
 import { prepareDirectorProjectForShot } from '../../../../director3d-character-sync';
 import '../../../../../styles/storyboard-board.css';
@@ -87,6 +89,8 @@ export function StoryboardPreviewWorkspace({
   const [generating, setGenerating] = useState(false);
   const [directorPanelOpen, setDirectorPanelOpen] = useState(false);
   const [batchOpen, setBatchOpen] = useState(false);
+  const [guideOpen, setGuideOpen] = useState(false);
+  const guideBtnRef = useRef<HTMLButtonElement>(null);
   const [panoramaPrompt, setPanoramaPrompt] = useState('');
   const [generatingPanorama, setGeneratingPanorama] = useState(false);
   const [composingSheet, setComposingSheet] = useState(false);
@@ -478,61 +482,55 @@ export function StoryboardPreviewWorkspace({
       onPointerDown={stop}
       onWheel={(e) => e.stopPropagation()}
     >
-      <div className="kp__top">
-        <div className="kp__identity">
-          <div className="flex items-center gap-2 min-w-0">
-            {!embedded && (
+      {!embedded ? (
+        <div className="kp__top">
+          <div className="kp__identity">
+            <div className="flex items-center gap-2 min-w-0">
               <GripVertical size={13} className="text-ink/25 nx9-prompt-bar-drag-handle cursor-grab shrink-0" />
-            )}
-            <p className="kp__title truncate">
-              {embedded ? '线稿预览' : (meta?.label ?? '分镜预览')}
-            </p>
-            {!embedded && (
+              <p className="kp__title truncate">{meta?.label ?? '分镜预览'}</p>
               <button type="button" onClick={handleCollapse} className="kp__btn is-ghost" style={{ padding: 4 }}>
                 <ChevronDown size={15} />
               </button>
+            </div>
+            <p className="kp__sub">Video Proof · 出图 / 导引 / 评分 · 提交批审</p>
+          </div>
+
+          <div className="kp__chips">
+            <span className="kp__chip is-accent">
+              {displaySummary.success}/{displaySummary.total || 0} 已出
+            </span>
+            {missingCount > 0 && <span className="kp__chip is-warn">缺 {missingCount}</span>}
+            {displaySummary.locked > 0 && <span className="kp__chip">锁 {displaySummary.locked}</span>}
+            <span className={`kp__chip ${pictureNode ? 'is-ok' : 'is-warn'}`}>
+              {pictureNode ? '图像已连' : '未连图像'}
+            </span>
+            {director3dNode && <span className="kp__chip">3D 已连</span>}
+            {(unboundCharacterShotCount > 0 || unboundSceneShotCount > 0) && (
+              <span
+                className="kp__chip is-warn"
+                title="在角色库/场景库补齐同名资产后，回到分镜网格同步重新绑定"
+              >
+                资产待绑 {unboundCharacterShotCount + unboundSceneShotCount}
+              </span>
+            )}
+            {report && (
+              <span className={`kp__chip ${scoreLow ? 'is-warn' : 'is-ok'}`}>
+                评分 {report.overallScore}
+              </span>
             )}
           </div>
-          <p className="kp__sub">{embedded ? '线稿构图 · 确认后交导演台批出彩图' : 'Video Proof · 出图 / 导引 / 评分 · 提交批审'}</p>
-        </div>
 
-        <div className="kp__chips">
-          <span className="kp__chip is-accent">
-            {displaySummary.success}/{displaySummary.total || 0} 已出
-          </span>
-          {missingCount > 0 && <span className="kp__chip is-warn">缺 {missingCount}</span>}
-          {displaySummary.locked > 0 && <span className="kp__chip">锁 {displaySummary.locked}</span>}
-          <span className={`kp__chip ${pictureNode ? 'is-ok' : 'is-warn'}`}>
-            {pictureNode ? '图像已连' : '未连图像'}
-          </span>
-          {!embedded && director3dNode && <span className="kp__chip">3D 已连</span>}
-          {(unboundCharacterShotCount > 0 || unboundSceneShotCount > 0) && (
-            <span
-              className="kp__chip is-warn"
-              title="在角色库/场景库补齐同名资产后，回到分镜网格同步重新绑定"
+          <div className="kp__primary">
+            <button
+              type="button"
+              className="kp__btn is-primary"
+              disabled={generating || !pictureNode || status === 'running'}
+              onMouseDown={stop}
+              onClick={() => void handleGenerateAll()}
             >
-              资产待绑 {unboundCharacterShotCount + unboundSceneShotCount}
-            </span>
-          )}
-          {report && !embedded && (
-            <span className={`kp__chip ${scoreLow ? 'is-warn' : 'is-ok'}`}>
-              评分 {report.overallScore}
-            </span>
-          )}
-        </div>
-
-        <div className="kp__primary">
-          <button
-            type="button"
-            className="kp__btn is-primary"
-            disabled={generating || !pictureNode || status === 'running'}
-            onMouseDown={stop}
-            onClick={() => void handleGenerateAll()}
-          >
-            <Play size={11} fill="currentColor" />
-            {hasFrames && missingCount > 0 ? `${embedded ? '补线稿' : '补生成'} · ${missingCount}` : embedded ? '全出线稿' : '生成全部'}
-          </button>
-          {!embedded && (
+              <Play size={11} fill="currentColor" />
+              {hasFrames && missingCount > 0 ? `补生成 · ${missingCount}` : '生成全部'}
+            </button>
             <button
               type="button"
               className="kp__btn"
@@ -544,19 +542,17 @@ export function StoryboardPreviewWorkspace({
               <Sparkles size={12} />
               评分
             </button>
-          )}
-          {lowCount > 0 && !embedded && (
-            <button
-              type="button"
-              className="kp__btn is-warn"
-              disabled={generating}
-              onMouseDown={stop}
-              onClick={handleRegenLow}
-            >
-              重生低分 · {lowCount}
-            </button>
-          )}
-          {!embedded && (
+            {lowCount > 0 && (
+              <button
+                type="button"
+                className="kp__btn is-warn"
+                disabled={generating}
+                onMouseDown={stop}
+                onClick={handleRegenLow}
+              >
+                重生低分 · {lowCount}
+              </button>
+            )}
             <button
               type="button"
               className="kp__btn is-solid"
@@ -566,9 +562,25 @@ export function StoryboardPreviewWorkspace({
             >
               提交批审
             </button>
-          )}
+          </div>
         </div>
-      </div>
+      ) : (
+        (missingCount > 0 || unboundCharacterShotCount > 0 || unboundSceneShotCount > 0) && (
+          <div className="kp__top kp__top--embedded-alerts">
+            <div className="kp__chips">
+              {missingCount > 0 && <span className="kp__chip is-warn">缺 {missingCount}</span>}
+              {(unboundCharacterShotCount > 0 || unboundSceneShotCount > 0) && (
+                <span
+                  className="kp__chip is-warn"
+                  title="在角色库/场景库补齐同名资产后，回到分镜网格同步重新绑定"
+                >
+                  资产待绑 {unboundCharacterShotCount + unboundSceneShotCount}
+                </span>
+              )}
+            </div>
+          </div>
+        )
+      )}
 
       {report && !embedded && (
         <div className={`kp__score ${scoreLow ? 'is-low' : 'is-ok'}`}>
@@ -584,7 +596,7 @@ export function StoryboardPreviewWorkspace({
         </div>
       )}
 
-      <div className="kp__toolbar">
+      <div className={`kp__toolbar ${embedded ? 'kp__toolbar--compact' : ''}`}>
         <div className="kp__seg">
           {VIEW_MODES.map((m) => (
             <button
@@ -599,56 +611,127 @@ export function StoryboardPreviewWorkspace({
           ))}
         </div>
         {(payload.viewMode === 'grid' || payload.viewMode === 'storyboard') && (
-          <div className="kp__cols">
-            {GRID_COLS.map((c) => (
-              <button
-                key={c}
-                type="button"
-                onMouseDown={stop}
-                className={payload.gridColumns === c ? 'is-on' : ''}
-                onClick={() => actions.setGridColumns(c)}
-              >
-                {c}列
-              </button>
-            ))}
-          </div>
+          <>
+            <span className="kp__sep" aria-hidden />
+            <div className="kp__cols">
+              {GRID_COLS.map((c) => (
+                <button
+                  key={c}
+                  type="button"
+                  onMouseDown={stop}
+                  className={payload.gridColumns === c ? 'is-on' : ''}
+                  onClick={() => actions.setGridColumns(c)}
+                >
+                  {c}列
+                </button>
+              ))}
+            </div>
+          </>
         )}
         {payload.viewMode === 'grid' && (
-          <div className="kp__seg">
-            <button
-              type="button"
-              onMouseDown={stop}
-              className={!gridEditMode ? 'is-on' : ''}
-              title="已出图合成一张宫格大图"
-              onClick={() => setGridEditMode(false)}
-            >
-              大图
-            </button>
-            <button
-              type="button"
-              onMouseDown={stop}
-              className={gridEditMode ? 'is-on' : ''}
-              title="分格编辑单镜"
-              onClick={() => setGridEditMode(true)}
-            >
-              分格
-            </button>
-          </div>
+          <>
+            <span className="kp__sep" aria-hidden />
+            <div className="kp__seg">
+              <button
+                type="button"
+                onMouseDown={stop}
+                className={!gridEditMode ? 'is-on' : ''}
+                title="已出图合成一张宫格大图"
+                onClick={() => setGridEditMode(false)}
+              >
+                大图
+              </button>
+              <button
+                type="button"
+                onMouseDown={stop}
+                className={gridEditMode ? 'is-on' : ''}
+                title="分格编辑单镜"
+                onClick={() => setGridEditMode(true)}
+              >
+                分格
+              </button>
+            </div>
+          </>
         )}
 
         <div className="kp__toolbar-spacer" />
 
         <div className="kp__toolbar-acts">
-          {!embedded && (
-            <button
-              type="button"
-              className={`kp__btn ${directorPanelOpen ? 'is-on' : ''}`}
-              onMouseDown={stop}
-              onClick={() => setDirectorPanelOpen((v) => !v)}
-            >
-              <Box size={12} />
-              3D
-            </button>
+          <button
+            ref={guideBtnRef}
+            type="button"
+            className={`kp__btn ${guideOpen || guideShowOverlay || guideUseForVideo ? 'is-on' : ''}`}
+            onMouseDown={stop}
+            onClick={() => setGuideOpen((v) => !v)}
+            title="箭头导引与色标过滤"
+          >
+            导引{guideShowOverlay ? '开' : '关'}
+          </button>
+          <VideoPopover
+            open={guideOpen}
+            onClose={() => setGuideOpen(false)}
+            anchorRef={guideBtnRef}
+            width={300}
+            align="end"
+            tone="desk"
+          >
+            <div className="kp__guide-popover" title="箭头仅作导引；关键帧像素干净；出视频用引导图但成片不画箭头">
+              <div className="kp__guide-popover__toggles">
+                <button
+                  type="button"
+                  onMouseDown={stop}
+                  onClick={() => setGuideShowOverlay(!guideShowOverlay)}
+                  className={`sb-guide-toggle ${guideShowOverlay ? 'is-on' : ''}`}
+                >
+                  导引 {guideShowOverlay ? '开' : '关'}
+                </button>
+                <button
+                  type="button"
+                  onMouseDown={stop}
+                  onClick={() => setGuideUseForVideo(!guideUseForVideo)}
+                  className={`sb-guide-toggle ${guideUseForVideo ? 'is-on' : ''}`}
+                  title={
+                    guideUseForVideo
+                      ? '出视频时合成带箭头引导图（成片仍不画箭头）'
+                      : '出视频仅用干净首帧'
+                  }
+                >
+                  视频引导 {guideUseForVideo ? '开' : '关'}
+                </button>
+              </div>
+              <div className="kp__guide-popover__kinds">
+                {GUIDE_LEGEND_SHORT.map((item) => {
+                  const on = guideKindsMap[item.kind] !== false;
+                  return (
+                    <button
+                      key={item.kind}
+                      type="button"
+                      data-k={item.kind}
+                      disabled={!guideShowOverlay && !guideUseForVideo}
+                      onMouseDown={stop}
+                      onClick={() => toggleGuideKind(item.kind)}
+                      className={`sb-guide-kind ${on ? 'is-on' : 'is-off'}`}
+                    >
+                      {item.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          </VideoPopover>
+
+           {!embedded && (
+             <button
+               type="button"
+               className={`kp__btn ${directorPanelOpen ? 'is-on' : ''}`}
+               onMouseDown={stop}
+               onClick={() => setDirectorPanelOpen((v) => !v)}
+               disabled={!DIRECTOR_3D_ENABLED}
+               title={DIRECTOR_3D_ENABLED ? undefined : '3D 导演台暂未开放'}
+             >
+               <Box size={12} />
+               3D 暂未开放
+             </button>
           )}
           <button
             type="button"
@@ -663,6 +746,40 @@ export function StoryboardPreviewWorkspace({
             同步
           </button>
         </div>
+
+        {!embedded && pictureNode ? (
+          <>
+            <span className="kp__sep" aria-hidden />
+            <div className="kp__gen kp__gen--inline">
+              <StoryboardPreviewGenSettings
+                settings={payload.pictureSettings}
+                onChange={actions.updatePictureSettings}
+                hideModel={false}
+                modelWidth={260}
+                endSlot={(
+                  <button
+                    type="button"
+                    className="kp__btn"
+                    disabled={!payload.contactSheetUrl}
+                    onMouseDown={stop}
+                    title={payload.contactSheetUrl ? '下载已合成的宫格/故事板大图' : '尚无合成大图可导出'}
+                    onClick={() => {
+                      if (!payload.contactSheetUrl) return;
+                      const a = document.createElement('a');
+                      a.href = payload.contactSheetUrl;
+                      a.download = `storyboard-${Date.now()}.png`;
+                      a.target = '_blank';
+                      a.rel = 'noreferrer';
+                      a.click();
+                    }}
+                  >
+                    导出图片
+                  </button>
+                )}
+              />
+            </div>
+          </>
+        ) : null}
       </div>
 
       {batchOpen && (
@@ -747,82 +864,6 @@ export function StoryboardPreviewWorkspace({
           </button>
         </div>
       )}
-
-      {pictureNode && (
-        <div className="kp__gen">
-          <StoryboardPreviewGenSettings
-            settings={payload.pictureSettings}
-            onChange={actions.updatePictureSettings}
-            hideModel={embedded}
-            endSlot={(
-              <button
-                type="button"
-                className="kp__btn"
-                disabled={!payload.contactSheetUrl}
-                onMouseDown={stop}
-                title={payload.contactSheetUrl ? '下载已合成的宫格/故事板大图' : '尚无合成大图可导出'}
-                onClick={() => {
-                  if (!payload.contactSheetUrl) return;
-                  const a = document.createElement('a');
-                  a.href = payload.contactSheetUrl;
-                  a.download = `storyboard-${Date.now()}.png`;
-                  a.target = '_blank';
-                  a.rel = 'noreferrer';
-                  a.click();
-                }}
-              >
-                导出图片
-              </button>
-            )}
-          />
-        </div>
-      )}
-
-      <div
-        className="kp__guide"
-        title="箭头仅作导引；关键帧像素干净；出视频用引导图但成片不画箭头"
-      >
-        <button
-          type="button"
-          onMouseDown={stop}
-          onClick={() => setGuideShowOverlay(!guideShowOverlay)}
-          className={`sb-guide-toggle ${guideShowOverlay ? 'is-on' : ''}`}
-        >
-          导引 {guideShowOverlay ? '开' : '关'}
-        </button>
-        <button
-          type="button"
-          onMouseDown={stop}
-          onClick={() => setGuideUseForVideo(!guideUseForVideo)}
-          className={`sb-guide-toggle ${guideUseForVideo ? 'is-on' : ''}`}
-          title={
-            guideUseForVideo
-              ? '出视频时合成带箭头引导图（成片仍不画箭头）'
-              : '出视频仅用干净首帧'
-          }
-        >
-          视频引导 {guideUseForVideo ? '开' : '关'}
-        </button>
-        <span className="sb-guide-legend-sep" aria-hidden>
-          |
-        </span>
-        {GUIDE_LEGEND_SHORT.map((item) => {
-          const on = guideKindsMap[item.kind] !== false;
-          return (
-            <button
-              key={item.kind}
-              type="button"
-              data-k={item.kind}
-              disabled={!guideShowOverlay && !guideUseForVideo}
-              onMouseDown={stop}
-              onClick={() => toggleGuideKind(item.kind)}
-              className={`sb-guide-kind ${on ? 'is-on' : 'is-off'}`}
-            >
-              {item.label}
-            </button>
-          );
-        })}
-      </div>
 
       <div className="kp__stage sb-board">
         {payload.viewMode === 'timeline' && hasFrames && !selectedFrame && !directorPanelOpen && (

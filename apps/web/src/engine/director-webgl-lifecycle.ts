@@ -4,7 +4,12 @@
  * 关导演台强制 dispose Three/WebGL；后台降帧/降分辨率；反复开关稳定。
  * GPU 争用信号：供 2D 画布等组件在导演台活跃时主动降质。
  */
-import type { WebGLRenderer } from 'three';
+type WebGLRenderer = {
+  domElement: HTMLCanvasElement;
+  getContext: () => WebGLRenderingContext | null;
+  setAnimationLoop: (callback: (() => void) | null) => void;
+  dispose: () => void;
+};
 
 export interface DirectorWebGLLifecycle {
   isActive(): boolean;
@@ -50,7 +55,7 @@ export function attachDirectorWebGLLifecycle(renderer: WebGLRenderer): DirectorW
       disposed = true;
       try {
         const ctx = renderer.getContext();
-        const ext = ctx.getExtension('WEBGL_lose_context');
+        const ext = ctx?.getExtension('WEBGL_lose_context');
         if (ext) ext.loseContext();
         renderer.setAnimationLoop(null);
         renderer.dispose();

@@ -65,8 +65,10 @@ export const BlockShell = memo(function BlockShell({
   const verticalBottom = verticalSockets.filter((s) => s.position === 'bottom');
   const hasExecPorts = verticalSockets.length > 0;
   const configuredShowExecPorts = (data as { showExecPorts?: boolean }).showExecPorts;
-  // F-006: 默认仅左右数据口；上下能力口需显式开启
-  const showExecPorts = configuredShowExecPorts ?? false;
+  // F-006: 默认仅左右数据口；上下能力口需显式开启。编剧台（设定板宿主）默认开启顶口以便连图像生成。
+  const showExecPorts =
+    configuredShowExecPorts ??
+    (type === 'script-desk' || type === 'dialogue-sheet');
   const status = (data as { status?: string }).status;
   const blockIndex = (data as { blockIndex?: number }).blockIndex;
   const hideBlockIndex = useStageDeckFlag((s) => s.isEnabled());

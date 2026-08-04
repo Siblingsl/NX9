@@ -1,57 +1,152 @@
 /**
  * AssetReadinessPanel — 编剧台「设定就绪」面板（F-005）。
  *
- * 显示角色/场景缺口，支持一键同步入库。
- * 不出现「设定检查节点」文案，以「设定就绪」为统一入口。
+ * 显示角色/场景缺口；角色入库标签上合并展示主角/配角与缺图提示。
+ * 视觉门槛：主角三视图（或完整设定板）；配角定妆/主参考。
  */
-import { memo, useCallback, useEffect, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import { Check, Loader2, Sparkles, AlertTriangle, BookOpen, Flag, Library } from 'lucide-react';
-import type { ScreenplayPackage } from '@nx9/shared';
+import { normalizeScreenplayBibleCharacters, type ScreenplayPackage } from '@nx9/shared';
 import {
+  classifyBibleCharacterRoles,
+  hasExplicitCharacterRoleLabel,
   inspectBibleAssets,
   syncBibleAssets,
   markScriptAssetReady,
   type AssetReadinessState,
+  type CharacterVisualGap,
+  toggleLibraryCharacterRole,
 } from '../../engine/asset-readiness';
 import { toastSuccess, toastError } from '../../stores/toast';
 import { useAssetLibraryModalUi } from '../../stores/asset-library-modal-ui';
+import { useWorkspaceDocument } from '../../stores/workspace-document';
+
+function characterReadyLabel(
+  name: string,
+  role: 'main' | 'support',
+  missingInLibrary: boolean,
+  gap: CharacterVisualGap | undefined,
+): { text: string; warn: boolean } {
+  const roleLabel = role === 'main' ? '主角' : '配角';
+  if (missingInLibrary) {
+    return { text: `${name} · ${roleLabel} · 未入库`, warn: true };
+  }
+  const bits: string[] = [name, roleLabel];
+  if (gap?.missingTurnaround) bits.push('缺三视图');
+  if (gap?.missingReference) bits.push('缺定妆');
+  if (!gap?.missingTurnaround && !gap?.missingReference) {
+    bits.push('已齐');
+    return { text: bits.join(' · '), warn: false };
+  }
+  return { text: bits.join(' · '), warn: true };
+}
 
 export const AssetReadinessPanel = memo(function AssetReadinessPanel({
   blockId,
   pkg,
   onReadinessChange,
+  onPackageChange,
 }: {
   blockId: string;
   pkg: ScreenplayPackage;
   /** 把最新就绪态写回 script-desk.node.data.assetReadiness */
   onReadinessChange?: (state: AssetReadinessState) => void;
+  /** 清洗同人重复角色后写回 Bible */
+  onPackageChange?: (next: ScreenplayPackage) => void;
+  /** @deprecated 出图不依赖画布连线；保留参数以免调用方报错 */
+  connectedPictureGenId?: string | null;
 }) {
   const [report, setReport] = useState<AssetReadinessState | null>(null);
   const [syncing, setSyncing] = useState(false);
   const openAssetAt = useAssetLibraryModalUi((s) => s.openAt);
 
-  useEffect(() => {
-    if (pkg.status === 'confirmed') {
-      setReport(inspectBibleAssets(pkg));
-    } else {
-      setReport(null);
+  // 监听素材库 tags 的变化，以便角色主/配角切换后即时刷新就绪 UI
+  const libraryCharacters = useWorkspaceDocument((s) => s.characters.characters);
+  const roles = useMemo(
+    () => classifyBibleCharacterRoles(pkg),
+    [pkg, libraryCharacters],
+  );
+  const unlabeledRoleNames = useMemo(
+    () =>
+      pkg.bible.characters
+        .filter((c) => c.name.trim() && !hasExplicitCharacterRoleLabel(c.identity))
+        .map((c) => c.name.trim()),
+    [pkg],
+  );
+  const gapByName = useMemo(() => {
+    const map = new Map<string, CharacterVisualGap>();
+    for (const gap of report?.characterVisualGaps ?? []) {
+      map.set(gap.name, gap);
     }
-  }, [pkg]);
+    return map;
+  }, [report?.characterVisualGaps]);
+
+  useEffect(() => {
+    if (pkg.status !== 'confirmed') {
+      setReport(null);
+      return;
+    }
+    // 历史脏数据：同人拆成「李稳」+「李稳 (化名陈默)」时先合并再检
+    const normalized = normalizeScreenplayBibleCharacters(pkg);
+    if (normalized !== pkg) {
+      onPackageChange?.(normalized);
+      return;
+    }
+    setReport(inspectBibleAssets(pkg));
+  }, [onPackageChange, pkg]);
+
+  const handleToggleRole = useCallback((name: string) => {
+    if (!pkg) return;
+    const { ok, nextRole } = toggleLibraryCharacterRole(name);
+    if (!ok) {
+      toastError('该角色未在素材库中，无法切换主/配角');
+      return;
+    }
+    const normalized = normalizeScreenplayBibleCharacters(pkg);
+    const next = inspectBibleAssets(normalized);
+    setReport(next);
+    onReadinessChange?.(next);
+    toastSuccess(`已将「${name}」切换为${nextRole === 'main' ? '主角' : '配角'}`);
+  }, [onReadinessChange, pkg]);
 
   const handleSync = useCallback(async () => {
     if (!pkg) return;
     setSyncing(true);
     try {
-      const result = syncBibleAssets(pkg);
+      const normalized = normalizeScreenplayBibleCharacters(pkg);
+      if (normalized !== pkg) onPackageChange?.(normalized);
+      const result = syncBibleAssets(normalized);
       setReport(result);
       onReadinessChange?.(result);
-      toastSuccess(`已同步 ${result.syncedCharacters} 个角色、${result.syncedScenes} 个场景`);
+      const created = result.syncedCharacters ?? 0;
+      const filled = result.filledCharacters ?? 0;
+      const scenes = result.syncedScenes ?? 0;
+      const visualLeft =
+        (result.missingCharacterRefs?.length ?? 0) +
+        (result.missingCharacterTurnarounds?.length ?? 0);
+      if (created + filled + scenes === 0) {
+        toastSuccess(
+          visualLeft > 0
+            ? `角色/场景已在库中，文本无需补全。剩余 ${visualLeft} 处缺图，请打开素材库生成定妆或三视图`
+            : '角色/场景已在库中，文本无需补全',
+        );
+      } else if (filled > 0) {
+        toastSuccess(
+          `已同步新建 ${created} 个角色、补全 ${filled} 个角色、${scenes} 个场景` +
+            (visualLeft > 0 ? `；仍有 ${visualLeft} 处缺图需在素材库完成` : ''),
+        );
+      } else {
+        toastSuccess(
+          `已同步 ${created} 个角色、${scenes} 个场景` +
+            (visualLeft > 0 ? `；仍有 ${visualLeft} 处缺图需在素材库完成` : ''),
+        );
+      }
     } catch (err) {
       toastError(err instanceof Error ? err.message : '同步失败');
     } finally {
       setSyncing(false);
     }
-  }, [onReadinessChange, pkg]);
+  }, [onPackageChange, onReadinessChange, pkg]);
 
   const handleMarkReady = useCallback((force = false) => {
     const base = report ?? inspectBibleAssets(pkg);
@@ -64,12 +159,18 @@ export const AssetReadinessPanel = memo(function AssetReadinessPanel({
       missingScenes: force ? base.missingScenes : [],
       missingCostumes: force ? base.missingCostumes : [],
       missingProps: force ? base.missingProps : [],
+      missingCharacterRefs: force ? base.missingCharacterRefs : [],
+      missingCharacterTurnarounds: force ? base.missingCharacterTurnarounds : [],
+      characterVisualGaps: force ? base.characterVisualGaps : [],
       ready: true,
     };
     setReport(state);
     onReadinessChange?.(state);
+    const hasVisualGap =
+      (base.missingCharacterRefs?.length ?? 0) > 0 ||
+      (base.missingCharacterTurnarounds?.length ?? 0) > 0;
     toastSuccess(
-      force && (base.missingCharacters.length > 0 || base.missingScenes.length > 0)
+      force && (base.missingCharacters.length > 0 || base.missingScenes.length > 0 || hasVisualGap)
         ? '已强制标记设定就绪'
         : '已标记设定就绪',
     );
@@ -83,7 +184,7 @@ export const AssetReadinessPanel = memo(function AssetReadinessPanel({
         <BookOpen size={16} aria-hidden />
         <p className="sd2-readiness-gate__title">设定就绪尚未解锁</p>
         <p className="sd2-readiness-gate__desc">
-          本页检查的是设定中人物/场景是否已入库、能否交给分镜台。
+          本页检查人物/场景是否入库，以及主角三视图、配角定妆是否齐备。
           请先点顶栏「确认成稿」，再回到这里查看缺口并同步到资产库。
         </p>
         <p className="sd2-readiness-gate__meta">
@@ -102,7 +203,14 @@ export const AssetReadinessPanel = memo(function AssetReadinessPanel({
     );
   }
 
-  const hasMissing = report.missingCharacters.length > 0 || report.missingScenes.length > 0;
+  const hasMissing =
+    report.missingCharacters.length > 0 || report.missingScenes.length > 0;
+  const hasVisualGap =
+    (report.missingCharacterRefs?.length ?? 0) > 0 ||
+    (report.missingCharacterTurnarounds?.length ?? 0) > 0;
+  const hasAnyGap = hasMissing || hasVisualGap;
+  /** 有角色文本可补全时也允许同步（不仅限「未入库」） */
+  const canSync = hasMissing || report.requiredCharacters.length > 0;
 
   return (
     <div className="sd2-ready-body" data-block-id={blockId}>
@@ -119,23 +227,50 @@ export const AssetReadinessPanel = memo(function AssetReadinessPanel({
         )}
       </div>
 
-      {/* 角色 */}
+      {/* 角色入库（含主角/配角与缺图提示） */}
       <div className="sd2-ready-section">
-        <p className="sd2-ready-section__title">角色（{report.requiredCharacters.length}）</p>
+        <p className="sd2-ready-section__title">角色入库（{report.requiredCharacters.length}）</p>
         {report.requiredCharacters.length === 0 ? (
           <p className="sd2-ready-section__empty">设定中无角色</p>
         ) : (
           <div className="sd2-ready-tags">
-            {report.requiredCharacters.map((name) => (
-              <span
-                key={name}
-                className={`sd2-ready-tag ${report.missingCharacters.includes(name) ? 'sd2-ready-tag--warn' : 'sd2-ready-tag--ok'}`}
-              >
-                {name}
-                {report.missingCharacters.includes(name) ? ' ⚠' : ' ✓'}
-              </span>
-            ))}
+            {report.requiredCharacters.map((name) => {
+              const role = roles.get(name) ?? 'support';
+              const missingInLibrary = report.missingCharacters.includes(name);
+              const gap = gapByName.get(name);
+              const label = characterReadyLabel(name, role, missingInLibrary, gap);
+              return (
+                <button
+                  type="button"
+                  key={name}
+                  onClick={(e) => {
+                    // 缺失角色：必须先进素材库建档/补信息
+                    if (missingInLibrary) {
+                      openAssetAt({ tab: 'character', itemId: name });
+                      return;
+                    }
+                    // Ctrl/⌘/Shift 点击仍可打开详情
+                    if (e.metaKey || e.ctrlKey || e.shiftKey) {
+                      openAssetAt({ tab: 'character', itemId: name });
+                      return;
+                    }
+                    handleToggleRole(name);
+                  }}
+                  className={`sd2-ready-tag sd2-ready-tag--clickable ${label.warn ? 'sd2-ready-tag--warn' : 'sd2-ready-tag--ok'}`}
+                  title="点击切换主/配角；Ctrl/⌘/Shift 打开素材库"
+                >
+                  {label.text}
+                  {label.warn ? ' ⚠' : ' ✓'}
+                </button>
+              );
+            })}
           </div>
+        )}
+        {unlabeledRoleNames.length > 0 && (
+          <p className="sd2-ready-section__empty" role="status">
+            {unlabeledRoleNames.length} 人未标明主角/配角，已按配角处理（只要定妆、不拦三视图）。
+            请重新「抽取设定」或在素材库身份中写明「主角/女主/男主」或「配角」。
+          </p>
         )}
       </div>
 
@@ -203,7 +338,7 @@ export const AssetReadinessPanel = memo(function AssetReadinessPanel({
 
       {/* 操作按钮 */}
       <div className="sd2-ready-actions">
-        {hasMissing && (
+        {canSync && (
           <button
             type="button"
             disabled={syncing}
@@ -222,7 +357,7 @@ export const AssetReadinessPanel = memo(function AssetReadinessPanel({
           <Library size={12} />
           打开素材库
         </button>
-        {!hasMissing || report.ready ? (
+        {!hasAnyGap || report.ready ? (
           <button
             type="button"
             onClick={() => handleMarkReady(false)}

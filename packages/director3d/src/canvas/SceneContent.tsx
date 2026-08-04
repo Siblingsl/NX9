@@ -1,6 +1,6 @@
-import { Grid, OrbitControls, PerspectiveCamera, TransformControls } from '@react-three/drei';
+import { Grid, Html, OrbitControls, PerspectiveCamera, TransformControls } from '@react-three/drei';
 import { useThree } from '@react-three/fiber';
-import { Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import React, { Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { Group } from 'three';
 import { MathUtils, Vector3 } from 'three';
 import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib';
@@ -15,6 +15,29 @@ import { useDirectorStore } from '../store/directorStore';
 import { StageActor } from '../runtime/StageActor';
 import { ImportedMesh } from '../runtime/ImportedMesh';
 import { PanoramaBackground } from '../runtime/PanoramaBackground';
+
+class AssetLoadBoundary extends React.Component<
+  { label: string; children: React.ReactNode },
+  { failed: boolean }
+> {
+  state = { failed: false };
+
+  static getDerivedStateFromError() {
+    return { failed: true };
+  }
+
+  render() {
+    if (!this.state.failed) return this.props.children;
+    return (
+      <Html center>
+        <div style={{ padding: 10, borderRadius: 8, background: 'rgba(20, 20, 24, .9)', color: '#fff', fontSize: 11, whiteSpace: 'nowrap' }}>
+          {this.props.label}加载失败
+          <button type="button" style={{ marginLeft: 8 }} onClick={() => this.setState({ failed: false })}>重试</button>
+        </div>
+      </Html>
+    );
+  }
+}
 
 function PropMesh({ type, color }: { type: GeometryPrimitiveType; color: string }) {
   const mat = <meshStandardMaterial color={color} />;
@@ -121,7 +144,7 @@ function SceneObject({
             posePresetId={object.posePresetId}
           />
         ) : object.kind === 'mesh' && object.meshUrl ? (
-          <ImportedMesh url={object.meshUrl} />
+          <AssetLoadBoundary label={object.name}><ImportedMesh url={object.meshUrl} /></AssetLoadBoundary>
         ) : (
           <PropMesh type={object.geometryType ?? 'box'} color={object.color ?? '#888'} />
         )}
@@ -149,12 +172,14 @@ function CameraMarker({
   const transformMode = useDirectorStore((s) => s.transformMode);
   const updateTransform = useDirectorStore((s) => s.updateObjectTransform);
   const [px, py, pz] = camera.transform.position;
+  const [rx, ry, rz] = camera.transform.rotation;
 
   return (
     <>
       <group
         ref={groupRef}
         position={[px, py, pz]}
+        rotation={[rx, ry, rz].map((d) => MathUtils.degToRad(d)) as [number, number, number]}
         onClick={(e) => {
           e.stopPropagation();
           onSelect();
@@ -172,7 +197,14 @@ function CameraMarker({
         onChange={() => {
           const g = groupRef.current;
           if (!g) return;
-          updateTransform(camera.id, { position: [g.position.x, g.position.y, g.position.z] });
+           updateTransform(camera.id, {
+             position: [g.position.x, g.position.y, g.position.z],
+             rotation: [
+               MathUtils.radToDeg(g.rotation.x),
+               MathUtils.radToDeg(g.rotation.y),
+               MathUtils.radToDeg(g.rotation.z),
+             ],
+           });
         }}
       />
     </>
@@ -216,7 +248,7 @@ export function SceneContent({
   return (
     <>
       {project.panorama?.url && (
-        <PanoramaBackground url={project.panorama.url} yaw={project.panorama.yaw} />
+        <AssetLoadBoundary label="全景图"><PanoramaBackground url={project.panorama.url} yaw={project.panorama.yaw} /></AssetLoadBoundary>
       )}
       <ambientLight intensity={project.panorama ? 0.35 : 0.55} />
       <directionalLight position={[5, 10, 4]} intensity={0.9} castShadow />
@@ -228,6 +260,16 @@ export function SceneContent({
           <planeGeometry args={[40, 40]} />
           <meshStandardMaterial color="#1e2430" transparent opacity={project.scene.groundOpacity} />
         </mesh>
+      )}
+
+      {project.objects.length === 0 && (
+        <Html center>
+          <div style={{ padding: 12, borderRadius: 10, background: 'rgba(20, 20, 24, .88)', color: '#fff', fontSize: 11, textAlign: 'center', width: 220 }}>
+            当前镜头还没有角色或道具
+            <br />
+            请从镜头列表载入角色，或使用“添加”创建占位演员。
+          </div>
+        </Html>
       )}
 
       {project.objects.map((obj) => (

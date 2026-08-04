@@ -115,6 +115,21 @@ describe('F-005 soft/hard 预检与接线源码守卫', () => {
     expect(src.includes('inspectBibleAssets')).toBe(true);
   });
 
+  it('AssetReadinessPanel：角色入库合并主角/配角与缺图，无独立角色视觉/图像连接', () => {
+    const src = readFileSync(
+      resolve(root, 'apps/web/src/components/asset/AssetReadinessPanel.tsx'),
+      'utf8',
+    );
+    expect(src).toContain('characterReadyLabel');
+    expect(src).toContain('classifyBibleCharacterRoles');
+    expect(src).toContain('缺三视图');
+    expect(src).toContain('缺定妆');
+    expect(src).toContain('未入库');
+    expect(src).not.toContain('角色视觉 · 主角三视图');
+    expect(src).not.toContain('图像生成连接');
+    expect(src).toContain('同步缺失项到库');
+  });
+
   it('StoryboardDesk 调用 runStoryboardPreflight 且硬模式禁用拆镜', () => {
     const src = readFileSync(
       resolve(root, 'apps/web/src/blocks/craft/storyboard-desk/use-storyboard-desk.tsx'),

@@ -13,12 +13,21 @@ interface GenSettingsPillsProps {
   className?: string;
   /** 内联标签，用于 Prompt 框底部紧凑布局 */
   compact?: boolean;
+  disabled?: boolean;
 }
 
-function GenSettingsPills({ label, options, value, onChange, className = '', compact = false }: GenSettingsPillsProps) {
+function GenSettingsPills({
+  label,
+  options,
+  value,
+  onChange,
+  className = '',
+  compact = false,
+  disabled = false,
+}: GenSettingsPillsProps) {
   if (compact) {
     return (
-      <div className={`flex items-center gap-1 min-w-0 ${className}`}>
+      <div className={`flex items-center gap-1 min-w-0 ${className} ${disabled ? 'opacity-45' : ''}`}>
         <span className="text-[10px] text-ink/50 shrink-0">{label}</span>
         <div className="flex flex-wrap gap-0.5">
           {options.map((opt) => (
@@ -26,8 +35,9 @@ function GenSettingsPills({ label, options, value, onChange, className = '', com
               key={opt.id}
               type="button"
               title={opt.id}
+              disabled={disabled}
               onClick={() => onChange(opt.id)}
-              className={`nodrag nopan text-[10px] px-1.5 py-0.5 rounded-full border transition-colors ${
+              className={`nodrag nopan text-[10px] px-1.5 py-0.5 rounded-full border transition-colors disabled:cursor-not-allowed disabled:pointer-events-none ${
                 value === opt.id
                   ? 'bg-brand/10 text-brand border-brand/30'
                   : 'border-line text-ink/60 hover:border-brand/30 hover:text-ink'
@@ -42,7 +52,7 @@ function GenSettingsPills({ label, options, value, onChange, className = '', com
   }
 
   return (
-    <div className={`space-y-1 ${className}`}>
+    <div className={`space-y-1 ${className} ${disabled ? 'opacity-45' : ''}`}>
       <p className="text-[10px] text-ink/50">{label}</p>
       <div className="flex flex-wrap gap-1">
         {options.map((opt) => (
@@ -50,8 +60,9 @@ function GenSettingsPills({ label, options, value, onChange, className = '', com
             key={opt.id}
             type="button"
             title={opt.id}
+            disabled={disabled}
             onClick={() => onChange(opt.id)}
-            className={`nodrag nopan text-[10px] px-2 py-1 rounded-full border transition-colors ${
+            className={`nodrag nopan text-[10px] px-2 py-1 rounded-full border transition-colors disabled:cursor-not-allowed disabled:pointer-events-none ${
               value === opt.id
                 ? 'bg-brand/10 text-brand border-brand/30'
                 : 'border-line text-ink/60 hover:border-brand/30 hover:text-ink'

@@ -1,6 +1,12 @@
-import React from 'react';
+import React, { useRef, useState } from 'react';
+import { CircleHelp } from 'lucide-react';
+import {
+  resolveStoryboardPreviewPictureSettings,
+  type StoryboardPreviewPictureSettings,
+} from '@nx9/shared';
 import { StoryboardPreviewWorkspace } from '../../../engine/stage-deck/chrome/attached-workspace/storyboard-preview/StoryboardPreviewWorkspace';
-import { ComposerModelSelect } from '../../../engine/stage-deck/chrome/attached-workspace/composer/ComposerModelSelect';
+import { StoryboardPreviewGenSettings } from '../../../engine/stage-deck/chrome/attached-workspace/storyboard-preview/StoryboardPreviewGenSettings';
+import { VideoPopover } from '../../../engine/stage-deck/chrome/attached-workspace/generation/video/VideoPopover';
 
 interface ComposePanelProps {
   blockId: string;
@@ -20,8 +26,6 @@ interface ComposePanelProps {
   composeViewTab: 'preview' | 'sheet';
   setComposeViewTab: React.Dispatch<React.SetStateAction<'preview' | 'sheet'>>;
   setStudioTab: React.Dispatch<React.SetStateAction<any>>;
-  composePictureModel: string | undefined;
-  composeModelOptions: Array<{ id: string; label: string }>;
   connectedPictureGenId: string | null | undefined;
   currentEpisodeShotIds: Set<string>;
   previewPayloadEarly: any;
@@ -31,8 +35,11 @@ interface ComposePanelProps {
   generateBatchGridLineArt: (scope?: 'visible' | 'all') => Promise<void>;
   generateStoryboardSheet: (force?: boolean) => Promise<void>;
   downloadContactSheet: () => void;
-  handleComposeModelChange: (model: string) => void;
+  updatePictureSettings: (patch: Partial<StoryboardPreviewPictureSettings>) => void;
 }
+
+const COMPOSE_HINT =
+  '线稿确认构图为主路径；「故事板大图」将本集线稿拼成专业分镜总览板（含镜号/运镜注/对白）。整集工业级关键帧在导演台批出。';
 
 const ComposePanel: React.FC<ComposePanelProps> = ({
   blockId,
@@ -51,9 +58,7 @@ const ComposePanel: React.FC<ComposePanelProps> = ({
   contactSheetUrl,
   composeViewTab,
   setComposeViewTab,
-  setStudioTab,
-  composePictureModel,
-  composeModelOptions,
+  setStudioTab: _setStudioTab,
   connectedPictureGenId,
   currentEpisodeShotIds,
   previewPayloadEarly,
@@ -63,65 +68,122 @@ const ComposePanel: React.FC<ComposePanelProps> = ({
   generateBatchGridLineArt,
   generateStoryboardSheet,
   downloadContactSheet,
-  handleComposeModelChange,
+  updatePictureSettings,
 }) => {
   const previewOk = (previewPayloadEarly?.frames ?? []).filter((f: any) => f.imageUrl?.trim()).length;
+  const pictureSettings = resolveStoryboardPreviewPictureSettings(previewPayloadEarly);
+  const infoBtnRef = useRef<HTMLButtonElement>(null);
+  const [infoOpen, setInfoOpen] = useState(false);
+
+  const statusText = sheetComposing
+    ? '正在合成故事板大图…'
+    : generatingShotId !== null
+      ? `单镜线稿 · ${visibleShots.find((s) => s.id === generatingShotId)?.sceneCode || `#${visibleShots.find((s) => s.id === generatingShotId)?.index ?? ''}`}`
+      : batchMode === 'line-art'
+        ? `批量线稿 ${batchProgress || ''}`.trim()
+        : batchMode === 'grid-line-art'
+          ? `宫格线稿 ${batchProgress || ''}`.trim()
+          : `覆盖 ${Math.round(compositionStats.coverage * 100)}% · ${previewOk}/${compositionStats.total || visibleShots.length}`;
+
+  const busyGen = batchRunning || sheetComposing || generatingShotId !== null;
 
   return (
     <div className="sg3-pane">
-      <div className="sg3-toolbar">
-        <div className="sg3-toolbar__meta">
-          <span title="主路径：推荐在此批量出线稿；卡片线稿为快捷入口">
-            主路径
-          </span>
-          {' · '}
-          {sheetComposing
-            ? '正在合成故事板大图…'
-            : generatingShotId !== null
-              ? `单镜线稿进行中 · ${visibleShots.find((s) => s.id === generatingShotId)?.sceneCode || `#${visibleShots.find((s) => s.id === generatingShotId)?.index ?? ''}`}`
-              : batchMode === 'line-art'
-                ? `批量线稿 ${batchProgress || ''}`.trim()
-                : batchMode === 'grid-line-art'
-                  ? `宫格线稿 ${batchProgress || ''}`.trim()
-                  : `构图覆盖 ${Math.round(compositionStats.coverage * 100)}%`}
-        </div>
-        <div className="sg3-toolbar__acts">
-          <button
-            type="button"
-            className="sg3-btn sg3-btn--primary"
-            disabled={!payload || batchRunning || sheetComposing || generatingShotId !== null || visibleShots.length === 0}
-            title={generatingShotId !== null ? '单镜生成中' : undefined}
-            onClick={() => void generateBatchLineArt('visible')}
-          >
-            {batchMode === 'line-art' ? `线稿 ${batchProgress}` : `批量线稿 · ${visibleShots.length}`}
-          </button>
-          {batchRunning ? (
+      <div className="sg3-compose-chrome">
+        <div className="sg3-compose-chrome__row">
+          <div className="sg3-compose-chrome__left">
+            <div className="sg3-compose-tabs" role="tablist" aria-label="构图视图">
+              <button
+                type="button"
+                role="tab"
+                aria-selected={composeViewTab === 'preview'}
+                className={`sg3-compose-tabs__btn ${composeViewTab === 'preview' ? 'is-on' : ''}`}
+                onClick={() => setComposeViewTab('preview')}
+              >
+                线稿预览
+                {previewOk > 0 ? <em>{previewOk}</em> : null}
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={composeViewTab === 'sheet'}
+                className={`sg3-compose-tabs__btn ${composeViewTab === 'sheet' ? 'is-on' : ''}`}
+                onClick={() => setComposeViewTab('sheet')}
+              >
+                故事板大图
+                {contactSheetUrl ? <em>已有</em> : null}
+              </button>
+            </div>
+
+            <span className="sg3-compose-chrome__status" title="主路径：推荐在此批量出线稿；卡片线稿为快捷入口">
+              {statusText}
+            </span>
+
+            {!connectedPictureGenId ? (
+              <span className="sg3-compose-chrome__warn" title="请从能力口连接「图像生成」节点后再出线稿">
+                未连图像
+              </span>
+            ) : null}
+
             <button
+              ref={infoBtnRef}
               type="button"
-              className="sg3-btn sg3-btn--danger"
-              onClick={() => lineArtAbortRef.current?.abort()}
+              className="sg3-compose-chrome__info"
+              aria-label="构图说明"
+              title="构图说明"
+              onClick={() => setInfoOpen((v) => !v)}
             >
-              停止
+              <CircleHelp size={14} strokeWidth={2} />
             </button>
-          ) : (
-            <>
+            <VideoPopover open={infoOpen} onClose={() => setInfoOpen(false)} anchorRef={infoBtnRef} width={280}>
+              <p className="sg3-compose-chrome__info-body">{COMPOSE_HINT}</p>
+            </VideoPopover>
+          </div>
+
+          <div className="sg3-compose-chrome__right">
+            <div className="sg3-compose-chrome__acts">
+              {!batchRunning ? (
+                <div className="sg3-compose-scope" role="group" aria-label="线稿范围">
+                  <button
+                    type="button"
+                    className={`sg3-compose-scope__btn ${batchScopeMode === 'missing' ? 'is-on' : ''}`}
+                    title="缺图优先：仅对缺图镜出线稿"
+                    onClick={() => setBatchScopeMode('missing')}
+                  >
+                    缺图
+                  </button>
+                  <button
+                    type="button"
+                    className={`sg3-compose-scope__btn ${batchScopeMode === 'all' ? 'is-on' : ''}`}
+                    title="全部覆盖：对所有镜重新出线稿"
+                    onClick={() => setBatchScopeMode('all')}
+                  >
+                    全部
+                  </button>
+                </div>
+              ) : null}
+
               <button
                 type="button"
-                className={`sg3-btn sg3-btn--ghost ${batchScopeMode === 'missing' ? 'is-on' : ''}`}
-                title="缺图优先：仅对缺图镜出线稿"
-                onClick={() => setBatchScopeMode('missing')}
+                className="sg3-btn sg3-btn--primary"
+                disabled={!payload || busyGen || visibleShots.length === 0}
+                title={generatingShotId !== null ? '单镜生成中' : '批量出线稿'}
+                onClick={() => void generateBatchLineArt('visible')}
               >
-                缺图优先
+                {batchMode === 'line-art' ? `线稿 ${batchProgress}` : `批量线稿 · ${visibleShots.length}`}
               </button>
-              <button
-                type="button"
-                className={`sg3-btn sg3-btn--ghost ${batchScopeMode === 'all' ? 'is-on' : ''}`}
-                title="全部覆盖：对所有镜重新出线稿"
-                onClick={() => setBatchScopeMode('all')}
-              >
-                全部覆盖
-              </button>
-              {lastBatchFailures.length > 0 && (
+
+              {batchRunning ? (
+                <button
+                  type="button"
+                  className="sg3-btn sg3-btn--danger"
+                  onClick={() => lineArtAbortRef.current?.abort()}
+                >
+                  停止
+                </button>
+              ) : null}
+
+              {!batchRunning && lastBatchFailures.length > 0 ? (
                 <button
                   type="button"
                   className="sg3-btn sg3-btn--ghost"
@@ -129,78 +191,62 @@ const ComposePanel: React.FC<ComposePanelProps> = ({
                   disabled={!payload || visibleShots.length === 0 || deskBusy}
                   onClick={() => void retryFailedLineArt()}
                 >
-                  重试失败 · {lastBatchFailures.length}
+                  重试 · {lastBatchFailures.length}
                 </button>
-              )}
-            </>
-          )}
-          <button
-            type="button"
-            className="sg3-btn sg3-btn--ghost"
-            disabled={!payload || batchRunning || sheetComposing || generatingShotId !== null || visibleShots.length === 0}
-            title={generatingShotId !== null ? '单镜生成中' : '多镜提示词合成一张宫格再切回各镜，节省出图次数'}
-            onClick={() => void generateBatchGridLineArt('visible')}
-          >
-            {batchMode === 'grid-line-art'
-              ? `宫格 ${batchProgress}`
-              : `宫格线稿 · ${Math.min(9, visibleShots.length) || 0}`}
-          </button>
-          <button
-            type="button"
-            className="sg3-btn sg3-btn--ghost"
-            disabled={!payload || batchRunning || sheetComposing || visibleShots.length === 0 || deskBusy}
-            onClick={() => {
-              setComposeViewTab('sheet');
-              void generateStoryboardSheet(true);
-            }}
-          >
-            {sheetComposing ? '合成中…' : contactSheetUrl ? '重出故事板' : '生成故事板大图'}
-          </button>
-          <span className="sg3-toolbar__spacer" style={{ flex: 1, minWidth: 16 }} />
-          <ComposerModelSelect
-            value={composePictureModel ?? ''}
-            options={
-              composeModelOptions.length > 0
-                ? composeModelOptions
-                : [{ id: composePictureModel ?? '', label: '未配置图片连接 · 点此去设置' }]
-            }
-            onChange={handleComposeModelChange}
-            width={220}
-            tone="desk"
-          />
-        </div>
-      </div>
-      {!connectedPictureGenId ? (
-        <p className="sg3-hint" style={{ color: 'var(--desk-warn)', fontWeight: 600 }}>
-          未连接「图像生成」节点 · 请从能力口连线后再出线稿
-        </p>
-      ) : (
-        <p className="sg3-hint">
-         线稿确认构图为主路径；「故事板大图」将本集线稿拼成专业分镜总览板（含镜号/运镜注/对白）。整集工业级关键帧在导演台批出。
-        </p>
-      )}
+              ) : null}
 
-      <div className="sg3-compose-tabs" role="tablist" aria-label="构图视图">
-        <button
-          type="button"
-          role="tab"
-          aria-selected={composeViewTab === 'preview'}
-          className={`sg3-compose-tabs__btn ${composeViewTab === 'preview' ? 'is-on' : ''}`}
-          onClick={() => setComposeViewTab('preview')}
-        >
-           线稿预览
-          {previewOk > 0 ? <em>{previewOk}</em> : null}
-        </button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={composeViewTab === 'sheet'}
-          className={`sg3-compose-tabs__btn ${composeViewTab === 'sheet' ? 'is-on' : ''}`}
-          onClick={() => setComposeViewTab('sheet')}
-        >
-          本集故事板大图
-          {contactSheetUrl ? <em>已有</em> : null}
-        </button>
+              <button
+                type="button"
+                className="sg3-btn sg3-btn--primary"
+                disabled={!payload || busyGen || visibleShots.length === 0}
+                title={
+                  generatingShotId !== null
+                    ? '单镜生成中'
+                    : '固定 2×2 四宫格出图再切回各镜；不足 4 镜白板补齐，节省出图次数'
+                }
+                onClick={() => void generateBatchGridLineArt('visible')}
+              >
+                {batchMode === 'grid-line-art'
+                  ? `宫格 ${batchProgress}`
+                  : `宫格 · ${Math.min(4, visibleShots.length) || 0}`}
+              </button>
+
+              <button
+                type="button"
+                className="sg3-btn sg3-btn--ghost"
+                disabled={!payload || batchRunning || sheetComposing || visibleShots.length === 0 || deskBusy}
+                title={contactSheetUrl ? '重新合成故事板大图' : '生成本集故事板大图'}
+                onClick={() => {
+                  setComposeViewTab('sheet');
+                  void generateStoryboardSheet(true);
+                }}
+              >
+                {sheetComposing ? '合成中…' : contactSheetUrl ? '重出故事板' : '故事板'}
+              </button>
+
+              <button
+                type="button"
+                className="sg3-btn sg3-btn--ghost"
+                disabled={!contactSheetUrl}
+                title={contactSheetUrl ? '下载已合成的宫格/故事板大图' : '尚无合成大图可导出'}
+                onClick={downloadContactSheet}
+              >
+                导出图片
+              </button>
+            </div>
+
+            <span className="sg3-compose-chrome__sep" aria-hidden />
+
+            <div className="sg3-compose-chrome__gen" aria-label="出图参数">
+              <StoryboardPreviewGenSettings
+                settings={pictureSettings}
+                onChange={updatePictureSettings}
+                modelWidth={148}
+                compact
+              />
+            </div>
+          </div>
+        </div>
       </div>
 
       {composeViewTab === 'preview' ? (
@@ -222,30 +268,12 @@ const ComposePanel: React.FC<ComposePanelProps> = ({
                   <button
                     type="button"
                     className="sg3-btn sg3-btn--ghost"
-                    disabled={sheetComposing}
-                    onClick={downloadContactSheet}
-                  >
-                    下载 PNG
-                  </button>
-                  <button
-                    type="button"
-                    className="sg3-btn sg3-btn--ghost"
                     disabled={sheetComposing || batchRunning}
                     onClick={() => void generateStoryboardSheet(true)}
                   >
                     {sheetComposing ? '合成中…' : '重新合成'}
                   </button>
-          {!payload && (
-            <div className="sg3-onboard" style={{ marginTop: 20, padding: 16, background: 'rgba(0,0,0,0.15)', borderRadius: 12, fontSize: 13, lineHeight: 1.8 }}>
-              <p className="sg3-onboard__hint">三步完成分镜准备：</p>
-              <ol style={{ paddingLeft: 20, margin: '8px 0' }}>
-                <li><b>拆镜</b>：从编剧台成稿自动生成镜表</li>
-                <li><b>出线稿</b>：在构图 Tab 批量生成分镜线稿</li>
-                <li><b>确认交接</b>：满足覆盖率后确认，并打开导演台</li>
-              </ol>
-            </div>
-          )}
-        </div>
+                </div>
               </div>
               <a
                 className="sg3-sheet__preview"
@@ -273,6 +301,16 @@ const ComposePanel: React.FC<ComposePanelProps> = ({
               </button>
             </div>
           )}
+          {!payload ? (
+            <div className="sg3-onboard" style={{ marginTop: 20, padding: 16, background: 'rgba(0,0,0,0.15)', borderRadius: 12, fontSize: 13, lineHeight: 1.8 }}>
+              <p className="sg3-onboard__hint">三步完成分镜准备：</p>
+              <ol style={{ paddingLeft: 20, margin: '8px 0' }}>
+                <li><b>拆镜</b>：从编剧台成稿自动生成镜表</li>
+                <li><b>出线稿</b>：在构图 Tab 批量生成分镜线稿</li>
+                <li><b>确认交接</b>：满足覆盖率后确认，并打开导演台</li>
+              </ol>
+            </div>
+          ) : null}
         </div>
       )}
     </div>

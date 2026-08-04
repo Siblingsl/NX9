@@ -44,6 +44,9 @@ export function resolveUpstreamChainDesk(
     const data = sourceNode.data as Record<string, unknown>;
     const chain = readChainStoryboard(data);
     if (chain) return sourceNode.id;
+    if (sourceNode.type === 'storyboard-desk' || sourceNode.type === 'storyboard-preview' || sourceNode.type === 'story-grid') {
+      return sourceNode.id;
+    }
   }
   return null;
 }

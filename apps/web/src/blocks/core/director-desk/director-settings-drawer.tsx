@@ -9,6 +9,7 @@ interface DirectorSettingsDrawerProps {
   forceSceneRef: boolean;
   styleLock: boolean;
   prefer3dRef: boolean;
+  preferLineArtRef: boolean;
   concurrency: number;
   maxRetries: number;
   stylePrompt: string;
@@ -30,6 +31,7 @@ export function DirectorSettingsDrawer({
   forceSceneRef,
   styleLock,
   prefer3dRef,
+  preferLineArtRef,
   concurrency,
   maxRetries,
   stylePrompt,
@@ -81,6 +83,10 @@ export function DirectorSettingsDrawer({
             <label className="dd2-settings-check">
               <input type="checkbox" checked={prefer3dRef} onChange={(e) => updateNodeData(blockId, { prefer3dRef: e.target.checked })} />
               优先 3D
+            </label>
+            <label className="dd2-settings-check">
+              <input type="checkbox" checked={preferLineArtRef} onChange={(e) => updateNodeData(blockId, { preferLineArtRef: e.target.checked })} />
+              线稿构图参考
             </label>
           </div>
         </div>

@@ -12,6 +12,7 @@ interface Shot {
   durationSec?: number;
   firstFrameAssetId?: string | null;
   keyframeReviewNote?: string;
+  keyframePreviousUrl?: string | null;
 }
 
 interface DirectorDeliverTabProps {
@@ -22,6 +23,9 @@ interface DirectorDeliverTabProps {
   running: boolean;
   handleApproveShot: (shotId: string) => void;
   handleApproveAll: () => void;
+  handleUnapproveShot: (shotId: string) => void;
+  handleUnapproveAll: () => Promise<void>;
+  handleRestoreShot: (shotId: string) => void;
   handleRejectShot: (shotId: string, regenerate: boolean) => Promise<void>;
   rejectDrafts: Record<string, string>;
   setRejectDrafts: React.Dispatch<React.SetStateAction<Record<string, string>>>;
@@ -38,7 +42,10 @@ interface DirectorDeliverTabProps {
   focusShot: (shotId: string) => void;
   styleSeed: number | null;
   stylePrompt: string;
-  handlePushClipGen: (force?: boolean) => void;
+  handlePushClipGen: (force?: boolean) => void | Promise<void>;
+  onGoToMissing: () => void;
+  lastPushReceipt?: { at?: string; shotCount?: number; clipGenId?: string };
+  reviewMode: 'manual' | 'auto';
 }
 
 export function DirectorDeliverTab({
@@ -49,6 +56,9 @@ export function DirectorDeliverTab({
   running,
   handleApproveShot,
   handleApproveAll,
+  handleUnapproveShot,
+  handleUnapproveAll,
+  handleRestoreShot,
   handleRejectShot,
   rejectDrafts,
   setRejectDrafts,
@@ -66,12 +76,15 @@ export function DirectorDeliverTab({
   styleSeed,
   stylePrompt,
   handlePushClipGen,
+  onGoToMissing,
+  lastPushReceipt,
+  reviewMode,
 }: DirectorDeliverTabProps) {
   return (
     <div className="dd2-deliver">
       <div className="dd2-deliver__intro">
         <h3>审阅送出</h3>
-        <p>台内批审关键帧 → 写回风格 → 放行后推送视频生成。外审宫格仍可用，不替代本页批审。</p>
+         <p>台内批审关键帧 → 写回风格 → 放行后推送视频生成。审阅：{reviewMode === 'manual' ? '手动' : '生成即通过'}。外审宫格仍可用，不替代本页批审。</p>
       </div>
 
       <section className="dd2-review" aria-label="关键帧批审">
@@ -91,11 +104,16 @@ export function DirectorDeliverTab({
             <button
               type="button"
               className="dd2-btn dd2-btn--ghost"
-              disabled={running || reviewStats.total === 0 || reviewStats.missing > 0 || keyframeGatePassed}
+               disabled={running || reviewStats.total === 0 || reviewStats.missing > 0 || keyframeGatePassed}
               onClick={handleApproveAll}
             >
               全部通过
             </button>
+            {keyframeGatePassed ? (
+              <button type="button" className="dd2-btn dd2-btn--ghost" disabled={running} onClick={() => void handleUnapproveAll()}>
+                撤销全部通过
+              </button>
+            ) : null}
             <button
               type="button"
               className="dd2-btn dd2-btn--ghost"
@@ -116,10 +134,10 @@ export function DirectorDeliverTab({
           </div>
         </div>
 
-        {reviewStats.missing > 0 ? (
-          <p className="dd2-review__hint is-warn">
-            还有 {reviewStats.missing} 镜缺关键帧，请先回「选镜批出」补齐，再全部通过。
-          </p>
+         {reviewStats.missing > 0 ? (
+           <button type="button" className="dd2-review__hint is-warn dd2-review__hint-btn" onClick={onGoToMissing}>
+             还有 {reviewStats.missing} 镜缺关键帧，请点此回「选镜批出」补齐。
+           </button>
         ) : keyframeGatePassed ? (
           <p className="dd2-review__hint is-ok">本集关键帧已全部批准，可推送视频生成。</p>
         ) : (
@@ -165,7 +183,7 @@ export function DirectorDeliverTab({
                       {shot.durationSec}s
                     </em>
                   </div>
-                  {!missing && !approved ? (
+                   {!missing && !approved ? (
                     <div className="dd2-review__cell-acts">
                       <button
                         type="button"
@@ -184,10 +202,30 @@ export function DirectorDeliverTab({
                         打回
                       </button>
                     </div>
-                  ) : null}
-                  {editing ? (
-                    <div className="dd2-review__reject">
-                      <textarea
+                   ) : approved ? (
+                     <div className="dd2-review__cell-acts">
+                       <button type="button" className="dd2-btn dd2-btn--ghost" disabled={running || busy} onClick={() => handleUnapproveShot(shot.id)}>撤回</button>
+                     </div>
+                   ) : null}
+                   {editing ? (
+                     <div className="dd2-review__reject">
+                       <div className="dd2-review__chips" aria-label="快捷打回原因">
+                         {['构图偏了', '角色不像', '光线不对', '需要重做'].map((label) => (
+                           <button
+                             key={label}
+                             type="button"
+                             className="dd2-btn dd2-btn--ghost"
+                             onClick={() => setRejectDrafts((prev) => {
+                               const current = prev[shot.id] ?? shot.keyframeReviewNote ?? '';
+                               const next = current.trim();
+                               return { ...prev, [shot.id]: next ? `${next}；${label}` : label };
+                             })}
+                           >
+                             {label}
+                           </button>
+                         ))}
+                       </div>
+                       <textarea
                         rows={2}
                         placeholder="打回原因（必填）"
                         value={rejectDrafts[shot.id] ?? shot.keyframeReviewNote ?? ''}
@@ -217,6 +255,9 @@ export function DirectorDeliverTab({
                   ) : null}
                   {!editing && shot.keyframeReviewNote ? (
                     <p className="dd2-review__note">{shot.keyframeReviewNote}</p>
+                  ) : null}
+                  {!editing && shot.keyframePreviousUrl ? (
+                    <button type="button" className="dd2-btn dd2-btn--ghost" disabled={running || busy} onClick={() => handleRestoreShot(shot.id)}>恢复上一版</button>
                   ) : null}
                 </article>
               );
@@ -286,6 +327,9 @@ export function DirectorDeliverTab({
         {' · '}
         {keyframeGatePassed ? '审阅已放行' : `审阅未放行（待 ${reviewStats.pending + reviewStats.failed + reviewStats.missing}）`}
       </div>
+      {lastPushReceipt?.at ? (
+        <div className="dd2-push-receipt">已写入 clip-gen · {lastPushReceipt.shotCount ?? 0} 镜 · {new Date(lastPushReceipt.at).toLocaleString()}</div>
+      ) : null}
     </div>
   );
 }

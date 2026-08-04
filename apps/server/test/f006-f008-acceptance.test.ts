@@ -58,6 +58,23 @@ describe('F-006 连接点默认仅左右', () => {
     expect(resolveVisibleVerticalSockets('picture-gen', { showExecPorts: true }).length).toBeGreaterThan(0);
   });
 
+  it('编剧台默认开启顶口 exec-picture，可连图像生成', () => {
+    expect(isExecPortsEnabled(undefined, 'script-desk')).toBe(true);
+    expect(isExecPortsEnabled({}, 'script-desk')).toBe(true);
+    expect(isExecPortsEnabled({ showExecPorts: false }, 'script-desk')).toBe(false);
+    const ports = resolveVisibleVerticalSockets('script-desk', {});
+    expect(ports.some((p) => p.id === 'exec-picture')).toBe(true);
+    const ok = validateConnectionWithHandles(
+      'picture-gen',
+      'script-desk',
+      { showExecPorts: true },
+      {},
+      'exec-picture',
+      'exec-picture',
+    );
+    expect(ok.ok).toBe(true);
+  });
+
   it('松手吸附：未开启能力口时拒绝 exec handle', () => {
     const denied = validateConnectionWithHandles(
       'picture-gen',
@@ -204,7 +221,9 @@ describe('F-006 连接点默认仅左右', () => {
       resolve(root, 'apps/web/src/blocks/shared/BlockShell.tsx'),
       'utf8',
     );
-    expect(shellSrc.includes('configuredShowExecPorts ?? false')).toBe(true);
+    // 编剧台（设定板宿主）默认开启顶口；其它节点仍缺省关闭
+    expect(shellSrc.includes("type === 'script-desk'")).toBe(true);
+    expect(shellSrc.includes('configuredShowExecPorts')).toBe(true);
 
     const flowSrc = readFileSync(
       resolve(root, 'apps/web/src/engine/FlowSurface.tsx'),

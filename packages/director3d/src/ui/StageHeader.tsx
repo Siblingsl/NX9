@@ -1,5 +1,5 @@
 import { useDirectorStore } from '../store/directorStore';
-import type { ViewportAspectRatio } from '../schema/directorProject';
+import type { ViewMode, ViewportAspectRatio } from '../schema/directorProject';
 
 const ASPECTS: ViewportAspectRatio[] = ['16:9', '9:16', '1:1'];
 
@@ -9,14 +9,19 @@ export function StageHeader({
   capturing,
   onCapture,
   onClose,
+  viewModeOverride,
+  onViewModeChange,
 }: {
   linkedShotId?: string;
   performanceLow?: boolean;
   capturing?: boolean;
   onCapture: () => void;
   onClose?: () => void;
+  viewModeOverride?: ViewMode;
+  onViewModeChange?: (mode: ViewMode) => void;
 }) {
-  const viewMode = useDirectorStore((s) => s.viewMode);
+  const storeViewMode = useDirectorStore((s) => s.viewMode);
+  const viewMode = viewModeOverride ?? storeViewMode;
   const aspect = useDirectorStore((s) => s.project.viewportAspectRatio);
   const canUndo = useDirectorStore((s) => s.undoStack.length > 0);
   const setViewMode = useDirectorStore((s) => s.setViewMode);
@@ -40,14 +45,14 @@ export function StageHeader({
       <button
         type="button"
         className={`nx9-stage-pill${viewMode === 'director' ? ' is-on' : ''}`}
-        onClick={() => setViewMode('director')}
+        onClick={() => { setViewMode('director'); onViewModeChange?.('director'); }}
       >
         俯瞰
       </button>
       <button
         type="button"
         className={`nx9-stage-pill${viewMode === 'camera' ? ' is-on' : ''}`}
-        onClick={() => setViewMode('camera')}
+        onClick={() => { setViewMode('camera'); onViewModeChange?.('camera'); }}
       >
         镜头
       </button>
@@ -78,7 +83,7 @@ export function StageHeader({
       </button>
 
       <button type="button" className="nx9-stage-cta" disabled={capturing} onClick={onCapture}>
-        {capturing ? '记录中…' : '记录帧'}
+        {capturing ? '记录中…' : '记录候选帧'}
       </button>
       {onClose && (
         <button type="button" className="nx9-stage-pill" onClick={onClose}>

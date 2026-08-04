@@ -33,6 +33,8 @@ export interface ScreenplayCharacterDraft {
   appearance?: string;
   personality?: string;
   relationships?: string;
+  /** 背景故事（抽取 bible.background） */
+  background?: string;
   goal?: string;
   voiceNotes?: string;
   fixedVisualKeywords?: string;
@@ -545,40 +547,140 @@ export function ingestTextToPackage(
   });
 }
 
+const CHAR_LEAD_IDENTITY_RE =
+  /主角|女主|男主|主人公|主视角|protagonist|heroine|leading|\bmain\b|\bhero\b/i;
+const CHAR_SUPPORT_IDENTITY_RE = /配角|supporting|\bsupport\b/i;
+
+/** 角色身份键：canonical name + 括号拆出的别名 + aliases 字段（小写） */
+function characterDraftKeys(draft: ScreenplayCharacterDraft): string[] {
+  const split = splitCharacterDisplayName(draft.name);
+  const keys = [
+    draft.name,
+    split.name,
+    ...(draft.aliases ?? []),
+    ...split.aliases,
+  ]
+    .map((k) => k?.trim().toLowerCase())
+    .filter((k): k is string => Boolean(k));
+  return [...new Set(keys)];
+}
+
+function preferCharacterIdentity(a?: string, b?: string): string | undefined {
+  const aLead = CHAR_LEAD_IDENTITY_RE.test(a ?? '');
+  const bLead = CHAR_LEAD_IDENTITY_RE.test(b ?? '');
+  if (aLead && !bLead) return (a || b) || undefined;
+  if (bLead && !aLead) return (b || a) || undefined;
+  return (a || b) || undefined;
+}
+
+/**
+ * 合并两条同人 draft 时选 canonical 名：
+ * - 若一方姓名落在另一方 aliases 中，保留非别名方
+ * - 否则优先 identity 标主角的一方；再否则保留先出现的（prev）
+ */
+function preferCanonicalCharacterName(
+  prev: ScreenplayCharacterDraft,
+  item: ScreenplayCharacterDraft,
+): { name: string; extraAliases: string[] } {
+  const a = prev.name.trim();
+  const b = item.name.trim();
+  if (!b || a === b) return { name: a || b, extraAliases: [] };
+  if (!a) return { name: b, extraAliases: [] };
+
+  const aAliases = new Set((prev.aliases ?? []).map((x) => x.trim().toLowerCase()).filter(Boolean));
+  const bAliases = new Set((item.aliases ?? []).map((x) => x.trim().toLowerCase()).filter(Boolean));
+
+  if (aAliases.has(b.toLowerCase())) return { name: a, extraAliases: [b] };
+  if (bAliases.has(a.toLowerCase())) return { name: b, extraAliases: [a] };
+
+  const aLead = CHAR_LEAD_IDENTITY_RE.test(prev.identity ?? '');
+  const bLead = CHAR_LEAD_IDENTITY_RE.test(item.identity ?? '');
+  if (bLead && !aLead) return { name: b, extraAliases: [a] };
+  return { name: a, extraAliases: [b] };
+}
+
+function mergeTwoCharacterDrafts(
+  prev: ScreenplayCharacterDraft,
+  item: ScreenplayCharacterDraft,
+): ScreenplayCharacterDraft {
+  const { name, extraAliases } = preferCanonicalCharacterName(prev, item);
+  return {
+    ...item,
+    ...prev,
+    id: prev.id || item.id,
+    name,
+    aliases: uniqAliases(prev.aliases, item.aliases, extraAliases),
+    identity: preferCharacterIdentity(prev.identity, item.identity),
+    appearance: prev.appearance || item.appearance,
+    personality: prev.personality || item.personality,
+    relationships: prev.relationships || item.relationships,
+    background: prev.background || item.background,
+    goal: prev.goal || item.goal,
+    voiceNotes: prev.voiceNotes || item.voiceNotes,
+    fixedVisualKeywords: prev.fixedVisualKeywords || item.fixedVisualKeywords,
+    libraryStatus: prev.libraryStatus || item.libraryStatus,
+    libraryCharacterId: prev.libraryCharacterId || item.libraryCharacterId,
+  };
+}
+
+/**
+ * 合并角色 draft：按「真名 + 别名」身份去重，而非仅精确姓名。
+ * 例：`李稳` 与 `李稳 (化名陈默)` / 独立条目 `陈默` 会合成一条。
+ * existing 在前，已有非空字段优先保留。
+ */
 export function mergeCharacterDrafts(
   existing: ScreenplayCharacterDraft[],
   incoming: ScreenplayCharacterDraft[],
 ): ScreenplayCharacterDraft[] {
-  const byName = new Map<string, ScreenplayCharacterDraft>();
-  for (const item of existing) {
-    byName.set(item.name.trim(), item);
-  }
-  for (const item of incoming) {
-    const key = item.name.trim();
-    if (!key) continue;
-    const prev = byName.get(key);
-    if (!prev) {
-      byName.set(key, item);
+  const result: ScreenplayCharacterDraft[] = [];
+
+  const findMatchIndex = (draft: ScreenplayCharacterDraft): number => {
+    const keys = new Set(characterDraftKeys(draft));
+    return result.findIndex((r) => characterDraftKeys(r).some((k) => keys.has(k)));
+  };
+
+  for (const raw of [...existing, ...incoming]) {
+    const item = characterDraftFromPartial(raw);
+    if (!item.name.trim()) continue;
+    const idx = findMatchIndex(item);
+    if (idx < 0) {
+      result.push(item);
       continue;
     }
-    byName.set(key, {
-      ...item,
-      ...prev,
-      id: prev.id || item.id,
-      name: prev.name || item.name,
-      aliases: prev.aliases?.length ? prev.aliases : item.aliases,
-      identity: prev.identity || item.identity,
-      appearance: prev.appearance || item.appearance,
-      personality: prev.personality || item.personality,
-      relationships: prev.relationships || item.relationships,
-      goal: prev.goal || item.goal,
-      voiceNotes: prev.voiceNotes || item.voiceNotes,
-      fixedVisualKeywords: prev.fixedVisualKeywords || item.fixedVisualKeywords,
-      libraryStatus: prev.libraryStatus || item.libraryStatus,
-      libraryCharacterId: prev.libraryCharacterId || item.libraryCharacterId,
-    });
+    result[idx] = mergeTwoCharacterDrafts(result[idx], item);
   }
-  return [...byName.values()];
+  return result;
+}
+
+/** 单列表内按身份去重（抽取结果清洗 / 修复历史脏 Bible） */
+export function dedupeCharacterDrafts(
+  drafts: ScreenplayCharacterDraft[],
+): ScreenplayCharacterDraft[] {
+  return mergeCharacterDrafts([], drafts);
+}
+
+/** 清洗 Bible 角色：拆括号别名并合并同人重复项；无变化时返回原 pkg */
+export function normalizeScreenplayBibleCharacters(
+  pkg: ScreenplayPackage,
+): ScreenplayPackage {
+  const characters = dedupeCharacterDrafts(pkg.bible.characters);
+  if (
+    characters.length === pkg.bible.characters.length
+    && characters.every((c, i) => {
+      const prev = pkg.bible.characters[i];
+      return (
+        c.id === prev.id
+        && c.name === prev.name
+        && JSON.stringify(c.aliases ?? []) === JSON.stringify(prev.aliases ?? [])
+        && (c.identity ?? '') === (prev.identity ?? '')
+      );
+    })
+  ) {
+    return pkg;
+  }
+  return touchScreenplayPackage(pkg, {
+    bible: { ...pkg.bible, characters },
+  });
 }
 
 export function mergeSceneDrafts(
@@ -615,17 +717,152 @@ export function mergeSceneDrafts(
   return [...byName.values()];
 }
 
+/**
+ * 从展示名拆出 canonical name + 括号别名。
+ * 例：`苏黛 (化名苏曼)` → { name: '苏黛', aliases: ['苏曼'] }
+ *     `李稳（首集作陈默）` → { name: '李稳', aliases: ['陈默'] }
+ */
+export function splitCharacterDisplayName(raw: string): { name: string; aliases: string[] } {
+  const text = String(raw ?? '').trim();
+  if (!text) return { name: '', aliases: [] };
+  const m = text.match(
+    /^(.+?)\s*[（(]\s*(?:化名|又名|别名|曾用名|首集作|首现作|饰)?\s*([^）)]+?)\s*[）)]\s*$/,
+  );
+  if (!m) return { name: text, aliases: [] };
+  const name = m[1].trim();
+  const aliases = String(m[2] ?? '')
+    .split(/[,，、;/|]/)
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .filter((a) => a !== name);
+  return { name: name || text, aliases };
+}
+
+function uniqAliases(...lists: Array<string[] | undefined>): string[] | undefined {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const list of lists) {
+    for (const item of list ?? []) {
+      const v = item.trim();
+      if (!v || seen.has(v)) continue;
+      seen.add(v);
+      out.push(v);
+    }
+  }
+  return out.length ? out : undefined;
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function normalizeRoleIdentity(identity: string | undefined, role: 'main' | 'support'): string {
+  const roleLabel = role === 'main' ? '主角' : '配角';
+  const source = String(identity ?? '').trim();
+  if (!source) return roleLabel;
+  const stripped = source
+    .replace(
+      /主角|女主|男主|主人公|主视角|protagonist|heroine|leading|\bmain\b|\bhero\b|配角|supporting|\bsupport\b/gi,
+      '',
+    )
+    .replace(/[·•|,，;；]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return stripped ? `${roleLabel} · ${stripped}` : roleLabel;
+}
+
+function countRegexHits(source: string, re: RegExp): number {
+  let total = 0;
+  for (const _m of source.matchAll(re)) total++;
+  return total;
+}
+
+/**
+ * 依据正文证据校准角色主/配角标注，减少模型抽取波动。
+ * 规则：
+ * - 明确「配角」优先级最高（不会被提到次数抬成主角）
+ * - 明确「主角」直接保留主角
+ * - 其余按对白行命中 + 文本命中打分，主角数量收敛到少量（通常 1~3）
+ */
+export function calibrateCharacterRolesByScreenplay(
+  drafts: ScreenplayCharacterDraft[],
+  screenplayText: string,
+): ScreenplayCharacterDraft[] {
+  const text = String(screenplayText ?? '');
+  if (!drafts.length) return drafts;
+
+  const scored = drafts.map((draft, index) => {
+    const keys = [draft.name, ...(draft.aliases ?? [])]
+      .map((k) => k.trim())
+      .filter(Boolean)
+      .sort((a, b) => b.length - a.length);
+
+    let mentionHits = 0;
+    let dialogueHits = 0;
+    for (const key of keys) {
+      const esc = escapeRegExp(key);
+      mentionHits += countRegexHits(text, new RegExp(esc, 'g'));
+      dialogueHits += countRegexHits(text, new RegExp(`^\\s*${esc}(?:（[^）]{0,20}）)?\\s*[:：]`, 'gm'));
+    }
+
+    const identity = draft.identity ?? '';
+    const explicitSupport = CHAR_SUPPORT_IDENTITY_RE.test(identity);
+    const explicitLead = CHAR_LEAD_IDENTITY_RE.test(identity);
+    const score =
+      (explicitLead ? 120 : 0) -
+      (explicitSupport ? 120 : 0) +
+      Math.min(mentionHits, 30) * 2 +
+      Math.min(dialogueHits, 20) * 8;
+
+    return { draft, index, mentionHits, dialogueHits, explicitLead, explicitSupport, score };
+  });
+
+  const explicitMain = scored.filter((x) => x.explicitLead && !x.explicitSupport);
+  const explicitSupportIds = new Set(
+    scored.filter((x) => x.explicitSupport).map((x) => x.draft.id),
+  );
+  // 主角人数收敛：小体量至少允许双主（常见双核），总体不超过 3。
+  const maxMain = Math.min(3, Math.max(1, Math.ceil(drafts.length * 0.35)));
+
+  const winners = new Set<string>(explicitMain.map((x) => x.draft.id));
+  const room = Math.max(0, maxMain - winners.size);
+  if (room > 0) {
+    const candidates = scored
+      .filter((x) => !explicitSupportIds.has(x.draft.id) && !winners.has(x.draft.id))
+      .filter((x) => x.dialogueHits >= 2 || x.mentionHits >= 4)
+      .sort((a, b) => b.score - a.score || b.dialogueHits - a.dialogueHits || a.index - b.index);
+    for (const item of candidates.slice(0, room)) winners.add(item.draft.id);
+  }
+  if (winners.size === 0) {
+    const best = scored
+      .filter((x) => !explicitSupportIds.has(x.draft.id))
+      .sort((a, b) => b.score - a.score || b.dialogueHits - a.dialogueHits || a.index - b.index)[0];
+    if (best && (best.dialogueHits >= 2 || best.mentionHits >= 4)) winners.add(best.draft.id);
+  }
+
+  return scored.map(({ draft }) => {
+    const role: 'main' | 'support' =
+      explicitSupportIds.has(draft.id) ? 'support' : (winners.has(draft.id) ? 'main' : 'support');
+    return {
+      ...draft,
+      identity: normalizeRoleIdentity(draft.identity, role),
+    };
+  });
+}
+
 export function characterDraftFromPartial(
   input: Partial<ScreenplayCharacterDraft> & { name: string },
-): ScreenplayCharacterDraft {
+  ): ScreenplayCharacterDraft {
+  const split = splitCharacterDisplayName(input.name);
   return {
     id: input.id || makeId('char'),
-    name: input.name.trim(),
-    aliases: input.aliases,
+    name: split.name,
+    aliases: uniqAliases(input.aliases, split.aliases),
     identity: input.identity,
     appearance: input.appearance,
     personality: input.personality,
     relationships: input.relationships,
+    background: input.background,
     goal: input.goal,
     voiceNotes: input.voiceNotes,
     fixedVisualKeywords: input.fixedVisualKeywords,
@@ -666,12 +903,27 @@ export function bibleDraftsFromExtract(input: {
       const bible = (raw.bible && typeof raw.bible === 'object')
         ? raw.bible as Record<string, unknown>
         : {};
+      // LLM 可能输出别名字段的不同命名（aliases / alias；以及是否在 bible 下）
+      const aliasesRaw = raw.aliases ?? raw.alias ?? bible.aliases ?? bible.alias;
+      const aliases = Array.isArray(aliasesRaw)
+        ? aliasesRaw.map((a) => String(a).trim()).filter(Boolean)
+        : typeof aliasesRaw === 'string'
+          ? aliasesRaw
+              .split(/[,，、;/|]/)
+              .map((s) => s.trim())
+              .filter(Boolean)
+          : String(aliasesRaw ?? '')
+              .split(/[,，、;/|]/)
+              .map((s) => s.trim())
+              .filter(Boolean);
       return characterDraftFromPartial({
         name,
+        aliases: aliases.length ? aliases : undefined,
         identity: String(raw.identity ?? bible.identity ?? raw.archetype ?? '').trim() || undefined,
         appearance: String(raw.appearance ?? bible.appearance ?? raw.description ?? '').trim() || undefined,
         personality: String(raw.personality ?? bible.personality ?? raw.traits ?? '').trim() || undefined,
         relationships: String(raw.relationships ?? bible.relationships ?? '').trim() || undefined,
+        background: String(raw.background ?? bible.background ?? '').trim() || undefined,
         goal: String(raw.goal ?? '').trim() || undefined,
         voiceNotes: String(raw.voiceNotes ?? bible.voice ?? '').trim() || undefined,
         fixedVisualKeywords: String(raw.fixedVisualKeywords ?? '').trim() || undefined,
@@ -714,7 +966,8 @@ export function bibleDraftsFromExtract(input: {
     .filter((item): item is ScreenplaySceneDraft => Boolean(item));
 
   return {
-    characters,
+    // 抽取常把同人拆成「李稳」+「李稳 (化名陈默)」或独立「陈默」——按身份合并
+    characters: dedupeCharacterDrafts(characters),
     scenes: mergeSceneDrafts(sceneFromLocations, sceneFromObjects),
   };
 }

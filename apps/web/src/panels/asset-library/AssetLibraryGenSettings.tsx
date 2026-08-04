@@ -1,11 +1,15 @@
-import { memo, useMemo } from 'react';
+import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import {
   IMAGE_ASPECT_OPTIONS,
   IMAGE_QUALITY_OPTIONS,
-  PICTURE_GEN_MODELS,
   resolveImageRequestSize,
 } from '@nx9/shared';
-import GenSettingsPills from '../../blocks/shared/GenSettingsPills';
+import { useConnectedPictureModels } from '../../hooks/use-connected-picture-models';
+import { ComposerModelSelect } from '../../engine/stage-deck/chrome/attached-workspace/composer/ComposerModelSelect';
+import {
+  VideoPopover,
+  PopoverItem,
+} from '../../engine/stage-deck/chrome/attached-workspace/generation/video/VideoPopover';
 
 /** 与图像生成节点 PictureParamChips 对齐的清晰度档位 */
 export const IMAGE_RESOLUTION_TIER_OPTIONS = [
@@ -97,7 +101,6 @@ export function resolveAssetLibraryImageRequest(
     const h = Math.round((resolved.height * ratio) / 16) * 16;
     resolved = { width: w, height: h, size: `${w}x${h}` };
   } else if (resolutionTier === '4k' && maxSide < 2048) {
-    // 目标 4K 但基础尺寸偏小：等比放大到接近 4K（仍受模型上限）
     const scale = Math.min(4096 / maxSide, 4);
     if (scale > 1.05) {
       const w = Math.round((resolved.width * scale) / 16) * 16;
@@ -117,6 +120,57 @@ export function resolveAssetLibraryImageRequest(
   };
 }
 
+function stop(e: React.SyntheticEvent) {
+  e.stopPropagation();
+}
+
+function ParamChip({
+  label,
+  active,
+  options,
+  onSelect,
+  width = 140,
+}: {
+  label: string;
+  active: string;
+  options: { id: string; label: string }[];
+  onSelect: (id: string) => void;
+  width?: number;
+}) {
+  const btnRef = useRef<HTMLButtonElement>(null);
+  const [open, setOpen] = useState(false);
+
+  return (
+    <>
+      <button
+        ref={btnRef}
+        type="button"
+        onMouseDown={stop}
+        onClick={() => setOpen((v) => !v)}
+        className={`inline-flex items-center px-2 py-0.5 rounded-md text-[10px] transition-colors ${
+          open ? 'bg-surface/90 text-ink' : 'text-ink/55 hover:text-ink hover:bg-surface/90'
+        }`}
+      >
+        {label}
+      </button>
+      <VideoPopover open={open} onClose={() => setOpen(false)} anchorRef={btnRef} width={width} tone="desk">
+        {options.map((o) => (
+          <PopoverItem
+            key={o.id}
+            active={o.id === active}
+            onClick={() => {
+              onSelect(o.id);
+              setOpen(false);
+            }}
+          >
+            {o.label}
+          </PopoverItem>
+        ))}
+      </VideoPopover>
+    </>
+  );
+}
+
 interface AssetLibraryGenSettingsProps {
   value: AssetLibraryGenSettingsValue;
   onChange: (patch: Partial<AssetLibraryGenSettingsValue>) => void;
@@ -124,9 +178,6 @@ interface AssetLibraryGenSettingsProps {
   preset?: 'character-sheet' | 'costume-sheet' | 'scene' | 'generic';
   compact?: boolean;
   className?: string;
-  hint?: string;
-  /** 是否显示标题栏 */
-  showTitle?: boolean;
 }
 
 const QUALITY_LABELS: Record<string, string> = {
@@ -136,46 +187,40 @@ const QUALITY_LABELS: Record<string, string> = {
   low: '低质量',
 };
 
-/** 素材库出图参数：模型 / 质量 / 比例 / 清晰度（对齐图像生成节点） */
+/** 素材库出图参数：对齐图像生成节点（设置连接模型下拉 + 质量/比例/清晰度 chips） */
 function AssetLibraryGenSettings({
   value,
   onChange,
   preset = 'generic',
   compact = false,
   className = '',
-  hint,
-  showTitle = true,
 }: AssetLibraryGenSettingsProps) {
-  const modelOptions = useMemo(
-    () =>
-      PICTURE_GEN_MODELS.map((m) => ({
-        id: m.id,
-        // 保持可读：免费档写全名，避免缩成 G 2.5 找不到
-        label: m.label,
-      })),
-    [],
-  );
-  const qualityOptions = useMemo(
-    () =>
-      IMAGE_QUALITY_OPTIONS.map((o) => ({
-        id: o.id,
-        label: QUALITY_LABELS[o.id] ?? o.label,
-      })),
-    [],
-  );
-  const aspectOptions = useMemo(
-    () => IMAGE_ASPECT_OPTIONS.map((o) => ({ id: o.id, label: o.label })),
-    [],
-  );
-  const resolutionOptions = useMemo(
-    () => IMAGE_RESOLUTION_TIER_OPTIONS.map((o) => ({ id: o.id, label: o.label })),
-    [],
-  );
+  const {
+    options: pictureModelOptions,
+    hasConnections: hasPictureConnections,
+    preferredModel,
+    selectModel: selectPictureModel,
+    openConnectionsSettings,
+  } = useConnectedPictureModels(value.model);
 
-  const preview = useMemo(
-    () => resolveAssetLibraryImageRequest(value),
-    [value],
-  );
+  useEffect(() => {
+    if (!preferredModel || preferredModel === value.model) return;
+    if (!hasPictureConnections) return;
+    onChange({ model: preferredModel });
+  }, [hasPictureConnections, onChange, preferredModel, value.model]);
+
+  const preview = useMemo(() => resolveAssetLibraryImageRequest(value), [value]);
+
+  const qualityDisplay =
+    QUALITY_LABELS[value.quality]
+    ?? IMAGE_QUALITY_OPTIONS.find((o) => o.id === value.quality)?.label
+    ?? value.quality;
+  const aspectLabel =
+    IMAGE_ASPECT_OPTIONS.find((o) => o.id === value.aspectRatio)?.label ?? value.aspectRatio;
+  const resLabel =
+    IMAGE_RESOLUTION_TIER_OPTIONS.find((o) => o.id === value.resolutionTier)?.label
+    ?? value.resolutionTier
+    ?? '2K';
 
   const presetLabel =
     preset === 'character-sheet'
@@ -188,65 +233,69 @@ function AssetLibraryGenSettings({
 
   return (
     <div
-      className={`rounded-xl border border-brand/25 bg-brand/[0.04] p-3 space-y-2.5 shadow-sm ${className}`}
+      className={`flex flex-wrap items-center gap-x-1.5 gap-y-1 ${compact ? '' : 'py-1'} ${className}`}
+      onMouseDown={stop}
     >
-      {showTitle ? (
-        <div className="flex items-center justify-between gap-2 flex-wrap">
-          <p className="text-[11px] font-semibold text-ink/75">
-            出图参数
-            {presetLabel ? ` · ${presetLabel}` : ''}
-          </p>
-          <p className="text-[10px] tabular-nums text-brand/80 font-medium">
-            {preview.size}
-            <span className="text-ink/35 font-normal"> · 将用于本次生成</span>
-          </p>
-        </div>
+      {!compact && presetLabel ? (
+        <span className="text-[10px] text-ink/45 shrink-0">{presetLabel}</span>
       ) : null}
-      {hint ? <p className="text-[10px] text-ink/45 leading-relaxed">{hint}</p> : null}
-      <div
-        className={`grid gap-2.5 ${
-          compact ? 'grid-cols-1' : 'grid-cols-1 sm:grid-cols-2'
-        }`}
-      >
-        <GenSettingsPills
-          label="模型"
-          options={modelOptions}
-          value={value.model}
-          onChange={(model) => onChange({ model })}
-          compact
-        />
-        <GenSettingsPills
-          label="清晰度"
-          options={resolutionOptions}
-          value={value.resolutionTier || '2k'}
-          onChange={(resolutionTier) => {
-            const patch: Partial<AssetLibraryGenSettingsValue> = { resolutionTier };
-            // 与节点一致：切 4K 时抬高质量
-            if (resolutionTier === '4k' && value.quality !== 'high') {
-              patch.quality = 'high';
+      <ComposerModelSelect
+        value={value.model}
+        options={
+          pictureModelOptions.length > 0
+            ? pictureModelOptions
+            : [{ id: value.model, label: '未配置图片连接 · 点此去设置' }]
+        }
+        onChange={(model) => {
+          if (!hasPictureConnections) {
+            openConnectionsSettings();
+            return;
+          }
+          void selectPictureModel(model, (id) => onChange({ model: id }));
+        }}
+        width={260}
+        tone="desk"
+      />
+      <span className="text-ink/20 text-[10px] select-none">·</span>
+      <ParamChip
+        label={aspectLabel}
+        active={value.aspectRatio}
+        options={[
+          ...IMAGE_ASPECT_OPTIONS.map((o) => ({ id: o.id, label: o.label })),
+        ]}
+        onSelect={(aspectRatio) => onChange({ aspectRatio })}
+        width={160}
+      />
+      <span className="text-ink/20 text-[10px] select-none">·</span>
+      <ParamChip
+        label={qualityDisplay}
+        active={value.quality}
+        options={IMAGE_QUALITY_OPTIONS.map((o) => ({
+          id: o.id,
+          label: QUALITY_LABELS[o.id] ?? o.label,
+        }))}
+        onSelect={(quality) => onChange({ quality })}
+      />
+      <span className="text-ink/20 text-[10px] select-none">·</span>
+      <ParamChip
+        label={resLabel}
+        active={value.resolutionTier || '2k'}
+        options={IMAGE_RESOLUTION_TIER_OPTIONS.map((o) => ({ id: o.id, label: o.label }))}
+        onSelect={(resolutionTier) => {
+          const patch: Partial<AssetLibraryGenSettingsValue> = { resolutionTier };
+          if (resolutionTier === '4k') {
+            patch.quality = 'high';
+            if (value.aspectRatio === '1:1' || value.aspectRatio === '2k') {
+              patch.aspectRatio = '4k';
             }
-            onChange(patch);
-          }}
-          compact
-        />
-        <GenSettingsPills
-          label="质量"
-          options={qualityOptions}
-          value={value.quality}
-          onChange={(quality) => onChange({ quality })}
-          compact
-        />
-        <GenSettingsPills
-          label="比例"
-          options={aspectOptions}
-          value={value.aspectRatio}
-          onChange={(aspectRatio) => onChange({ aspectRatio })}
-          compact
-        />
-      </div>
-      <p className="text-[9px] leading-relaxed text-ink/40">
-        与画布「图像生成」节点同级参数：模型 / 清晰度 / 质量 / 比例。素材库选择优先于节点缺省值；生成请求 size 实时预览为上方数值。
-      </p>
+          } else if (resolutionTier === '2k' && value.aspectRatio === '4k') {
+            patch.aspectRatio = '2k';
+          }
+          onChange(patch);
+        }}
+        width={100}
+      />
+      <span className="ml-auto text-[10px] tabular-nums text-ink/40 shrink-0">{preview.size}</span>
     </div>
   );
 }

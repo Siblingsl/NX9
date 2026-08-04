@@ -1,15 +1,15 @@
 import { useRef, useState } from 'react';
 import { useDirectorStore } from '../store/directorStore';
-import { exportProjectJson, importProjectJson } from '../io/projectIo';
+import { exportProjectJson, importProjectJson, exportSceneTemplateJson, importSceneTemplateJson } from '../io/projectIo';
 import { loadLocalLibrary } from '../io/localLibrary';
-import type { DirectorProject } from '../schema/directorProject';
+import { projectFromSceneTemplate, sceneTemplateFromProject, type Director3dSceneTemplate } from '../schema/directorProject';
 
 export function EnvDrawer({
   onUploadFile,
   onSaveSceneTemplate,
 }: {
   onUploadFile?: (file: File) => Promise<{ url: string; filename?: string }>;
-  onSaveSceneTemplate?: (project: DirectorProject, label: string) => void;
+  onSaveSceneTemplate?: (template: Director3dSceneTemplate) => void;
 }) {
   const panorama = useDirectorStore((s) => s.project.panorama);
   const assets = useDirectorStore((s) => s.project.assets);
@@ -24,6 +24,7 @@ export function EnvDrawer({
   const panoRef = useRef<HTMLInputElement>(null);
   const meshRef = useRef<HTMLInputElement>(null);
   const projectRef = useRef<HTMLInputElement>(null);
+  const templateRef = useRef<HTMLInputElement>(null);
   const [sceneLabel, setSceneLabel] = useState('我的场景');
 
   const localLibrary = loadLocalLibrary();
@@ -103,12 +104,29 @@ export function EnvDrawer({
             <button
               type="button"
               className="nx9-stage-mini-btn is-on"
-              onClick={() => onSaveSceneTemplate(project, sceneLabel.trim() || 'Stage Deck 场景')}
+              onClick={() => onSaveSceneTemplate(sceneTemplateFromProject(project, sceneLabel.trim() || 'NX9 场景模板'))}
             >
               载入工作区
             </button>
+            <button type="button" className="nx9-stage-mini-btn" onClick={() => exportSceneTemplateJson(sceneTemplateFromProject(project, sceneLabel.trim() || 'NX9 场景模板'))}>
+              导出模板
+            </button>
+            <button type="button" className="nx9-stage-mini-btn" onClick={() => templateRef.current?.click()}>
+              导入模板
+            </button>
           </div>
         )}
+        <input
+          ref={templateRef}
+          type="file"
+          accept="application/json,.json"
+          hidden
+          onChange={(e) => {
+            const file = e.target.files?.[0];
+            if (file) void importSceneTemplateJson(file).then((template) => replaceProject(projectFromSceneTemplate(template)));
+            e.target.value = '';
+          }}
+        />
 
         <p className="nx9-stage-hint" style={{ marginTop: 14 }}>
           视口辅助

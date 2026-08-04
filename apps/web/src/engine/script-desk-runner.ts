@@ -1,6 +1,7 @@
 import {
   applyPackagePatch,
   bibleDraftsFromExtract,
+  calibrateCharacterRolesByScreenplay,
   buildNarrativeConsistencyDiagnostics,
   buildScreenplayMeta,
   confirmScreenplayPackage,
@@ -141,7 +142,11 @@ export async function extractBibleFromPackage(
   const scenes = (assets.scenes as Array<Record<string, unknown>> | undefined)
     ?? (raw.scenes as Array<Record<string, unknown>> | undefined)
     ?? [];
-  const drafts = bibleDraftsFromExtract({ characters, locations, environments, scenes });
+  const draftsRaw = bibleDraftsFromExtract({ characters, locations, environments, scenes });
+  const drafts = {
+    ...draftsRaw,
+    characters: calibrateCharacterRolesByScreenplay(draftsRaw.characters, source),
+  };
   let next = touchScreenplayPackage(pkg, {
     bible: {
       world: pkg.bible.world,

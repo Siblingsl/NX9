@@ -16,6 +16,7 @@ export interface GenPromptPack {
   styleLockPrefix?: string;
   characterRefHint?: string;
   camera3dHint?: string;
+  lineArtHint?: string;
   /** 原始包正文（调试） */
   raw?: string;
 }
@@ -28,6 +29,7 @@ const SECTION_KEYS = [
   'style_lock_prefix',
   'character_ref_hint',
   'camera_3d_hint',
+  'line_art_hint',
 ] as const;
 
 type SectionKey = (typeof SECTION_KEYS)[number];
@@ -40,6 +42,7 @@ const KEY_TO_FIELD: Record<SectionKey, keyof GenPromptPack> = {
   style_lock_prefix: 'styleLockPrefix',
   character_ref_hint: 'characterRefHint',
   camera_3d_hint: 'camera3dHint',
+  line_art_hint: 'lineArtHint',
 };
 
 /** 解析 `## section_name` 分块的 prompt-pack 正文 */

@@ -1,27 +1,23 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useMemo, useRef, useState, useEffect } from 'react';
+import { resolveBlockCharacters, type CharacterProfile } from '@nx9/shared';
 import {
-  resolveBlockCharacters,
-} from '@nx9/shared';
-import { Director3dShell, type DirectorProject, type Director3dCapturePayload } from '@nx9/director3d';
-import { Box } from 'lucide-react';
-import {
-  prepareDirectorProjectForShot,
-} from '../../../engine/director3d-character-sync';
-import { useWorkspaceDocument } from '../../../stores/workspace-document';
+  Director3dShell,
+  normalizeDirectorProject,
+  normalizeShotState,
+  projectFromShotState,
+  type Director3dCommitPayload,
+  type Director3dSceneTemplate,
+  type Director3dShotState,
+  type DirectorProject,
+} from '@nx9/director3d';
+import type { Node } from '@xyflow/react';
+import { prepareDirectorProjectForShot } from '../../../engine/director3d-character-sync';
+import { createDirector3dCommitAdapter, sceneByShotFromNodeData } from '../../../engine/director3d-commit-adapter';
 import { api } from '../../../api/client';
 import { disposeDirectorWebGLLifecycle } from '../../../engine/director-webgl-lifecycle';
-
-interface CameraPreset {
-  id: string;
-  name: string;
-  captureUrl?: string;
-  position?: [number, number, number];
-  rotation?: [number, number, number];
-  fov?: number;
-  savedAt: string;
-}
-
-export { type CameraPreset };
+import { applyPoseTransaction } from '../../../engine/agent-director3d-bridge';
+import AgentPoseInput from './agent-pose-input';
+import { askConfirm } from '../../../stores/confirm-dialog';
 
 export function Director3dStageEmbed({
   blockId,
@@ -33,238 +29,191 @@ export function Director3dStageEmbed({
   updateNodeData,
   appendLog,
   focusShot,
+  nodes,
+  edges,
+  sourceChainDeskId,
+  episodeLabel,
+  episodeConfirmed = false,
+  lineArtByShotId,
 }: {
   blockId: string;
   project: DirectorProject;
   linkedShotId: string | null | undefined;
   shots: Array<Record<string, unknown>>;
-  characters: import('@nx9/shared').CharacterProfile[];
+  characters: CharacterProfile[];
   data: Record<string, unknown>;
   updateNodeData: (id: string, patch: Record<string, unknown>) => void;
   appendLog: (msg: string) => void;
   focusShot: (shotId: string) => void;
+  nodes: Node[];
+  edges: Array<{ source: string; target: string }>;
+  sourceChainDeskId?: string;
+  episodeLabel?: string;
+  episodeConfirmed?: boolean;
+  lineArtByShotId: Record<string, string>;
 }) {
-  const [currentShotId, setCurrentShotId] = useState<string | null>(linkedShotId ?? (shots[0] as Record<string, unknown>)?.id as string ?? null);
-  const [sceneProject, setSceneProject] = useState<DirectorProject>(() => rawProject);
-  const disposeRef = useRef<() => void>(undefined);
-  const allPresets = (data.cameraPresets as Record<string, CameraPreset[]> | undefined) ?? {};
-  const shotPresets = currentShotId ? allPresets[currentShotId] ?? [] : [];
-  const [presetNameInput, setPresetNameInput] = useState('');
-  const [showSavePreset, setShowSavePreset] = useState(false);
-  const lastPayloadRef = useRef<Director3dCapturePayload | null>(null);
-
-  const resolvedScene = useMemo(() => {
-    if (!currentShotId) return sceneProject;
-    const shot = shots.find((s) => s.id === currentShotId) as Record<string, unknown> | undefined;
-    const shotCharacters = shot
-      ? resolveBlockCharacters(data, shot as never, characters)
-      : [];
-    return prepareDirectorProjectForShot(
-      sceneProject,
-      shotCharacters.map((c: { id: string }) => c.id),
-      characters,
-      undefined,
-      shotCharacters.map((c: { name: string }) => c.name),
-    );
-  }, [sceneProject, currentShotId, shots, characters, data]);
+  const baseProject = useMemo(() => normalizeDirectorProject(rawProject), [rawProject]);
+  const sceneByShot = useMemo(() => sceneByShotFromNodeData(data), [data]);
+  const firstShotId = (shots[0]?.id as string | undefined) ?? null;
+  const [currentShotId, setCurrentShotId] = useState<string | null>(linkedShotId ?? firstShotId);
+  const [state, setState] = useState<Director3dShotState | null>(null);
+  const disposeRef = useRef<(() => void) | undefined>(undefined);
 
   useEffect(() => {
     if (linkedShotId) setCurrentShotId(linkedShotId);
   }, [linkedShotId]);
 
-  const handleCapture = useCallback(async (payload: Director3dCapturePayload) => {
-    if (!currentShotId) return;
-    lastPayloadRef.current = payload;
-    let imageUrl = payload.imageUrl;
-    if (payload.dataUrl && !imageUrl) {
-      try {
-        const blob = await (await fetch(payload.dataUrl)).blob();
-        const file = new File([blob], `capture-${Date.now()}.png`, { type: 'image/png' });
-        const uploaded = await api.uploadAsset(file);
-        imageUrl = uploaded.url;
-      } catch { /* use dataUrl fallback */ }
+  const loadState = useCallback((shotId: string | null) => {
+    const id = shotId ?? '__standalone__';
+    const stored = sceneByShot[id];
+    const shot = shots.find((item) => item.id === id) as Record<string, unknown> | undefined;
+    const episodeId = shot?.episodeId as string | null | undefined;
+    const next = normalizeShotState(stored, id, baseProject);
+    if (!stored && shot) {
+      const shotCharacters = resolveBlockCharacters(data, shot as never, characters);
+      const shotCharacterIds = Array.isArray(shot.characterIds)
+        ? shot.characterIds.filter((id): id is string => typeof id === 'string' && id.length > 0)
+        : shotCharacters.map((character) => character.id);
+      const shotCharacterNames = Array.isArray(shot.characterNames)
+        ? shot.characterNames.filter((name): name is string => typeof name === 'string' && name.trim().length > 0)
+        : shotCharacters.map((character) => character.name);
+      const prepared = prepareDirectorProjectForShot(
+        projectFromShotState(next, baseProject),
+        shotCharacterIds,
+        characters,
+        (shot.director3dGuide as { characterPlacements?: never[] } | undefined)?.characterPlacements,
+        shotCharacterNames,
+      );
+      const migrated = {
+        ...next,
+        episodeId,
+        sourceChainDeskId,
+        sourceShotRevision: (data.lastHandoff as { chainRevision?: number } | undefined)?.chainRevision,
+        objects: prepared.objects,
+      };
+      setState(migrated);
+      updateNodeData(blockId, { sceneByShot: { ...sceneByShot, [id]: migrated } });
+      return;
     }
-    const shot = shots.find((s) => s.id === currentShotId) as { index?: number } | undefined;
-    if (shot) {
-      useWorkspaceDocument.getState().updateShot(currentShotId, {
-        director3dGuide: {
-          sourceBlockId: blockId,
-          captureId: payload.captureId,
-          captureUrl: imageUrl || payload.dataUrl || '',
-          cameraPrompt: payload.cameraPrompt || '',
-          cameraPosition: payload.cameraPosition as [number, number, number] | undefined,
-          cameraRotation: payload.cameraRotation as [number, number, number] | undefined,
-          cameraFov: payload.cameraFov,
-          appliedAt: new Date().toISOString(),
-        },
-      });
-      updateNodeData(blockId, { previewUrl: imageUrl || payload.dataUrl });
-      appendLog(`导演台 · 3D 截图已写回镜 #${shot.index}`);
-    }
-  }, [currentShotId, shots, blockId, updateNodeData, appendLog]);
+    setState({ ...next, episodeId, sourceChainDeskId });
+  }, [baseProject, blockId, characters, data, sceneByShot, shots, sourceChainDeskId, updateNodeData]);
 
-  const savePreset = useCallback((name: string) => {
-    if (!currentShotId || !lastPayloadRef.current) return;
-    const payload = lastPayloadRef.current;
-    const preset: CameraPreset = {
-      id: `preset-${Date.now().toString(36)}`,
-      name: name || `机位 ${shotPresets.length + 1}`,
-      captureUrl: (() => { const s = shots.find((s2) => s2.id === currentShotId); if (s) { const g = (s as Record<string, unknown>).director3dGuide; return g ? (g as Record<string, unknown>).captureUrl as string : undefined; } return undefined; })(),
-      position: payload.cameraPosition as [number, number, number] | undefined,
-      rotation: payload.cameraRotation as [number, number, number] | undefined,
-      fov: payload.cameraFov,
-      savedAt: new Date().toISOString(),
-    };
-    const updated = { ...allPresets, [currentShotId]: [...shotPresets, preset] };
-    updateNodeData(blockId, { cameraPresets: updated });
-    setShowSavePreset(false);
-    setPresetNameInput('');
-    appendLog(`导演台 · 已保存机位预设 ${preset.name}`);
-  }, [currentShotId, allPresets, shotPresets, shots, blockId, updateNodeData, appendLog]);
+  useEffect(() => { loadState(currentShotId); }, [currentShotId, loadState]);
 
-  const deletePreset = useCallback((presetId: string) => {
-    if (!currentShotId) return;
-    const filtered = shotPresets.filter((p) => p.id !== presetId);
-    const updated = { ...allPresets, [currentShotId]: filtered };
-    updateNodeData(blockId, { cameraPresets: updated });
-    appendLog(`导演台 · 已删除机位预设`);
-  }, [currentShotId, allPresets, shotPresets, blockId, updateNodeData, appendLog]);
+  const currentState = state ?? normalizeShotState(undefined, currentShotId ?? '__standalone__', baseProject);
+  const currentProject = useMemo(() => projectFromShotState(currentState, baseProject), [baseProject, currentState]);
 
-  const persistProject = useCallback((proj: DirectorProject) => {
-    setSceneProject(proj);
-    updateNodeData(blockId, { scene: proj as unknown as Record<string, unknown> });
-  }, [blockId, updateNodeData]);
+  const persistState = useCallback((next: Director3dShotState) => {
+    setState(next);
+    const previous = sceneByShotFromNodeData(data);
+    updateNodeData(blockId, {
+      sceneByShot: { ...previous, [next.shotId]: next },
+    });
+  }, [blockId, data, updateNodeData]);
+
+  const commit = useMemo(() => createDirector3dCommitAdapter({
+    blockId,
+    nodes,
+    edges,
+    updateNodeData,
+    currentSourceShotRevision: currentState.sourceShotRevision,
+    onCommitted: (payload) => appendLog(`3D 构图已提交，可进入彩色关键帧批出 · 镜 ${payload.shotId}`),
+  }), [blockId, currentState.sourceShotRevision, edges, nodes, updateNodeData, appendLog]);
+
+  const handleCommit = useCallback((payload: Director3dCommitPayload) => {
+    const result = commit(payload);
+    if (!result.ok) throw new Error(result.error ?? '3D 构图提交失败');
+  }, [commit]);
+
+  const handleCandidate = useCallback(async (payload: { dataUrl: string; shotId: string; stateVersion: number }) => {
+    if (!currentShotId || payload.shotId !== currentShotId) throw new Error('镜头已切换，请重新记录候选帧');
+    const blob = await (await fetch(payload.dataUrl)).blob();
+    const file = new File([blob], `director3d-${payload.shotId}-${Date.now()}.png`, { type: 'image/png' });
+    const uploaded = await api.uploadAsset(file);
+    return { imageUrl: uploaded.url };
+  }, [currentShotId]);
+
+  const handleTemplate = useCallback((template: Director3dSceneTemplate) => {
+    const templates = (data.sceneTemplates as Record<string, Director3dSceneTemplate> | undefined) ?? {};
+    updateNodeData(blockId, { sceneTemplates: { ...templates, [template.id]: template } });
+    appendLog(`已保存场景模板「${template.name}」，角色不会固化到模板`);
+  }, [appendLog, blockId, data.sceneTemplates, updateNodeData]);
+
+  const handleAgentPose = useCallback(async (command: Parameters<typeof applyPoseTransaction>[1]['command'] | null) => {
+    if (!command) return;
+    const confirmed = await askConfirm({
+      title: '确认应用 Agent 3D 摆位',
+      description: '将把预览中的角色和相机变化应用到当前镜头，可使用撤销恢复。',
+      confirmLabel: '应用摆位',
+    });
+    const result = applyPoseTransaction(
+      currentState,
+      { shotId: currentState.shotId, baseStateVersion: currentState.stateVersion, command },
+      confirmed,
+    );
+    if (!result.ok || !result.nextState) throw new Error(result.error ?? 'Agent 摆位应用失败');
+    persistState(result.nextState);
+    appendLog(`Agent 3D 摆位已应用 · ${result.summary ?? ''}`);
+  }, [appendLog, currentState, persistState]);
 
   const handleRendererReady = useCallback((renderer: { dispose: () => void }) => {
     disposeRef.current = renderer.dispose;
   }, []);
 
-  useEffect(() => {
-    return () => {
-      disposeRef.current?.();
-      disposeDirectorWebGLLifecycle();
-    };
+  useEffect(() => () => {
+    disposeRef.current?.();
+    disposeDirectorWebGLLifecycle();
   }, []);
+
+  const shotItems = shots.map((shot) => ({
+    id: shot.id as string,
+    index: Number(shot.index ?? 0),
+    label: (shot.descriptionZh ?? shot.promptEn) as string | undefined,
+    episodeId: shot.episodeId as string | null | undefined,
+    status: shot.status as string | undefined,
+    has3dGuide: Boolean((shot.director3dGuide as { captureUrl?: string } | undefined)?.captureUrl),
+    lineArtUrl: lineArtByShotId[shot.id as string],
+  }));
 
   return (
     <div className="flex flex-col h-full" style={{ height: '100%' }}>
-      <div className="flex items-center gap-2 px-3 py-1.5 border-b border-line shrink-0">
-        <span className="text-[10px] text-ink/60 font-medium">当前镜</span>
-        <select
-          className="text-[10px] px-2 py-1 rounded border border-line bg-surface"
-          value={currentShotId ?? ''}
-          onChange={(e) => {
-            const sid = e.target.value;
-            setCurrentShotId(sid);
-            focusShot(sid);
-          }}
-        >
-           {(shots as Array<{ id: string; index: number; descriptionZh?: string; promptEn?: string }>).map((s) => (
-            <option key={s.id} value={s.id}>#{s.index} {s.descriptionZh || s.promptEn || '未命名'}</option>
-          ))}
+      <AgentPoseInput onPose={handleAgentPose} />
+      <Director3dShell
+        options={{
+          project: currentProject,
+          shotState: currentState,
+          shotContext: {
+            shotId: currentShotId ?? undefined,
+            episodeId: currentState.episodeId,
+            sourceChainDeskId,
+            sourceShotRevision: currentState.sourceShotRevision,
+            sourceLabel: sourceChainDeskId ? '分镜台链镜表' : undefined,
+            episodeLabel,
+            lineArtUrl: currentShotId ? lineArtByShotId[currentShotId] : undefined,
+            confirmed: episodeConfirmed,
+            upstreamConnected: Boolean(sourceChainDeskId && currentShotId),
+            shots: shotItems,
+          },
+          performanceMode: 'normal',
+          crowdMax: 20,
+          onShotStateChange: persistState,
+          onSelectShot: (shotId) => { setCurrentShotId(shotId); focusShot(shotId); },
+          onCandidateCreated: handleCandidate,
+          onCommit: handleCommit,
+          onUploadFile: async (file) => {
+            const uploaded = await api.uploadAsset(file);
+            return { url: uploaded.url, filename: uploaded.filename };
+          },
+          onSaveSceneTemplate: handleTemplate,
+          onRendererReady: handleRendererReady,
+        }}
+      />
+      <div className="sr-only">
+        <select value={currentShotId ?? ''} onChange={(event) => { setCurrentShotId(event.target.value || null); if (event.target.value) focusShot(event.target.value); }}>
+          <option value="">独立场景模式</option>
+          {shotItems.map((shot) => <option key={shot.id} value={shot.id}>{shot.index} {shot.label}</option>)}
         </select>
-        <button
-          type="button"
-          className="dd-btn is-ghost"
-          style={{ fontSize: 10, height: 24, padding: '0 8px', marginLeft: 'auto' }}
-          onClick={() => {
-            if (!currentShotId) return;
-            const shot = shots.find((s) => s.id === currentShotId) as Record<string, unknown> | undefined;
-            if (!shot) return;
-            const shotCharacters = resolveBlockCharacters(data, shot as never, characters);
-            const updated = prepareDirectorProjectForShot(
-              sceneProject,
-              shotCharacters.map((c: { id: string }) => c.id),
-              characters,
-              undefined,
-              shotCharacters.map((c: { name: string }) => c.name),
-            );
-            persistProject(updated);
-            appendLog(`导演台 · 已应用 3D 摆位建议至镜 #${(shot as { index?: number }).index ?? '?'}`);
-          }}
-        >
-          <Box size={10} />
-           生成3D摆位建议
-        </button>
-        {showSavePreset ? (
-          <div className="flex items-center gap-1 shrink-0">
-            <input
-              className="text-[9px] px-1.5 py-0.5 rounded border border-line bg-surface w-20"
-              value={presetNameInput}
-              onChange={(e) => setPresetNameInput(e.target.value)}
-              placeholder="机位名"
-              autoFocus
-              onKeyDown={(e) => { if (e.key === 'Enter') savePreset(presetNameInput); if (e.key === 'Escape') setShowSavePreset(false); }}
-            />
-            <button type="button" className="dd-btn is-ghost" style={{ fontSize: 9, height: 22, padding: '0 6px' }} onClick={() => { savePreset(presetNameInput); }}>保存</button>
-            <button type="button" className="dd-btn is-ghost" style={{ fontSize: 9, height: 22, padding: '0 6px' }} onClick={() => setShowSavePreset(false)}>取消</button>
-          </div>
-        ) : (
-          <button
-            type="button"
-            className="dd-btn is-ghost"
-            style={{ fontSize: 9, height: 22, padding: '0 6px', marginLeft: 4 }}
-            onClick={() => setShowSavePreset(true)}
-          >
-            存机位
-          </button>
-        )}
-      </div>
-      {shotPresets.length > 0 && (
-        <div className="flex items-center gap-1 px-3 py-1 overflow-x-auto shrink-0 border-b border-line" style={{ maxWidth: '100%' }}>
-          {shotPresets.map((p) => (
-            <button
-              key={p.id}
-              type="button"
-              className="flex items-center gap-1 px-2 py-0.5 rounded text-[9px] border border-line bg-surface/50 hover:bg-surface whitespace-nowrap shrink-0"
-              title={`位置 ${p.position?.join(',') ?? '—'} · FOV ${p.fov ?? '—'}`}
-              onClick={() => {
-                if (!currentShotId) return;
-                const shot = shots.find((s) => s.id === currentShotId) as Record<string, unknown> | undefined;
-                if (!shot) return;
-                const existingGuide = (shot.director3dGuide as Record<string, unknown> | undefined) ?? {};
-                useWorkspaceDocument.getState().updateShot(currentShotId, {
-                  director3dGuide: {
-                    sourceBlockId: (existingGuide.sourceBlockId as string) || blockId,
-                    captureId: (existingGuide.captureId as string) || '',
-                    captureUrl: (existingGuide.captureUrl as string) || '',
-                    cameraPosition: p.position,
-                    cameraRotation: p.rotation,
-                    cameraFov: p.fov,
-                    cameraPrompt: (p as CameraPreset & { cameraPrompt?: string }).cameraPrompt ?? existingGuide.cameraPrompt as string ?? '',
-                    appliedAt: new Date().toISOString(),
-                  } as never,
-                });
-                appendLog(`导演台 · 已恢复机位 ${p.name}`);
-              }}
-            >
-              {p.captureUrl ? <img src={p.captureUrl} alt="" className="w-5 h-4 rounded object-cover" /> : null}
-              <span>{p.name}</span>
-              <span
-                className="ml-1 opacity-40 hover:opacity-100 cursor-pointer"
-                onClick={(e) => { e.stopPropagation(); deletePreset(p.id); }}
-                title="删除"
-              >×</span>
-            </button>
-          ))}
-        </div>
-      )}
-      <div className="flex-1 min-h-0">
-        <Director3dShell
-          options={{
-            project: resolvedScene,
-            linkedShotId: currentShotId ?? undefined,
-            performanceMode: 'normal',
-            crowdMax: 20,
-            onProjectChange: persistProject,
-            onCapture: handleCapture,
-            onUploadFile: async (file) => {
-              const uploaded = await api.uploadAsset(file);
-              return { url: uploaded.url, filename: uploaded.filename };
-            },
-            onRendererReady: handleRendererReady,
-          }}
-        />
+        <span>{currentShotId ?? 'standalone'}</span>
       </div>
     </div>
   );

@@ -8,6 +8,7 @@ import {
   type EnvironmentProfile,
   buildLineArtShotPrompt,
   buildLineArtPanelGridPrompt,
+  LINE_ART_GRID_PAGE_SIZE,
   pickLineArtGridLayout,
   createScriptBreakdownPromptPack,
   parseScriptBreakdownPromptPack,
@@ -17,6 +18,7 @@ import {
   screenplayFullText,
   type ScriptBreakdownPromptPack,
   type ScriptBreakdownPromptTemplates,
+  buildPictureGenDelegatePatch,
   emptyStoryboardPreview,
   flattenScriptBreakdownShots,
   getEpisodeContactSheet,
@@ -24,6 +26,7 @@ import {
   readChainStoryboard,
   resolveConnectedPictureGenId,
   resolveStoryboardPreviewPictureSettings,
+  type StoryboardPreviewPictureSettings,
   bindStoryboardShotAssets,
   writeBackBreakdownPreviewImage,
   BUILTIN_COMPOSITION_TEMPLATES,
@@ -69,7 +72,6 @@ import { getAllChainShots } from '../../../engine/chain-storyboard-aggregate';
 import { AssetMentionInput } from '../../../engine/stage-deck/chrome/asset-mention/AssetMentionInput';
 import { StoryboardPreviewWorkspace } from '../../../engine/stage-deck/chrome/attached-workspace/storyboard-preview/StoryboardPreviewWorkspace';
 import { ComposerModelSelect } from '../../../engine/stage-deck/chrome/attached-workspace/composer/ComposerModelSelect';
-import { useConnectedPictureModels } from '../../../hooks/use-connected-picture-models';
 import {
   createEpisodeQueue,
   queueNextEpisode,
@@ -516,40 +518,10 @@ export function useStoryboardDesk(props: NodeProps) {
     [characterNameSet, previewPayloadEarly, sceneNameSet, shotFilter, storyboardUrlMapEarly, visibleShots],
   );
 
-  const composePictureModel = previewPayloadEarly?.pictureSettings?.model;
   const connectedPictureGenId = useMemo(
     () => resolveConnectedPictureGenId(props.id, getNodes(), getEdges()),
     [props.id, getNodes, getEdges],
   );
-  const {
-    options: composeModelOptions,
-    hasConnections: composeHasPictureConnections,
-    selectModel: composeSelectModel,
-    openConnectionsSettings: composeOpenConnections,
-  } = useConnectedPictureModels(composePictureModel);
-
-  const handleComposeModelChange = useCallback((model: string) => {
-    if (!composeHasPictureConnections) {
-      composeOpenConnections();
-      return;
-    }
-    void composeSelectModel(model, (id) => {
-      updateNodeData(props.id, (node) => {
-        const data = (node.data ?? {}) as Record<string, unknown>;
-        const raw = data.storyboardPreview as StoryboardPreviewPayload | undefined;
-        const current = raw?.version === 1
-          ? { ...emptyStoryboardPreview(), ...raw, pictureSettings: resolveStoryboardPreviewPictureSettings(raw) }
-          : emptyStoryboardPreview();
-        return {
-          ...data,
-          storyboardPreview: {
-            ...current,
-            pictureSettings: { ...current.pictureSettings, model: id },
-          },
-        };
-      });
-    });
-  }, [composeHasPictureConnections, composeOpenConnections, composeSelectModel, props.id, updateNodeData]);
 
   const readiness = useMemo(() => {
     try {
@@ -2146,12 +2118,14 @@ export function useStoryboardDesk(props: NodeProps) {
         return;
       }
 
-      const pageSize = 9;
+      // 固定四宫格（2×2）：每页最多 4 镜；不足 4 镜时空格白板，布局不变形
+      const pageSize = LINE_ART_GRID_PAGE_SIZE;
+      const { rows, cols } = pickLineArtGridLayout(pageSize);
       const pageCount = Math.ceil(targetShots.length / pageSize);
       setBatchMode('grid-line-art');
       setBatchProgress(`0/${pageCount}`);
       appendLog(
-        `开始宫格线稿 · ${targetShots.length} 镜 · ${pageCount} 张宫格（${scope === 'visible' ? '当前可见' : '全部'}）`,
+        `开始宫格线稿 · ${targetShots.length} 镜 · ${pageCount} 张四宫格（${scope === 'visible' ? '当前可见' : '全部'}）`,
       );
 
       let ok = 0;
@@ -2161,7 +2135,6 @@ export function useStoryboardDesk(props: NodeProps) {
       for (let page = 0; page < pageCount; page++) {
         if (signal.aborted) break;
         const chunk = targetShots.slice(page * pageSize, page * pageSize + pageSize);
-        const { rows, cols } = pickLineArtGridLayout(chunk.length);
         setBatchProgress(`${page + 1}/${pageCount}`);
         setGeneratingShotId(chunk[0]?.id ?? null);
 
@@ -2181,6 +2154,7 @@ export function useStoryboardDesk(props: NodeProps) {
             };
           });
 
+          // 始终按 2×2 构图；chunk < 4 时 prompt 空格白板，切分仍按四格
           const gridPrompt = buildLineArtPanelGridPrompt(
             panels.map((p) => ({ label: p.label, prompt: p.prompt })),
             rows,
@@ -2189,11 +2163,18 @@ export function useStoryboardDesk(props: NodeProps) {
           const nodeData = (getNodes().find((n) => n.id === props.id)?.data ?? {}) as Record<string, unknown>;
           const previewRaw = nodeData.storyboardPreview as StoryboardPreviewPayload | undefined;
           const pictureSettings = resolveStoryboardPreviewPictureSettings(previewRaw);
-          const { modelId } = resolvePictureGenSettings(pictureData, pictureSettings);
-          // 宫格用正方形，便于等分裁切
-          const size = '1024x1024';
+          // 宫格出横屏：跟随工具条画幅；若为方图/竖图则回落 16:9，2×2 等分后每格仍为横屏
+          const settingsResolved = resolvePictureGenSettings(pictureData, pictureSettings);
+          const [bw, bh] = settingsResolved.size.split('x').map((n) => Number(n) || 0);
+          const { modelId, size } = bw > bh
+            ? settingsResolved
+            : resolvePictureGenSettings(pictureData, { ...pictureSettings, aspectRatio: '16:9' });
 
-          appendLog(`宫格出图中 · 第 ${page + 1}/${pageCount} 张 · ${rows}×${cols} · ${chunk.length} 镜`);
+          const blankSlots = pageSize - chunk.length;
+          appendLog(
+            `宫格出图中 · 第 ${page + 1}/${pageCount} 张 · 2×2 · ${size} · ${chunk.length} 镜`
+              + (blankSlots > 0 ? ` · 白板补 ${blankSlots} 格` : ''),
+          );
           const urls = await runPictureGenJob({
             prompt: gridPrompt,
             modelId,
@@ -2557,6 +2538,35 @@ export function useStoryboardDesk(props: NodeProps) {
     a.click();
   }, [contactSheetUrl]);
 
+  const updatePictureSettings = useCallback(
+    (patch: Partial<StoryboardPreviewPictureSettings>) => {
+      let nextSettings: StoryboardPreviewPictureSettings | undefined;
+      updateNodeData(props.id, (node) => {
+        const data = (node.data ?? {}) as Record<string, unknown>;
+        const raw = data.storyboardPreview as StoryboardPreviewPayload | undefined;
+        const current = raw?.version === 1 && Array.isArray(raw.frames)
+          ? {
+              ...emptyStoryboardPreview(),
+              ...raw,
+              pictureSettings: resolveStoryboardPreviewPictureSettings(raw),
+            }
+          : emptyStoryboardPreview();
+        const pictureSettings = { ...current.pictureSettings, ...patch };
+        nextSettings = pictureSettings;
+        return {
+          ...data,
+          storyboardPreview: { ...current, pictureSettings },
+        };
+      });
+      if (!nextSettings) return;
+      const pictureId = resolveConnectedPictureGenId(props.id, getNodes(), getEdges());
+      if (pictureId) {
+        updateNodeData(pictureId, buildPictureGenDelegatePatch(nextSettings));
+      }
+    },
+    [getEdges, getNodes, props.id, updateNodeData],
+  );
+
   // F-006: 上下口由 FlowSurface spawn 时显式设 true，不再运行时覆写。
   // 旧节点用户可通过 BlockShell toggle 按钮手动打开。
 
@@ -2643,47 +2653,118 @@ export function useStoryboardDesk(props: NodeProps) {
         width="min(1280px, 100vw - 24px)"
         variant="default"
         className="sg3-modal"
-        headerRight={!showShotNav ? (
+        headerRight={(
           <div className="sg3-header-right">
-            {(payload?.episodes?.length ?? 0) > 0 ? (
-              <select
-                className="sg3-episode-select"
-                value={activeEpisodeId ?? payload!.episodes[0]?.id ?? ''}
-                onChange={(event) => {
-                  setActiveEpisodeId(event.target.value || null);
-                  setSelectedId(null);
+            {currentEpisodeConfirmed && currentEpisodeId && studioTab === 'handoff' ? (
+              <button
+                type="button"
+                className="sg3-btn sg3-btn--ghost"
+                disabled={deskBusy}
+                onClick={() => {
+                  updateNodeData(props.id, {
+                    ...stripEpisodeConfirmation(props.data, currentEpisodeId),
+                  });
+                  appendLog(`已撤回本集确认 · ${visibleEpisodes[0]?.title ?? currentEpisodeId}`);
                 }}
-                aria-label="选择集"
               >
-                {payload!.episodes.map((episode) => {
-                  const done = confirmedEpisodeIds.includes(episode.id);
-                  return (
-                    <option key={episode.id} value={episode.id}>
-                      {episode.title}
-                      {done ? ' · 已确认' : ''}
-                      {` · ${episode.shots.length} 镜`}
-                    </option>
-                  );
-                })}
-              </select>
-            ) : breakdownBusy ? (
-              <span className="sg3-episode-select sg3-episode-select--busy" aria-live="polite">
-                {queueProgress.total > 0
-                  ? `拆镜中 ${Math.min(queueProgress.current + 1, queueProgress.total)}/${queueProgress.total} 集`
-                  : '拆镜中…'}
-              </span>
+                撤回确认
+              </button>
             ) : null}
-            <span className={`sg3-header-status ${currentEpisodeConfirmed ? 'is-ok' : ''}`}>
-              {breakdownBusy
-                ? (queueProgress.total > 0
-                  ? `队列 ${Math.min(queueProgress.current + 1, queueProgress.total)}/${queueProgress.total}`
-                  : '拆镜进行中')
-                : (payload?.episodes?.length ?? 0) > 1
-                  ? `已确认 ${(payload?.episodes ?? []).filter((ep) => confirmedEpisodeIds.includes(ep.id)).length}/${payload?.episodes?.length ?? 0} · 本集构图 ${Math.round(compositionStats.coverage * 100)}%`
-                  : currentEpisodeConfirmed ? '本集已确认' : '本集未确认'}
-            </span>
+            {studioTab === 'breakdown' ? (
+              breakingDown ? (
+                <button
+                  type="button"
+                  className="sg3-btn sg3-btn--primary"
+                  onClick={cancelBreakdown}
+                >
+                  取消同步
+                </button>
+              ) : upstreamNeedsConfirm ? (
+                <button
+                  type="button"
+                  className="sg3-btn sg3-btn--primary"
+                  disabled={deskBusy}
+                  onClick={openUpstreamScriptDeskForConfirm}
+                  title={`打开上游编剧台「${upstreamPackage?.brief?.title || '未命名'}」`}
+                >
+                  打开上游编剧台 · 确认成稿
+                </button>
+              ) : packageStale && canSyncLatest ? (
+                <button
+                  type="button"
+                  className="sg3-btn sg3-btn--primary"
+                  disabled={breakingDown || deskBusy}
+                  onClick={() => void (
+                    incrementalNewEpisodeCount > 0
+                      ? breakdownNewEpisodesOnly()
+                      : breakdownFromPackage()
+                  )}
+                >
+                  {breakingDown
+                    ? '同步中…'
+                    : incrementalNewEpisodeCount > 0
+                      ? `只拆新增 ${incrementalNewEpisodeCount} 集`
+                      : '同步最新成稿'}
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className="sg3-btn sg3-btn--primary"
+                  disabled={deskBusy || !payload}
+                  onClick={() => setStudioTab(payload ? 'grid' : 'breakdown')}
+                >
+                  {payload ? '去镜表' : '先完成拆镜'}
+                </button>
+              )
+            ) : null}
+            {studioTab === 'grid' ? (
+              <button
+                type="button"
+                className="sg3-btn sg3-btn--primary"
+                disabled={deskBusy || visibleShots.length === 0}
+                onClick={() => setStudioTab('compose')}
+              >
+                {compositionStats.coverage < 1 ? '去构图补线稿' : '去构图'}
+              </button>
+            ) : null}
+            {studioTab === 'compose' ? (
+              compositionStats.coverage < 1 ? (
+                <button
+                  type="button"
+                  className="sg3-btn sg3-btn--primary"
+                  disabled={deskBusy || visibleShots.length === 0 || Boolean(batchMode)}
+                  onClick={() => void generateBatchLineArt('visible')}
+                >
+                  {batchMode === 'line-art' ? `批量线稿 ${batchProgress ?? ''}…` : '缺图批量线稿'}
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className="sg3-btn sg3-btn--primary"
+                  disabled={deskBusy}
+                  onClick={() => setStudioTab('handoff')}
+                >
+                  去交接确认
+                </button>
+              )
+            ) : null}
+            {studioTab === 'handoff' && !currentEpisodeConfirmed ? (
+              <button
+                type="button"
+                className="sg3-btn sg3-btn--primary"
+                disabled={visibleShots.length === 0 || deskBusy}
+                onClick={confirmCurrentEpisode}
+                title={
+                  packageStale
+                    ? '成稿不同步：确认前会再次提示'
+                    : undefined
+                }
+              >
+                确认本集
+              </button>
+            ) : null}
           </div>
-        ) : undefined}
+        )}
       >
         {/* F-005: 上游设定就绪预检条 */}
         <div className={`sg3-readiness-bar${ready ? ' sg3-readiness-bar--ready' : ''}`}>
@@ -2796,35 +2877,90 @@ export function useStoryboardDesk(props: NodeProps) {
         ) : null}
         <div className="sg3-studio">
           <div className="sg3-pipeline" aria-label="分镜流程">
-            {(() => {
-              const hasBreakdown = Boolean(payload?.episodes?.length);
-              // F-01：有镜表 → 1/2 done；有线稿 → 3 done；已确认 → 4 done
-              // 未绑定是设定/梳表质量信号，不挡「镜表」步骤完成态（否则设定未就绪时会出现 3 亮而 2 不亮）
-              const hasLineArt = compositionStats.composed > 0;
-              const stepDone: Record<string, boolean> = {
-                breakdown: hasBreakdown,
-                grid: hasBreakdown,
-                compose: hasLineArt,
-                handoff: currentEpisodeConfirmed,
-              };
-              return ([
-                ['breakdown', '1', '拆镜'],
-                ['grid', '2', '镜表'],
-                ['compose', '3', '构图'],
-                ['handoff', '4', '交接'],
-              ] as const).map(([id, num, label], i) => (
-                <span key={id} className="sg3-pipeline__item">
-                  {i > 0 ? <span className="sg3-pipeline__sep" aria-hidden /> : null}
-                  <button
-                    type="button"
-                    className={`sg3-pipeline__step ${studioTab === id ? 'is-on' : ''} ${stepDone[id] ? 'is-done' : ''}`}
-                    onClick={() => setStudioTab(id)}
-                  >
-                    <b>{num}</b> {label}
-                  </button>
+            <div className="sg3-pipeline__steps">
+              {(() => {
+                const hasBreakdown = Boolean(payload?.episodes?.length);
+                // F-01：有镜表 → 1/2 done；有线稿 → 3 done；已确认 → 4 done
+                // 未绑定是设定/梳表质量信号，不挡「镜表」步骤完成态（否则设定未就绪时会出现 3 亮而 2 不亮）
+                const hasLineArt = compositionStats.composed > 0;
+                const stepDone: Record<string, boolean> = {
+                  breakdown: hasBreakdown,
+                  grid: hasBreakdown,
+                  compose: hasLineArt,
+                  handoff: currentEpisodeConfirmed,
+                };
+                return ([
+                  ['breakdown', '1', '拆镜'],
+                  ['grid', '2', '镜表'],
+                  ['compose', '3', '构图'],
+                  ['handoff', '4', '交接'],
+                ] as const).map(([id, num, label], i) => (
+                  <span key={id} className="sg3-pipeline__item">
+                    {i > 0 ? <span className="sg3-pipeline__sep" aria-hidden /> : null}
+                    <button
+                      type="button"
+                      className={`sg3-pipeline__step ${studioTab === id ? 'is-on' : ''} ${stepDone[id] ? 'is-done' : ''}`}
+                      onClick={() => setStudioTab(id)}
+                    >
+                      <b>{num}</b> {label}
+                    </button>
+                  </span>
+                ));
+              })()}
+            </div>
+            <div className="sg3-pipeline__episode">
+              {(payload?.episodes?.length ?? 0) > 0 ? (
+                <select
+                  className="sg3-episode-select sg3-episode-select--pipeline"
+                  value={activeEpisodeId ?? payload!.episodes[0]?.id ?? ''}
+                  onChange={(event) => {
+                    setActiveEpisodeId(event.target.value || null);
+                    setSelectedId(null);
+                  }}
+                  aria-labelledby="sg3-episode-label"
+                  title="选择要编辑的剧集；左侧镜表与中间构图会跟随切换"
+                >
+                  {payload!.episodes.map((episode) => {
+                    const done = confirmedEpisodeIds.includes(episode.id);
+                    return (
+                      <option key={episode.id} value={episode.id}>
+                        {episode.title}
+                        {done ? ' · 已确认' : ''}
+                        {` · ${episode.shots.length} 镜`}
+                      </option>
+                    );
+                  })}
+                </select>
+              ) : breakdownBusy ? (
+                <span className="sg3-episode-select sg3-episode-select--pipeline sg3-episode-select--busy" aria-live="polite">
+                  {queueProgress.total > 0
+                    ? `拆镜中 ${Math.min(queueProgress.current + 1, queueProgress.total)}/${queueProgress.total} 集`
+                    : '拆镜中…'}
                 </span>
-              ));
-            })()}
+              ) : (
+                <span className="sg3-episode-select sg3-episode-select--pipeline sg3-episode-select--empty">暂无剧集</span>
+              )}
+              <span
+                className={`sg3-pipeline__episode-meta ${currentEpisodeConfirmed ? 'is-ok' : ''}`}
+                title={
+                  breakdownBusy
+                    ? '拆镜进行中'
+                    : (payload?.episodes?.length ?? 0) > 1
+                      ? `全片已确认 ${(payload?.episodes ?? []).filter((ep) => confirmedEpisodeIds.includes(ep.id)).length}/${payload?.episodes?.length ?? 0} 集 · 本集构图 ${Math.round(compositionStats.coverage * 100)}%`
+                      : currentEpisodeConfirmed
+                        ? '本集已确认，可交导演台'
+                        : '本集尚未确认交接'
+                }
+              >
+                {breakdownBusy
+                  ? (queueProgress.total > 0
+                    ? `拆镜 ${Math.min(queueProgress.current + 1, queueProgress.total)}/${queueProgress.total}`
+                    : '拆镜中')
+                  : (payload?.episodes?.length ?? 0) > 1
+                    ? `已确认 ${(payload?.episodes ?? []).filter((ep) => confirmedEpisodeIds.includes(ep.id)).length}/${payload?.episodes?.length ?? 0} 集`
+                    : currentEpisodeConfirmed ? '本集已确认' : '本集未确认'}
+              </span>
+            </div>
           </div>
 
           {unconfirmBannerEpisodeId === currentEpisodeId ? (
@@ -2855,50 +2991,7 @@ export function useStoryboardDesk(props: NodeProps) {
           <div className={`sg3-body ${showShotNav ? 'has-nav' : 'is-wide'}`}>
             {showShotNav && (
               <aside className="sg3-nav" aria-label="镜头导航">
-                <div className="sg3-nav__episode">
-                  <div className="sg3-nav__section-label">当前集</div>
-                  {(payload?.episodes?.length ?? 0) > 0 ? (
-                    <select
-                      className="sg3-episode-select sg3-episode-select--nav"
-                      value={activeEpisodeId ?? payload!.episodes[0]?.id ?? ''}
-                      onChange={(event) => {
-                        setActiveEpisodeId(event.target.value || null);
-                        setSelectedId(null);
-                      }}
-                      aria-label="选择集"
-                    >
-                      {payload!.episodes.map((episode) => {
-                        const done = confirmedEpisodeIds.includes(episode.id);
-                        return (
-                          <option key={episode.id} value={episode.id}>
-                            {episode.title}
-                            {done ? ' · 已确认' : ''}
-                            {` · ${episode.shots.length} 镜`}
-                          </option>
-                        );
-                      })}
-                    </select>
-                  ) : breakdownBusy ? (
-                    <span className="sg3-episode-select sg3-episode-select--nav sg3-episode-select--busy" aria-live="polite">
-                      {queueProgress.total > 0
-                        ? `拆镜中 ${Math.min(queueProgress.current + 1, queueProgress.total)}/${queueProgress.total} 集`
-                        : '拆镜中…'}
-                    </span>
-                  ) : (
-                    <span className="sg3-episode-select sg3-episode-select--nav sg3-episode-select--empty">暂无集</span>
-                  )}
-                  <span className={`sg3-nav__episode-meta ${currentEpisodeConfirmed ? 'is-ok' : ''}`}>
-                    {breakdownBusy
-                      ? (queueProgress.total > 0
-                        ? `队列 ${Math.min(queueProgress.current + 1, queueProgress.total)}/${queueProgress.total}`
-                        : '拆镜进行中')
-                      : (payload?.episodes?.length ?? 0) > 1
-                        ? `已确认 ${(payload?.episodes ?? []).filter((ep) => confirmedEpisodeIds.includes(ep.id)).length}/${payload?.episodes?.length ?? 0} · 本集构图 ${Math.round(compositionStats.coverage * 100)}%`
-                        : currentEpisodeConfirmed ? '本集已确认' : '本集未确认'}
-                  </span>
-                </div>
                 <div className="sg3-nav__filter-block">
-                  <div className="sg3-nav__section-label">镜头筛选</div>
                   <div className="sg3-filters">
                   {([
                     ['all', '全部', visibleShots.length],
@@ -3061,8 +3154,6 @@ export function useStoryboardDesk(props: NodeProps) {
                   composeViewTab={composeViewTab}
                   setComposeViewTab={setComposeViewTab}
                   setStudioTab={setStudioTab}
-                  composePictureModel={composePictureModel}
-                  composeModelOptions={composeModelOptions}
                   connectedPictureGenId={connectedPictureGenId}
                   currentEpisodeShotIds={currentEpisodeShotIds}
                   previewPayloadEarly={previewPayloadEarly}
@@ -3072,7 +3163,7 @@ export function useStoryboardDesk(props: NodeProps) {
                   generateBatchGridLineArt={generateBatchGridLineArt}
                   generateStoryboardSheet={generateStoryboardSheet}
                   downloadContactSheet={downloadContactSheet}
-                  handleComposeModelChange={handleComposeModelChange}
+                  updatePictureSettings={updatePictureSettings}
                 />
               )}
 
@@ -3100,8 +3191,8 @@ export function useStoryboardDesk(props: NodeProps) {
             </main>
           </div>
 
-          <div className="sg3-foot">
-            {/* X-14: 本集总时长与平均镜长 */}
+          <div className="sg3-foot" aria-live="polite">
+            {/* X-14: 本集总时长与平均镜长（紧凑提示条，主操作在顶栏） */}
             {(() => {
               const totalSec = visibleShots.reduce((sum, s) => sum + (s.durationSec ?? 5), 0);
               const avgSec = visibleShots.length > 0 ? Math.round(totalSec / visibleShots.length) : 0;
@@ -3124,116 +3215,6 @@ export function useStoryboardDesk(props: NodeProps) {
                 </p>
               );
             })()}
-            <div className="sg3-foot__actions">
-              {currentEpisodeConfirmed && currentEpisodeId && studioTab === 'handoff' ? (
-                <button
-                  type="button"
-                  className="sg3-btn sg3-btn--ghost"
-                  disabled={deskBusy}
-                  onClick={() => {
-                    updateNodeData(props.id, {
-                      ...stripEpisodeConfirmation(props.data, currentEpisodeId),
-                    });
-                    appendLog(`已撤回本集确认 · ${visibleEpisodes[0]?.title ?? currentEpisodeId}`);
-                  }}
-                >
-                  撤回确认
-                </button>
-              ) : null}
-              {studioTab === 'breakdown' ? (
-                breakingDown ? (
-                  <button
-                    type="button"
-                    className="sg3-btn sg3-btn--primary"
-                    onClick={cancelBreakdown}
-                  >
-                    取消同步
-                  </button>
-                ) : upstreamNeedsConfirm ? (
-                  <button
-                    type="button"
-                    className="sg3-btn sg3-btn--primary"
-                    disabled={deskBusy}
-                    onClick={openUpstreamScriptDeskForConfirm}
-                    title={`打开上游编剧台「${upstreamPackage?.brief?.title || '未命名'}」`}
-                  >
-                    打开上游编剧台 · 确认成稿
-                  </button>
-                ) : packageStale && canSyncLatest ? (
-                  <button
-                    type="button"
-                    className="sg3-btn sg3-btn--primary"
-                    disabled={breakingDown || deskBusy}
-                    onClick={() => void (
-                      incrementalNewEpisodeCount > 0
-                        ? breakdownNewEpisodesOnly()
-                        : breakdownFromPackage()
-                    )}
-                  >
-                    {breakingDown
-                      ? '同步中…'
-                      : incrementalNewEpisodeCount > 0
-                        ? `只拆新增 ${incrementalNewEpisodeCount} 集`
-                        : '同步最新成稿'}
-                  </button>
-                ) : (
-                  <button
-                    type="button"
-                    className="sg3-btn sg3-btn--primary"
-                    disabled={deskBusy || !payload}
-                    onClick={() => setStudioTab(payload ? 'grid' : 'breakdown')}
-                  >
-                    {payload ? '去镜表' : '先完成拆镜'}
-                  </button>
-                )
-              ) : null}
-              {studioTab === 'grid' ? (
-                <button
-                  type="button"
-                  className="sg3-btn sg3-btn--primary"
-                  disabled={deskBusy || visibleShots.length === 0}
-                  onClick={() => setStudioTab('compose')}
-                >
-                  {compositionStats.coverage < 1 ? '去构图补线稿' : '去构图'}
-                </button>
-              ) : null}
-              {studioTab === 'compose' ? (
-                compositionStats.coverage < 1 ? (
-                  <button
-                    type="button"
-                    className="sg3-btn sg3-btn--primary"
-                    disabled={deskBusy || visibleShots.length === 0 || Boolean(batchMode)}
-                    onClick={() => void generateBatchLineArt('visible')}
-                  >
-                    {batchMode === 'line-art' ? `批量线稿 ${batchProgress ?? ''}…` : '缺图批量线稿'}
-                  </button>
-                ) : (
-                  <button
-                    type="button"
-                    className="sg3-btn sg3-btn--primary"
-                    disabled={deskBusy}
-                    onClick={() => setStudioTab('handoff')}
-                  >
-                    去交接确认
-                  </button>
-                )
-              ) : null}
-              {studioTab === 'handoff' && !currentEpisodeConfirmed ? (
-                <button
-                  type="button"
-                  className="sg3-btn sg3-btn--primary"
-                  disabled={visibleShots.length === 0 || deskBusy}
-                  onClick={confirmCurrentEpisode}
-                  title={
-                    packageStale
-                      ? '成稿不同步：确认前会再次提示'
-                      : undefined
-                  }
-                >
-                  确认本集
-                </button>
-              ) : null}
-            </div>
           </div>
         </div>
         {isDevPromptEnabled() && <StoryboardDeskDevPack blockId={props.id} />}

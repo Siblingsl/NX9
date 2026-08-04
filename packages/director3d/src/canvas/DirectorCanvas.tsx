@@ -17,15 +17,21 @@ export interface DirectorCanvasProps {
   nodeCount?: number;
   onRendererReady?: (renderer: { dispose: () => void }) => void;
   onGLCreated?: (gl: WebGLRenderer) => void;
+  viewMode?: 'director' | 'camera';
+  lineArtUrl?: string;
+  compareMode?: boolean;
+  diagnosticMode?: boolean;
 }
 
-export function DirectorCanvas({ performanceMode = 'normal', onCaptureReady, nodeCount = 0, onRendererReady, onGLCreated }: DirectorCanvasProps) {
-  const viewMode = useDirectorStore((s) => s.viewMode);
+export function DirectorCanvas({ performanceMode = 'normal', onCaptureReady, nodeCount = 0, onRendererReady, onGLCreated, viewMode: viewModeProp, lineArtUrl, compareMode, diagnosticMode }: DirectorCanvasProps) {
+  const storeViewMode = useDirectorStore((s) => s.viewMode);
+  const viewMode = viewModeProp ?? storeViewMode;
   const controlsRef = useRef<OrbitControlsImpl | null>(null);
   const shadowsOff = performanceMode === 'low' || nodeCount >= 80;
   const dpr = performanceMode === 'low' ? 1 : Math.min(window.devicePixelRatio, 1.5);
 
   return (
+    <div className="nx9-stage-canvas-wrap">
     <Canvas
       className="nx9-stage-canvas"
       dpr={dpr}
@@ -65,5 +71,8 @@ export function DirectorCanvas({ performanceMode = 'normal', onCaptureReady, nod
         />
       </Suspense>
     </Canvas>
+    {compareMode && lineArtUrl && <img className="nx9-stage-line-art-overlay" src={lineArtUrl} alt="线稿构图参考" />}
+    {diagnosticMode && <div className="nx9-stage-diagnostic">诊断：对象与机位数据来自当前镜头状态</div>}
+    </div>
   );
 }
