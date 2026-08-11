@@ -19,6 +19,7 @@ import {
   Smile,
   Anchor,
   FolderOpen,
+  Package,
 } from 'lucide-react';
 import type { AssetTrashEntry, AssetTrashKind } from '@nx9/shared';
 import {
@@ -50,6 +51,7 @@ const KIND_FILTERS: { id: KindFilter; label: string }[] = [
 const KIND_ICONS: Record<AssetTrashKind, typeof User> = {
   character: User,
   costume: Shirt,
+  prop: Package,
   scene: MapPin,
   shot: Camera,
   emotion: Smile,

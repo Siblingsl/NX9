@@ -216,15 +216,15 @@ export const BLOCK_GROUPS: Record<BlockCategory, { title: string; items: BlockDe
 };
 
 /**
- * 仅程序化 spawn（拖出/内部创建），不进 Dock / 命令面板 / getSpawnableBlocks。
- * 与「隐藏旧节点」无关：这是新设计的画布钉图能力。
+ * 仅程序化 spawn（拖出/本地文件投放/内部创建），不进 Dock / 命令面板 / getSpawnableBlocks。
+ * 与「隐藏旧节点」无关：这是新设计的画布钉板能力。
  */
 export const INTERNAL_BLOCKS: BlockDefinition[] = [
   {
     kind: 'media-pin',
-    label: '画布钉图',
+    label: '画布钉板',
     category: 'utility',
-    hint: '从生成结果或上游拖出的单图钉板 · 可连下游',
+    hint: '图像 / 视频 / 音频 / 文本 / 3D · 从生成结果拖出或本地文件投放 · 可连下游',
     glyph: 'Pin',
     accent: '#c4a574',
   },

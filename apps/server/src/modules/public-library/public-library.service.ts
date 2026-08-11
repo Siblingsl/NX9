@@ -26,6 +26,7 @@ export class PublicLibraryService {
       characters: payload.characters ?? [],
       templates: payload.templates ?? [],
       sounds: payload.sounds ?? [],
+      styles: payload.styles ?? [],
     };
     this.store.writeJson(this.fileForOwner(id), normalized);
     return normalized;

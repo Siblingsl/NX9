@@ -298,7 +298,16 @@ export function gatherUpstream(
         (d.pinUrl as string) ||
         (d.previewUrl as string) ||
         (d.assetUrl as string);
-      if (url) out.pictures.push(url);
+      if (!url) continue;
+      const pinKind = (d.pinKind as string) || 'picture';
+      if (pinKind === 'clip') out.clips.push(url);
+      else if (pinKind === 'sound') out.sounds.push(url);
+      else if (pinKind === 'text') {
+        const text = (d.textContent as string) || url;
+        if (text?.trim()) out.prompts.push(String(text).trim());
+      } else if (pinKind !== 'mesh') {
+        out.pictures.push(url);
+      }
       continue;
     }
     if (kind === 'asset-import' || kind === 'render-slot') {

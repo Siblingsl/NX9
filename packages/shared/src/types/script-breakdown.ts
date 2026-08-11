@@ -139,6 +139,21 @@ export interface ScriptBreakdownShot {
   cameraMove?: '固定' | '推' | '拉' | '摇' | '移' | '跟' | '手持';
   cameraAngle?: string;
   cameraLens?: string;
+  /** Shot-01：可选绑定镜头库条目 id，生成时合并库 Shot Prompt */
+  shotAssetId?: string | null;
+  /** Emo-03：可选绑定情绪库条目 id */
+  emotionAssetId?: string | null;
+  /**
+   * Cos-06：本镜换装覆盖（优先于角色默认 costumeId）。
+   * characterName 与 shot.characters 对齐。
+   */
+  costumeOverrides?: Array<{
+    characterName: string;
+    costumeId: string;
+    costumeLabel?: string;
+  }>;
+  /** Prop-06：本镜关键道具库 id */
+  propIds?: string[];
   characters: string[];
   scene: string;
   scriptText: string;
@@ -358,6 +373,8 @@ export function storyboardShotsFromScriptBreakdown(
       sceneName: shot.scene,
       sceneId: shot.sceneId,
       sceneCode: shot.sceneCode,
+      costumeOverrides: shot.costumeOverrides?.map((o) => ({ ...o })),
+      propIds: shot.propIds ? [...shot.propIds] : undefined,
       notes: shot.continuityNotes?.length ? shot.continuityNotes.join('\n') : undefined,
       sketchPrompt: shot.sketchPrompt ?? null,
       keyframeStatus: approved ? 'approved' : hasPreview ? 'review' : 'draft',

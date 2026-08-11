@@ -55,6 +55,9 @@ export interface CharacterConsistencyMeta {
   seed?: string | number | null;
   loraId?: string | null;
   locked?: boolean;
+  /** H-03 / C-06：锁定时写入的 Prompt 快照，用于漂移检测 */
+  lockedPromptSnapshot?: string;
+  lockedAt?: string;
 }
 
 export interface CharacterPromptPack {
@@ -77,7 +80,10 @@ export interface CharacterCreativeExtension {
   personalityText?: string;
   backgroundStory?: string;
   worldView?: string;
+  /** 角色完整设定板（ID LOCK 母图；五类分类原图的唯一角色参考） */
   fullSheetUrl?: string | null;
+  /** 五张分类母图原图，便于追溯裁切来源 */
+  categorySheetUrls?: Record<string, string>;
   frontViewUrl?: string | null;
   /** 主身份 3/4 站姿 */
   threeQuarterViewUrl?: string | null;
@@ -86,7 +92,9 @@ export interface CharacterCreativeExtension {
   /** 正面/侧面剪影 */
   silhouetteFrontUrl?: string | null;
   silhouetteSideUrl?: string | null;
-  /** 情绪特写（胸部以上） */
+  /** 完整设定板内的定妆头像（脸锁）；可选，不单独展示编辑 */
+  faceLockUrl?: string | null;
+  /** @deprecated 情绪特写已并入表情系统；保留字段仅兼容旧数据，不再生成/展示 */
   emotionalCloseupUrl?: string | null;
   viewsLocked?: boolean;
   bodyMetrics?: CharacterBodyMetrics;
@@ -125,6 +133,8 @@ export interface SceneCreativeExtension {
   worldView?: string;
   referenceUrls?: string[];
   sheetUrl?: string | null;
+  /** 设定板主景裁切封面（卡片优先；整板仍在 sheetUrl） */
+  coverUrl?: string | null;
   timeOfDay?: string;
   weather?: string;
   lighting?: string;
@@ -133,6 +143,8 @@ export interface SceneCreativeExtension {
   environmentId?: string;
   sceneCode?: string;
   props?: string[];
+  /** 场景挂接的道具库条目 id（Scn-01 / Prop-05） */
+  propIds?: string[];
   locked?: boolean;
   forbiddenDrift?: string;
   recommendedCharacters?: string[];
@@ -147,16 +159,42 @@ export interface SceneCreativeExtension {
   };
 }
 
+/** 公共镜头库运镜族（主分类） */
+export type ShotMoveFamily =
+  | 'static'
+  | 'dolly'
+  | 'pan_tilt'
+  | 'track'
+  | 'crane'
+  | 'orbit'
+  | 'special';
+
 export interface ShotCreativeExtension {
   purpose?: string;
   gifUrl?: string | null;
   exampleImageUrl?: string | null;
   recommendedPlot?: string;
+  /** @deprecated 优先用 emotionTags；保留兼容旧数据 */
   recommendedEmotion?: string;
+  /** 表演/氛围标签（内置预设或自定义；不替代角色表情格） */
+  emotionTags?: string[];
+  /** 运镜族：摄影动作粗分（三级筛选） */
+  moveFamily?: ShotMoveFamily;
+  /** 词典体系 id：system1 实拍 / system2 AI·CG（一级筛选） */
+  lexiconSystemId?: string;
+  /** 词典体系全称 */
+  lexiconSystem?: string;
+  /** 词典分类（二级筛选，如「基础推拉变焦运镜」） */
+  lexiconCategory?: string;
   cameraMove?: string;
   durationSec?: number;
   shotSize?: string;
   favorite?: boolean;
+  /** Shot-02：与角色同级锁定 */
+  locked?: boolean;
+  /** H-03：锁定时 Prompt 快照 */
+  lockedPromptSnapshot?: string;
+  lockedAt?: string;
   prompts?: {
     shot?: StructuredPrompt;
   };
@@ -169,6 +207,13 @@ export interface EmotionCreativeExtension {
   actionDescription?: string;
   shotRecommendation?: string;
   favorite?: boolean;
+  /** Emo-02 */
+  locked?: boolean;
+  lockedPromptSnapshot?: string;
+  lockedAt?: string;
+  /** Emo-01：从角色表情格发布时记录来源 */
+  sourceCharacterId?: string;
+  sourceExpressionId?: string;
   prompts?: {
     emotion?: StructuredPrompt;
   };
@@ -180,6 +225,11 @@ export interface HookCreativeExtension {
   firstThreeSecondsScript?: string;
   applicableTypes?: string[];
   example?: string;
+  favorite?: boolean;
+  /** Hook-02 */
+  locked?: boolean;
+  lockedPromptSnapshot?: string;
+  lockedAt?: string;
   prompts?: {
     hook?: StructuredPrompt;
   };
@@ -195,6 +245,36 @@ export interface VoiceCreativeExtension {
   favorite?: boolean;
   prompts?: {
     voice?: StructuredPrompt;
+  };
+}
+
+/** 道具库 Creative Asset Center 扩展（轻量：对齐服装子集，无完整设定板五分类） */
+export interface PropCreativeExtension {
+  /** 外观 / 用途简述 */
+  description?: string;
+  /** 类别：手持 / 陈设 / 载具… */
+  category?: string;
+  /** 材质与质感 */
+  materials?: string;
+  /** 标志细节（连续性锚点） */
+  landmarks?: string;
+  /** 所属或常出场景名（文本兼容） */
+  linkedScenes?: string[];
+  /** 关联场景库 id（与场景 propIds 双向） */
+  linkedSceneIds?: string[];
+  tags?: string[];
+  /** 参考图 */
+  referenceUrls?: string[];
+  /** 主参考 / 三视图设定板 */
+  sheetUrl?: string | null;
+  /** 三视图正面格裁切封面（卡片优先） */
+  coverUrl?: string | null;
+  /** 锁定后防漂移 */
+  locked?: boolean;
+  prompts?: {
+    prop?: StructuredPrompt;
+    image?: StructuredPrompt;
+    negative?: StructuredPrompt;
   };
 }
 
@@ -231,6 +311,10 @@ export interface CostumeCreativeExtension {
   referenceUrls?: string[];
   /** 服装设定板 */
   sheetUrl?: string | null;
+  /** 设定板裁切/上传的正面全身衣封面 */
+  frontFlatUrl?: string | null;
+  /** 状态变体：破损 / 湿衣 / 夜视 / 战斗等（轻量，默认空） */
+  variants?: CreativeVariantEntry[];
   /** 锁定后防漂移 */
   locked?: boolean;
   prompts?: {
@@ -245,4 +329,5 @@ export type WorkspaceCreativeExtension =
   | ShotCreativeExtension
   | EmotionCreativeExtension
   | HookCreativeExtension
-  | CostumeCreativeExtension;
+  | CostumeCreativeExtension
+  | PropCreativeExtension;

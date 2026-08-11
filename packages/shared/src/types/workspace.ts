@@ -103,6 +103,8 @@ export interface WorkspacePayloadV2 {
   voice?: VoicePayload;
   characters?: CharacterLibraryPayload;
   soundLibrary?: SoundLibraryPayload;
+  /** Sty-01：项目级风格预设 */
+  styleLibrary?: import('./style-library').StyleLibraryPayload;
   backlotCustom?: BacklotCustomPayload;
   backlotWorkspace?: BacklotWorkspacePayload;
   preferences?: WorkspacePreferences;

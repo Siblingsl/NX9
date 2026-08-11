@@ -103,6 +103,7 @@ export interface DirectorDeskBatchOptions {
     total: number,
   ) => void;
   shouldAbort?: () => boolean;
+  signal?: AbortSignal;
 }
 
 export interface DirectorDeskShotResult {
@@ -671,6 +672,22 @@ export function buildShotPrompt(
     // 有角色档案但无图
     missingForced.push('角色缺参考图');
   }
+
+  // C-09：使用 3D 机位时仍强制要求 2D 定妆/设定板，避免舞台与定妆脱节
+  if (prefer3d && d3 && forceChar && characters.length > 0) {
+    const lacking = characters.filter((c) => {
+      const url =
+        c.referenceImageUrl?.trim()
+        || c.creative?.fullSheetUrl?.trim()
+        || c.creative?.frontViewUrl?.trim();
+      return !url;
+    });
+    if (lacking.length > 0) {
+      missingForced.push(
+        `3D机位缺对应定妆：${lacking.map((c) => c.name).join('、')}`,
+      );
+    }
+  }
   if (envRef) {
     if (!referenceImageUrls.includes(envRef)) referenceImageUrls.push(envRef);
     usedRefs.push('scene');
@@ -831,6 +848,7 @@ async function attemptGenerate(
       seed,
       negativePrompt,
       n: 1,
+      signal: opts.signal,
     });
     const url = urls[0];
     if (!url) throw new Error('图像生成未返回 URL');

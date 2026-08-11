@@ -95,8 +95,8 @@ export function HomeNavPage() {
         {projects.length > 0 && (
           <section className="space-y-3">
             <h2 className="text-[11px] font-bold uppercase tracking-wider text-ink/40">项目</h2>
-            <div className="flex flex-wrap gap-2">
-              {projects.slice(0, 12).map((p) => (
+            <div className="flex flex-wrap gap-2 max-h-[140px] overflow-y-auto nx9-scroll pr-0.5">
+              {projects.map((p) => (
                 <div
                   key={p.id}
                   className={`group inline-flex items-center gap-1 rounded-full border pl-3.5 pr-1 py-1 text-xs transition-all ${
@@ -128,6 +128,9 @@ export function HomeNavPage() {
                 </div>
               ))}
             </div>
+            {projects.length > 8 && (
+              <p className="text-[10px] text-ink/35">共 {projects.length} 个项目（可滚动查看）</p>
+            )}
             {active && (
               <p className="text-[11px] text-ink/40">
                 当前「{active.title}」· {active.shotCount ?? 0} 镜头

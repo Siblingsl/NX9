@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import { existsSync, readFileSync } from 'fs';
 import { resolveMediaUrl } from '../../common/media-path';
+import { upstreamTimeout } from './upstream-error';
 
 const MH_BASE = 'https://api.magichour.ai';
 const TASK_PREFIX_IMAGE = 'mh:image:';
@@ -93,11 +94,20 @@ export class MagicHourAdapter {
     path: string,
     body?: unknown,
   ): Promise<T> {
-    const res = await fetch(`${MH_BASE}${path}`, {
-      method,
-      headers: this.headers(body !== undefined),
-      body: body === undefined ? undefined : JSON.stringify(body),
-    });
+    let res: Response;
+    try {
+      res = await fetch(`${MH_BASE}${path}`, {
+        method,
+        headers: this.headers(body !== undefined),
+        body: body === undefined ? undefined : JSON.stringify(body),
+        signal: AbortSignal.timeout(120_000),
+      });
+    } catch (error) {
+      if (error instanceof Error && /AbortError|timeout/i.test(error.name + error.message)) {
+        throw upstreamTimeout('Magic Hour', 120_000);
+      }
+      throw error;
+    }
     const text = await res.text();
     if (!res.ok) {
       const message = this.readErrorMessage(text);

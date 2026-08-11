@@ -254,6 +254,7 @@ export {
   buildStoryboardPreviewFramesFromBreakdown,
   storyboardPreviewSummary,
   canRegenerateFrame,
+  scopeStoryboardPreviewFrames,
   canConfirmStoryboardPreview,
   getEpisodeContactSheet,
 } from './types/storyboard-preview';
@@ -410,8 +411,16 @@ export {
 export {
   buildMediaPinNodeData,
   parseMediaPinPayload,
+  resolveMediaPinKind,
+  guessMediaPinKindFromUrl,
+  guessMediaPinKindFromFile,
+  isMediaPinDropFile,
+  mediaPinKindToSocket,
+  mediaPinKindLabel,
+  isMediaPinKind,
   type MediaPinPayload,
   type MediaPinSource,
+  type MediaPinKind,
   type MediaPinNodeData,
 } from './utils/media-pin';
 
@@ -487,20 +496,59 @@ export type { WorkspaceVisibility } from './utils/workspace-utils';
 export { isPrivateWorkspace, computeWorkspaceAssetCount } from './utils/workspace-utils';
 export type { CharacterProfile, CharacterLibraryPayload, CharacterBible } from './types/character';
 export { emptyCharacterLibrary } from './types/character';
-export type { SoundAssetProfile, SoundLibraryPayload } from './types/sound-library';
-export { BUILTIN_PUBLIC_SOUND_ASSETS, emptySoundLibrary, newSoundAsset } from './types/sound-library';
+export type { SoundAssetProfile, SoundLibraryPayload, SoundAssetKind } from './types/sound-library';
+export {
+  BUILTIN_PUBLIC_SOUND_ASSETS,
+  SOUND_ASSET_KINDS,
+  emptySoundLibrary,
+  newSoundAsset,
+  cloneSoundAsset,
+  resolvePublicSounds,
+  isBuiltinSoundAsset,
+  isSoundFavorite,
+  inferSoundAssetKind,
+  soundAssetKindLabel,
+  SOUND_ASSET_KIND_LABELS,
+} from './types/sound-library';
+export type {
+  StylePresetProfile,
+  StyleLibraryPayload,
+  StyleAestheticFamily,
+} from './types/style-library';
+export {
+  BUILTIN_STYLE_PRESETS,
+  STYLE_AESTHETIC_FAMILIES,
+  emptyStyleLibrary,
+  newStylePreset,
+  cloneStylePreset,
+  resolveStylePresets,
+  findStylePresetByName,
+  styleAestheticFamilyLabel,
+  isBuiltinStylePreset,
+} from './types/style-library';
+export {
+  BUILTIN_EMOTION_PRESETS,
+  type EmotionPreset,
+} from './data/emotion-presets';
 export type {
   StructuredPrompt,
   CreativeVariantEntry,
   CharacterCreativeExtension,
   SceneCreativeExtension,
   CostumeCreativeExtension,
+  PropCreativeExtension,
   ShotCreativeExtension,
+  ShotMoveFamily,
   EmotionCreativeExtension,
   HookCreativeExtension,
   VoiceCreativeExtension,
 } from './types/creative-asset-center';
 export { emptyStructuredPrompt, touchStructuredPrompt } from './types/creative-asset-center';
+export {
+  SHOT_MOVE_FAMILIES,
+  shotMoveFamilyLabel,
+  inferShotMoveFamilyFromGroup,
+} from './data/shot-move-families';
 export {
   CAC_EXPRESSION_PRESETS,
   CAC_POSE_PRESETS,
@@ -510,12 +558,14 @@ export {
   CAC_VOICE_GENDERS,
   CAC_VOICE_EMOTIONS,
   defaultCharacterVariants,
+  mergeVariantSlots,
   CAC_SHEET_EXPRESSION_PRESETS,
   CAC_MICRO_EXPRESSION_PRESETS,
   CAC_SHEET_POSE_PRESETS,
   CAC_SHEET_HEAD_ANGLE_PRESETS,
   CAC_COSTUME_DETAIL_PRESETS,
   CAC_HAND_REF_PRESETS,
+  CAC_COSTUME_VARIANT_PRESETS,
 } from './data/creative-asset-presets';
 export {
   CHARACTER_SHEET_PROMPT_TEMPLATE,
@@ -533,6 +583,13 @@ export {
   COSTUME_SHEET_PROMPT_TEMPLATE,
   getCostumeCreative,
   regenerateCostumePrompts,
+  buildPropBiblePrompt,
+  buildPropImagePrompt,
+  buildPropNegativePrompt,
+  buildPropSheetGenerationPrompt,
+  PROP_SHEET_PROMPT_TEMPLATE,
+  getPropCreative,
+  regeneratePropPrompts,
   buildSceneSheetGenerationPrompt,
   buildShotPrompt,
   buildEmotionPrompt,
@@ -550,10 +607,18 @@ export {
 export {
   CHARACTER_SHEET_MASTER_PROMPT_TEMPLATE,
   CHARACTER_SHEET_PANEL_LAYOUT,
+  CHARACTER_SHEET_PANEL_DEFS,
   CHARACTER_SHEET_STYLE_LABELS,
   CHARACTER_SHEET_GRID_COLS,
   CHARACTER_SHEET_GRID_ROWS,
+  CHARACTER_SHEET_CANVAS_WIDTH,
+  CHARACTER_SHEET_CANVAS_HEIGHT,
+  CHARACTER_SHEET_CATEGORY_HEADER_RATIO,
+  CHARACTER_SHEET_CATEGORY_LAYOUTS,
+  CHARACTER_SHEET_PANEL_CONTENT,
   buildCharacterMasterSheetPrompt,
+  buildCharacterSheetCategoryPrompt,
+  getCharacterSheetCategoryLayout,
   buildCharacterSheetLockedLayoutPrompt,
   formatPanelGridSpec,
   panelRectToPixels,
@@ -562,8 +627,30 @@ export {
   type CharacterSheetStyleMode,
   type CharacterSheetPanelId,
   type CharacterSheetPanelLayout,
+  type CharacterSheetCategoryId,
+  type CharacterSheetCategoryLayout,
   type CharacterSheetPromptInput,
 } from './utils/character-sheet-master';
+
+export {
+  entitySheetCropRect,
+  COSTUME_SHEET_FRONT_RECT,
+  SCENE_SHEET_HERO_RECT,
+  PROP_SHEET_FRONT_RECT,
+  type EntitySheetCropKind,
+} from './utils/entity-sheet-crop';
+
+export {
+  applyShotCostumeOverridesToCharacters,
+  enrichPromptWithShotAssets,
+  costumeSourcesFromWorkspace,
+  propSourcesFromWorkspace,
+  buildShotPropPromptSuffix,
+  type ShotCostumeOverrideLike,
+  type ShotAssetEnrichInput,
+  type CostumePromptSource,
+  type PropPromptSource,
+} from './utils/shot-asset-enrich';
 
 export {
   applyCroppedPanelsToCharacter,
@@ -583,13 +670,21 @@ export type { PublicLibraryPayload } from './types/public-library';
 export { emptyPublicLibrary } from './types/public-library';
 export {
   ASSET_LIBRARY_TABS,
+  ASSET_LIBRARY_TAB_GROUPS,
+  ASSET_LIBRARY_PUBLIC_ONLY_KINDS,
+  isAssetLibraryNavKind,
+  isAssetLibraryPublicOnlyKind,
+  assetLibraryTabGroupsForScope,
+  isAssetLibraryNavKindForScope,
   ASSET_KIND_MENTION_PREFIX,
   formatAssetMention,
   parseAssetMentions,
+  findLegacyBareMentions,
   characterToItem,
   workspaceItemToAsset,
   templateToAsset,
   soundToItem,
+  styleToItem,
   resolveAssetRef,
   enrichPromptWithAssets,
   enrichPromptWithAssetMentions,
@@ -671,6 +766,9 @@ export type {
 export {
   readChainStoryboard,
   buildChainStoryboardPayload,
+  buildLineArtShotPatch,
+  chainStoryboardHash,
+  lineArtVersionHash,
   patchChainShot,
   activeChainEpisodeShots,
   chainHasShots,
@@ -869,6 +967,18 @@ export {
   type BacklotApplyTarget,
   type BacklotCharacterArchetype,
 } from './data/backlot-templates';
+export {
+  SHOT_LIBRARY_SEEDS,
+  SHOT_LIBRARY_SEED_COUNT,
+  type ShotLibrarySeed,
+} from './data/shot-library-seeds';
+export {
+  SHOT_LEXICON_SYSTEMS,
+  shotLexiconSystemLabel,
+  listShotLexiconCategories,
+  shortenShotLexiconCategory,
+  type ShotLexiconSystem,
+} from './data/shot-lexicon-taxonomy';
 export type { GridCellPrompt, GridReversePromptsResult } from './types/grid-prompts';
 export { gridCellsToStoryboardShots } from './utils/grid-prompt-export';
 export { ANIME_TAG_PRESETS, ANGLE_PRESETS, type TagPreset } from './data/anime-tag-presets';

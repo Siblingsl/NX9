@@ -8,9 +8,18 @@ export default defineConfig({
     baseURL: 'http://localhost:5173',
     headless: true,
   },
-  webServer: {
-    command: 'pnpm run dev',
-    url: 'http://localhost:5173',
-    reuseExistingServer: true,
-  },
+  webServer: [
+    {
+      command: 'pnpm --filter @nx9/server dev',
+      url: 'http://localhost:3001/api/status',
+      reuseExistingServer: true,
+      timeout: 120000,
+    },
+    {
+      command: 'pnpm --filter @nx9/web dev',
+      url: 'http://localhost:5173',
+      reuseExistingServer: true,
+      timeout: 120000,
+    },
+  ],
 });

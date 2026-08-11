@@ -112,6 +112,18 @@ export interface StoryboardShot {
   characterNames?: string[];
   sceneName?: string | null;
   sceneAssetId?: string | null;
+  /**
+   * Cos-06：本镜换装覆盖（优先于角色默认服装）。
+   * characterName / characterId 二选一，名优先匹配。
+   */
+  costumeOverrides?: Array<{
+    characterName?: string;
+    characterId?: string;
+    costumeId: string;
+    costumeLabel?: string;
+  }>;
+  /** Prop-06：本镜关键道具 */
+  propIds?: string[];
   director3dGuide?: StoryboardDirector3dGuide | null;
   /** 当前退回修改意见；通过后清空，完整记录保留在 reviewHistory。 */
   keyframeReviewNote?: string | null;
@@ -120,6 +132,8 @@ export interface StoryboardShot {
   notes?: string;
   sketchSource?: SketchSource | null;
   sketchPrompt?: string | null;
+  /** 分镜台线稿；与导演台 firstFrameAssetId 严格分离。 */
+  lineArtUrl?: string | null;
   sketchApprovedAt?: string | null;
   videoDesc?: string | null;
   associateAssetIds?: string[];

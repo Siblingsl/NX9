@@ -298,14 +298,21 @@ export const AssetReadinessPanel = memo(function AssetReadinessPanel({
       {report.missingCostumes && report.missingCostumes.length > 0 && (
         <div className="sd2-ready-section">
           <p className="sd2-ready-section__title">
-            服装参考（点击缺口打开服装库）
+            服装参考（点击缺口打开服装库并建议建档）
           </p>
           <div className="sd2-ready-tags">
             {report.missingCostumes.map((name) => (
               <button
                 type="button"
                 key={name}
-                onClick={() => openAssetAt({ tab: 'costume' })}
+                onClick={() =>
+                  openAssetAt({
+                    tab: 'costume',
+                    query: name,
+                    suggestCreateLabel: name,
+                    returnHint: '设定就绪',
+                  })
+                }
                 className="sd2-ready-tag sd2-ready-tag--warn sd2-ready-tag--clickable"
                 title="点击打开服装库"
               >
@@ -318,16 +325,23 @@ export const AssetReadinessPanel = memo(function AssetReadinessPanel({
       {report.missingProps && report.missingProps.length > 0 && (
         <div className="sd2-ready-section">
           <p className="sd2-ready-section__title">
-            道具参考（点击缺口打开场景库）
+            道具参考（点击缺口打开道具库并建议建档）
           </p>
           <div className="sd2-ready-tags">
             {report.missingProps.map((name) => (
               <button
                 type="button"
                 key={name}
-                onClick={() => openAssetAt({ tab: 'scene' })}
+                onClick={() =>
+                  openAssetAt({
+                    tab: 'prop',
+                    query: name,
+                    suggestCreateLabel: name,
+                    returnHint: '设定就绪',
+                  })
+                }
                 className="sd2-ready-tag sd2-ready-tag--warn sd2-ready-tag--clickable"
-                title="点击打开场景库"
+                title="点击打开道具库"
               >
                 {name} ⚠
               </button>

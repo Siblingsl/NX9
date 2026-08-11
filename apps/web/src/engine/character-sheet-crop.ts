@@ -1,14 +1,17 @@
 ﻿import {
   CHARACTER_SHEET_PANEL_LAYOUT,
+  type CharacterSheetCategoryLayout,
   panelRectToPixels,
 } from '@nx9/shared';
 
 export async function cropCharacterSheetPanels(
   sheetImageUrl: string,
+  layout: CharacterSheetCategoryLayout | typeof CHARACTER_SHEET_PANEL_LAYOUT = CHARACTER_SHEET_PANEL_LAYOUT,
 ): Promise<Record<string, Blob>> {
   const img = await loadImage(sheetImageUrl);
   const out: Record<string, Blob> = {};
-  for (const panel of CHARACTER_SHEET_PANEL_LAYOUT) {
+  const panels = Array.isArray(layout) ? layout : layout.panels;
+  for (const panel of panels) {
     const px = panelRectToPixels(panel.rect, img.naturalWidth, img.naturalHeight);
     out[panel.id] = await cropToBlob(img, px.x, px.y, px.w, px.h);
   }

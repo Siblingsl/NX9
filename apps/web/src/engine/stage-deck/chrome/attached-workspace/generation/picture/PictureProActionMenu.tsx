@@ -7,6 +7,7 @@ import {
   Image as ImageIcon,
   Images,
   Lightbulb,
+  ListOrdered,
   Mountain,
   Package,
   Redo2,
@@ -36,6 +37,7 @@ const ACTION_ICONS: Partial<Record<PictureProActionId, React.ComponentType<{ siz
   'text-to-image': Type,
   'image-to-image': ImageIcon,
   'upscale-hd': ZoomIn,
+  'multi-prompt': ListOrdered,
   'director-storyboard': Clapperboard,
   storyboard: Film,
   'grid-25': Grid3x3,
@@ -127,9 +129,11 @@ export function PictureProActionMenu({
             <p className="text-[9px] text-ink/35">对齐 LibTV 图片节点能力</p>
           </div>
 
-          {/* 基础快捷 */}
+          {/* 基础：文生图/图生图已按提示词与参考图自动判定，快捷区只保留需显式选择的能力 */}
           <div className="flex flex-wrap gap-1 mb-2.5 px-0.5">
-            {PICTURE_PRO_ACTIONS.filter((a) => a.category === 'quick').map((a) => {
+            {PICTURE_PRO_ACTIONS.filter(
+              (a) => a.category === 'quick' && a.id !== 'text-to-image' && a.id !== 'image-to-image',
+            ).map((a) => {
               const Icon = ACTION_ICONS[a.id] ?? Wand2;
               const active = a.id === activeId;
               return (
@@ -151,6 +155,9 @@ export function PictureProActionMenu({
                 </button>
               );
             })}
+            <span className="inline-flex items-center px-1.5 text-[9px] text-ink/35">
+              文生图 / 图生图会按参考图自动切换
+            </span>
           </div>
 
           <div className="grid grid-cols-2 gap-x-3 gap-y-3 max-h-[230px] overflow-y-auto nx9-scroll pr-0.5">
@@ -206,13 +213,15 @@ export function PictureProActionMenu({
   );
 }
 
-/** 节点空态快捷：图生图 / 图片高清 */
+/** 节点空态快捷：仅保留需显式选择的能力（文生/图生已按参考图自动判定） */
 export function PictureQuickEmptyActions({
   onSelect,
 }: {
   onSelect: (action: PictureProActionDef) => void;
 }) {
-  const quick = PICTURE_PRO_ACTIONS.filter((a) => a.quickOnEmpty);
+  const quick = PICTURE_PRO_ACTIONS.filter(
+    (a) => a.quickOnEmpty && a.id !== 'text-to-image' && a.id !== 'image-to-image',
+  );
   return (
     <div className="flex flex-col gap-1.5 nodrag nopan" onMouseDown={stop}>
       <p className="text-[10px] text-ink/40 mb-0.5">尝试：</p>

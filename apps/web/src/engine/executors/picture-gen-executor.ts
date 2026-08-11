@@ -69,13 +69,20 @@ export async function runPictureGenExecutor(ctx: BlockExecutorContext): Promise<
     prompt,
     upstream.promptDispatch,
   );
-  const finalJobs = jobs.length > 0 ? jobs : [{ prompt: prompt || 'a scenic landscape' }];
+  let finalJobs = jobs.length > 0 ? jobs : [{ prompt: prompt || 'a scenic landscape' }];
+  const { composePictureProPrompt, lookupPictureProAction, isPictureMultiPromptAction, filledMultiPrompts } =
+    await import('../stage-deck/chrome/attached-workspace/generation/picture/picture-pro-actions');
+  const multiPromptRun = isPictureMultiPromptAction(d.pictureProAction as string | undefined);
+  if (multiPromptRun) {
+    const filled = filledMultiPrompts(d.multiPrompts);
+    if (filled.length === 0) throw new Error('请至少填写一条多图提示词');
+    finalJobs = filled.map((p) => ({ prompt: p }));
+  }
   const composeAction = upstream.promptDispatch?.composeAction ?? 'generate';
   const modelId = (d.model as string) || 'dall-e-3';
   const quality = (d.quality as string) || 'auto';
   const aspectRatio = (d.aspectRatio as string) || '1:1';
   const imageCount = (d.imageCount as number) || 1;
-  const pictureGenMode = (d.pictureGenMode as string) || 'text-to-image';
   const customW = (d.width as number) || 1024;
   const customH = (d.height as number) || 1024;
   const snapToStep = (d.snapToStep as boolean) ?? true;
@@ -90,6 +97,24 @@ export async function runPictureGenExecutor(ctx: BlockExecutorContext): Promise<
       : [],
   );
   const upstreamPics = (upstream.pictures ?? []).filter((u) => !excludedRefs.has(u));
+  const nodeRefEarly = (d.referenceImageUrl as string | undefined)?.trim();
+  const { resolveRuntimePictureGenMode } = await import(
+    '../stage-deck/chrome/attached-workspace/generation/picture/picture-gen-modes'
+  );
+  const pictureGenMode = resolveRuntimePictureGenMode(d, [
+    nodeRefEarly,
+    ...multiRefs,
+    styleImageUrl,
+    ...upstreamPics,
+  ].filter((u): u is string => Boolean(u)));
+  let effectiveModelId = modelId;
+  if (pictureGenMode === 'text-to-image' || pictureGenMode === 'panorama-720') {
+    const { resolvePictureModelForRequest } = await import('@nx9/shared');
+    const def = resolvePictureModelForRequest(effectiveModelId);
+    if (def.provider === 'fal' && def.supportsReference) {
+      effectiveModelId = 'flux-dev';
+    }
+  }
   const resolvedSize = resolveImageRequestSize({
     quality,
     aspectRatio: aspectRatio === 'custom' ? undefined : aspectRatio,
@@ -97,7 +122,7 @@ export async function runPictureGenExecutor(ctx: BlockExecutorContext): Promise<
     height: aspectRatio === 'custom' ? customH : undefined,
     snapToStep,
   });
-  const nodeRef = (d.referenceImageUrl as string | undefined)?.trim();
+  const nodeRef = nodeRefEarly;
   const existingGenerated = Array.isArray(d.previewUrls)
     ? (d.previewUrls as string[]).filter((u) => typeof u === 'string' && u.trim())
     : d.previewUrl
@@ -119,10 +144,7 @@ export async function runPictureGenExecutor(ctx: BlockExecutorContext): Promise<
     pictureGenMode === 'upscale-hd' ||
     mentionedMediaUrls.length > 0;
 
-  // 专业动作模板（LibTV 对齐）
-  const { composePictureProPrompt, lookupPictureProAction } = await import(
-    '../stage-deck/chrome/attached-workspace/generation/picture/picture-pro-actions'
-  );
+  // 专业动作模板
   const proAction = lookupPictureProAction(d.pictureProAction as string | undefined);
 
   const urls: string[] = [];
@@ -220,13 +242,13 @@ export async function runPictureGenExecutor(ctx: BlockExecutorContext): Promise<
 
       const batchUrls = await runPictureGenJob({
         prompt: finalPrompt,
-        modelId,
+        modelId: effectiveModelId,
         size: resolvedSize.size,
         referenceImageUrl: refImage,
         referenceImageUrls: effectiveMultiRefs,
         styleImageUrl,
         strength: imageStrength,
-        n: imageCount,
+        n: multiPromptRun ? 1 : imageCount,
         mode: pictureGenMode === 'panorama-720' ? 'panorama-720' : 'standard',
         negativePrompt: d.negativePrompt as string | undefined,
         seed: d.seed as number | undefined,

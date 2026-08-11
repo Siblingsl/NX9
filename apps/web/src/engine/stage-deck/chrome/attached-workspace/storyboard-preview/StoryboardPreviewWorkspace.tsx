@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Box, ChevronDown, GripVertical, Play, Sparkles } from 'lucide-react';
 import {
-  canConfirmStoryboardPreview,
   KEYFRAME_SCORE_THRESHOLD,
   lookupBlock,
   STORYBOARD_GUIDE_KINDS,
+  scopeStoryboardPreviewFrames,
   storyboardPreviewSummary,
   type StoryboardGuideKind,
   type StoryboardPreviewGridColumns,
@@ -109,9 +109,7 @@ export function StoryboardPreviewWorkspace({
   const status = (data.status as string) ?? 'idle';
   /** X-16: 按当前集过滤 frames */
   const displayFrames = useMemo(
-    () => (episodeShotIds && episodeShotIds.size > 0
-      ? payload.frames.filter((f) => f.sourceShotId && episodeShotIds.has(f.sourceShotId))
-      : payload.frames),
+    () => scopeStoryboardPreviewFrames(payload.frames, episodeShotIds),
     [payload.frames, episodeShotIds],
   );
   const summary = storyboardPreviewSummary(payload);
@@ -122,7 +120,8 @@ export function StoryboardPreviewWorkspace({
     const locked = displayFrames.filter((f) => f.locked).length;
     return { total, success, locked, ready: total > 0 && success === total && Boolean(payload?.confirmed) };
   }, [displayFrames, episodeShotIds, summary, payload?.confirmed]);
-  const canConfirm = canConfirmStoryboardPreview(payload);
+  const canConfirmDisplay = displayFrames.length > 0
+    && displayFrames.every((frame) => frame.status === 'success' || frame.status === 'locked');
   const pictureNode = actions.connectedPictureNode();
   const director3dNode = actions.connectedDirector3dNode();
   const { model, pictureGenMode, quality, aspectRatio } = payload.pictureSettings;
@@ -132,6 +131,14 @@ export function StoryboardPreviewWorkspace({
   const unboundSceneShotCount = actions.shots.filter(
     (shot) => Boolean(shot.sceneName) && !shot.sceneAssetId,
   ).length;
+
+  useEffect(() => {
+    const visibleIds = new Set(displayFrames.map((frame) => frame.id));
+    setSelectedIds((prev) => {
+      const next = new Set([...prev].filter((id) => visibleIds.has(id)));
+      return next.size === prev.size ? prev : next;
+    });
+  }, [displayFrames]);
 
   useEffect(() => {
     if (!pictureNode) return;
@@ -188,14 +195,17 @@ export function StoryboardPreviewWorkspace({
   }, []);
 
   const selectAll = useCallback(() => {
-    setSelectedIds(new Set(payload.frames.map((f) => f.id)));
-  }, [payload.frames]);
+    setSelectedIds(new Set(displayFrames.map((f) => f.id)));
+  }, [displayFrames]);
 
   const clearSelection = useCallback(() => setSelectedIds(new Set()), []);
 
   const handleBatchRegenerate = useCallback(async () => {
-    const ids = selectedIds.size > 0 ? [...selectedIds] : payload.frames.map((f) => f.id);
-    const unlocked = payload.frames.filter(
+    const scopeIds = new Set(displayFrames.map((f) => f.id));
+    const ids = selectedIds.size > 0
+      ? [...selectedIds].filter((id) => scopeIds.has(id))
+      : [...scopeIds];
+    const unlocked = displayFrames.filter(
       (f) => ids.includes(f.id) && !f.locked && f.status !== 'generating',
     );
     if (unlocked.length === 0) {
@@ -208,13 +218,13 @@ export function StoryboardPreviewWorkspace({
     }
     setGenerating(false);
     appendLog(`批量重新生成 ${unlocked.length} 张（跳过锁定）`);
-  }, [actions, appendLog, payload.frames, selectedIds]);
+  }, [actions, appendLog, displayFrames, selectedIds]);
 
   const handleGenerateAll = useCallback(async () => {
     setGenerating(true);
-    await actions.generateAllFrames(true);
+    await actions.generateAllFrames(true, displayFrames.map((frame) => frame.id));
     setGenerating(false);
-  }, [actions]);
+  }, [actions, displayFrames]);
 
   const selectedFrame = payload.selectedFrameId
     ? payload.frames.find((f) => f.id === payload.selectedFrameId)
@@ -556,9 +566,9 @@ export function StoryboardPreviewWorkspace({
             <button
               type="button"
               className="kp__btn is-solid"
-              disabled={!canConfirm || status === 'running' || generating}
+              disabled={!canConfirmDisplay || status === 'running' || generating}
               onMouseDown={stop}
-              onClick={actions.confirmAll}
+              onClick={() => actions.confirmAll(displayFrames.map((frame) => frame.id))}
             >
               提交批审
             </button>

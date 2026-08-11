@@ -14,6 +14,7 @@ export type PictureProActionId =
   | 'text-to-image'
   | 'image-to-image'
   | 'upscale-hd'
+  | 'multi-prompt'
   | 'director-storyboard'
   | 'storyboard'
   | 'grid-25'
@@ -29,6 +30,9 @@ export type PictureProActionId =
   | 'product-design-sheet'
   | 'portrait-refine'
   | 'cinematic-light';
+
+/** 多图独立提示词上限（与 imageCount 上限对齐） */
+export const MAX_PICTURE_MULTI_PROMPTS = 15;
 
 export interface PictureProActionDef {
   id: PictureProActionId;
@@ -87,13 +91,12 @@ export const PICTURE_PRO_ACTIONS: PictureProActionDef[] = [
     id: 'image-to-image',
     category: 'quick',
     label: '图生图',
-    hint: '基于参考图改写 / 重绘',
+    hint: '基于参考图改写 / 重绘（有参考图时自动启用，无需手动点选）',
     needsReference: true,
     pictureGenMode: 'image-to-image',
     promptSuffix:
       'Keep the subject identity and composition readable from the reference; refine details, lighting and style as described.',
     defaultPromptHint: '描述想改成什么样…',
-    quickOnEmpty: true,
   },
   {
     id: 'upscale-hd',
@@ -105,6 +108,16 @@ export const PICTURE_PRO_ACTIONS: PictureProActionDef[] = [
     imageCount: 1,
     promptSuffix: '',
     defaultPromptHint: '可选：补充增强方向（皮肤 / 纹理 / 锐度）…',
+    quickOnEmpty: true,
+  },
+  {
+    id: 'multi-prompt',
+    category: 'quick',
+    label: '生成多图',
+    hint: '为每张图写独立提示词，一次批量生成',
+    // 不锁定 pictureGenMode：文生/图生仍按参考图自动判定
+    promptSuffix: '',
+    defaultPromptHint: '第 N 张图的画面描述…',
     quickOnEmpty: true,
   },
 
@@ -402,4 +415,37 @@ export function composePictureProPrompt(
   if (base.includes(suffix.slice(0, 40))) return base;
   if (!base) return suffix;
   return `${base}\n\n[Professional mode · ${action!.label}]\n${suffix}`;
+}
+
+export function isPictureMultiPromptAction(id?: string | null): boolean {
+  return id === 'multi-prompt';
+}
+
+/** 规范化多图提示词槽位（至少 1 条，最多 MAX） */
+export function normalizeMultiPrompts(raw: unknown, fallback = ''): string[] {
+  const list = Array.isArray(raw)
+    ? raw.map((x) => (typeof x === 'string' ? x : String(x ?? '')))
+    : [];
+  const next = list.length > 0 ? list : [fallback];
+  while (next.length < 1) next.push('');
+  return next.slice(0, MAX_PICTURE_MULTI_PROMPTS);
+}
+
+/** 进入「生成多张图」时的初始槽位：已有多槽则保留，否则用当前正文作第 1 条并补空槽 */
+export function seedMultiPrompts(raw: unknown, currentContent = ''): string[] {
+  const existing = Array.isArray(raw)
+    ? raw.map((x) => (typeof x === 'string' ? x : String(x ?? '')))
+    : [];
+  if (existing.length > 0) {
+    return normalizeMultiPrompts(existing);
+  }
+  const first = currentContent.trim();
+  return normalizeMultiPrompts([first, '', '']);
+}
+
+/** 仅保留非空提示词（生成时用） */
+export function filledMultiPrompts(raw: unknown): string[] {
+  return normalizeMultiPrompts(raw)
+    .map((t) => t.trim())
+    .filter(Boolean);
 }

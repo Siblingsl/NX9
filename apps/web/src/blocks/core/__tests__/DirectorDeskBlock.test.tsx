@@ -21,16 +21,16 @@ vi.mock('@xyflow/react', async () => {
   };
 });
 
-vi.mock('../../../stores/workspace-document', () => ({
-  useWorkspaceDocument: (selector?: any) => {
-    const state = {
+vi.mock('../../../stores/workspace-document', () => {
+  const state = {
       storyboard: { shots: [], activeEpisodeId: null, episodes: [], title: '' },
       characters: { characters: [] },
       environments: { environments: [] },
     };
-    return selector ? selector(state) : state;
-  },
-}));
+  const useWorkspaceDocument: any = (selector?: any) => selector ? selector(state) : state;
+  useWorkspaceDocument.getState = () => state;
+  return { useWorkspaceDocument };
+});
 
 vi.mock('../../shared/BlockShell', () => ({
   BlockShell: ({ children }: any) => <div data-testid="block-shell">{children}</div>,

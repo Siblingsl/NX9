@@ -1,6 +1,7 @@
 import {
   bindStoryboardShotAssets,
   buildChainStoryboardPayload,
+  migrateGlobalToChainStoryboard,
   flattenScriptBreakdownShots,
   normalizeScriptBreakdownConfig,
   normalizeScriptBreakdownPrompts,
@@ -133,9 +134,12 @@ export function applyScriptBreakdownPayload(
   const existingNodeData = (runtime?.getNodes?.().find((node) => node.id === blockId)?.data
     ?? {}) as Record<string, unknown>;
   const previousChain = readChainStoryboard(existingNodeData);
+  const migratedChain = !previousChain && doc.storyboard.shots.length > 0
+    ? migrateGlobalToChainStoryboard(doc.storyboard)
+    : undefined;
+  const sourceChain = previousChain ?? migratedChain;
   const previousById = new Map<string, (typeof doc.storyboard.shots)[number]>();
-  for (const shot of doc.storyboard.shots) previousById.set(shot.id, shot);
-  for (const shot of previousChain?.shots ?? []) previousById.set(shot.id, shot);
+  for (const shot of sourceChain?.shots ?? []) previousById.set(shot.id, shot);
   const rawShots = storyboardShotsFromScriptBreakdown(payload).map((base) => {
     const prev = previousById.get(base.id);
     return {
@@ -169,22 +173,21 @@ export function applyScriptBreakdownPayload(
     environmentLibrary,
   );
   const episodeIds = new Set(shots.map((shot) => shot.episodeId).filter(Boolean));
-  const activeEpisodeId = doc.storyboard.activeEpisodeId && episodeIds.has(doc.storyboard.activeEpisodeId)
-    ? doc.storyboard.activeEpisodeId
+  const activeEpisodeId = sourceChain?.activeEpisodeId && episodeIds.has(sourceChain.activeEpisodeId)
+    ? sourceChain.activeEpisodeId
     : payload.episodes[0]?.id ?? null;
-  doc.setStoryboard({
-    ...doc.storyboard,
-    version: 3,
-    title: payload.title,
-    activeEpisodeId,
-    shots,
-  });
   const flat = flattenScriptBreakdownShots(payload);
-  const chainStoryboard = buildChainStoryboardPayload(previousChain, {
+  const chainStoryboard = buildChainStoryboardPayload(sourceChain, {
     title: payload.title,
     activeEpisodeId,
     shots,
-    episodes: doc.storyboard.episodes,
+    episodes: payload.episodes.map((episode) => ({
+      id: episode.id,
+      index: episode.index,
+      title: episode.title,
+      status: 'draft' as const,
+      logline: episode.logline,
+    })),
   });
   runtime?.updateNodeData(blockId, {
     status: 'success',
@@ -192,6 +195,11 @@ export function applyScriptBreakdownPayload(
     scriptBreakdown: payload,
     scriptBreakdownConfig: payload.config,
     chainStoryboard,
+    storyboardSchemaVersion: 1,
+    ...(migratedChain ? {
+      migratedFromGlobalStoryboard: true,
+      migratedAt: new Date().toISOString(),
+    } : {}),
     breakdownProgress: null,
     lines: flat.flatMap((shot) => shot.dialogue),
     content: `${payload.title} · ${payload.episodes.length} 集 · ${flat.length} 个分镜`,

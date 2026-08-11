@@ -101,56 +101,6 @@ function linkedShotForBlock(blockId: string, data: Record<string, unknown>, node
   return undefined;
 }
 
-/** @deprecated F-003: 使用 applyDeskBreakdown 写入链镜表代替全局 storyboard.shots。 */
-function syncBreakdownToStoryboard(
-  payload: import('@nx9/shared').ScriptBreakdownPayload,
-): void {
-  if (process.env.NODE_ENV === 'development') {
-    console.warn(
-      '[F-003] syncBreakdownToStoryboard 已废弃：全局 storyboard.shots 写将由 chainStoryboard 替代。',
-    );
-  }
-  const doc = useWorkspaceDocument.getState();
-  const previousById = new Map(doc.storyboard.shots.map((shot) => [shot.id, shot]));
-  const rawShots = storyboardShotsFromScriptBreakdown(payload).map((base) => {
-    const previous = previousById.get(base.id);
-    if (!previous) return base;
-    return {
-      ...base,
-      ...previous,
-      episodeId: base.episodeId,
-      episodeIndex: base.episodeIndex,
-      episodeTitle: base.episodeTitle,
-      index: base.index,
-      durationSec: base.durationSec,
-      descriptionZh: base.descriptionZh,
-      promptEn: base.promptEn,
-      videoPromptEn: base.videoPromptEn,
-      characterNames: base.characterNames,
-      sceneName: base.sceneName,
-      sceneId: base.sceneId,
-      sceneCode: base.sceneCode,
-    };
-  });
-  const shots = bindStoryboardShotAssets(
-    rawShots,
-    doc.characters.characters,
-    doc.environments?.environments ?? [],
-  );
-  const episodeIds = new Set(shots.map((shot) => shot.episodeId).filter(Boolean));
-  const activeEpisodeId =
-    doc.storyboard.activeEpisodeId && episodeIds.has(doc.storyboard.activeEpisodeId)
-      ? doc.storyboard.activeEpisodeId
-      : shots.find((shot) => shot.episodeId)?.episodeId ?? null;
-  doc.setStoryboard({
-    ...doc.storyboard,
-    version: 3,
-    title: payload.title,
-    activeEpisodeId,
-    shots,
-  });
-}
-
 function characterContextForBlock(
   block: FlowBlock,
   upstreamPictures: string[] = [],
@@ -372,9 +322,6 @@ async function executeBlock(
       upstream.scriptBreakdowns?.[0] ??
       (d.scriptBreakdown as import('@nx9/shared').ScriptBreakdownPayload | undefined);
     if (rawPayload) {
-      // F-003: syncBreakdownToStoryboard 已废弃（写全局 store），
-      // applyDeskBreakdown 已负责写入节点 chainStoryboard。
-      syncBreakdownToStoryboard(rawPayload);
       applyDeskBreakdown(block.id, rawPayload, updateNodeData, {
         content: `${rawPayload.title} · ${rawPayload.episodes.length} 集 · ${flattenScriptBreakdownShots(rawPayload).length} 镜`,
       });
@@ -430,9 +377,20 @@ async function executeBlock(
       const resolved = resolveMentionsForPrompt(job.prompt, mentionRefs);
       job.prompt = resolved.resolved;
     }
-    const finalJobs = jobs.length > 0 ? jobs : [{ prompt: prompt || 'a scenic landscape' }];
+    let finalJobs = jobs.length > 0 ? jobs : [{ prompt: prompt || 'a scenic landscape' }];
+    const { isPictureMultiPromptAction, filledMultiPrompts } = await import(
+      './stage-deck/chrome/attached-workspace/generation/picture/picture-pro-actions'
+    );
+    if (isPictureMultiPromptAction(d.pictureProAction as string | undefined)) {
+      const filled = filledMultiPrompts(d.multiPrompts);
+      if (filled.length === 0) {
+        throw new Error('请至少填写一条多图提示词');
+      }
+      finalJobs = filled.map((p) => ({ prompt: p }));
+    }
     const composeAction = upstream.promptDispatch?.composeAction ?? 'generate';
-    const modelId = (d.model as string) || 'gemini-2.5-flash-image';
+    const multiPromptRun = isPictureMultiPromptAction(d.pictureProAction as string | undefined);
+    let modelId = (d.model as string) || 'gemini-2.5-flash-image';
     const { resolveImageRequestSize, extractReferenceConstraints } = await import('@nx9/shared');
     // F-017/F-032: 从上游 reference-board 提取约束
     const referenceConstraint = (() => {
@@ -449,7 +407,6 @@ async function executeBlock(
     const quality = (d.quality as string) || 'auto';
     const aspectRatio = (d.aspectRatio as string) || '1:1';
     const imageCount = (d.imageCount as number) || 1;
-    const pictureGenMode = (d.pictureGenMode as string) || 'text-to-image';
     const customW = (d.width as number) || 1024;
     const customH = (d.height as number) || 1024;
     const snapToStep = (d.snapToStep as boolean) ?? true;
@@ -462,6 +419,23 @@ async function executeBlock(
       Array.isArray(d.excludedRefUrls) ? (d.excludedRefUrls as string[]) : [],
     );
     const upstreamPics = (upstream.pictures ?? []).filter((u) => !excludedRefs.has(u));
+    const nodeRefEarly = (d.referenceImageUrl as string | undefined)?.trim();
+    const { resolveRuntimePictureGenMode } = await import(
+      './stage-deck/chrome/attached-workspace/generation/picture/picture-gen-modes'
+    );
+    const pictureGenMode = resolveRuntimePictureGenMode(d, [
+      nodeRefEarly,
+      ...multiRefs,
+      styleImageUrl,
+      ...upstreamPics,
+    ].filter((u): u is string => Boolean(u)));
+    if (pictureGenMode === 'text-to-image' || pictureGenMode === 'panorama-720') {
+      const { resolvePictureModelForRequest } = await import('@nx9/shared');
+      const def = resolvePictureModelForRequest(modelId);
+      if (def.provider === 'fal' && def.supportsReference) {
+        modelId = 'flux-dev';
+      }
+    }
     const resolvedSize = resolveImageRequestSize({
       quality,
       aspectRatio: aspectRatio === 'custom' ? undefined : aspectRatio,
@@ -473,7 +447,7 @@ async function executeBlock(
     // F-003: 链优先读取上游镜表
     const linkedShot = linkedShotForBlock(block.id, d, ctx?.nodes, ctx?.edges);
     const shotRef = linkedShot?.firstFrameAssetId;
-    const nodeRef = (d.referenceImageUrl as string | undefined)?.trim();
+    const nodeRef = nodeRefEarly;
     const existingGenerated = Array.isArray(d.previewUrls)
       ? (d.previewUrls as string[]).filter((u) => typeof u === 'string' && u.trim())
       : d.previewUrl
@@ -624,7 +598,7 @@ async function executeBlock(
           referenceImageUrls: effectiveMultiRefs,
           styleImageUrl,
           strength: imageStrength,
-          n: imageCount,
+          n: multiPromptRun ? 1 : imageCount,
           resolutionTier: (d.resolutionTier as string) || undefined,
           mode: pictureGenMode === 'panorama-720' ? 'panorama-720' : 'standard',
           negativePrompt: d.negativePrompt as string | undefined,
@@ -778,7 +752,7 @@ async function executeBlock(
               const primarySourceId = (block.data as Record<string, unknown>)?.primarySourceId as string | null | undefined;
               const upstream = gatherUpstream(block.id, ctx!.nodes as any, ctx!.edges as any, upstreamPolicy, primarySourceId);
               const upstreamChain = upstream.shotIds;
-              if (upstreamChain.length > 0) {
+               if ((upstreamChain?.length ?? 0) > 0) {
                 const inc = ctx!.edges.filter((e) => e.target === block.id);
                 for (const e of inc) {
                   const src = ctx!.nodes.find((n) => n.id === e.source);
@@ -1687,6 +1661,7 @@ async function executeBlock(
   }
 
   if (kind === 'export-pack') {
+    if (!ctx) throw new Error('export-pack 缺少画布上下文');
     const shots = activeEpisodeShots(useWorkspaceDocument.getState().storyboard);
     const { runExportPack } = await import('./export-pack-runner');
     const { hasEffectiveTimeline, parseTimelineDraft } = await import('@nx9/shared');
@@ -1694,14 +1669,14 @@ async function executeBlock(
     const prefix = (d.exportPrefix as string) || 'nx9-shot';
     const audioUrl = (d.episodeAudioUrl as string) || '';
     // F-011: 解析本节点或上游智能剪辑时间线；失败不得标 success
-    let timeline = parseTimelineDraft(d.timelineDraft as string | object | undefined);
+    let timeline = parseTimelineDraft(d.timelineDraft as import('@nx9/shared').TimelineDraftRaw);
     if (!hasEffectiveTimeline(timeline)) {
       const incoming = ctx.edges.filter((e) => e.target === block.id);
       for (const edge of incoming) {
         const src = ctx.nodes.find((n) => n.id === edge.source);
         if (src?.type !== 'clip-editor') continue;
         const parsed = parseTimelineDraft(
-          (src.data as Record<string, unknown> | undefined)?.timelineDraft as string | object | undefined,
+            (src.data as Record<string, unknown> | undefined)?.timelineDraft as import('@nx9/shared').TimelineDraftRaw,
         );
         if (hasEffectiveTimeline(parsed)) {
           timeline = parsed;

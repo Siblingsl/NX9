@@ -39,6 +39,7 @@ import { useAppSurface } from '../stores/app-surface';
 import { useWorkspaceCatalog } from '../stores/workspace-catalog';
 import { useCredentialVault } from '../stores/credential-vault';
 import { useSkillLibraryModalUi } from '../stores/skill-library-modal-ui';
+import { useAssetLibraryModalUi } from '../stores/asset-library-modal-ui';
 import ImageUploadSlot from '../blocks/shared/ImageUploadSlot';
 import {
   CAMERA_MOVE_PRESETS,
@@ -791,11 +792,23 @@ function AssetsHub({
     <>
       <div className="studio-desk__hero">
         <div>
-          <h2>资产库</h2>
+          <h2>资产快览</h2>
           <p>
-            角色、场景、声音跨集合复用。拆镜时会自动写入；也可在此手工维护，并进入专业一致性 Prompt。
+            制作台只提供瘦客户端：快速建档与参考图/音。完整 Creative 字段、设定板、公共库、健康检查请打开完整素材库。
           </p>
         </div>
+        <button
+          type="button"
+          className="studio-desk__btn-primary"
+          onClick={() =>
+            useAssetLibraryModalUi.getState().openAt({
+              tab: tab === 'env' ? 'scene' : tab === 'sound' ? 'sound' : 'character',
+              returnHint: '来自制作台资产快览',
+            })
+          }
+        >
+          在完整素材库打开
+        </button>
       </div>
 
       <div className="studio-desk__chip-row">

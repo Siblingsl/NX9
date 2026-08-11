@@ -142,8 +142,12 @@ export const api = {
       body: JSON.stringify(body),
       signal,
     }).then(async (res) => {
-      if (!res.ok) throw new Error(`LLM stream error: ${res.status}`);
-      const reader = res.body!.getReader();
+       if (!res.ok) {
+         const text = await res.text();
+         throw new Error(text || `LLM stream error: ${res.status}`);
+       }
+       if (!res.body) throw new Error('LLM stream response body missing');
+       const reader = res.body.getReader();
       const decoder = new TextDecoder();
       let full = '';
       while (true) {
@@ -152,14 +156,15 @@ export const api = {
         const text = decoder.decode(value, { stream: true });
         for (const line of text.split('\n').filter((l) => l.startsWith('data: '))) {
           const json = JSON.parse(line.slice(6));
-          if (json.done) return json.full as string;
+           if (json.error) throw new Error(String(json.error));
+           if (json.done) return json.full as string;
           if (json.text) { full += json.text; onChunk(json.text); }
         }
       }
       return full;
     }),
-  proxyImage: (body: Record<string, unknown>) =>
-    request<unknown>('/api/gateway/image', { method: 'POST', body: JSON.stringify(body) }),
+  proxyImage: (body: Record<string, unknown>, options?: { signal?: AbortSignal }) =>
+    request<unknown>('/api/gateway/image', { method: 'POST', body: JSON.stringify(body), signal: options?.signal }),
   proxyVideo: (body: Record<string, unknown>) =>
     request<{
       ok: boolean;
@@ -292,10 +297,11 @@ export const api = {
       body: JSON.stringify({ lineIds, voice }),
     }),
 
-  gridSplit: (body: { sourceUrl: string; rows?: number; cols?: number }) =>
+  gridSplit: (body: { sourceUrl: string; rows?: number; cols?: number }, options?: { signal?: AbortSignal }) =>
     request<{ ok: boolean; urls: string[]; rows: number; cols: number }>('/api/grid/split', {
       method: 'POST',
       body: JSON.stringify(body),
+      signal: options?.signal,
     }),
 
   gridCompose: (body: {
@@ -453,10 +459,11 @@ export const api = {
       body: JSON.stringify(body),
     }),
 
-  proxyFal: (body: { model: string; input: Record<string, unknown> }) =>
+  proxyFal: (body: { model: string; input: Record<string, unknown> }, options?: { signal?: AbortSignal }) =>
     request<{ ok: boolean; url?: string; taskId?: string; output?: Record<string, unknown> }>('/api/gateway/fal', {
       method: 'POST',
       body: JSON.stringify(body),
+      signal: options?.signal,
     }),
 
   proxyComfy: (body: {

@@ -22,7 +22,7 @@ import { usePromptHistory } from '../../../../stores/prompt-history';
 import { api } from '../../../../../../api/client';
 import { useConnectedPictureModels } from '../../../../../../hooks/use-connected-picture-models';
 import { useWorkspaceDocument } from '../../../../../../stores/workspace-document';
-import { toastSuccess } from '../../../../../../stores/toast';
+import { toastError, toastSuccess } from '../../../../../../stores/toast';
 import { useUpstreamMedia } from '../use-upstream-media';
 import { useAttachedNodeData } from '../use-attached-node-data';
 import { useLocalNodePrompt } from '../use-local-node-prompt';
@@ -33,18 +33,34 @@ import {
 } from '../../../asset-mention/local-media-mention';
 import { PictureParamChips } from './PictureParamChips';
 import { PictureResultGallery } from './PictureResultGallery';
-import { PictureUpstreamStrip } from './PictureUpstreamStrip';
+import {
+  PictureUpstreamStrip,
+  type PictureRefItem,
+} from './PictureUpstreamStrip';
+import { PictureMultiPromptEditor } from './PictureMultiPromptEditor';
 import { PictureProActionMenu } from './PictureProActionMenu';
 import {
   buildPictureProActionPatch,
   composePictureProPrompt,
+  filledMultiPrompts,
+  isPictureMultiPromptAction,
   lookupPictureProAction,
+  normalizeMultiPrompts,
+  seedMultiPrompts,
   type PictureProActionDef,
 } from './picture-pro-actions';
-import { readPictureGenMode } from './picture-gen-modes';
+import {
+  MAX_PICTURE_UPLOAD_REFS,
+  patchPictureGenMode,
+  readPictureGenMode,
+  patchUploadedReferenceUrls,
+  resolvePictureReferenceUrls,
+  resolveRuntimePictureGenMode,
+  resolveUploadedReferenceUrls,
+} from './picture-gen-modes';
 
 const EMPTY_HISTORY: { id: string; blockId: string; text: string; savedAt: number }[] = [];
-const PICTURE_MENTION_KINDS: AssetLibraryKind[] = ['character', 'scene', 'costume'];
+const PICTURE_MENTION_KINDS: AssetLibraryKind[] = ['character', 'scene', 'costume', 'prop'];
 
 function stop(e: React.SyntheticEvent) {
   e.stopPropagation();
@@ -115,6 +131,11 @@ export function PictureWorkspace({ blockId, kind, onCollapse }: PictureWorkspace
   const pictureGenMode = readPictureGenMode(data);
   const proActionId = (data.pictureProAction as string) || undefined;
   const proAction = lookupPictureProAction(proActionId);
+  const multiPromptMode = isPictureMultiPromptAction(proActionId);
+  const multiPrompts = useMemo(
+    () => normalizeMultiPrompts(data.multiPrompts),
+    [data.multiPrompts],
+  );
   const quality = (data.quality as string) ?? 'auto';
   const aspectRatio = (data.aspectRatio as string) ?? '1:1';
   const imageCount = (data.imageCount as number) ?? 1;
@@ -161,11 +182,31 @@ export function PictureWorkspace({ blockId, kind, onCollapse }: PictureWorkspace
       if (action.pictureGenMode === 'panorama-720' && model === 'flux-i2i') {
         patch.model = 'flux-dev';
       }
+      if (isPictureMultiPromptAction(action.id)) {
+        const seeded = seedMultiPrompts(data.multiPrompts, draft);
+        patch.multiPrompts = seeded;
+        patch.imageCount = Math.max(1, filledMultiPrompts(seeded).length || seeded.length);
+        const first = filledMultiPrompts(seeded)[0];
+        if (first) patch.content = first;
+      }
       // 空 prompt 时用动作 hint 作 placeholder 引导；不强制覆盖已有正文
       handlePatch(patch);
       appendLog(`图像专业工具 · ${action.label}`);
     },
-    [appendLog, handlePatch, model],
+    [appendLog, data.multiPrompts, draft, handlePatch, model],
+  );
+
+  const handleMultiPromptsChange = useCallback(
+    (next: string[]) => {
+      const normalized = normalizeMultiPrompts(next);
+      const filled = filledMultiPrompts(normalized);
+      handlePatch({
+        multiPrompts: normalized,
+        imageCount: Math.max(1, filled.length || normalized.length),
+        content: filled[0] ?? '',
+      });
+    },
+    [handlePatch],
   );
 
   const handleDeleteGenerated = useCallback(
@@ -197,21 +238,55 @@ export function PictureWorkspace({ blockId, kind, onCollapse }: PictureWorkspace
   );
 
   const handleUploadRef = useCallback(
-    async (file: File) => {
+    async (files: FileList | File[]) => {
+      const list = Array.from(files).filter((f) => f.type.startsWith('image/') || !f.type);
+      if (!list.length) return;
+
+      const existing = resolveUploadedReferenceUrls(data);
+      const room = Math.max(0, MAX_PICTURE_UPLOAD_REFS - existing.length);
+      if (room <= 0) {
+        toastError(`参考图最多 ${MAX_PICTURE_UPLOAD_REFS} 张`);
+        return;
+      }
+      const toUpload = list.slice(0, room);
+      if (list.length > room) {
+        toastError(`参考图最多 ${MAX_PICTURE_UPLOAD_REFS} 张，已忽略多余 ${list.length - room} 张`);
+      }
+
       setRefBusy(true);
       try {
-        const res = await api.uploadAsset(file);
-        handlePatch({
-          referenceImageUrl: res.url,
-          pictureGenMode:
-            pictureGenMode === 'text-to-image' ? 'image-to-image' : pictureGenMode,
-          useImageReference: true,
-        });
+        const uploaded: string[] = [];
+        for (const file of toUpload) {
+          const res = await api.uploadAsset(file);
+          if (res.url?.trim()) uploaded.push(res.url.trim());
+        }
+        if (!uploaded.length) return;
+        const next = [...existing];
+        for (const url of uploaded) {
+          if (!next.includes(url)) next.push(url);
+        }
+        handlePatch(patchUploadedReferenceUrls(next, pictureGenMode, proActionId));
+        if (uploaded.length > 1) {
+          toastSuccess(`已添加 ${uploaded.length} 张参考图`);
+        }
       } finally {
         setRefBusy(false);
       }
     },
-    [handlePatch, pictureGenMode],
+    [data, handlePatch, pictureGenMode, proActionId],
+  );
+
+  /** 从红框移除本节点上传的参考图（不碰上游） */
+  const handleRemoveUploadRef = useCallback(
+    (url: string) => {
+      const next = resolveUploadedReferenceUrls(data).filter((u) => u !== url);
+      const patch = patchUploadedReferenceUrls(next, pictureGenMode, proActionId);
+      if ((data.styleImageUrl as string | undefined)?.trim() === url) {
+        patch.styleImageUrl = undefined;
+      }
+      handlePatch(patch);
+    },
+    [data, handlePatch, pictureGenMode, proActionId],
   );
 
   /** 在提示词光标处插入 @上游/@生成 */
@@ -241,13 +316,53 @@ export function PictureWorkspace({ blockId, kind, onCollapse }: PictureWorkspace
     flushNow();
     if (!runtime) return;
 
-    // 运行前把专业模板拼进 content（仅当有专业动作）
-    if (proAction?.promptSuffix) {
-      const composed = composePictureProPrompt(draft, proAction);
-      if (composed !== draft) {
-        updateNodeData(blockId, { content: composed });
+    // 基础路径：按「上传 + 上游参考」自动文生图 / 图生图 / 多参考，无需进专业工具点选
+    const excluded = new Set(
+      ((data.excludedRefUrls as string[]) ?? []).filter(Boolean),
+    );
+    const effectiveRefs = [
+      ...resolvePictureReferenceUrls(data),
+      ...upstreamPictures.filter((u) => u && !excluded.has(u)),
+    ];
+    const runtimeMode = resolveRuntimePictureGenMode(data, effectiveRefs);
+    const prePatch: Record<string, unknown> = {
+      ...patchPictureGenMode(runtimeMode),
+    };
+    if (proActionId === 'text-to-image' || proActionId === 'image-to-image') {
+      prePatch.pictureProAction = undefined;
+      prePatch.pictureProActionLabel = undefined;
+    }
+
+    if (isPictureMultiPromptAction(proActionId)) {
+      const slots = normalizeMultiPrompts(data.multiPrompts, draft);
+      const filled = filledMultiPrompts(slots);
+      if (filled.length === 0) {
+        toastError('请至少填写一条多图提示词');
+        return;
+      }
+      prePatch.multiPrompts = slots;
+      prePatch.imageCount = filled.length;
+      prePatch.content = filled[0];
+    } else {
+      // 底栏已去掉「N张」：普通路径固定 1 张；多张走「生成多图」
+      prePatch.imageCount = 1;
+    }
+
+    // 纯文生图时，图生图专用模型（如 flux-i2i）自动换成可文生的模型
+    if (runtimeMode === 'text-to-image' || runtimeMode === 'panorama-720') {
+      const def = resolvePictureModelForRequest(model);
+      if (def.provider === 'fal' && def.supportsReference) {
+        prePatch.model = 'flux-dev';
       }
     }
+    // 运行前把专业模板拼进 content（仅当有专业动作；多图模式按条处理）
+    if (proAction?.promptSuffix && !isPictureMultiPromptAction(proActionId)) {
+      const composed = composePictureProPrompt(draft, proAction);
+      if (composed !== draft) {
+        prePatch.content = composed;
+      }
+    }
+    updateNodeData(blockId, prePatch);
 
     try {
       const { runCascadeFromBlock } = await import('../../../../execution/cascade-runner');
@@ -262,9 +377,21 @@ export function PictureWorkspace({ blockId, kind, onCollapse }: PictureWorkspace
         },
         updateNodeData: (id, patch) => runtime.updateNodeData(id, patch),
       });
+      const filledCount = isPictureMultiPromptAction(proActionId)
+        ? filledMultiPrompts(data.multiPrompts).length
+        : 0;
+      const modeLabel = isPictureMultiPromptAction(proActionId)
+        ? `多图 ×${filledCount || imageCount}`
+        : runtimeMode === 'image-to-image'
+          ? '图生图'
+          : runtimeMode === 'multi-ref'
+            ? '多参考'
+            : runtimeMode === 'text-to-image'
+              ? '文生图'
+              : proAction?.label;
       appendLog(
-        proAction
-          ? `运行 · ${proAction.label}`
+        modeLabel
+          ? `运行 · ${modeLabel}`
           : `运行 · ${meta?.label ?? kind}`,
       );
     } catch (e) {
@@ -274,19 +401,26 @@ export function PictureWorkspace({ blockId, kind, onCollapse }: PictureWorkspace
     flushNow,
     runtime,
     proAction,
+    proActionId,
     draft,
+    data,
+    upstreamPictures,
+    model,
     updateNodeData,
     blockId,
     appendLog,
     meta,
     kind,
+    imageCount,
   ]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Enter' || !(e.ctrlKey || e.metaKey)) return;
-      const ta = promptContainerRef.current?.querySelector('textarea');
-      if (document.activeElement !== ta) return;
+      const root = promptContainerRef.current;
+      if (!root) return;
+      const active = document.activeElement;
+      if (!(active instanceof HTMLTextAreaElement) || !root.contains(active)) return;
       e.preventDefault();
       void handleRun();
     };
@@ -301,6 +435,49 @@ export function PictureWorkspace({ blockId, kind, onCollapse }: PictureWorkspace
   }, [collapsePromptBar, onCollapse, flushNow]);
 
   const excludedRefUrls = (data.excludedRefUrls as string[]) ?? [];
+  const uploadRefUrls = useMemo(() => resolveUploadedReferenceUrls(data), [data]);
+  const allRefUrls = useMemo(() => resolvePictureReferenceUrls(data), [data]);
+  const refStripItems = useMemo((): PictureRefItem[] => {
+    const items: PictureRefItem[] = [];
+    const seen = new Set<string>();
+    // 展示：上传主体参考 + 风格图（若有且不重复）
+    allRefUrls.forEach((url, index) => {
+      if (!url || seen.has(url)) return;
+      seen.add(url);
+      items.push({ url, source: 'upload', index });
+    });
+    upstreamPictures.forEach((url, index) => {
+      if (!url || seen.has(url)) return;
+      seen.add(url);
+      items.push({ url, source: 'upstream', index });
+    });
+    return items;
+  }, [allRefUrls, upstreamPictures]);
+
+  // 参考图变化时自动同步基础模式（专业玩法锁定时不改）
+  useEffect(() => {
+    const excluded = new Set(excludedRefUrls.filter(Boolean));
+    const effective = refStripItems
+      .map((i) => i.url)
+      .filter((u) => u && !excluded.has(u));
+    const nextMode = resolveRuntimePictureGenMode(data, effective);
+    if (nextMode === pictureGenMode) return;
+    const patch: Record<string, unknown> = patchPictureGenMode(nextMode);
+    // 清掉已无意义的「文生图/图生图」专业标记，避免 UI 仍显示旧工具名
+    if (proActionId === 'text-to-image' || proActionId === 'image-to-image') {
+      patch.pictureProAction = undefined;
+      patch.pictureProActionLabel = undefined;
+    }
+    handlePatch(patch);
+  }, [
+    data,
+    excludedRefUrls,
+    handlePatch,
+    pictureGenMode,
+    proActionId,
+    refStripItems,
+  ]);
+
   const localMedia = useMemo(
     () => buildLocalMediaItems(previewUrls, upstreamPictures),
     [previewUrls, upstreamPictures],
@@ -326,30 +503,37 @@ export function PictureWorkspace({ blockId, kind, onCollapse }: PictureWorkspace
 
   const toolbarLeft = (
     <div className="flex items-center gap-1 flex-wrap min-w-0" onMouseDown={stop}>
-      {/* + 参考文件（静默写入 referenceImageUrl，不再展示手动参考区） */}
+      {/* + 参考文件：写入 referenceImageUrl，并在上方「参考图」区与上游一并展示 */}
       <button
         type="button"
         onMouseDown={stop}
         disabled={refBusy}
         onClick={() => refInputRef.current?.click()}
         className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] transition-colors ${
-          data.referenceImageUrl
+          uploadRefUrls.length > 0
             ? 'bg-brand/10 text-brand'
             : 'text-ink/55 hover:text-ink hover:bg-surface/90'
         }`}
-        title="上传参考图文件"
+        title={`上传参考图（可多选，最多 ${MAX_PICTURE_UPLOAD_REFS} 张）`}
       >
         <ImagePlus size={12} />
         参考
-        {data.referenceImageUrl ? (
+        {uploadRefUrls.length > 0 ? (
+          <span className="tabular-nums opacity-80">×{uploadRefUrls.length}</span>
+        ) : null}
+        {uploadRefUrls.length > 0 ? (
           <span
             role="button"
             tabIndex={0}
             onClick={(e) => {
               e.stopPropagation();
-              handlePatch({ referenceImageUrl: undefined });
+              handlePatch({
+                ...patchUploadedReferenceUrls([], pictureGenMode, proActionId),
+                styleImageUrl: undefined,
+              });
             }}
             className="ml-0.5 opacity-60 hover:opacity-100"
+            title="清除全部上传参考"
           >
             <X size={10} />
           </span>
@@ -359,10 +543,11 @@ export function PictureWorkspace({ blockId, kind, onCollapse }: PictureWorkspace
         ref={refInputRef}
         type="file"
         accept="image/*"
+        multiple
         className="hidden"
         onChange={(e) => {
-          const f = e.target.files?.[0];
-          if (f) void handleUploadRef(f);
+          const files = e.target.files;
+          if (files?.length) void handleUploadRef(files);
           e.target.value = '';
         }}
       />
@@ -386,7 +571,10 @@ export function PictureWorkspace({ blockId, kind, onCollapse }: PictureWorkspace
           '标准文生图'
         )}
         {' · '}
-        {modelDef.label} · {resolvedSize.size} · ×{imageCount}
+        {modelDef.label} · {resolvedSize.size}
+        {multiPromptMode
+          ? ` · 多图 ×${Math.max(1, filledMultiPrompts(multiPrompts).length || multiPrompts.length)}`
+          : ''}
       </div>
 
       {aspectRatio === 'custom' && (
@@ -454,23 +642,6 @@ export function PictureWorkspace({ blockId, kind, onCollapse }: PictureWorkspace
         />
       </label>
 
-      <label className="block space-y-1">
-        <span className="text-[10px] text-ink/45">额外张数（1–15）</span>
-        <input
-          type="number"
-          min={1}
-          max={15}
-          value={imageCount}
-          onChange={(e) =>
-            handlePatch({
-              imageCount: Math.min(15, Math.max(1, Number(e.target.value) || 1)),
-            })
-          }
-          onMouseDown={stop}
-          className="w-full rounded-lg border border-line/50 px-2 py-1 text-[11px] focus:outline-none focus:border-brand/40"
-        />
-      </label>
-
       <div className="space-y-1">
         <span className="text-[10px] text-ink/45">宽高比快捷</span>
         <div className="flex flex-wrap gap-1">
@@ -495,19 +666,20 @@ export function PictureWorkspace({ blockId, kind, onCollapse }: PictureWorkspace
   );
 
   const hasGenerated = previewUrls.length > 0;
-  const hasUpstream = upstreamPictures.length > 0 || excludedRefUrls.length > 0;
-  const showMediaRow = hasGenerated || hasUpstream;
+  const hasRefs =
+    refStripItems.length > 0 || excludedRefUrls.length > 0;
+  const showMediaRow = hasGenerated || hasRefs;
 
   const topSlot = (
     <>
-      {/* 一排两列：左生成结果 · 右上游传入；单侧有内容则全宽；都无则不展示 */}
+      {/* 一排两列：左生成结果 · 右参考图（本节点上传 + 上游传入）；单侧有内容则全宽 */}
       {showMediaRow && (
         <div
           className="mx-3 mt-2 flex items-start gap-3 pb-2 border-b border-line/20"
           onMouseDown={stop}
         >
           {hasGenerated && (
-            <div className={hasUpstream ? 'min-w-0 flex-1' : 'min-w-0 w-full'}>
+            <div className={hasRefs ? 'min-w-0 flex-1' : 'min-w-0 w-full'}>
               <PictureResultGallery
                 urls={previewUrls}
                 selectedIndex={Math.min(selectedResult, Math.max(0, previewUrls.length - 1))}
@@ -517,18 +689,18 @@ export function PictureWorkspace({ blockId, kind, onCollapse }: PictureWorkspace
               />
             </div>
           )}
-          {hasGenerated && hasUpstream && (
+          {hasGenerated && hasRefs && (
             <div className="w-px self-stretch bg-line/25 shrink-0" aria-hidden />
           )}
-          {hasUpstream && (
+          {hasRefs && (
             <div className={hasGenerated ? 'min-w-0 flex-1' : 'min-w-0 w-full'}>
               <PictureUpstreamStrip
-                urls={upstreamPictures}
+                items={refStripItems}
                 mentionedUrls={mentionedUpstreamUrls}
                 excludedUrls={excludedRefUrls}
                 sourceBlockId={blockId}
-                onSelect={(_url, index) => insertLocalMediaAtCursor('upstream', index)}
-                onExclude={(url) => {
+                onSelectUpstream={(_url, index) => insertLocalMediaAtCursor('upstream', index)}
+                onExcludeUpstream={(url) => {
                   if (excludedRefUrls.includes(url)) {
                     handlePatch({
                       excludedRefUrls: excludedRefUrls.filter((u) => u !== url),
@@ -537,6 +709,7 @@ export function PictureWorkspace({ blockId, kind, onCollapse }: PictureWorkspace
                     handlePatch({ excludedRefUrls: [...excludedRefUrls, url] });
                   }
                 }}
+                onRemoveUpload={handleRemoveUploadRef}
                 onRestoreExcluded={() => handlePatch({ excludedRefUrls: [] })}
               />
             </div>
@@ -575,22 +748,9 @@ export function PictureWorkspace({ blockId, kind, onCollapse }: PictureWorkspace
         </div>
       )}
 
-      {!proAction && upstreamPictures.length === 0 && previewUrls.length === 0 && (
+      {!proAction && uploadRefUrls.length === 0 && upstreamPictures.length === 0 && previewUrls.length === 0 && (
         <div className="mx-3 mt-1.5 flex flex-wrap items-center gap-2 text-[10px] text-ink/40">
           <span>快捷：</span>
-          <button
-            type="button"
-            onMouseDown={stop}
-            onClick={() => {
-              const a = lookupPictureProAction('image-to-image');
-              if (a) handleSelectProAction(a);
-              refInputRef.current?.click();
-            }}
-            className="text-ink/55 hover:text-brand"
-          >
-            图生图
-          </button>
-          <span className="text-ink/20">·</span>
           <button
             type="button"
             onMouseDown={stop}
@@ -602,6 +762,18 @@ export function PictureWorkspace({ blockId, kind, onCollapse }: PictureWorkspace
             className="text-ink/55 hover:text-brand"
           >
             图片高清
+          </button>
+          <span className="text-ink/20">·</span>
+          <button
+            type="button"
+            onMouseDown={stop}
+            onClick={() => {
+              const a = lookupPictureProAction('multi-prompt');
+              if (a) handleSelectProAction(a);
+            }}
+            className="text-ink/55 hover:text-brand"
+          >
+            生成多图
           </button>
           <span className="text-ink/20">·</span>
           <button
@@ -623,10 +795,10 @@ export function PictureWorkspace({ blockId, kind, onCollapse }: PictureWorkspace
   const runLabel =
     pictureGenMode === 'upscale-hd'
       ? '高清放大'
-      : proAction
-        ? `生成 · ${proAction.label.slice(0, 6)}`
-        : imageCount > 1
-          ? `生成 ×${imageCount}`
+      : multiPromptMode
+        ? `生成 ×${Math.max(1, filledMultiPrompts(multiPrompts).length || multiPrompts.length)}`
+        : proAction
+          ? `生成 · ${proAction.label.slice(0, 6)}`
           : '生成';
 
   return (
@@ -670,21 +842,35 @@ export function PictureWorkspace({ blockId, kind, onCollapse }: PictureWorkspace
       running={data.status === 'running'}
       runLabel={runLabel}
       promptContainerRef={promptContainerRef}
-      bodyClassName="shrink-0 h-[120px] px-3 pt-2 pb-1 overflow-hidden"
+      heightClass="h-auto"
+      bodyClassName={
+        multiPromptMode
+          ? 'px-3 pt-2.5 pb-2 overflow-visible'
+          : 'shrink-0 h-[120px] px-3 pt-2 pb-1 overflow-hidden'
+      }
     >
-      <AssetMentionInput
-        as="textarea"
-        value={draft}
-        onChange={onChange}
-        onFocus={onFocus}
-        onBlur={onBlur}
-        placeholder={placeholder}
-        kinds={PICTURE_MENTION_KINDS}
-        localMedia={localMedia}
-        highlightMentions
-        className={COMPOSER_PROMPT_TEXTAREA_CLASS}
-        tone="desk"
-      />
+      {multiPromptMode ? (
+        <PictureMultiPromptEditor
+          prompts={multiPrompts}
+          onChange={handleMultiPromptsChange}
+          placeholder={proAction?.defaultPromptHint}
+          localMedia={localMedia}
+        />
+      ) : (
+        <AssetMentionInput
+          as="textarea"
+          value={draft}
+          onChange={onChange}
+          onFocus={onFocus}
+          onBlur={onBlur}
+          placeholder={placeholder}
+          kinds={PICTURE_MENTION_KINDS}
+          localMedia={localMedia}
+          highlightMentions
+          className={COMPOSER_PROMPT_TEXTAREA_CLASS}
+          tone="desk"
+        />
+      )}
     </ComposerWorkspaceShell>
   );
 }

@@ -24,5 +24,11 @@ export function loadEnvFile(filePath: string): void {
 
 /** Load apps/server/.env when cwd is the server package (nest start / vitest). */
 export function loadServerEnv(): void {
-  loadEnvFile(join(process.cwd(), '.env'));
+  const candidates = [
+    join(process.cwd(), '.env'),
+    join(__dirname, '..', '..', '.env'),
+  ];
+  for (const filePath of candidates) {
+    loadEnvFile(filePath);
+  }
 }

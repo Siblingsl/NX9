@@ -43,7 +43,7 @@ import { enrichPromptWithAssetMentions, summarizePackagePatch, resolveConnectedP
 import { enrichBibleScenesFromPackage } from '@nx9/shared';
 import { api } from '../../api/client';
 import { useAllAssetLibraryItems } from '../../hooks/use-asset-library-items';
-import { askConfirmWithOption, confirmDelete } from '../../stores/confirm-dialog';
+import { askConfirm, askConfirmWithOption, confirmDelete } from '../../stores/confirm-dialog';
 import { isDevPromptEnabled } from '../../stores/dev-prompt-overrides';
 import { toastSuccess } from '../../stores/toast';
 import { useWorkspaceDocument } from '../../stores/workspace-document';
@@ -68,6 +68,8 @@ import {
   runScriptDeskSkill,
 } from '../../engine/script-desk-runner';
 import { inspectBibleAssets, type AssetReadinessState } from '../../engine/asset-readiness';
+import { packageSourceHash } from '../../engine/storyboard-desk-runner';
+import { resolveConnectedStoryboardDeskId } from '../../engine/chain-storyboard-utils';
 import { AssetReadinessPanel } from '../../components/asset/AssetReadinessPanel';
 import { useAssetLibraryModalUi } from '../../stores/asset-library-modal-ui';
 import { ScriptDeskDevPackOverlay } from './script-desk/script-desk-dev-pack-overlay';
@@ -81,6 +83,15 @@ type RightTab = 'screenplay' | 'bible' | 'readiness' | 'diagnostics';
 const SPLIT_DEFAULT = 60;
 const SPLIT_MIN = 32;
 const SPLIT_MAX = 72;
+
+const SCREENPLAY_VISUAL_STYLES = [
+  { value: '真人写实', label: '真人写实' },
+  { value: '写实 3D', label: '写实 3D' },
+  { value: '风格化 3D', label: '风格化 3D' },
+  { value: '二维动漫', label: '二维动漫' },
+  { value: '国漫水墨', label: '国漫水墨' },
+  { value: '定格动画', label: '定格动画' },
+] as const;
 
 function clampSplitPct(n: number): number {
   return Math.min(SPLIT_MAX, Math.max(SPLIT_MIN, Math.round(n * 10) / 10));
@@ -106,6 +117,10 @@ function compact(text: string, max = 48) {
 /** Brief 已可用：至少有剧名或 logline，才允许首次选集数生成分集 */
 function isBriefReadyForFirstGen(pkg: ScreenplayPackage): boolean {
   return Boolean(pkg.brief.title?.trim() || pkg.brief.logline?.trim());
+}
+
+function isVisualStyleReady(pkg: ScreenplayPackage): boolean {
+  return Boolean(pkg.bible.world?.visualStyleNotes?.trim());
 }
 
 /** 列表标题：去掉与集号重复的「第N集」前缀；若标题仅有集号则返回空串 */
@@ -472,6 +487,7 @@ function ScriptDeskBlock(props: NodeProps) {
       at: new Date().toISOString(),
       autoOpenBreakdown: true,
       sourceScriptBlockId: props.id,
+      scriptHash: packageSourceHash(pkg),
       episodeRange: {
         count: pkg.screenplay.episodes.length,
         firstId: pkg.screenplay.episodes[0]?.id ?? null,
@@ -483,7 +499,8 @@ function ScriptDeskBlock(props: NodeProps) {
     };
     const runtime = useFlowRuntime.getState().runtime;
     const nodes = runtime?.getNodes() ?? [];
-    const storyboardDesk = nodes.find((n) => n.type === 'storyboard-desk');
+    const storyboardDeskId = resolveConnectedStoryboardDeskId(props.id, nodes as any, getEdges() as any);
+    const storyboardDesk = storyboardDeskId ? nodes.find((node) => node.id === storyboardDeskId) : undefined;
     if (storyboardDesk) {
       updateNodeData(storyboardDesk.id, { handoff });
       runtime?.focusBlock(storyboardDesk.id);
@@ -566,6 +583,11 @@ function ScriptDeskBlock(props: NodeProps) {
       setTip('请先共创并应用大纲（至少剧名或一句话故事）');
       return false;
     }
+    if (!isVisualStyleReady(fromPkg)) {
+      setTip('请先在右侧「世界观」中选择人物与全片视觉风格，再生成剧本');
+      setRightTab('bible');
+      return false;
+    }
     setFirstGenFloatDeferred(false);
     setGenEpisodeCount(1);
     setGenFloatExpanded(true);
@@ -575,6 +597,11 @@ function ScriptDeskBlock(props: NodeProps) {
   const handleAgentSend = useCallback(async () => {
     const instruction = chatInput.trim();
     const skillId = activeSkills[0] ?? 'generate';
+    if (skillId === 'generate' && !isVisualStyleReady(pkg)) {
+      setTip('请先在右侧「世界观」中选择人物与全片视觉风格');
+      setRightTab('bible');
+      return;
+    }
     if (!instruction && skillId !== 'consistency' && skillId !== 'generate') {
       setTip('请输入说明或选择生成/一致性技能');
       return;
@@ -721,6 +748,11 @@ function ScriptDeskBlock(props: NodeProps) {
     }
     if (!isBriefReadyForFirstGen(pkg)) {
       setTip('请先共创并应用大纲（至少剧名或一句话故事）');
+      return;
+    }
+    if (!isVisualStyleReady(pkg)) {
+      setTip('请先在右侧「世界观」中选择人物与全片视觉风格，再生成剧本');
+      setRightTab('bible');
       return;
     }
     setGenFloatExpanded(false);
@@ -895,9 +927,12 @@ function ScriptDeskBlock(props: NodeProps) {
       setTip('续写集数需 ≥ 1');
       return;
     }
-    if (count > 10 && !window.confirm(`即将续写 ${count} 集。是否继续？`)) {
-      return;
-    }
+    if (count > 10 && !(await askConfirm({
+      title: `即将续写 ${count} 集`,
+      description: '续写可能需要较长时间，确认继续？',
+      confirmLabel: '继续续写',
+      cancelLabel: '取消',
+    }))) return;
     setContinueOpen(false);
     setContinueBusy(true);
     // Q-03: 创建 AbortController
@@ -921,7 +956,7 @@ function ScriptDeskBlock(props: NodeProps) {
 
     let currentPkg = pkg;
     let ok = 0;
-    let failAt: number | null = null;
+    const failedIndexes: number[] = [];
     let aborted = false;
     setSkeletonIndexes(Array.from({ length: count }, (_, i) => startIndex + i));
     for (let i = 0; i < count; i++) {
@@ -961,7 +996,7 @@ function ScriptDeskBlock(props: NodeProps) {
       } catch (e) {
         const isAbort = e instanceof DOMException && e.name === 'AbortError';
         if (isAbort) { aborted = true; break; }
-        failAt = nextIndex;
+        failedIndexes.push(nextIndex);
         const errMsg = e instanceof Error ? e.message : String(e);
         nextSession = appendAgentMessage(nextSession, {
           role: 'system',
@@ -969,18 +1004,19 @@ function ScriptDeskBlock(props: NodeProps) {
         });
         updateNodeData(props.id, { agentSession: nextSession });
         appendLog(`续写第 ${nextIndex} 集失败：${errMsg}`);
-        break;
+        continue;
       }
     }
 
     currentPkg = runAutoLint(currentPkg);
     savePkg(currentPkg);
+    if (failedIndexes.length > 0) setFailedEpisodeIndexes(failedIndexes);
 
     // completion message
     const summary = aborted
       ? `续写已停止 · 新增第 ${startIndex}–${startIndex + ok - 1} 集 · 成功 ${ok}`
       : ok > 0
-        ? `续写完成 · 新增第 ${startIndex}–${startIndex + ok - 1} 集 · 成功 ${ok}${failAt != null ? ` · 第 ${failAt} 集失败` : ' · 全部成功'}`
+        ? `续写完成 · 新增第 ${startIndex}–${startIndex + ok - 1} 集 · 成功 ${ok}${failedIndexes.length > 0 ? ` · 失败 ${failedIndexes.join(', ')}` : ' · 全部成功'}`
         : '续写失败，未成功生成任何集';
     nextSession = appendAgentMessage(nextSession, {
       role: 'system',
@@ -988,7 +1024,7 @@ function ScriptDeskBlock(props: NodeProps) {
     });
     updateNodeData(props.id, { agentSession: nextSession });
     if (ok > 0) {
-      appendLog(`续写完成 · 新增第 ${startIndex}–${startIndex + ok - 1} 集 · 成功 ${ok} · ${failAt != null ? `第 ${failAt} 集失败` : '全部成功'}`);
+       appendLog(`续写完成 · 新增第 ${startIndex}–${startIndex + ok - 1} 集 · 成功 ${ok} · ${failedIndexes.length > 0 ? `失败 ${failedIndexes.join(', ')}` : '全部成功'}`);
       setTip(aborted ? `已停止 · 新增 ${ok} 集` : `续写完成 · 新增 ${ok} 集`);
     } else {
       setTip(aborted ? '已停止' : '续写失败，未成功生成任何集');
@@ -1441,6 +1477,19 @@ function ScriptDeskBlock(props: NodeProps) {
 
   // S-01/S-02: 关台前 upsert 工作草稿；dirty 时确认
   const handleCloseStudio = useCallback(async () => {
+    const runningTask = busy || continueBusy || rewritingEpIndex != null;
+    if (runningTask) {
+      const result = await askConfirmWithOption({
+        title: '任务仍在运行',
+        description: '可以停止任务并关闭，或继续后台运行。',
+        confirmLabel: '关闭并停止任务',
+        cancelLabel: '取消',
+        tone: 'danger',
+        option: { label: '继续后台运行', defaultChecked: false },
+      });
+      if (!result.confirmed) return;
+      if (!result.optionChecked) abortRef.current?.abort();
+    }
     if (hasDraftMemory && dirtyRef.current) {
       const result = await askConfirmWithOption({
         title: '关闭前保存到草稿？',
@@ -1471,7 +1520,7 @@ function ScriptDeskBlock(props: NodeProps) {
       });
     }
     setStudioOpen(false);
-  }, [hasDraftMemory, pkg, session, entryMode, props.id, upsertScriptDeskWorkingDraft, dirtyRef]);
+  }, [busy, continueBusy, rewritingEpIndex, hasDraftMemory, pkg, session, entryMode, props.id, upsertScriptDeskWorkingDraft, dirtyRef]);
 
   const skillName = activeSkills[0] ? SKILL_CHIPS.find((s) => s.id === activeSkills[0])?.label : '';
 
@@ -2285,7 +2334,7 @@ function ScriptDeskBlock(props: NodeProps) {
                             key={ep.id}
                             className={`sd2-ep${skeletonIndexes.includes(ep.index) ? ' is-skeleton' : ''}${dragEpId === ep.id ? ' is-dragging' : ''}`}
                             id={`sd2-ep-${ep.id}`}
-                            defaultOpen={ep.index === 1}
+                             open={ep.index === 1}
                           >
                             <summary
                               className="sd2-ep__summary"
@@ -2585,10 +2634,22 @@ function ScriptDeskBlock(props: NodeProps) {
                                     <span className="sd2-field__label">地点</span>
                                     <input value={pkg.bible.world.location ?? ''} onChange={(e) => patchBibleWorld('location', e.target.value)} />
                                   </label>
-                                  <label className="sd2-field sd2-field--compact">
-                                    <span className="sd2-field__label">世界观</span>
-                                    <input value={pkg.bible.world.worldview ?? ''} onChange={(e) => patchBibleWorld('worldview', e.target.value)} />
-                                  </label>
+                                   <label className="sd2-field sd2-field--compact">
+                                     <span className="sd2-field__label">世界观</span>
+                                     <input value={pkg.bible.world.worldview ?? ''} onChange={(e) => patchBibleWorld('worldview', e.target.value)} />
+                                   </label>
+                                   <label className="sd2-field sd2-field--compact">
+                                     <span className="sd2-field__label">视觉风格（生成前必选）</span>
+                                     <select
+                                       value={pkg.bible.world.visualStyleNotes ?? ''}
+                                       onChange={(e) => patchBibleWorld('visualStyleNotes', e.target.value)}
+                                     >
+                                       <option value="">请选择人物与全片视觉风格</option>
+                                       {SCREENPLAY_VISUAL_STYLES.map((style) => (
+                                         <option key={style.value} value={style.value}>{style.label}</option>
+                                       ))}
+                                     </select>
+                                   </label>
                                   <div className="sd2-bible-card__acts">
                                     <button
                                       type="button"

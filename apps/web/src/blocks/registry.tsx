@@ -21,7 +21,7 @@ const blockLoaders: Record<string, () => Promise<{ default: ComponentType<NodePr
   // F-005: asset-gate 已由 stripAssetGateFromGraph + migrateBlockKinds 迁移为 script-desk
   'asset-import': () => import('./input/AssetImportBlock').then((m) => ({ default: m.default })),
   'link-parser': () => import('./utility/LinkParserBlock').then((m) => ({ default: m.default })),
-  /** 内部钉图：不进 BLOCK_CATALOG，仅拖出创建 */
+  /** 内部钉板：不进 BLOCK_CATALOG，仅拖出 / 本地投放创建 */
   'media-pin': () => import('./utility/MediaPinBlock').then((m) => ({ default: m.default })),
 
   'script-desk': () => import('./nx9/ScriptDeskBlock').then((m) => ({ default: m.default })),

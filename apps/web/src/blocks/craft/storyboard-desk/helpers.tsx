@@ -87,13 +87,13 @@ export function namesToText(names: string[]): string {
 export function textToNames(value: string): string[] {
   return value
     .split(/[、,，\s]+/)
-    .map((item) => item.trim().replace(/^@角色:/, ''))
+    .map((item) => item.trim().replace(/^@(角色|服装|场景|道具|镜头|情绪|钩子|风格|声音):/, ''))
     .filter(Boolean)
     .slice(0, 20);
 }
 
 export function stripMentionToken(value: string): string {
-  return value.trim().replace(/^@(角色|场景|镜头|情绪|钩子|声音):/, '');
+  return value.trim().replace(/^@(角色|服装|场景|道具|镜头|情绪|钩子|风格|声音):/, '');
 }
 
 export function scenePresetName(item: EnvironmentProfile | BacklotWorkspaceItem): string {
@@ -107,7 +107,15 @@ export function characterMeta(character: CharacterProfile): string {
     .join(' · ');
 }
 
-export const GLOBAL_MENTION_KINDS: AssetLibraryKind[] = ['character', 'scene', 'shot', 'emotion', 'hook', 'sound'];
+export const GLOBAL_MENTION_KINDS: AssetLibraryKind[] = [
+  'character',
+  'scene',
+  'costume',
+  'prop',
+  'shot',
+  'style',
+  'sound',
+];
 export const CHARACTER_MENTION_KINDS: AssetLibraryKind[] = ['character'];
 export const SCENE_MENTION_KINDS: AssetLibraryKind[] = ['scene'];
 
@@ -150,6 +158,8 @@ export type ShotEditDraft = Pick<
   | 'negativePrompt'
   | 'continuityNotes'
   | 'compositionTemplateId'
+  | 'costumeOverrides'
+  | 'propIds'
 > & {
   dialogueText: string;
   dialogueSpeaker: string;
@@ -178,6 +188,8 @@ export function createShotEditDraft(shot: ScriptBreakdownShot): ShotEditDraft {
     negativePrompt: shot.negativePrompt,
     continuityNotes: shot.continuityNotes ? [...shot.continuityNotes] : [],
     compositionTemplateId: shot.compositionTemplateId ?? null,
+    costumeOverrides: (shot.costumeOverrides ?? []).map((o) => ({ ...o })),
+    propIds: [...(shot.propIds ?? [])],
     dialogueText: shot.dialogue?.[0]?.text ?? '',
     dialogueSpeaker: shot.dialogue?.[0]?.speaker ?? '',
   };

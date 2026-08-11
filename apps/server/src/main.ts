@@ -4,10 +4,7 @@ import { json, urlencoded } from 'express';
 import { AppModule } from './app.module';
 import { ClientAbortExceptionFilter } from './common/client-abort.filter';
 import { HOST, LIMITS, PORT, ALLOW_PUBLIC_WRITE } from './config/app.config';
-import { loadServerEnv } from './config/load-env';
 import { setLibraryAclConfig } from '@nx9/shared';
-
-loadServerEnv();
 
 async function bootstrap() {
   // F-038: 初始化 ACL 配置（环境变量 ALLOW_PUBLIC_WRITE 控制公共库写权限）

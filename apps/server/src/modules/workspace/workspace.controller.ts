@@ -35,6 +35,17 @@ export class WorkspaceController {
     return this.workspaces.importPayload(body.payload, body.title);
   }
 
+  // Static collection routes must precede the :id route.
+  @Get('trash/list')
+  listTrash() {
+    return this.workspaces.listTrash();
+  }
+
+  @Post('trash/purge-expired')
+  async purgeExpiredTrash() {
+    return this.workspaces.purgeExpiredTrash();
+  }
+
   @Get(':id')
   load(@Param('id') id: string) {
     return this.workspaces.load(id);
@@ -56,20 +67,9 @@ export class WorkspaceController {
     return { ok: true };
   }
 
-  // F-010: 回收站
-  @Get('trash/list')
-  listTrash() {
-    return this.workspaces.listTrash();
-  }
-
   @Post(':id/restore')
   async restore(@Param('id') id: string) {
     return this.workspaces.restore(id);
-  }
-
-  @Post('trash/purge-expired')
-  async purgeExpiredTrash() {
-    return this.workspaces.purgeExpiredTrash();
   }
 
   @Delete(':id/purge')

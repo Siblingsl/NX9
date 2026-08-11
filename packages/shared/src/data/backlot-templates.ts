@@ -1,7 +1,7 @@
 import type { CharacterProfile } from '../types/character';
-import { CAMERA_PROMPT_PRESETS } from './prompt-presets';
+import { SHOT_LIBRARY_SEEDS } from './shot-library-seeds';
 
-export type BacklotTemplateKind = 'character' | 'scene' | 'shot' | 'emotion' | 'hook' | 'costume';
+export type BacklotTemplateKind = 'character' | 'scene' | 'shot' | 'emotion' | 'hook' | 'costume' | 'prop';
 
 export type BacklotHookPhase = 'opening' | 'ending';
 
@@ -29,6 +29,8 @@ export interface BacklotTemplate {
   characterArchetype?: BacklotCharacterArchetype;
   defaultBlockType?: BacklotApplyTarget;
   builtin?: boolean;
+  /** Creative Asset Center 扩展（镜头词典等内置可带元数据） */
+  creative?: import('../types/creative-asset-center').WorkspaceCreativeExtension;
 }
 
 export interface BacklotCustomTemplate {
@@ -85,12 +87,14 @@ const WORKSPACE_DEFAULT_LABELS: Record<BacklotWorkspaceKind, string> = {
   emotion: '新情绪',
   hook: '新钩子',
   costume: '新服装',
+  prop: '新道具',
 };
 
 export const BACKLOT_TEMPLATE_TABS: { key: BacklotTemplateKind; label: string; hint: string }[] = [
   { key: 'character', label: '角色库', hint: '人设 archetype + 工作区角色' },
   { key: 'costume', label: '服装库', hint: '造型套装、面料、配色与标志物' },
   { key: 'scene', label: '场景库', hint: '环境、光线、时代与空间' },
+  { key: 'prop', label: '道具库', hint: '标志性物品、连续性锚点' },
   { key: 'shot', label: '镜头库', hint: '运镜、景别、机位描述' },
   { key: 'emotion', label: '情绪库', hint: '表情、氛围、色调与节奏' },
   { key: 'hook', label: '钩子库', hint: '开场抓人 + 结尾留存' },
@@ -263,16 +267,31 @@ const SCENE_TEMPLATES: BacklotTemplate[] = [
   },
 ];
 
-const SHOT_TEMPLATES: BacklotTemplate[] = CAMERA_PROMPT_PRESETS.map((p) => ({
-  id: `shot-${p.id}`,
+/** 公共镜头库：中立种子 → 内置模板（117 条；见 shot-library-seeds.ts） */
+const SHOT_TEMPLATES: BacklotTemplate[] = SHOT_LIBRARY_SEEDS.map((s) => ({
+  id: s.id,
   kind: 'shot' as const,
-  group: p.group,
-  label: p.label,
-  description: p.group,
-  promptEn: p.text,
-  promptZh: p.label,
+  group: s.category,
+  label: s.label,
+  description: s.purposeZh,
+  promptEn: s.promptEn,
+  promptZh: s.promptZh,
+  tags: [s.labelEn, s.system, s.category, s.moveFamily].filter(Boolean),
   defaultBlockType: 'camera-prompt' as const,
   builtin: true,
+  creative: {
+    purpose: s.purposeZh,
+    moveFamily: s.moveFamily,
+    lexiconSystemId: s.systemId,
+    lexiconSystem: s.system,
+    lexiconCategory: s.category,
+    cameraMove: s.cameraMove,
+    shotSize: s.shotSize,
+    durationSec: s.durationSec,
+    prompts: {
+      shot: { version: 1 as const, text: s.promptEn },
+    },
+  },
 }));
 
 const EMOTION_TEMPLATES: BacklotTemplate[] = [
@@ -578,7 +597,8 @@ export const DEFAULT_BACKLOT_GROUPS: Record<BacklotTemplateKind, string[]> = {
   character: ['主角型', '日常型', '职业型', '幻想型', '配角型'],
   costume: ['日常', '正装', '职业', '古装', '奇幻', '战甲', '赛博', '礼服'],
   scene: ['都市', '室内', '自然', '废墟', '历史'],
-  shot: ['推拉', '环绕', '升降', '横移', '转场', '特殊', '固定'],
+  prop: ['手持', '陈设', '载具', '武器', '信物', '科技', '其他'],
+  shot: ['固定', '推拉', '摇移', '跟拍', '升降', '环绕', '特殊'],
   emotion: ['积极', '消极', '张力', '怀旧', '悬疑', '浪漫', '喜剧'],
   hook: ['开场', '结尾'],
 };
@@ -698,7 +718,7 @@ export function templateToWorkspaceItem(
   if (tpl.kind === 'character') return null;
   const linkedId = sourceTemplateId ?? ('createdAt' in tpl ? tpl.id : undefined);
   const creative = 'creative' in tpl ? tpl.creative : undefined;
-  // 内置模板没有 creative：按文案预填服装/场景基础字段
+  // 内置模板没有 creative：按文案预填服装/场景/镜头基础字段
   const seededCreative =
     creative
     ?? (tpl.kind === 'costume'
@@ -707,10 +727,21 @@ export function templateToWorkspaceItem(
           category: tpl.group,
           tags: tpl.tags ?? [],
         }
+      : tpl.kind === 'prop'
+        ? {
+            description: tpl.promptZh || tpl.description || tpl.label,
+            category: tpl.group,
+            tags: tpl.tags ?? [],
+          }
       : tpl.kind === 'scene'
         ? {
             description: tpl.promptZh || tpl.description || tpl.label,
             tags: tpl.tags ?? [],
+          }
+      : tpl.kind === 'shot'
+        ? {
+            purpose: tpl.description || tpl.promptZh || tpl.label,
+            cameraMove: tpl.group,
           }
         : undefined);
   return {

@@ -61,14 +61,12 @@ function ParamChip({
   );
 }
 
-/** LibTV 风格：16:9 · 高质量 · 4K · 1张 */
+/** LibTV 风格：16:9 · 高质量 · 4K（张数由「生成多图」提示词条数决定，底栏不再单独选张数） */
 const RESOLUTION_OPTIONS = [
   { id: '1k', label: '1K' },
   { id: '2k', label: '2K' },
   { id: '4k', label: '4K' },
 ] as const;
-
-const COUNT_OPTIONS = [1, 2, 3, 4, 6, 8].map((n) => ({ id: String(n), label: `×${n}` }));
 
 const STRENGTH_OPTIONS = [
   { id: '0.35', label: '弱 0.35' },
@@ -90,7 +88,6 @@ export function PictureParamChips({ blockId, onPatch }: PictureParamChipsProps) 
 
   const quality = (data.quality as string) ?? 'auto';
   const aspectRatio = (data.aspectRatio as string) ?? '1:1';
-  const imageCount = (data.imageCount as number) ?? 1;
   const imageStrength = (data.imageStrength as number) ?? 0.85;
   const resolution = (data.resolutionTier as string) ?? '2k';
   const mode = readPictureGenMode(data);
@@ -156,13 +153,6 @@ export function PictureParamChips({ blockId, onPatch }: PictureParamChipsProps) 
           onPatch(patch);
         }}
         width={100}
-      />
-      <span className="text-ink/20 text-[10px] select-none">·</span>
-      <ParamChip
-        label={`${imageCount}张`}
-        active={String(imageCount)}
-        options={COUNT_OPTIONS.map((o) => ({ id: o.id, label: `${o.id}张` }))}
-        onSelect={(v) => onPatch({ imageCount: Number(v) })}
       />
       {showStrength && (
         <>

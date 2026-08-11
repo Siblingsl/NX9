@@ -1,5 +1,5 @@
 import type { BacklotWorkspaceItem } from '../data/backlot-templates';
-import { defaultCharacterVariants } from '../data/creative-asset-presets';
+import { defaultCharacterVariants, mergeVariantSlots } from '../data/creative-asset-presets';
 import type { CharacterProfile } from '../types/character';
 import type { SoundAssetProfile } from '../types/sound-library';
 import { regenerateCharacterPrompts, regenerateVoicePrompts, regenerateWorkspacePrompts } from './creative-asset-prompts';
@@ -50,9 +50,12 @@ export function normalizeCharacterProfile(c: CharacterProfile): CharacterProfile
       ...variants,
       ...creative,
       aliases: [...new Set((creative.aliases ?? []).map((item) => item.trim()).filter(Boolean))],
-      expressions: creative.expressions?.length ? creative.expressions : variants.expressions,
+      expressions: mergeVariantSlots(creative.expressions, variants.expressions, { keepUnknown: false }),
       poses: creative.poses?.length ? creative.poses : variants.poses,
       angles: creative.angles?.length ? creative.angles : variants.angles,
+      microExpressions: mergeVariantSlots(creative.microExpressions, variants.microExpressions),
+      costumeDetails: creative.costumeDetails?.length ? creative.costumeDetails : variants.costumeDetails,
+      handRefs: creative.handRefs?.length ? creative.handRefs : variants.handRefs,
     },
     consistencyPrompt:
       c.consistencyPrompt?.trim() ||
@@ -108,6 +111,16 @@ export function refreshWorkspacePrompts(item: BacklotWorkspaceItem): BacklotWork
       creative,
       promptEn: item.promptEn?.trim() || imagePrompt || item.promptEn,
       promptZh: item.promptZh?.trim() || costume?.description || item.promptZh,
+    };
+  }
+  if (item.kind === 'prop') {
+    const prop = creative as import('../types/creative-asset-center').PropCreativeExtension | undefined;
+    const imagePrompt = prop?.prompts?.image?.text?.trim();
+    return {
+      ...item,
+      creative,
+      promptEn: item.promptEn?.trim() || imagePrompt || item.promptEn,
+      promptZh: item.promptZh?.trim() || prop?.description || item.promptZh,
     };
   }
   return { ...item, creative };

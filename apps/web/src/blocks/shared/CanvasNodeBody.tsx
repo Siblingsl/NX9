@@ -1,13 +1,16 @@
 import { memo, useCallback, useMemo } from 'react';
-import { ImageIcon, Loader2, Maximize2, Play, Video } from 'lucide-react';
+import { Box, FileText, ImageIcon, Loader2, Maximize2, Music, Play, Video } from 'lucide-react';
 import {
   lookupBlock,
+  mediaPinKindLabel,
   normalizeNodeStatus,
+  resolveMediaPinKind,
   resolveNodeAssetTags,
   resolveNodeOutputCount,
   resolveNodePromptText,
   resolveNodeThumbUrl,
   truncatePromptPreview,
+  type MediaPinKind,
   type NodeRunStatus,
 } from '@nx9/shared';
 import { useDeckUi } from '../../engine/stage-deck/stores/deck-ui';
@@ -31,39 +34,97 @@ export interface CanvasNodeBodyProps {
   data: Record<string, unknown>;
   alias?: string;
   onRun?: () => void;
-  /** 点击预览图（画布钉图等） */
+  /** 点击预览打开（画布钉板等） */
   onPreviewOpen?: () => void;
   compact?: boolean;
   canOpenWorkspace?: boolean;
 }
 
-/** 画布钉图：仅展示图像，无说明/状态脚/运行按钮 */
+/** 画布钉板：按媒体类型展示，无说明/状态脚/运行按钮 */
 function MediaPinOnlyBody({
   url,
+  pinKind,
+  label,
+  textContent,
   onOpen,
 }: {
   url: string;
+  pinKind: MediaPinKind;
+  label?: string;
+  textContent?: string;
   onOpen?: () => void;
 }) {
+  const kindLabel = mediaPinKindLabel(pinKind);
+  const title =
+    pinKind === 'picture'
+      ? url
+        ? '点击放大 · 裁剪 / 本地清晰度'
+        : undefined
+      : url || textContent
+        ? `点击预览 · ${kindLabel}`
+        : undefined;
+  const canOpen = Boolean(url || textContent);
+
+  const open = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (canOpen) onOpen?.();
+  };
+
   return (
     <div className="nx9-media-pin nodrag nopan">
-      <button
-        type="button"
-        className="nx9-media-pin__frame"
-        onClick={(e) => {
-          e.stopPropagation();
-          if (url) onOpen?.();
-        }}
-        onMouseDown={(e) => e.stopPropagation()}
-        title={url ? '点击放大 · 裁剪 / 本地清晰度' : undefined}
-        disabled={!url}
-      >
-        {url ? (
-          <img src={url} alt="" className="nx9-media-pin__img" draggable={false} />
-        ) : (
-          <div className="nx9-media-pin__empty">暂无图像</div>
-        )}
-      </button>
+      {pinKind === 'sound' && url ? (
+        <div className="nx9-media-pin__frame nx9-media-pin__frame--static" onMouseDown={(e) => e.stopPropagation()}>
+          <div className="nx9-media-pin__badge">
+            <button type="button" className="nx9-media-pin__icon-hit" onClick={open} title={title}>
+              <Music size={22} strokeWidth={1.4} />
+              <span>{label || kindLabel}</span>
+            </button>
+            <audio
+              src={url}
+              preload="metadata"
+              className="nx9-media-pin__audio"
+              controls
+              onClick={(e) => e.stopPropagation()}
+            />
+          </div>
+        </div>
+      ) : (
+        <button
+          type="button"
+          className="nx9-media-pin__frame"
+          onClick={open}
+          onMouseDown={(e) => e.stopPropagation()}
+          title={title}
+          disabled={!canOpen}
+        >
+          {pinKind === 'picture' && url ? (
+            <img src={url} alt="" className="nx9-media-pin__img" draggable={false} />
+          ) : pinKind === 'clip' && url ? (
+            <video
+              src={url}
+              muted
+              playsInline
+              preload="metadata"
+              className="nx9-media-pin__img"
+              draggable={false}
+            />
+          ) : pinKind === 'text' ? (
+            <div className="nx9-media-pin__badge nx9-media-pin__badge--text">
+              <FileText size={18} strokeWidth={1.4} />
+              <span className="nx9-media-pin__text-preview">
+                {(textContent || label || '文本').slice(0, 120)}
+              </span>
+            </div>
+          ) : pinKind === 'mesh' && url ? (
+            <div className="nx9-media-pin__badge">
+              <Box size={22} strokeWidth={1.4} />
+              <span>{label || kindLabel}</span>
+            </div>
+          ) : (
+            <div className="nx9-media-pin__empty">暂无{kindLabel}</div>
+          )}
+        </button>
+      )}
     </div>
   );
 }
@@ -230,7 +291,7 @@ export const CanvasNodeBody = memo(function CanvasNodeBody({
     return single ? [single] : [];
   }, [isPicture, data.previewUrl, data.previewUrls, thumb]);
 
-  /* 画布钉图：纯图卡，无底部说明/运行 */
+  /* 画布钉板：按媒体类型展示 */
   if (isMediaPin) {
     const pinUrl =
       (data.pinUrl as string | undefined) ||
@@ -238,7 +299,16 @@ export const CanvasNodeBody = memo(function CanvasNodeBody({
       (data.assetUrl as string | undefined) ||
       thumb ||
       '';
-    return <MediaPinOnlyBody url={pinUrl} onOpen={onPreviewOpen} />;
+    const pinKind = resolveMediaPinKind(data.pinKind, pinUrl);
+    return (
+      <MediaPinOnlyBody
+        url={pinUrl}
+        pinKind={pinKind}
+        label={(data.pinLabel as string | undefined) || (data.filename as string | undefined)}
+        textContent={data.textContent as string | undefined}
+        onOpen={onPreviewOpen}
+      />
+    );
   }
 
   /* 图像生成：卡片只展示图，参数与操作都在底部工作区 */

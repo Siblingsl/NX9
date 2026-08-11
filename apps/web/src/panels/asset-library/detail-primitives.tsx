@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 import { useMemo, useState } from 'react';
-import { Copy, RefreshCw, ZoomIn } from 'lucide-react';
+import { Copy, MoreHorizontal, RefreshCw, ZoomIn } from 'lucide-react';
 import { ImageLightbox, type ImageLightboxItem } from '../../components/ui/ImageLightbox';
 
 export function DetailSection({ title, children }: { title: string; children: ReactNode }) {
@@ -126,6 +126,76 @@ export function PromptPanel({
   );
 }
 
+function CharacterItemMoreMenu({
+  label,
+  accept,
+  onUpload,
+  onCrop,
+  onRegenerate,
+}: {
+  label: string;
+  accept: string;
+  onUpload: (file: File) => void;
+  onCrop?: () => void;
+  onRegenerate?: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+
+  return (
+    <div className="absolute right-1 top-1 z-20">
+      <button
+        type="button"
+        title={`更多操作：${label}`}
+        aria-label={`更多操作：${label}`}
+        aria-expanded={open}
+        onClick={() => setOpen((value) => !value)}
+        className="grid h-6 w-6 place-items-center rounded bg-ink/60 text-white hover:bg-brand"
+      >
+        <MoreHorizontal size={14} />
+      </button>
+      {open ? (
+        <div className="absolute right-0 top-7 w-32 overflow-hidden rounded-lg border border-white/15 bg-[#252525] py-1 text-white shadow-2xl">
+          <button
+            type="button"
+            disabled={!onCrop}
+            onClick={() => {
+              setOpen(false);
+              onCrop?.();
+            }}
+            className="flex w-full items-center px-2.5 py-1.5 text-left text-[10px] text-white/90 hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-35"
+          >
+            调整裁剪
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setOpen(false);
+              onRegenerate?.();
+            }}
+            className="flex w-full items-center px-2.5 py-1.5 text-left text-[10px] text-white/90 hover:bg-white/10"
+          >
+            单独重新生成
+          </button>
+          <label className="flex w-full cursor-pointer items-center px-2.5 py-1.5 text-left text-[10px] text-white/90 hover:bg-white/10">
+            重新上传
+            <input
+              type="file"
+              accept={accept}
+              className="hidden"
+              onChange={(event) => {
+                const file = event.target.files?.[0];
+                if (file) onUpload(file);
+                event.currentTarget.value = '';
+                setOpen(false);
+              }}
+            />
+          </label>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 export function MediaSlot({
   label,
   url,
@@ -133,6 +203,8 @@ export function MediaSlot({
   onUpload,
   hint,
   gallery,
+  onCrop,
+  compact = false,
 }: {
   label: string;
   url?: string | null;
@@ -141,6 +213,9 @@ export function MediaSlot({
   hint?: string;
   /** 放大时的图集（含当前图）；不传则仅当前图 */
   gallery?: ImageLightboxItem[];
+  onCrop?: () => void;
+  /** 角色设定板子项使用与 VariantGrid 一致的紧凑卡片布局 */
+  compact?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const isImage = Boolean(url && !/\.(mp3|wav|ogg|m4a)(\?|$)/i.test(url));
@@ -152,14 +227,14 @@ export function MediaSlot({
   const startIndex = Math.max(0, items.findIndex((g) => g.url === url));
 
   return (
-    <div className="block text-[10px] text-ink/50">
-      <span className="mb-1 block">{label}</span>
-      <div className="overflow-hidden rounded-lg border border-dashed border-line hover:border-brand/30">
+    <div className={compact ? 'space-y-1 rounded-lg border border-line/80 p-1.5 text-[10px] text-ink/50' : 'block text-[10px] text-ink/50'}>
+      <span className={compact ? 'flex h-5 items-center justify-center truncate text-center text-[10px] font-semibold text-white/90' : 'mb-1 block'} title={compact ? label : undefined}>{label}</span>
+      <div className={compact ? 'relative aspect-square overflow-visible rounded-md border border-line bg-surface' : 'overflow-hidden rounded-lg border border-dashed border-line hover:border-brand/30'}>
         {url && isImage ? (
           <div className="relative">
             <button
               type="button"
-              className="group relative block aspect-square w-full overflow-hidden bg-surface"
+              className={compact ? 'group relative block h-full w-full overflow-hidden bg-surface' : 'group relative block aspect-square w-full overflow-hidden bg-surface'}
               onClick={() => setOpen(true)}
               title={`放大查看：${label}`}
             >
@@ -168,7 +243,7 @@ export function MediaSlot({
                 <ZoomIn size={16} className="text-white opacity-0 drop-shadow transition group-hover:opacity-100" />
               </span>
             </button>
-            <label className="flex cursor-pointer items-center justify-center border-t border-line bg-surface/70 px-2 py-1 text-[10px] text-ink/55 hover:bg-brand/5 hover:text-brand">
+            {!compact ? <label className="flex cursor-pointer items-center justify-center border-t border-line bg-surface/70 px-2 py-1 text-[10px] text-ink/55 hover:bg-brand/5 hover:text-brand">
               更换
               <input
                 type="file"
@@ -180,10 +255,11 @@ export function MediaSlot({
                   e.currentTarget.value = '';
                 }}
               />
-            </label>
+            </label> : null}
+            {compact ? <CharacterItemMoreMenu label={label} accept={accept} onUpload={onUpload} onCrop={onCrop} /> : null}
           </div>
         ) : (
-          <label className="flex min-h-[84px] cursor-pointer flex-col items-center justify-center gap-1 px-2 py-4 text-center text-[10px] text-ink/45">
+          <label className={compact ? 'flex h-full min-h-[84px] cursor-pointer flex-col items-center justify-center gap-1 px-2 py-4 text-center text-[9px] text-ink/45' : 'flex min-h-[84px] cursor-pointer flex-col items-center justify-center gap-1 px-2 py-4 text-center text-[10px] text-ink/45'}>
             <input
               type="file"
               accept={accept}
@@ -194,7 +270,7 @@ export function MediaSlot({
                 e.currentTarget.value = '';
               }}
             />
-            <span>{url ? '已上传 · 点击替换' : hint ?? '点击上传'}</span>
+            <span>{url ? (compact ? '已上传' : '已上传 · 点击替换') : hint ?? '点击上传'}</span>
           </label>
         )}
       </div>
@@ -239,9 +315,10 @@ export function VariantGrid({
   onChangeItem,
   onUploadItem,
   columns = 2,
-  maxHeightClass = 'max-h-48',
+  maxHeightClass = '',
   /** 传入完整角色图集时，放大可左右切换所有角色图 */
   sharedGallery,
+  onCropItem,
 }: {
   title: string;
   items: Array<{ id: string; label: string; prompt?: string; imageUrl?: string }>;
@@ -250,6 +327,7 @@ export function VariantGrid({
   columns?: 2 | 3 | 4 | 5;
   maxHeightClass?: string;
   sharedGallery?: ImageLightboxItem[];
+  onCropItem?: (id: string) => void;
 }) {
   const colClass =
     columns === 5 ? 'grid-cols-5' : columns === 4 ? 'grid-cols-4' : columns === 3 ? 'grid-cols-3' : 'grid-cols-2';
@@ -264,16 +342,17 @@ export function VariantGrid({
   return (
     <div className="space-y-1.5">
       <p className="text-[10px] text-ink/40">{title}</p>
-      <div className={`grid ${colClass} gap-1.5 ${maxHeightClass} overflow-y-auto nx9-scroll`}>
+      <div className={`grid ${colClass} gap-1.5 ${maxHeightClass}`}>
         {items.map((item) => {
           const galleryIndex = gallery.findIndex((g) => g.url === item.imageUrl);
           return (
             <div key={item.id} className="space-y-1 rounded-lg border border-line/80 p-1.5">
-              <div className="relative aspect-square overflow-hidden rounded-md border border-line bg-surface">
+              <span className="flex h-5 items-center justify-center truncate text-center text-[10px] font-semibold text-white/90" title={item.label}>{item.label}</span>
+              <div className="relative aspect-square overflow-visible rounded-md border border-line bg-surface">
                 {item.imageUrl ? (
                   <button
                     type="button"
-                    className="group relative h-full w-full"
+                    className="group relative h-full w-full overflow-hidden rounded-md"
                     onClick={() => {
                       setIndex(Math.max(0, galleryIndex));
                       setOpen(true);
@@ -289,22 +368,14 @@ export function VariantGrid({
                   <div className="grid h-full place-items-center text-[9px] text-ink/30">待回填</div>
                 )}
                 {onUploadItem ? (
-                  <label className="absolute inset-x-0 bottom-0 cursor-pointer bg-black/45 px-1 py-0.5 text-center text-[9px] text-white/90">
-                    上传
-                    <input
-                      type="file"
-                      accept="image/*"
-                      className="hidden"
-                      onChange={(e) => {
-                        const f = e.target.files?.[0];
-                        if (f) onUploadItem(item.id, f);
-                        e.currentTarget.value = '';
-                      }}
-                    />
-                  </label>
+                  <CharacterItemMoreMenu
+                    label={item.label}
+                    accept="image/*"
+                    onUpload={(file) => onUploadItem(item.id, file)}
+                    onCrop={item.imageUrl && onCropItem ? () => onCropItem(item.id) : undefined}
+                  />
                 ) : null}
               </div>
-              <span className="block truncate text-[10px] font-medium text-ink/70" title={item.label}>{item.label}</span>
             </div>
           );
         })}

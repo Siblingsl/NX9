@@ -4,7 +4,12 @@ export default defineConfig({
   test: {
     globals: true,
     environment: 'jsdom',
-    include: ['src/blocks/craft/__tests__/**/*.test.tsx', 'src/engine/__tests__/**/*.test.ts'],
+    include: [
+      'src/blocks/craft/__tests__/**/*.test.tsx',
+      'src/blocks/core/__tests__/**/*.test.tsx',
+      'src/blocks/nx9/__tests__/**/*.test.tsx',
+      'src/engine/__tests__/**/*.test.ts',
+    ],
     testTimeout: 30000,
   },
 });

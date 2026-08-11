@@ -1,5 +1,6 @@
 import type { SocketKind, SocketProfile } from '../types/block';
 import { resolveAssetImportItems } from '../utils/asset-import';
+import { mediaPinKindToSocket, resolveMediaPinKind } from '../utils/media-pin';
 
 const DEV_SOCKETS: Record<string, SocketProfile> = {};
 
@@ -117,8 +118,11 @@ export const SOCKET_REGISTRY: Record<string, SocketProfile> = {
   'asset-import': { accepts: [], emits: [] },
   'asset-bundle': { accepts: ['prompt', 'picture', 'clip', 'sound'], emits: ['prompt', 'picture', 'clip', 'sound'] },
   'render-slot': { accepts: ['prompt', 'picture'], emits: ['picture'] },
-  /** 画布钉图：可接图像入线（拖出自动连），并向下游输出 */
-  'media-pin': { accepts: ['picture'], emits: ['picture'] },
+  /** 画布钉板：按 pinKind 动态口；静态表为无 data 时的兜底 */
+  'media-pin': {
+    accepts: ['picture', 'clip', 'sound', 'mesh', 'prompt'],
+    emits: ['picture', 'clip', 'sound', 'mesh', 'prompt'],
+  },
   'preview-sink': { accepts: ['prompt', 'picture', 'clip', 'sound', 'mesh', 'wildcard'], emits: ['wildcard'] },
   'group-frame': { accepts: [], emits: ['wildcard'] },
   'codex-picture': { accepts: ['prompt', 'picture'], emits: ['picture', 'prompt'] },
@@ -147,6 +151,10 @@ export const SOCKET_LABELS: Record<SocketKind, string> = {
 };
 
 export function resolveEmits(kind: string, data?: Record<string, unknown>): SocketKind[] {
+  if (kind === 'media-pin') {
+    const pinKind = resolveMediaPinKind(data?.pinKind, (data?.pinUrl as string) || (data?.assetUrl as string));
+    return [mediaPinKindToSocket(pinKind)];
+  }
   if (kind === 'asset-import') {
     const items = resolveAssetImportItems(data);
     if (items.length === 0) {
@@ -180,7 +188,17 @@ export function resolveEmits(kind: string, data?: Record<string, unknown>): Sock
   return SOCKET_REGISTRY[kind]?.emits ?? [];
 }
 
-export function resolveAccepts(kind: string): SocketKind[] {
+export function resolveAccepts(kind: string, data?: Record<string, unknown>): SocketKind[] {
+  if (kind === 'media-pin') {
+    if (data?.pinKind != null || data?.pinUrl || data?.assetUrl) {
+      const pinKind = resolveMediaPinKind(
+        data?.pinKind,
+        (data?.pinUrl as string) || (data?.assetUrl as string),
+      );
+      return [mediaPinKindToSocket(pinKind)];
+    }
+    return SOCKET_REGISTRY['media-pin']?.accepts ?? ['picture'];
+  }
   return SOCKET_REGISTRY[kind]?.accepts ?? [];
 }
 
@@ -194,11 +212,12 @@ export function validateLink(
   sourceKind: string,
   targetKind: string,
   sourceData?: Record<string, unknown>,
+  targetData?: Record<string, unknown>,
 ): boolean {
   if (sourceKind === targetKind && sourceKind !== 'passthrough') return false;
   if (sourceKind === 'iterator' && targetKind === 'preview-sink') return false;
   const emits = resolveEmits(sourceKind, sourceData);
-  const accepts = resolveAccepts(targetKind);
+  const accepts = resolveAccepts(targetKind, targetData);
   return socketsCompatible(emits, accepts);
 }
 
@@ -319,7 +338,7 @@ export function validateConnectionWithHandles(
   sourceHandle?: string | null,
   targetHandle?: string | null,
 ): { ok: boolean; reason?: 'socket_incompatible' | 'exec_ports_disabled' } {
-  if (!validateLink(sourceKind, targetKind, sourceData ?? undefined)) {
+  if (!validateLink(sourceKind, targetKind, sourceData ?? undefined, targetData ?? undefined)) {
     return { ok: false, reason: 'socket_incompatible' };
   }
   const sourceExec = isExecHandle(sourceHandle);

@@ -48,6 +48,7 @@ export async function generateStoryboardFrameImage(
   pictureNodeData: Record<string, unknown>,
   previewSettings?: StoryboardPreviewPictureSettings,
   lineArt = false,
+  signal?: AbortSignal,
 ): Promise<string> {
   const effectiveFrame = lineArt
     ? { ...frame, stylePreset: 'line-art' }
@@ -62,6 +63,7 @@ export async function generateStoryboardFrameImage(
     size,
     referenceImageUrl: frame.referenceImageUrl ?? undefined,
     n: 1,
+    signal,
   });
   const imageUrl = urls[0];
   if (!imageUrl) throw new Error('图像生成失败');

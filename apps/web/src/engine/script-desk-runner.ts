@@ -25,7 +25,11 @@ import {
 import { api } from '../api/client';
 
 export function readScriptDeskPackage(data: Record<string, unknown> | undefined | null): ScreenplayPackage {
-  if (isScreenplayPackage(data?.package)) return data!.package as ScreenplayPackage;
+  if (isScreenplayPackage(data?.package)) {
+    const pkg = data!.package as ScreenplayPackage;
+    if (pkg.bible.world) return pkg;
+    return { ...pkg, bible: { ...pkg.bible, world: {} } };
+  }
   return migrateDialogueSheetDataToPackage(data ?? undefined);
 }
 
@@ -288,6 +292,10 @@ export async function runAppendEpisodeSkill(
 ): Promise<{ assistantText: string; patch: Partial<ScreenplayPackage> }> {
   const signal = options.signal;
   if (signal?.aborted) throw new DOMException('已中止', 'AbortError');
+  const visualStyle = pkg.bible.world?.visualStyleNotes?.trim();
+  if (!visualStyle) {
+    throw new Error('生成剧本前必须先选择人物与全片视觉风格');
+  }
   const sorted = [...pkg.screenplay.episodes]
     .filter((ep) => ep.bodyMd.trim())
     .sort((a, b) => a.index - b.index);
@@ -299,6 +307,7 @@ export async function runAppendEpisodeSkill(
     pkg.brief.title ? `标题：${pkg.brief.title}` : '',
     pkg.brief.logline ? `logline：${pkg.brief.logline}` : '',
     pkg.brief.plotOutline ? `大纲：${pkg.brief.plotOutline}` : '',
+    `统一视觉风格（已锁定）：${visualStyle}`,
     pkg.bible.characters.length
       ? `人物：${pkg.bible.characters.map((c) => `${c.name}${c.identity ? `（${c.identity}）` : ''}`).join('、')}`
       : '',
@@ -588,6 +597,9 @@ export async function runScriptDeskSkill(
 ): Promise<{ assistantText: string; patch?: Partial<ScreenplayPackage> }> {
   try {
     if (signal?.aborted) throw new DOMException('已中止', 'AbortError');
+    if (skillId === 'generate' && !pkg.bible.world?.visualStyleNotes?.trim()) {
+      throw new Error('生成剧本前必须先选择人物与全片视觉风格');
+    }
     const res = await api.scriptDeskChat({
       skillId,
       userInstruction: userInstruction.trim() || undefined,

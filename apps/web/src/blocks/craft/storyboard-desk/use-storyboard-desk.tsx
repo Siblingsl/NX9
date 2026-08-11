@@ -1,4 +1,4 @@
-﻿import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Clock, ImagePlus, Loader2, Pencil } from 'lucide-react';
 import { type NodeProps, useReactFlow } from '@xyflow/react';
 import {
@@ -22,7 +22,10 @@ import {
   emptyStoryboardPreview,
   flattenScriptBreakdownShots,
   getEpisodeContactSheet,
+  buildLineArtShotPatch,
   patchChainShot,
+  chainStoryboardHash,
+  lineArtVersionHash,
   readChainStoryboard,
   resolveConnectedPictureGenId,
   resolveStoryboardPreviewPictureSettings,
@@ -34,6 +37,10 @@ import {
   type ScriptBreakdownShot,
   type StoryboardPreviewFrame,
   type StoryboardPreviewPayload,
+  costumeSourcesFromWorkspace,
+  propSourcesFromWorkspace,
+  enrichPromptWithShotAssets,
+  getSceneCreative,
 } from '@nx9/shared';
 import { BlockShell } from '../../shared/BlockShell';
 import { ScreenModal } from '../../../components/ui/ScreenModal';
@@ -59,6 +66,7 @@ import {
   packageSourceHash,
   removeShotFromBreakdown,
   reorderShotsInBreakdown,
+  resolveDeskActiveEpisodeId,
   runBreakdownFromPackage,
   splitShotInBreakdown,
   stripEpisodeConfirmation,
@@ -150,8 +158,7 @@ export function useStoryboardDesk(props: NodeProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   const shots = useMemo(() => flattenScriptBreakdownShots(payload), [payload]);
-  const activeEpisodeId = useWorkspaceDocument((state) => state.storyboard.activeEpisodeId);
-  const setActiveEpisodeId = useWorkspaceDocument((state) => state.setActiveEpisodeId);
+  const activeEpisodeId = resolveDeskActiveEpisodeId(props.data as Record<string, unknown>, payload);
   const characters = useWorkspaceDocument((state) => state.characters.characters);
   const environmentLibrary = useWorkspaceDocument((state) => state.environments);
   const workspaceItems = useWorkspaceDocument((state) => state.backlotWorkspace.items);
@@ -160,6 +167,8 @@ export function useStoryboardDesk(props: NodeProps) {
     () => workspaceItems.filter((item) => item.kind === 'scene'),
     [workspaceItems],
   );
+  const costumeOptions = useMemo(() => costumeSourcesFromWorkspace(workspaceItems), [workspaceItems]);
+  const propOptions = useMemo(() => propSourcesFromWorkspace(workspaceItems), [workspaceItems]);
   const currentEpisodeId = activeEpisodeId ?? payload?.episodes[0]?.id ?? null;
   const confirmedEpisodeIds = Array.isArray(props.data?.confirmedEpisodeIds)
     ? (props.data.confirmedEpisodeIds as string[])
@@ -376,7 +385,6 @@ export function useStoryboardDesk(props: NodeProps) {
     setStudioOpen(false);
   }, [appendLog, breakdownBusy, deskBusy, focusBlock, props.id]);
 
-  const updateShot = useWorkspaceDocument((s) => s.updateShot);
   // Q-04: chainStoryboard 是 SSOT；全局 storyboard.shots 不得伪装成 chain 流入优先级 2
   const storyboardShots = useMemo(() => {
     const chain = (props.data as Record<string, unknown>)?.chainStoryboard as { shots: Array<{ id: string }> } | undefined;
@@ -474,11 +482,8 @@ export function useStoryboardDesk(props: NodeProps) {
     }
     // Q-04 优先级 2: 本节点 chainStoryboard 镜图
     for (const s of storyboardShots) {
-      if (s.firstFrameAssetId && !map.get(s.id)) map.set(s.id, s.firstFrameAssetId);
-    }
-    // Q-04 legacy fallback: 仅当 preview + chain 均缺图时兜底读全局 storyboard.shots
-    for (const s of useWorkspaceDocument.getState().storyboard.shots) {
-      if (s.firstFrameAssetId && !map.get(s.id)) map.set(s.id, s.firstFrameAssetId);
+      const url = s.lineArtUrl || s.firstFrameAssetId;
+      if (url && !map.get(s.id)) map.set(s.id, url);
     }
     return map;
   }, [previewPayloadEarly, storyboardShots]);
@@ -1151,11 +1156,8 @@ export function useStoryboardDesk(props: NodeProps) {
     }
     // Q-04 优先级 2: chainStoryboard 镜图
     for (const s of getAllChainShots(getNodes())) {
-      if (s.firstFrameAssetId && !urlMap.get(s.id)) urlMap.set(s.id, s.firstFrameAssetId);
-    }
-    // Q-04 legacy fallback: 仅当 preview + chain 均缺图时兜底读全局 storyboard.shots
-    for (const s of useWorkspaceDocument.getState().storyboard.shots) {
-      if (s.firstFrameAssetId && !urlMap.get(s.id)) urlMap.set(s.id, s.firstFrameAssetId);
+      const url = s.lineArtUrl || s.firstFrameAssetId;
+      if (url && !urlMap.get(s.id)) urlMap.set(s.id, url);
     }
     const sceneNameSet = new Set([
       ...environments.map((e) => e.name.trim()),
@@ -1257,8 +1259,18 @@ export function useStoryboardDesk(props: NodeProps) {
     const lineArtFrames = (preview?.frames ?? [])
       .filter((f) => f.sourceShotId && f.imageUrl && currentEpisodeShotIds?.has(f.sourceShotId))
       .map((f) => ({ shotId: f.sourceShotId!, imageUrl: f.imageUrl! }));
+    const chain = readChainStoryboard(props.data as Record<string, unknown>);
+    const scriptHash = upstreamPackage ? packageSourceHash(upstreamPackage) : '';
+    const storyboardHash = chain ? chainStoryboardHash(chain) : '';
+    const lineartVersion = chain ? lineArtVersionHash(chain, currentEpisodeId) : '';
+    const handoffVersion = Number(props.data?.handoffVersion ?? 0) + 1;
     const handoff = {
       sourceStoryboardBlockId: props.id,
+      scriptHash,
+      storyboardHash,
+      lineartVersion,
+      handoffVersion,
+      confirmedAt: props.data?.confirmedAt as string | undefined,
       episodeId: currentEpisodeId,
       episodeTitle: visibleEpisodes[0]?.title ?? undefined,
       shotCount: visibleShots.length,
@@ -1270,6 +1282,7 @@ export function useStoryboardDesk(props: NodeProps) {
       lineArtFrames,
       at: new Date().toISOString(),
     };
+    updateNodeData(props.id, { handoffVersion });
     if (desk && focusBlock) {
       updateNodeData(desk.id, {
         lastHandoff: {
@@ -1291,6 +1304,11 @@ export function useStoryboardDesk(props: NodeProps) {
         fromId: props.id,
         at: handoff.at,
         sourceStoryboardBlockId: props.id,
+        scriptHash,
+        storyboardHash,
+        lineartVersion,
+        handoffVersion,
+        confirmedAt: handoff.confirmedAt,
         episodeId: currentEpisodeId,
         episodeTitle: handoff.episodeTitle,
         shotCount: handoff.shotCount,
@@ -1303,7 +1321,7 @@ export function useStoryboardDesk(props: NodeProps) {
       },
     });
     appendLog('已创建导演台并连线 · 交接数据已推送');
-  }, [appendLog, focusBlock, getAllNodes, getNodes, props.data, props.id, currentEpisodeId, currentEpisodeConfirmed, confirmedEpisodeIds, visibleEpisodes, visibleShots, compositionStats, updateNodeData, currentEpisodeShotIds]);
+  }, [appendLog, focusBlock, getAllNodes, getNodes, props.data, props.id, currentEpisodeId, currentEpisodeConfirmed, confirmedEpisodeIds, visibleEpisodes, visibleShots, compositionStats, updateNodeData, currentEpisodeShotIds, upstreamPackage]);
 
   const saveShotEdit = useCallback(() => {
     if (!payload || !editingShot || !editDraft) return;
@@ -1345,6 +1363,14 @@ export function useStoryboardDesk(props: NodeProps) {
       compositionTemplateId: editDraft.compositionTemplateId ?? null,
       continuityNotes: notesRaw,
       dialogue,
+      costumeOverrides: (editDraft.costumeOverrides ?? [])
+        .filter((o) => o.characterName?.trim() && o.costumeId?.trim())
+        .map((o) => ({
+          characterName: o.characterName.trim(),
+          costumeId: o.costumeId,
+          costumeLabel: o.costumeLabel,
+        })),
+      propIds: [...(editDraft.propIds ?? [])],
     });
     applyDeskBreakdown(props.id, next, updateNodeData, {
       ...stripEpisodeConfirmation(props.data, currentEpisodeId),
@@ -1419,11 +1445,8 @@ export function useStoryboardDesk(props: NodeProps) {
     }
     // Q-04 优先级 2: 本节点 chainStoryboard 镜图
     for (const s of storyboardShots) {
-      if (s.firstFrameAssetId && !map.has(s.id)) map.set(s.id, s.firstFrameAssetId);
-    }
-    // Q-04 legacy fallback: 仅当 preview + chain 均缺图时兜底读全局 storyboard.shots
-    for (const s of useWorkspaceDocument.getState().storyboard.shots) {
-      if (s.firstFrameAssetId && !map.has(s.id)) map.set(s.id, s.firstFrameAssetId);
+      const url = s.lineArtUrl || s.firstFrameAssetId;
+      if (url && !map.has(s.id)) map.set(s.id, url);
     }
     return map;
   }, [previewPayloadEarly, storyboardShots]);
@@ -1441,12 +1464,6 @@ export function useStoryboardDesk(props: NodeProps) {
           status: 'previewing',
         });
       applyScriptBreakdownPayload(props.id, nextBreakdown);
-
-      updateShot(shotId, {
-        firstFrameAssetId: imageUrl,
-        keyframeStatus: 'review',
-        status: 'review',
-      });
 
       // 同步 storyboardPreview.frames + chainStoryboard（镜表 SSOT）
       updateNodeData(props.id, (node) => {
@@ -1496,22 +1513,8 @@ export function useStoryboardDesk(props: NodeProps) {
           };
           frames = [...frames, frame];
         }
-        const chain = readChainStoryboard(data);
-        const chainPatch = chain
-          ? {
-              chainStoryboard: {
-                ...chain,
-                shots: patchChainShot(chain, shotId, {
-                  firstFrameAssetId: imageUrl,
-                  keyframeStatus: 'review' as const,
-                  status: 'review' as const,
-                }),
-              },
-            }
-          : {};
         return {
             ...data,
-            ...chainPatch,
             scriptBreakdown: nextBreakdown,
             storyboardPreview: {
               ...current,
@@ -1523,7 +1526,7 @@ export function useStoryboardDesk(props: NodeProps) {
           };
       });
     },
-    [getNodes, payload, props.id, updateNodeData, updateShot],
+    [getNodes, payload, props.id, updateNodeData],
   );
 
   const handleDeleteShot = useCallback(async (shotId: string) => {
@@ -1654,62 +1657,6 @@ export function useStoryboardDesk(props: NodeProps) {
     appendLog(`已批量删除 · ${selectedShotIds.size} 镜`);
   }, [appendLog, currentEpisodeId, payload, props.data, props.id, pushUndo, selectedId, selectedShotIds, updateNodeData]);
 
-  /** 构图已出图但镜表缺图时，打开分镜台自动从预览帧补齐回填 */
-  useEffect(() => {
-    if (!studioOpen) return;
-    const node = getNodes().find((n) => n.id === props.id);
-    if (!node) return;
-    const data = (node.data ?? {}) as Record<string, unknown>;
-    const breakdown = data.scriptBreakdown as ScriptBreakdownPayload | undefined;
-    const frames = (data.storyboardPreview as StoryboardPreviewPayload | undefined)?.frames ?? [];
-    if (!breakdown?.episodes?.length || frames.length === 0) return;
-
-    let next = breakdown;
-    let changed = 0;
-    for (const frame of frames) {
-      if (!frame.sourceShotId || !frame.imageUrl) continue;
-      const shot = flattenScriptBreakdownShots(next).find((s) => s.id === frame.sourceShotId);
-      if (shot?.previewImageUrl) continue;
-      next = writeBackBreakdownPreviewImage(next, frame.sourceShotId, frame.imageUrl)
-        ?? patchShotInPayload(next, frame.sourceShotId, {
-          previewImageUrl: frame.imageUrl,
-          referenceImageUrl: frame.imageUrl,
-          status: 'previewing',
-        });
-      changed += 1;
-      updateShot(frame.sourceShotId, {
-        firstFrameAssetId: frame.imageUrl,
-        keyframeStatus: 'review',
-        status: 'review',
-      });
-    }
-    if (changed === 0) return;
-
-    applyScriptBreakdownPayload(props.id, next);
-    updateNodeData(props.id, (n) => {
-      const d = (n.data ?? {}) as Record<string, unknown>;
-      let chain = readChainStoryboard(d);
-      if (chain) {
-        let shots = chain.shots;
-        for (const frame of frames) {
-          if (!frame.sourceShotId || !frame.imageUrl) continue;
-          shots = patchChainShot({ ...chain, shots }, frame.sourceShotId, {
-            firstFrameAssetId: frame.imageUrl,
-            keyframeStatus: 'review',
-            status: 'review',
-          });
-        }
-        chain = { ...chain, shots };
-      }
-      return {
-        ...d,
-        ...(chain ? { chainStoryboard: chain } : {}),
-        scriptBreakdown: next,
-      };
-    });
-    appendLog(`已从关键帧预览回填镜表 · ${changed} 镜`);
-  }, [appendLog, getNodes, props.id, studioOpen, updateNodeData, updateShot]);
-
   const referenceBoardData = useMemo(() => {
     // Find connected reference-board nodes
     const boardNodes = getNodes().filter((n) => n.type === 'reference-board');
@@ -1768,7 +1715,14 @@ export function useStoryboardDesk(props: NodeProps) {
       if (!pictureNode) return;
 
       setGeneratingShotId(shot.id);
-      const sketchPrompt = resolveSketchPrompt(shot);
+      const baseSketch = resolveSketchPrompt(shot);
+      const sketchPrompt = enrichPromptWithShotAssets(
+        baseSketch,
+        shot,
+        characters,
+        costumeOptions,
+        propOptions,
+      );
       const frame: StoryboardPreviewFrame = {
         id: `frame-line-${shot.id}`,
         order: 1,
@@ -1804,12 +1758,6 @@ export function useStoryboardDesk(props: NodeProps) {
           });
           const nextBreakdown = writeBackBreakdownPreviewImage(withSketch, shot.id, imageUrl) ?? withSketch;
           applyScriptBreakdownPayload(props.id, nextBreakdown);
-          updateShot(shot.id, {
-            firstFrameAssetId: imageUrl,
-            keyframeStatus: 'review',
-            status: 'review',
-            sketchPrompt,
-          });
           updateNodeData(props.id, (node) => {
             const data = (node.data ?? {}) as Record<string, unknown>;
             const raw = data.storyboardPreview as StoryboardPreviewPayload | undefined;
@@ -1865,7 +1813,7 @@ export function useStoryboardDesk(props: NodeProps) {
         setGeneratingShotId(null);
       }
     },
-    [appendLog, batchRunning, getEdges, getNodes, payload, props.id, resolveSketchPrompt, setShotFrameUrl, updateNodeData, updateShot],
+    [appendLog, batchRunning, characters, costumeOptions, getEdges, getNodes, payload, propOptions, props.id, resolveSketchPrompt, setShotFrameUrl, updateNodeData],
   );
 
   /** X-12: 键盘快捷键 · ↑↓ 选镜，E 编辑，L 线稿，Del 删镜 */
@@ -1963,7 +1911,13 @@ export function useStoryboardDesk(props: NodeProps) {
         try {
           const livePayload = (getNodes().find((n) => n.id === props.id)?.data as Record<string, unknown> | undefined)?.scriptBreakdown as ScriptBreakdownPayload | undefined;
           const liveShot = flattenScriptBreakdownShots(livePayload).find((s) => s.id === shot.id) ?? shot;
-          const sketchPrompt = resolveSketchPrompt(liveShot);
+          const sketchPrompt = enrichPromptWithShotAssets(
+            resolveSketchPrompt(liveShot),
+            liveShot,
+            characters,
+            costumeOptions,
+            propOptions,
+          );
           const frame: StoryboardPreviewFrame = {
             id: `frame-line-${liveShot.id}`,
             order: i + 1,
@@ -1986,6 +1940,8 @@ export function useStoryboardDesk(props: NodeProps) {
             frame,
             (pictureNode.data ?? {}) as Record<string, unknown>,
             pictureSettings,
+            true,
+            signal,
           );
 
           const base = livePayload ?? payload;
@@ -2000,12 +1956,6 @@ export function useStoryboardDesk(props: NodeProps) {
             });
             const nextBreakdown = writeBackBreakdownPreviewImage(withSketch, liveShot.id, imageUrl) ?? withSketch;
             applyScriptBreakdownPayload(props.id, nextBreakdown);
-            updateShot(liveShot.id, {
-              firstFrameAssetId: imageUrl,
-              keyframeStatus: 'review',
-              status: 'review',
-              sketchPrompt,
-            });
             updateNodeData(props.id, (node) => {
               const data = (node.data ?? {}) as Record<string, unknown>;
               const raw = data.storyboardPreview as StoryboardPreviewPayload | undefined;
@@ -2073,15 +2023,17 @@ export function useStoryboardDesk(props: NodeProps) {
     [
       appendLog,
       batchScopeMode,
+      characters,
+      costumeOptions,
       getEdges,
       getNodes,
       payload,
+      propOptions,
       props.id,
       resolveSketchPrompt,
       setShotFrameUrl,
       shots,
       updateNodeData,
-      updateShot,
       visibleShots,
     ],
   );
@@ -2145,7 +2097,13 @@ export function useStoryboardDesk(props: NodeProps) {
 
           const panels = chunk.map((shot) => {
             const liveShot = liveMap.get(shot.id) ?? shot;
-            const sketchPrompt = resolveSketchPrompt(liveShot);
+            const sketchPrompt = enrichPromptWithShotAssets(
+              resolveSketchPrompt(liveShot),
+              liveShot,
+              characters,
+              costumeOptions,
+              propOptions,
+            );
             return {
               shot: liveShot,
               sketchPrompt,
@@ -2184,7 +2142,7 @@ export function useStoryboardDesk(props: NodeProps) {
           const gridUrl = urls[0];
           if (!gridUrl) throw new Error('宫格线稿未返回图片');
 
-          const split = await api.gridSplit({ sourceUrl: gridUrl, rows, cols });
+           const split = await api.gridSplit({ sourceUrl: gridUrl, rows, cols }, { signal });
           if (!split.urls?.length) throw new Error('宫格切分未返回图片');
 
           // 每页开始前重读节点，并用已有预览帧图补齐缺 previewImageUrl 的镜
@@ -2236,12 +2194,6 @@ export function useStoryboardDesk(props: NodeProps) {
               status: 'previewing',
             });
             nextBreakdown = writeBackBreakdownPreviewImage(withSketch, liveShot.id, imageUrl) ?? withSketch;
-            updateShot(liveShot.id, {
-              firstFrameAssetId: imageUrl,
-              keyframeStatus: 'review',
-              status: 'review',
-              sketchPrompt,
-            });
             ok += 1;
           }
 
@@ -2301,12 +2253,7 @@ export function useStoryboardDesk(props: NodeProps) {
                   chainShots = patchChainShot(
                     { ...chain, shots: chainShots },
                     patch.shot.id,
-                    {
-                      firstFrameAssetId: patch.imageUrl,
-                      keyframeStatus: 'review',
-                      status: 'review',
-                      sketchPrompt: patch.sketchPrompt,
-                    },
+                    buildLineArtShotPatch(patch.imageUrl, patch.sketchPrompt),
                   );
                 }
                 chain = { ...chain, shots: chainShots };
@@ -2339,15 +2286,17 @@ export function useStoryboardDesk(props: NodeProps) {
     },
     [
       appendLog,
+      characters,
+      costumeOptions,
       getEdges,
       getNodes,
       payload,
+      propOptions,
       props.id,
       resolveSketchPrompt,
       setShotFrameUrl,
       shots,
       updateNodeData,
-      updateShot,
       visibleShots,
     ],
   );
@@ -2434,13 +2383,8 @@ export function useStoryboardDesk(props: NodeProps) {
 
       const livePreview = ((getNodes().find((n) => n.id === props.id)?.data ?? {}) as Record<string, unknown>)
         .storyboardPreview as StoryboardPreviewPayload | undefined;
-      // Q-04: workspaceShotById 优先 chain 数据，缺链时用全局 shots 做元数据兜底（字幕/光照等，非 URL 主路径）
-      const wsById = new Map(storyboardShots.map((s) => [s.id, s]));
-      if (storyboardShots.length === 0) {
-        for (const s of useWorkspaceDocument.getState().storyboard.shots) {
-          if (!wsById.has(s.id)) wsById.set(s.id, s);
-        }
-      }
+       // Q-04: workspaceShotById 只认当前节点 chain 数据。
+       const wsById = new Map(storyboardShots.map((s) => [s.id, s]));
       const cells = deskSheetCellsFromBreakdownShots(visibleShots, {
         preview: livePreview ?? previewPayload,
         storyboardUrlByShotId,
@@ -2914,7 +2858,7 @@ export function useStoryboardDesk(props: NodeProps) {
                   className="sg3-episode-select sg3-episode-select--pipeline"
                   value={activeEpisodeId ?? payload!.episodes[0]?.id ?? ''}
                   onChange={(event) => {
-                    setActiveEpisodeId(event.target.value || null);
+                    updateNodeData(props.id, { activeEpisodeId: event.target.value || null });
                     setSelectedId(null);
                   }}
                   aria-labelledby="sg3-episode-label"
@@ -3377,15 +3321,165 @@ export function useStoryboardDesk(props: NodeProps) {
                   {editDraft.characters.some((n) => !characterNameSet.has(stripMentionToken(n))) && (
                     <span className="is-req">含未入库</span>
                   )}
+                  <span className="text-[10px] text-ink/40 font-normal ml-1">从 @ 列表选库内角色（写入正式名）</span>
                 </span>
                 <AssetMentionInput
                   value={namesToText(editDraft.characters)}
                   onChange={(next) => setEditDraft({ ...editDraft, characters: textToNames(next) })}
                   kinds={CHARACTER_MENTION_KINDS}
-                  placeholder="@角色 或输入"
+                  placeholder="@角色:名 从库选择"
                   className="sg-input"
                 />
               </label>
+
+              {editDraft.characters.length > 0 && costumeOptions.length > 0 ? (
+                <div className="sg-field">
+                  <span className="sg-label">本镜换装（Cos-06 · 优先于角色默认服装）</span>
+                  <div className="sg-grid-2" style={{ gap: 8 }}>
+                    {editDraft.characters.map((rawName) => {
+                      const name = stripMentionToken(rawName);
+                      const current = (editDraft.costumeOverrides ?? []).find(
+                        (o) => o.characterName.trim().toLowerCase() === name.trim().toLowerCase(),
+                      );
+                      return (
+                        <label key={name} className="sg-field" style={{ margin: 0 }}>
+                          <span className="sg-label" style={{ fontWeight: 400 }}>{name}</span>
+                          <select
+                            className="sg-select"
+                            value={current?.costumeId ?? ''}
+                            onChange={(e) => {
+                              const costumeId = e.target.value;
+                              const hit = costumeOptions.find((c) => c.id === costumeId);
+                              const rest = (editDraft.costumeOverrides ?? []).filter(
+                                (o) => o.characterName.trim().toLowerCase() !== name.trim().toLowerCase(),
+                              );
+                              setEditDraft({
+                                ...editDraft,
+                                costumeOverrides: costumeId
+                                  ? [...rest, { characterName: name, costumeId, costumeLabel: hit?.label }]
+                                  : rest,
+                              });
+                            }}
+                          >
+                            <option value="">角色默认服装</option>
+                            {costumeOptions.map((c) => (
+                              <option key={c.id} value={c.id}>{c.label}</option>
+                            ))}
+                          </select>
+                        </label>
+                      );
+                    })}
+                  </div>
+                </div>
+              ) : null}
+
+              {propOptions.length > 0 ? (
+                <div className="sg-field">
+                  <span className="sg-label">本镜道具（Prop-06）</span>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                    {propOptions.map((p) => {
+                      const on = (editDraft.propIds ?? []).includes(p.id);
+                      return (
+                        <button
+                          key={p.id}
+                          type="button"
+                          className={`sg-chip ${on ? 'is-on' : ''}`}
+                          style={{
+                            border: '1px solid var(--nx9-line, #333)',
+                            borderRadius: 999,
+                            padding: '2px 8px',
+                            fontSize: 11,
+                            background: on ? 'rgba(45, 212, 191, 0.12)' : 'transparent',
+                            color: on ? 'var(--nx9-brand, #2dd4bf)' : 'inherit',
+                          }}
+                          onClick={() => {
+                            const cur = editDraft.propIds ?? [];
+                            setEditDraft({
+                              ...editDraft,
+                              propIds: on ? cur.filter((id) => id !== p.id) : [...cur, p.id],
+                            });
+                          }}
+                        >
+                          {p.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              ) : null}
+
+              {(() => {
+                const sceneLabel = stripMentionToken(editDraft.scene || '');
+                const sceneItem = workspaceScenes.find(
+                  (s) => s.label.trim().toLowerCase() === sceneLabel.trim().toLowerCase(),
+                );
+                const rec = sceneItem ? getSceneCreative(sceneItem) : null;
+                const hasRec = Boolean(
+                  rec
+                  && (
+                    (rec.recommendedShots?.length ?? 0)
+                    || (rec.recommendedEmotions?.length ?? 0)
+                    || (rec.recommendedCharacters?.length ?? 0)
+                  ),
+                );
+                if (!hasRec || !rec) return null;
+                return (
+                  <div className="sg-field">
+                    <span className="sg-label">场景创作推荐（点选写入本镜）</span>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                      {(rec.recommendedShots ?? []).map((v) => (
+                        <button
+                          key={`shot-${v}`}
+                          type="button"
+                          className="sg-chip"
+                          style={{ border: '1px solid var(--nx9-line,#333)', borderRadius: 999, padding: '2px 8px', fontSize: 11 }}
+                          onClick={() => setEditDraft({
+                            ...editDraft,
+                            shotSize: (SHOT_SIZES as readonly string[]).includes(v)
+                              ? (v as ShotEditDraft['shotSize'])
+                              : editDraft.shotSize,
+                            purpose: editDraft.purpose?.trim()
+                              ? `${editDraft.purpose} · 推荐镜头:${v}`
+                              : `推荐镜头:${v}`,
+                          })}
+                        >
+                          镜头·{v}
+                        </button>
+                      ))}
+                      {(rec.recommendedEmotions ?? []).map((v) => (
+                        <button
+                          key={`emo-${v}`}
+                          type="button"
+                          className="sg-chip"
+                          style={{ border: '1px solid var(--nx9-line,#333)', borderRadius: 999, padding: '2px 8px', fontSize: 11 }}
+                          onClick={() => setEditDraft({
+                            ...editDraft,
+                            purpose: editDraft.purpose?.trim()
+                              ? `${editDraft.purpose} · @情绪:${v}`
+                              : `@情绪:${v}`,
+                          })}
+                        >
+                          情绪·{v}
+                        </button>
+                      ))}
+                      {(rec.recommendedCharacters ?? []).map((v) => (
+                        <button
+                          key={`char-${v}`}
+                          type="button"
+                          className="sg-chip"
+                          style={{ border: '1px solid var(--nx9-line,#333)', borderRadius: 999, padding: '2px 8px', fontSize: 11 }}
+                          onClick={() => {
+                            if (editDraft.characters.some((n) => stripMentionToken(n) === v)) return;
+                            setEditDraft({ ...editDraft, characters: [...editDraft.characters, v] });
+                          }}
+                        >
+                          角色·{v}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })()}
 
               <div className="sg-grid-2">
                 <label className="sg-field">

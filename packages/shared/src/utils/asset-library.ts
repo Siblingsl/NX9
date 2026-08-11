@@ -4,7 +4,7 @@ import type { CharacterProfile } from '../types/character';
 import type { SoundAssetProfile } from '../types/sound-library';
 import { resolveAssetPromptText } from './creative-asset-prompts';
 
-export type AssetLibraryKind = BacklotTemplateKind | 'sound';
+export type AssetLibraryKind = BacklotTemplateKind | 'sound' | 'style';
 export type AssetScope = 'private' | 'public';
 
 export interface AssetRef {
@@ -21,6 +21,7 @@ export interface AssetLibraryItem {
   label: string;
   prompt: string;
   description?: string;
+  tags?: string[];
   audioUrl?: string;
   imageUrl?: string;
   hookPhase?: 'opening' | 'ending';
@@ -29,23 +30,68 @@ export interface AssetLibraryItem {
   deletedAt?: number;
 }
 
+/** Tab 分组：实体 / 词典 / 声音
+ * 情绪、钩子/爆点已退出主导航（情绪→镜头标签；爆点 SSOT=编剧 brief.hooks）。
+ * 镜头 / 风格仅出现在「公共」scope（见 assetLibraryTabGroupsForScope）。
+ */
+export const ASSET_LIBRARY_TAB_GROUPS: {
+  id: 'entity' | 'lexicon' | 'media';
+  label: string;
+  keys: AssetLibraryKind[];
+}[] = [
+  { id: 'entity', label: '上镜实体', keys: ['character', 'costume', 'scene', 'prop'] },
+  { id: 'lexicon', label: '语言词典', keys: ['shot', 'style'] },
+  { id: 'media', label: '声音', keys: ['sound'] },
+];
+
+/** 仅公共库顶栏展示的词典 kind */
+export const ASSET_LIBRARY_PUBLIC_ONLY_KINDS: readonly AssetLibraryKind[] = ['shot', 'style'];
+
 export const ASSET_LIBRARY_TABS: { key: AssetLibraryKind; label: string; hint: string }[] = [
   { key: 'character', label: '角色', hint: '人设与一致性参考' },
   { key: 'costume', label: '服装', hint: '造型套装、面料与标志物' },
   { key: 'scene', label: '场景', hint: '环境、光线、空间' },
-  { key: 'shot', label: '镜头', hint: '运镜、景别、机位' },
-  { key: 'emotion', label: '情绪', hint: '表情、氛围、色调' },
-  { key: 'hook', label: '钩子', hint: '开场与结尾钩子' },
-  { key: 'sound', label: '声音', hint: '参考音频、配音样本' },
+  { key: 'prop', label: '道具', hint: '标志性物品、连续性锚点' },
+  { key: 'shot', label: '镜头', hint: '运镜词典（仅公共库）' },
+  { key: 'emotion', label: '情绪', hint: '已降级：请用镜头推荐情绪 / 角色表情格（兼容旧条目）' },
+  { key: 'hook', label: '爆点', hint: '已退出主导航：请在编剧台维护 brief.hooks（兼容旧条目）' },
+  { key: 'style', label: '风格', hint: '名 + Prompt + 可选参考图（仅公共库）' },
+  { key: 'sound', label: '声音', hint: '配音 / 音效 / BGM（可选音频）' },
 ];
+
+/** 主导航可见的 kind（情绪 / 爆点不进顶栏；不含 scope 过滤） */
+export function isAssetLibraryNavKind(kind: AssetLibraryKind): boolean {
+  return ASSET_LIBRARY_TAB_GROUPS.some((g) => g.keys.includes(kind));
+}
+
+export function isAssetLibraryPublicOnlyKind(kind: AssetLibraryKind): boolean {
+  return (ASSET_LIBRARY_PUBLIC_ONLY_KINDS as readonly string[]).includes(kind);
+}
+
+/** 按 scope 过滤顶栏分组（私有不展示镜头 / 风格） */
+export function assetLibraryTabGroupsForScope(scope: AssetScope): typeof ASSET_LIBRARY_TAB_GROUPS {
+  if (scope === 'public') return ASSET_LIBRARY_TAB_GROUPS;
+  return ASSET_LIBRARY_TAB_GROUPS
+    .map((g) => ({
+      ...g,
+      keys: g.keys.filter((k) => !isAssetLibraryPublicOnlyKind(k)),
+    }))
+    .filter((g) => g.keys.length > 0);
+}
+
+export function isAssetLibraryNavKindForScope(kind: AssetLibraryKind, scope: AssetScope): boolean {
+  return assetLibraryTabGroupsForScope(scope).some((g) => g.keys.includes(kind));
+}
 
 export const ASSET_KIND_MENTION_PREFIX: Record<AssetLibraryKind, string> = {
   character: '角色',
   costume: '服装',
   scene: '场景',
+  prop: '道具',
   shot: '镜头',
   emotion: '情绪',
   hook: '钩子',
+  style: '风格',
   sound: '声音',
 };
 
@@ -59,7 +105,7 @@ export function formatAssetMention(kind: AssetLibraryKind, label: string): strin
 
 export function parseAssetMentions(text: string | undefined): Array<{ kind: AssetLibraryKind; label: string }> {
   if (!text) return [];
-  const pattern = /@(角色|服装|场景|镜头|情绪|钩子|声音):(\S+)/g;
+  const pattern = /@(角色|服装|场景|道具|镜头|情绪|钩子|风格|声音):(\S+)/g;
   const seen = new Set<string>();
   const result: Array<{ kind: AssetLibraryKind; label: string }> = [];
   for (const m of text.matchAll(pattern)) {
@@ -74,6 +120,31 @@ export function parseAssetMentions(text: string | undefined): Array<{ kind: Asse
   return result;
 }
 
+/**
+ * C-01：检测裸 `@名`（无类型前缀）。兼容层仍可能被旧文案使用，新产品路径应升级为 `@角色:名`。
+ */
+export function findLegacyBareMentions(text: string | undefined): string[] {
+  if (!text) return [];
+  const typed = new Set(
+    parseAssetMentions(text).map((m) => m.label.trim().toLowerCase()),
+  );
+  const bare: string[] = [];
+  const seen = new Set<string>();
+  for (const m of text.matchAll(/(^|[\s，,、；;（(])@([^\s:@：]+)/g)) {
+    const label = m[2]?.trim();
+    if (!label) continue;
+    const key = label.toLowerCase();
+    if (typed.has(key) || seen.has(key)) continue;
+    // 跳过已是「类型:名」被截断的情况
+    if (Object.values(ASSET_KIND_MENTION_PREFIX).some((p) => label === p || label.startsWith(`${p}:`))) {
+      continue;
+    }
+    seen.add(key);
+    bare.push(label);
+  }
+  return bare;
+}
+
 export function characterToItem(c: CharacterProfile, scope: AssetScope): AssetLibraryItem {
   return {
     id: c.id,
@@ -82,18 +153,27 @@ export function characterToItem(c: CharacterProfile, scope: AssetScope): AssetLi
     label: c.name,
     prompt: resolveAssetPromptText('character', c),
     description: c.descriptionZh,
-    imageUrl: c.creative?.fullSheetUrl ?? c.referenceImageUrl ?? undefined,
+    imageUrl:
+      c.creative?.frontViewUrl
+      ?? c.referenceImageUrl
+      ?? c.creative?.fullSheetUrl
+      ?? undefined,
     audioUrl: c.referenceAudioUrl ?? undefined,
     deletedAt: c.deletedAt,
   };
 }
 
 export function workspaceItemToAsset(item: BacklotWorkspaceItem, scope: AssetScope): AssetLibraryItem {
-  const kind = item.kind as Exclude<AssetLibraryKind, 'character' | 'sound'>;
+  const kind = item.kind as Exclude<AssetLibraryKind, 'character' | 'sound' | 'style'>;
   const creative = (item.creative ?? {}) as {
     description?: string;
     sheetUrl?: string | null;
+    frontFlatUrl?: string | null;
+    coverUrl?: string | null;
     referenceUrls?: string[];
+    gifUrl?: string | null;
+    exampleImageUrl?: string | null;
+    purpose?: string;
   };
   return {
     id: item.id,
@@ -101,21 +181,35 @@ export function workspaceItemToAsset(item: BacklotWorkspaceItem, scope: AssetSco
     scope,
     label: item.label,
     prompt: resolveAssetPromptText(kind, item),
-    description: creative.description ?? item.promptZh,
-    imageUrl: creative.sheetUrl ?? creative.referenceUrls?.[0] ?? undefined,
+    description: creative.purpose ?? creative.description ?? item.promptZh,
+    imageUrl:
+      creative.gifUrl
+      ?? creative.exampleImageUrl
+      ?? creative.coverUrl
+      ?? creative.frontFlatUrl
+      ?? creative.sheetUrl
+      ?? creative.referenceUrls?.[0]
+      ?? undefined,
     hookPhase: item.hookPhase,
     deletedAt: item.deletedAt,
   };
 }
 
 export function templateToAsset(tpl: BacklotCustomTemplate, scope: AssetScope, builtin = false): AssetLibraryItem {
+  const creative = (tpl.creative ?? {}) as {
+    gifUrl?: string | null;
+    exampleImageUrl?: string | null;
+    purpose?: string;
+  };
   return {
     id: tpl.id,
     kind: tpl.kind,
     scope,
     label: tpl.label,
     prompt: backlotTemplatePrompt(tpl),
-    description: tpl.description ?? tpl.promptZh,
+    description: creative.purpose ?? tpl.description ?? tpl.promptZh,
+    imageUrl: creative.gifUrl?.trim() || creative.exampleImageUrl?.trim() || undefined,
+    tags: tpl.tags,
     hookPhase: tpl.hookPhase,
     builtin,
     deletedAt: tpl.deletedAt,
@@ -131,6 +225,26 @@ export function soundToItem(s: SoundAssetProfile, scope: AssetScope): AssetLibra
     prompt: resolveAssetPromptText('sound', s),
     description: s.description,
     audioUrl: s.audioUrl,
+    tags: s.tags,
+    builtin: Boolean(s.builtinKey) || s.id.startsWith('builtin-sound-'),
+    deletedAt: s.deletedAt,
+  };
+}
+
+export function styleToItem(
+  s: import('../types/style-library').StylePresetProfile,
+  scope: AssetScope,
+): AssetLibraryItem {
+  return {
+    id: s.id,
+    kind: 'style',
+    scope,
+    label: s.name,
+    prompt: s.promptEn?.trim() || s.promptZh?.trim() || '',
+    description: s.description ?? s.promptZh,
+    imageUrl: s.referenceImageUrl?.trim() || undefined,
+    builtin: Boolean(s.builtinKey),
+    tags: s.tags,
     deletedAt: s.deletedAt,
   };
 }

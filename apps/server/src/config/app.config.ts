@@ -1,4 +1,9 @@
-import { join } from 'path';
+import { existsSync } from 'fs';
+import { dirname, join } from 'path';
+import { loadServerEnv } from './load-env';
+
+// Load package-local environment variables before any exported config is evaluated.
+loadServerEnv();
 
 export const APP_VERSION = '0.1.0';
 export const HOST = process.env.NX9_HOST ?? '127.0.0.1';
@@ -7,8 +12,17 @@ export const PORT = Number(process.env.NX9_PORT ?? 3001);
 /** F-038: 公共库写权限开关（默认 false → 公共库只读） */
 export const ALLOW_PUBLIC_WRITE = process.env.ALLOW_PUBLIC_WRITE === 'true';
 
-/** Monorepo root — cwd is apps/server when started via pnpm workspace */
-const ROOT = join(process.cwd(), '..', '..');
+/** Resolve the monorepo root for both workspace and compiled production starts. */
+function resolveRoot(): string {
+  const candidates = [
+    process.cwd(),
+    join(process.cwd(), '..', '..'),
+    join(__dirname, '..', '..', '..'),
+  ];
+  return (candidates.find((candidate) => existsSync(join(candidate, 'pnpm-workspace.yaml'))) ?? candidates[0]);
+}
+
+const ROOT = resolveRoot();
 
 export const PATHS = {
   root: ROOT,

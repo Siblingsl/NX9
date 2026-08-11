@@ -1,6 +1,6 @@
 import type { MediaPinPayload } from '@nx9/shared';
 
-/** 从图像生成工作区拖出钉图时的 MIME（不进能力区） */
+/** 从生成工作区拖出钉板时的 MIME（不进能力区） */
 export const MEDIA_PIN_MIME = 'application/nx9-media-pin';
 
 export function setMediaPinDragData(

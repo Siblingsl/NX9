@@ -10,8 +10,10 @@ import { useStoryboardUi } from '../../stores/flow-runtime';
 import { checkAssetReadinessInEdges } from '../../engine/asset-readiness';
 import {
   readUpstreamChainStoryboard,
+  migrateUpstreamChainStoryboard,
   resolveUpstreamChainDesk,
   patchUpstreamShot,
+  validateDirectorHandoff,
 } from '../../engine/chain-storyboard-utils';
 import { askConfirm } from '../../stores/confirm-dialog';
 import {
@@ -49,7 +51,7 @@ import './director-desk.v2.css';
 
 
 function DirectorDeskBlock(props: NodeProps) {
-  const { updateNodeData, fitView } = useReactFlow();
+  const { updateNodeData, fitView, getNodes } = useReactFlow();
   const nodes = useNodes();
   const edges = useEdges();
   const appendLog = useActivityLog((s) => s.append);
@@ -90,10 +92,23 @@ function DirectorDeskBlock(props: NodeProps) {
     () => readUpstreamChainStoryboard(props.id, nodes as any, edges as any),
     [props.id, nodes, edges],
   );
+  useEffect(() => {
+    migrateUpstreamChainStoryboard(
+      updateNodeData,
+      props.id,
+      nodes as any,
+      edges as any,
+      storyboard,
+    );
+  }, [edges, nodes, props.id, storyboard, updateNodeData]);
   const upstreamDeskId = useMemo(
     () => resolveUpstreamChainDesk(props.id, nodes as any, edges as any),
     [props.id, nodes, edges],
   );
+  const upstreamDeskData = useMemo(() => {
+    if (!upstreamDeskId) return undefined;
+    return (nodes.find((node) => node.id === upstreamDeskId)?.data ?? {}) as Record<string, unknown>;
+  }, [nodes, upstreamDeskId]);
 
   // X-41: 从 lastHandoff 读取当前集
   const handoffEpisodeId = useMemo(
@@ -105,6 +120,22 @@ function DirectorDeskBlock(props: NodeProps) {
     () => chain?.episodes?.find((episode) => episode.id === episodeId)?.artDirection,
     [chain, episodeId],
   );
+  const handoffValidation = useMemo(() => {
+    const handoff = data.lastHandoff as Record<string, unknown> | undefined;
+    if (!handoff || !chain || !episodeId) return { valid: false, reason: '缺少交接数据' };
+    const currentScriptHash = (
+      (upstreamDeskData?.breakdownJob as Record<string, unknown> | undefined)?.sourcePackageHash
+      ?? (upstreamDeskData?.handoff as Record<string, unknown> | undefined)?.scriptHash
+    ) as string | undefined;
+    return validateDirectorHandoff({ handoff, chain, episodeId, scriptHash: currentScriptHash });
+  }, [chain, data.lastHandoff, episodeId, upstreamDeskData]);
+  useEffect(() => {
+    if (!data.lastHandoff || handoffValidation.valid || data.lastHandoffStatus === 'stale') return;
+    updateNodeData(props.id, {
+      lastHandoffStatus: 'stale',
+      lastHandoffInvalidReason: handoffValidation.reason,
+    });
+  }, [data.lastHandoff, data.lastHandoffStatus, handoffValidation, props.id, updateNodeData]);
 
   // X-26: 解析上游 desk 标题
   const upstreamDeskTitle = useMemo(() => {
@@ -123,7 +154,7 @@ function DirectorDeskBlock(props: NodeProps) {
       const byEpisode = episodeId
         ? chain.shots.filter((s) => s.episodeId === episodeId)
         : activeChainEpisodeShots(chain);
-      return byEpisode.length > 0 ? byEpisode : chain.shots;
+      return byEpisode;
     }
     return [];
   }, [chain, episodeId]);
@@ -131,10 +162,13 @@ function DirectorDeskBlock(props: NodeProps) {
   // D-03/R-01: 线稿帧映射 shotId → url
   const lineArtByShotId = useMemo(() => {
     const map: Record<string, string> = {};
+    const scopedShotIds = new Set(
+      chain?.shots.filter((shot) => !episodeId || shot.episodeId === episodeId).map((shot) => shot.id) ?? [],
+    );
     const handoff = data.lastHandoff as Record<string, unknown> | undefined;
     const frames = handoff?.lineArtFrames as Array<{ shotId: string; imageUrl: string }> | undefined;
     if (frames && frames.length > 0) {
-      for (const f of frames) {
+      for (const f of frames.filter((frame) => scopedShotIds.has(frame.shotId))) {
         if (f.shotId && f.imageUrl) map[f.shotId] = f.imageUrl;
       }
     }
@@ -145,23 +179,25 @@ function DirectorDeskBlock(props: NodeProps) {
       for (const frame of preview?.frames ?? []) {
         const shotId = frame.sourceShotId || frame.id;
         const url = frame.lineArtUrl || frame.imageUrl;
-        if (shotId && url && !map[shotId]) map[shotId] = url;
+        if (shotId && scopedShotIds.has(shotId) && url && !map[shotId]) map[shotId] = url;
       }
     }
     return map;
-  }, [data.lastHandoff, upstreamDeskId, nodes]);
+  }, [chain, data.lastHandoff, episodeId, upstreamDeskId, nodes]);
 
   // X-41/D-04: 本集是否已确认
   const episodeConfirmed = useMemo(() => {
     const handoff = data.lastHandoff as Record<string, unknown> | undefined;
+    if (!handoffValidation.valid) return false;
     if (handoff?.confirmed === true) return true;
     const confirmedIds = handoff?.confirmedEpisodeIds as string[] | undefined;
     if (confirmedIds && episodeId && confirmedIds.includes(episodeId)) return true;
     if (chain?.confirmedEpisodeIds && episodeId && chain.confirmedEpisodeIds.includes(episodeId)) return true;
     return false;
-  }, [data.lastHandoff, episodeId, chain]);
+  }, [data.lastHandoff, episodeId, chain, handoffValidation.valid]);
 
   const lineArtCount = Object.keys(lineArtByShotId).length;
+  const episodeScopeInvalid = Boolean(chain && episodeId && activeShots.length === 0);
 
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
   const [runningShotId, setRunningShotId] = useState<string | null>(null);
@@ -176,6 +212,7 @@ function DirectorDeskBlock(props: NodeProps) {
   const [rejectEditingId, setRejectEditingId] = useState<string | null>(null);
   const [rejectBusyId, setRejectBusyId] = useState<string | null>(null);
   const abortRef = useRef(false);
+  const abortControllerRef = useRef<AbortController | null>(null);
   const failedCountRef = useRef(0);
 
   const stats = useMemo(() => summarizeDirectorQueue(activeShots), [activeShots]);
@@ -300,15 +337,36 @@ function DirectorDeskBlock(props: NodeProps) {
   // D-02: 写回上游链镜表
   const patchShot = useCallback(
     (shotId: string, patch: Partial<import('@nx9/shared').StoryboardShot>) => {
-      const ok = patchUpstreamShot(updateNodeData, props.id, nodes as any, edges as any, shotId, patch);
+      const ok = patchUpstreamShot(
+        updateNodeData,
+        props.id,
+        nodes as any,
+        edges as any,
+        shotId,
+        patch,
+        getNodes as any,
+        (id, updater) => updateNodeData(id, updater as any),
+      );
       if (!ok) appendLog('导演台：无法写回上游链镜表（未连接分镜台？）');
       return ok;
     },
-    [updateNodeData, props.id, nodes, edges, appendLog],
+    [updateNodeData, props.id, nodes, edges, getNodes, appendLog],
   );
 
   const runBatch = useCallback(
     async (mode: 'filter' | 'selected' | 'one' | 'failed', oneId?: string) => {
+      if (episodeScopeInvalid) {
+        const message = '导演台：当前集不存在或交接已过期，请重新同步后再批出';
+        appendLog(message);
+        updateNodeData(props.id, { status: 'error', error: message });
+        return;
+      }
+      if (!handoffValidation.valid) {
+        const message = `导演台：${handoffValidation.reason}，请从分镜台重新同步后再批出`;
+        appendLog(message);
+        updateNodeData(props.id, { status: 'error', error: message, lastHandoffStatus: 'stale' });
+        return;
+      }
       // O-14：门禁未放行时硬阻断（导演台锁参考）
       if (!ready && (forceCharacterRef || forceSceneRef)) {
         appendLog('导演台：上游设定未就绪，锁参考模式下禁止批出。请先在编剧台「设定就绪」标记放行。');
@@ -342,6 +400,9 @@ function DirectorDeskBlock(props: NodeProps) {
         if (!ok) return;
       }
       abortRef.current = false;
+      abortControllerRef.current?.abort();
+      const batchController = new AbortController();
+      abortControllerRef.current = batchController;
       const shotIds =
         mode === 'one' && oneId
           ? [oneId]
@@ -447,7 +508,8 @@ function DirectorDeskBlock(props: NodeProps) {
           skipExisting: mode === 'one' || mode === 'failed' ? false : skipExisting,
           skipApproved: mode === 'one' || mode === 'failed' ? false : skipApproved,
           concurrency: mode === 'one' ? 1 : concurrency,
-          shouldAbort: () => abortRef.current,
+           shouldAbort: () => abortRef.current,
+           signal: batchController.signal,
           onShotStart: (shot, _index, total) => {
             setRunningShotId(shot.id);
             setLiveProgress((p) => ({ ...p, total }));
@@ -539,6 +601,7 @@ function DirectorDeskBlock(props: NodeProps) {
         });
         appendLog(`导演台批出失败 · ${String(e)}`);
       } finally {
+        abortControllerRef.current = null;
         setRunningShotId(null);
         setPhaseHint('');
         setLiveProgress({ done: 0, total: 0, failed: 0 });
@@ -571,6 +634,8 @@ function DirectorDeskBlock(props: NodeProps) {
       lineArtByShotId,
       patchShot,
        episodeConfirmed,
+       episodeScopeInvalid,
+       handoffValidation,
        characters,
        environments,
        episodeArtDirection,
@@ -580,6 +645,7 @@ function DirectorDeskBlock(props: NodeProps) {
 
   const stopBatch = useCallback(() => {
     abortRef.current = true;
+    abortControllerRef.current?.abort();
     appendLog('导演台 · 尽快停止：不再开新镜');
   }, [appendLog]);
 
@@ -833,15 +899,17 @@ function DirectorDeskBlock(props: NodeProps) {
     appendLog(`导演台 · 已导出 ${rows.length} 镜关键帧 URL`);
   }, [activeShots, appendLog, episodeId]);
 
-  const footerReason = !chain || activeShots.length === 0
-    ? '阻断：未连接分镜台或暂无链镜表'
-    : !ready && (forceCharacterRef || forceSceneRef)
-      ? '阻断：设定未就绪，参考锁未放行'
-      : studioTab === 'deliver' && !keyframeGatePassed
-        ? '阻断：关键帧门禁未放行'
-        : lineArtCount === 0
-          ? '提示：无线稿，线稿参考为可选'
-          : null;
+  const footerReason = episodeScopeInvalid
+    ? '阻断：当前集不存在或交接已过期，请重新同步'
+    : !chain || activeShots.length === 0
+      ? '阻断：未连接分镜台或暂无链镜表'
+      : !ready && (forceCharacterRef || forceSceneRef)
+        ? '阻断：设定未就绪，参考锁未放行'
+        : studioTab === 'deliver' && !keyframeGatePassed
+          ? '阻断：关键帧门禁未放行'
+          : lineArtCount === 0
+            ? '提示：无线稿，线稿参考为可选'
+            : null;
 
   const primaryLabel = useMemo(() => {
     if (running) {

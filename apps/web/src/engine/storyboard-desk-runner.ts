@@ -18,6 +18,15 @@ export type StoryboardDeskMode = 'breakdown' | 'grid' | 'compose' | 'handoff';
 
 export type ShotListFilter = 'all' | 'uncomposed' | 'unbound';
 
+export function resolveDeskActiveEpisodeId(
+  data: Record<string, unknown> | null | undefined,
+  payload: ScriptBreakdownPayload | undefined,
+): string | null {
+  const requested = typeof data?.activeEpisodeId === 'string' ? data.activeEpisodeId : null;
+  if (requested && payload?.episodes.some((episode) => episode.id === requested)) return requested;
+  return payload?.episodes[0]?.id ?? null;
+}
+
 export interface CompositionStats {
   total: number;
   composed: number;
@@ -203,13 +212,6 @@ export function projectBreakdownToWorkspace(payload: ScriptBreakdownPayload) {
     doc.storyboard.activeEpisodeId && episodeIds.has(doc.storyboard.activeEpisodeId)
       ? doc.storyboard.activeEpisodeId
       : storyboardShots.find((s) => s.episodeId)?.episodeId ?? null;
-  doc.setStoryboard({
-    ...doc.storyboard,
-    version: 3,
-    title: payload.title,
-    activeEpisodeId: nextActive,
-    shots: storyboardShots,
-  });
   return storyboardShots;
 }
 
@@ -220,7 +222,6 @@ export function applyDeskBreakdown(
   extra: Record<string, unknown> = {},
 ) {
   applyScriptBreakdownPayload(blockId, payload, { syncAssets: false });
-  projectBreakdownToWorkspace(payload);
   const flat = flattenScriptBreakdownShots(payload);
   // F-003: 构建链镜表并写入节点 data.chainStoryboard
   const shots = storyboardShotsFromScriptBreakdown(payload);

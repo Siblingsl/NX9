@@ -41,6 +41,7 @@ import {
   type VideoGenMode,
 } from './video-gen-modes';
 import { batchGenerateVideosFromShots } from '../../../../../core-pipeline-runner';
+import { setMediaPinDragData } from '../../../../../media-pin-drag';
 
 const EMPTY_HISTORY: { id: string; blockId: string; text: string; savedAt: number }[] = [];
 const VIDEO_MENTION_KINDS: AssetLibraryKind[] = [
@@ -278,6 +279,8 @@ export function VideoWorkspace({ blockId, kind, onCollapse }: VideoWorkspaceProp
     onCollapse?.();
   }, [collapsePromptBar, onCollapse, flushNow]);
 
+  const videoUrl = (data.videoUrl as string | undefined) || undefined;
+
   const toolbarLeft = (
     <div className="flex items-center gap-1" onMouseDown={stop}>
       <VideoGenModeChip
@@ -428,12 +431,48 @@ export function VideoWorkspace({ blockId, kind, onCollapse }: VideoWorkspaceProp
               onReferenceChange={(url) => handlePatch({ referenceFrameUrl: url })}
             />
           )}
+          {videoUrl && (
+            <div className="border-b border-line/25 px-3 py-2 nodrag nopan" onMouseDown={stop}>
+              <div className="mb-1.5 flex items-center gap-1.5">
+                <p className="text-[10px] font-medium text-ink/65">生成结果</p>
+                <span className="text-[9px] text-ink/28">拖出钉到画布</span>
+              </div>
+              <div
+                draggable
+                onDragStart={(e) => {
+                  const el = e.currentTarget.querySelector('video');
+                  setMediaPinDragData(
+                    e.dataTransfer,
+                    {
+                      url: videoUrl,
+                      source: 'generated',
+                      label: '生成视频',
+                      pinKind: 'clip',
+                      sourceBlockId: blockId,
+                    },
+                    el,
+                  );
+                }}
+                className="w-28 h-16 rounded-lg overflow-hidden border border-line/40 cursor-grab active:cursor-grabbing"
+                title="拖出钉到画布"
+              >
+                <video
+                  src={videoUrl}
+                  muted
+                  playsInline
+                  preload="metadata"
+                  className="h-full w-full object-cover pointer-events-none"
+                />
+              </div>
+            </div>
+          )}
           {hasUpstream && shots.length > 0 && (
             <div className="border-b border-line/25 px-3 py-2">
               <div className="mb-1.5 flex items-center gap-2">
                 <p className="text-[10px] font-medium text-ink/65">
                   上游 {shots.length} 镜 · 已生成 {shots.filter((shot) => shot.videoAssetId).length}
                 </p>
+                <span className="text-[9px] text-ink/28">有视频可拖出钉板</span>
                 <button
                   type="button"
                   disabled={shots.some((shot) => !shot.videoAssetId)}
@@ -456,14 +495,37 @@ export function VideoWorkspace({ blockId, kind, onCollapse }: VideoWorkspaceProp
                       : badge.tone === 'rejected'
                         ? 'bg-error/10 text-error'
                         : 'bg-ink/10 text-ink/50';
+                  const pinUrl = displayVersion?.url || shot.videoAssetId;
                   return (
                   <div key={shot.id} className="rounded-lg bg-surface/45 p-1.5">
                     <div className="flex items-center gap-2">
-                    <div className="h-9 w-14 shrink-0 overflow-hidden rounded bg-black/5">
+                    <div
+                      className={`h-9 w-14 shrink-0 overflow-hidden rounded bg-black/5${pinUrl ? ' cursor-grab active:cursor-grabbing' : ''}`}
+                      draggable={Boolean(pinUrl)}
+                      title={pinUrl ? '拖出钉到画布' : undefined}
+                      onDragStart={(e) => {
+                        if (!pinUrl) {
+                          e.preventDefault();
+                          return;
+                        }
+                        const el = e.currentTarget.querySelector('video,img');
+                        setMediaPinDragData(
+                          e.dataTransfer,
+                          {
+                            url: pinUrl,
+                            source: 'generated',
+                            label: `镜 ${shot.index + 1}`,
+                            pinKind: 'clip',
+                            sourceBlockId: blockId,
+                          },
+                          el as HTMLElement | null,
+                        );
+                      }}
+                    >
                       {displayVersion?.url ? (
-                        <video src={displayVersion.url} controls className="h-full w-full object-cover" />
+                        <video src={displayVersion.url} muted playsInline preload="metadata" className="h-full w-full object-cover pointer-events-none" />
                       ) : shot.firstFrameAssetId ? (
-                        <img src={shot.firstFrameAssetId} alt="" className="h-full w-full object-cover" />
+                        <img src={shot.firstFrameAssetId} alt="" className="h-full w-full object-cover pointer-events-none" />
                       ) : null}
                     </div>
                     <div className="min-w-0 flex-1">

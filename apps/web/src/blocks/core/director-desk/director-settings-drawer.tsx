@@ -130,7 +130,7 @@ export function DirectorSettingsDrawer({
               立即写回
             </button>
           </div>
-          {globalArtDirection && (
+          {typeof globalArtDirection === 'string' && globalArtDirection && (
             <span className="dd2-settings-hint">已读全局美术方向</span>
           )}
           <div className="dd2-settings-row" style={{ marginTop: 4 }}>

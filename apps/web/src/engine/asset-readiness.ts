@@ -368,8 +368,23 @@ function inspectCharacterVisualGaps(
   return gaps;
 }
 
+function normalizeAssetLabel(value: string): string {
+  return value.trim().toLowerCase();
+}
+
+/** 工作区 backlot 某 kind 的展示名集合（大小写不敏感） */
+function libraryBacklotLabelSet(kind: 'costume' | 'prop' | 'scene'): Set<string> {
+  const doc = useWorkspaceDocument.getState();
+  return new Set(
+    doc.backlotWorkspace.items
+      .filter((item) => item.kind === kind && !item.deletedAt)
+      .map((item) => normalizeAssetLabel(item.label))
+      .filter(Boolean),
+  );
+}
+
 /** F-051: 从 Bible 中提取服装名 */
-function extractCostumeNames(pkg: ScreenplayPackage): string[] {
+export function extractCostumeNames(pkg: ScreenplayPackage): string[] {
   const names = new Set<string>();
   for (const char of pkg.bible.characters) {
     const text = [char.appearance, char.personality, char.voiceNotes].filter(Boolean).join(' ');
@@ -380,11 +395,11 @@ function extractCostumeNames(pkg: ScreenplayPackage): string[] {
       }
     }
   }
-  return [...names];
+  return [...names].filter(Boolean);
 }
 
 /** F-051: 从 Bible 中提取道具名 */
-function extractPropNames(pkg: ScreenplayPackage): string[] {
+export function extractPropNames(pkg: ScreenplayPackage): string[] {
   const names = new Set<string>();
   for (const scene of pkg.bible.scenes) {
     const text = [scene.summary, scene.dramaticFunction].filter(Boolean).join(' ');
@@ -395,7 +410,7 @@ function extractPropNames(pkg: ScreenplayPackage): string[] {
       }
     }
   }
-  return [...names];
+  return [...names].filter(Boolean);
 }
 
 function buildReadinessState(
@@ -404,6 +419,8 @@ function buildReadinessState(
 ): AssetReadinessState {
   const existingCharacters = libraryCharacterNameSet();
   const existingScenes = librarySceneNameSet();
+  const existingCostumes = libraryBacklotLabelSet('costume');
+  const existingProps = libraryBacklotLabelSet('prop');
   const library = libraryCharacters();
   const requiredCharacters = uniq(pkg.bible.characters.map((item) => item.name));
   const requiredScenes = uniq(pkg.bible.scenes.map((item) => item.name || item.location || item.code || ''));
@@ -411,10 +428,14 @@ function buildReadinessState(
   const missingScenes = requiredScenes.filter((name) => !existingScenes.has(name));
   const requiredCostumes = extractCostumeNames(pkg);
   const requiredProps = extractPropNames(pkg);
+  // Cos-01 / R-01：对照服装库 label，不再误用角色名集合
   const missingCostumes = requiredCostumes.filter(
-    (c) => !existingCharacters.has(c) && !libraryCharacterNameSet().has(c),
+    (c) => !existingCostumes.has(normalizeAssetLabel(c)),
   );
-  const missingProps = requiredProps;
+  // Prop-04 / R-02：对照道具库；建档后可关闭缺口
+  const missingProps = requiredProps.filter(
+    (p) => !existingProps.has(normalizeAssetLabel(p)),
+  );
   const characterVisualGaps = inspectCharacterVisualGaps(pkg, library);
   const missingCharacterRefs = characterVisualGaps
     .filter((g) => g.missingReference)

@@ -12,7 +12,7 @@ export interface PictureResultGalleryProps {
   onSelect?: (index: number) => void;
   /** 确认后删除第 index 张生成图 */
   onDelete?: (index: number) => void;
-  /** 拖出钉图时的来源节点 id */
+  /** 拖出钉板时的来源节点 id */
   sourceBlockId?: string;
   /** @deprecated 空列表直接不渲染，保留以免调用方报错 */
   emptyHint?: string;
@@ -45,7 +45,7 @@ export function PictureResultGallery({
           <span className="text-[9px] text-ink/28">拖出钉到画布</span>
         </div>
       )}
-      <div className="flex items-center gap-1.5 overflow-x-auto nx9-scroll pb-0.5">
+      <div className="flex items-center gap-1.5 overflow-x-auto nx9-scroll nx9-picture-strip-scroll pb-0.5">
         {urls.map((url, i) => {
           const active = i === selectedIndex;
           return (
@@ -61,6 +61,7 @@ export function PictureResultGallery({
                     url,
                     source: 'generated',
                     label: `生成 ${i + 1}`,
+                    pinKind: 'picture',
                     sourceBlockId,
                   },
                   img,

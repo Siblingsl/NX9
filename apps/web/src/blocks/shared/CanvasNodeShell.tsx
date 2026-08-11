@@ -10,7 +10,7 @@ import { isSurfaceEnabled } from '../../config/product-surface';
 interface CanvasNodeShellProps extends NodeProps {
   alias?: string;
   onRunOverride?: () => void;
-  /** 点击预览图打开（如画布钉图放大） */
+  /** 点击预览打开（如画布钉板放大） */
   onPreviewOpen?: () => void;
 }
 

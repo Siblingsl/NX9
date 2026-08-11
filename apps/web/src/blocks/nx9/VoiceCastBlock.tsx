@@ -73,7 +73,7 @@ function VoiceCastBlock(props: NodeProps) {
                   <option value="shimmer">Shimmer</option>
                   {profiles.map((p) => (
                     <option key={p.id} value={p.voiceId}>
-                      {p.name}（角色库）
+                      {p.name}（声线档案）
                     </option>
                   ))}
                 </select>

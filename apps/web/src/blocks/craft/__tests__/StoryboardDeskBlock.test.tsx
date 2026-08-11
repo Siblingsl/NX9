@@ -6,8 +6,9 @@
 import { describe, it, expect, vi } from 'vitest';
 import { render } from '@testing-library/react';
 import { ReactFlowProvider } from '@xyflow/react';
-import { removeShotFromBreakdown, stripEpisodeConfirmation, reorderShotsInBreakdown, mergeIncrementalBreakdown } from '../../../engine/storyboard-desk-runner';
-import { getEpisodeContactSheet, emptyStoryboardPreview, type ScriptBreakdownPayload, type StoryboardPreviewPayload } from '@nx9/shared';
+import { removeShotFromBreakdown, resolveDeskActiveEpisodeId, stripEpisodeConfirmation, reorderShotsInBreakdown, mergeIncrementalBreakdown } from '../../../engine/storyboard-desk-runner';
+import { migrateUpstreamChainStoryboard, resolveConnectedStoryboardDeskId, validateDirectorHandoff } from '../../../engine/chain-storyboard-utils';
+import { activeChainEpisodeShots, buildLineArtShotPatch, chainStoryboardHash, getEpisodeContactSheet, emptyStoryboardPreview, lineArtVersionHash, patchChainShot, scopeStoryboardPreviewFrames, type ScriptBreakdownPayload, type StoryboardPreviewPayload } from '@nx9/shared';
 
 // Mock dependencies for component smoke test
 vi.mock('@xyflow/react', async () => {
@@ -163,21 +164,169 @@ describe('getEpisodeContactSheet', () => {
     expect(ep2.signature).toBe('sig2');
   });
 
-  it('falls back to global contactSheetUrl when per-episode is missing', () => {
+  it('does not fall back to another scope when per-episode is missing', () => {
     const preview: StoryboardPreviewPayload = {
       ...emptyStoryboardPreview(),
       contactSheetUrl: 'https://a.com/sheet-global.png',
       contactSheetSignature: 'sig-global',
     };
     const ep1 = getEpisodeContactSheet(preview, 'ep-1');
-    expect(ep1.url).toBe('https://a.com/sheet-global.png');
-    expect(ep1.signature).toBe('sig-global');
+    expect(ep1.url).toBe(null);
+    expect(ep1.signature).toBe(null);
   });
 
   it('returns null when no preview', () => {
     const result = getEpisodeContactSheet(undefined, 'ep-1');
     expect(result.url).toBe(null);
     expect(result.signature).toBe(null);
+  });
+});
+
+describe('line-art/keyframe contract', () => {
+  it('stores line art separately without changing director keyframe fields', () => {
+    const shot = {
+      id: 'shot-1',
+      index: 1,
+      durationSec: 4,
+      shotType: 'medium',
+      descriptionZh: '测试镜头',
+      promptEn: 'test',
+      status: 'review',
+      firstFrameAssetId: 'color-keyframe-url',
+      keyframeStatus: 'approved',
+    } as any;
+    const [patched] = patchChainShot(
+      { version: 2, shots: [shot] },
+      'shot-1',
+      buildLineArtShotPatch('line-art-url', 'line prompt'),
+    );
+
+    expect(patched.lineArtUrl).toBe('line-art-url');
+    expect(patched.sketchPrompt).toBe('line prompt');
+    expect(patched.firstFrameAssetId).toBe('color-keyframe-url');
+    expect(patched.keyframeStatus).toBe('approved');
+  });
+});
+
+describe('global storyboard migration boundary', () => {
+  it('migrates an old desk once and records migration metadata', () => {
+    const nodes: any[] = [
+      { id: 'director', type: 'director-desk', data: {} },
+      { id: 'storyboard', type: 'storyboard-desk', data: {} },
+    ];
+    const globalShot = {
+      id: 'shot-1',
+      index: 1,
+      durationSec: 4,
+      shotType: 'medium',
+      descriptionZh: '测试镜头',
+      promptEn: 'test',
+      status: 'draft',
+    };
+    const writes: Array<{ id: string; data: Record<string, unknown> }> = [];
+    const migrated = migrateUpstreamChainStoryboard(
+      (id, data) => writes.push({ id, data }),
+      'director',
+      nodes,
+      [{ source: 'storyboard', target: 'director' }],
+      { title: '旧项目', activeEpisodeId: 'ep-1', shots: [globalShot as any] },
+      '2026-08-04T00:00:00.000Z',
+    );
+
+    expect(migrated).toBe(true);
+    expect(writes).toHaveLength(1);
+    expect(writes[0]).toMatchObject({
+      id: 'storyboard',
+      data: {
+        storyboardSchemaVersion: 1,
+        migratedFromGlobalStoryboard: true,
+        migratedAt: '2026-08-04T00:00:00.000Z',
+      },
+    });
+    expect((writes[0].data.chainStoryboard as any).shots).toEqual([globalShot]);
+
+    nodes[1].data = writes[0].data;
+    expect(migrateUpstreamChainStoryboard(
+      (id, data) => writes.push({ id, data }),
+      'director',
+      nodes,
+      [{ source: 'storyboard', target: 'director' }],
+      { title: '新全局数据不应覆盖', shots: [{ ...globalShot, id: 'wrong' } as any] },
+      '2026-08-04T00:00:01.000Z',
+    )).toBe(false);
+    expect(writes).toHaveLength(1);
+  });
+});
+
+describe('episode scope boundary', () => {
+  it('returns no shots instead of falling back to the full chain', () => {
+    const shots = activeChainEpisodeShots({
+      version: 2,
+      activeEpisodeId: 'ep-missing',
+      shots: [{ id: 'shot-1', episodeId: 'ep-1' } as any],
+    });
+    expect(shots).toEqual([]);
+  });
+});
+
+describe('handoff hash contract', () => {
+  it('hashes chain content stably and scopes line-art version to the episode', () => {
+    const chain = {
+      version: 2 as const,
+      activeEpisodeId: 'ep-1',
+      shots: [
+        { id: 'shot-2', episodeId: 'ep-2', lineArtUrl: 'line-2' },
+        { id: 'shot-1', episodeId: 'ep-1', lineArtUrl: 'line-1' },
+      ] as any,
+    };
+    const reordered = { ...chain, shots: [...chain.shots].reverse() };
+    expect(chainStoryboardHash(chain)).not.toBe(chainStoryboardHash(reordered));
+    expect(lineArtVersionHash(chain, 'ep-1')).toBe(lineArtVersionHash(reordered, 'ep-1'));
+    expect(lineArtVersionHash(chain, 'ep-1')).not.toBe(lineArtVersionHash(chain, 'ep-2'));
+
+    const handoff = {
+      scriptHash: 'script-1',
+      storyboardHash: chainStoryboardHash(chain),
+      lineartVersion: lineArtVersionHash(chain, 'ep-1'),
+      handoffVersion: 1,
+      confirmedAt: '2026-08-04T00:00:00.000Z',
+    };
+    expect(validateDirectorHandoff({ handoff, chain, episodeId: 'ep-1', scriptHash: 'script-1' }).valid).toBe(true);
+    expect(validateDirectorHandoff({ handoff: { ...handoff, scriptHash: 'old' }, chain, episodeId: 'ep-1', scriptHash: 'script-1' }).valid).toBe(false);
+  });
+});
+
+describe('preview episode scope', () => {
+  it('uses the displayed episode frames as the action scope', () => {
+    const frames = [
+      { id: 'f1', sourceShotId: 's1' },
+      { id: 'f2', sourceShotId: 's2' },
+    ] as any;
+    expect(scopeStoryboardPreviewFrames(frames, new Set(['s2']))).toEqual([frames[1]]);
+  });
+});
+
+describe('connected handoff target', () => {
+  it('selects a connected storyboard desk instead of the first canvas desk', () => {
+    const nodes: any[] = [
+      { id: 'script', type: 'script-desk', data: {} },
+      { id: 'unrelated', type: 'storyboard-desk', data: {} },
+      { id: 'connected', type: 'storyboard-desk', data: {} },
+    ];
+    expect(resolveConnectedStoryboardDeskId(
+      'script',
+      nodes,
+      [{ source: 'script', target: 'connected' }],
+    )).toBe('connected');
+  });
+});
+
+describe('desk episode scope', () => {
+  it('reads the active episode from node data, not the global workspace', () => {
+    const payload = makeBasePayload(1);
+    payload.episodes.push({ id: 'ep-2', index: 2, title: '第2集', shots: [] });
+    expect(resolveDeskActiveEpisodeId({ activeEpisodeId: 'ep-2' }, payload)).toBe('ep-2');
+    expect(resolveDeskActiveEpisodeId({ activeEpisodeId: 'ep-old' }, payload)).toBe('ep-1');
   });
 });
 

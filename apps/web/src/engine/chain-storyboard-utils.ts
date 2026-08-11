@@ -10,6 +10,8 @@ import {
   buildChainStoryboardPayload,
   patchChainShot as patchChainShotShared,
   activeChainEpisodeShots,
+  chainStoryboardHash,
+  lineArtVersionHash,
   migrateGlobalToChainStoryboard,
   type ChainStoryboardPayload,
   type StoryboardShot,
@@ -49,6 +51,23 @@ export function resolveUpstreamChainDesk(
     }
   }
   return null;
+}
+
+export function resolveConnectedStoryboardDeskId(
+  sourceId: string,
+  nodes: Node[],
+  edges: Array<{ source: string; target: string }>,
+): string | null {
+  const nodeMap = new Map(nodes.map((node) => [node.id, node]));
+  const connected = edges
+    .filter((edge) => edge.source === sourceId)
+    .map((edge) => nodeMap.get(edge.target))
+    .filter((node): node is Node => node?.type === 'storyboard-desk');
+  const matchingHandoff = connected.find((node) => {
+    const handoff = (node.data as Record<string, unknown> | undefined)?.handoff as Record<string, unknown> | undefined;
+    return handoff?.sourceScriptBlockId === sourceId;
+  });
+  return (matchingHandoff ?? connected[0])?.id ?? null;
 }
 
 /**
@@ -93,14 +112,32 @@ export function patchUpstreamShot(
   edges: Array<{ source: string; target: string }>,
   shotId: string,
   patch: Partial<import('@nx9/shared').StoryboardShot>,
+  getLatestNodes?: () => Node[],
+  updateNodeDataAtomically?: (id: string, updater: (node: Node) => Record<string, unknown>) => void,
 ): boolean {
-  const deskId = resolveUpstreamChainDesk(nodeId, nodes, edges);
+  const currentNodes = getLatestNodes?.() ?? nodes;
+  const deskId = resolveUpstreamChainDesk(nodeId, currentNodes, edges);
   if (!deskId) return false;
-  const nodeMap = new Map(nodes.map((n) => [n.id, n]));
+  const nodeMap = new Map(currentNodes.map((n) => [n.id, n]));
   const deskNode = nodeMap.get(deskId);
   if (!deskNode) return false;
   const chain = readChainStoryboard(deskNode.data as Record<string, unknown>);
   if (!chain) return false;
+  if (updateNodeDataAtomically) {
+    updateNodeDataAtomically(deskId, (node) => {
+      const latestChain = readChainStoryboard(node.data as Record<string, unknown>);
+      if (!latestChain) return {};
+      return {
+        chainStoryboard: {
+          ...latestChain,
+          shots: latestChain.shots.map((shot) =>
+            shot.id === shotId ? { ...shot, ...patch } : shot,
+          ),
+        },
+      };
+    });
+    return true;
+  }
   const newShots = (chain.shots ?? []).map((s) =>
     s.id === shotId ? { ...s, ...patch } : s,
   );
@@ -168,6 +205,67 @@ export function migrateDeskFromGlobalStoryboard(
     return existingChain; // 已有链镜表，不覆盖
   }
   return migrateGlobalToChainStoryboard(globalStoryboard);
+}
+
+/**
+ * 首次读取旧 desk 时，将旧全局镜表迁移到该 desk 的链镜表。
+ * 迁移后只返回 chainStoryboard，不再让调用方继续消费全局镜表。
+ */
+export function migrateUpstreamChainStoryboard(
+  updateNodeData: (id: string, data: Record<string, unknown>) => void,
+  nodeId: string,
+  nodes: Node[],
+  edges: Array<{ source: string; target: string }>,
+  globalStoryboard: {
+    title?: string;
+    activeEpisodeId?: string | null;
+    episodes?: EpisodeMeta[];
+    shots: StoryboardShot[];
+    exportHistory?: EpisodeExportRecord[];
+  },
+  now = new Date().toISOString(),
+): boolean {
+  if (globalStoryboard.shots.length === 0) return false;
+  const deskId = resolveUpstreamChainDesk(nodeId, nodes, edges);
+  if (!deskId) return false;
+  const deskNode = nodes.find((node) => node.id === deskId);
+  if (!deskNode) return false;
+  const data = deskNode.data as Record<string, unknown>;
+  if (readChainStoryboard(data)) return false;
+  updateNodeData(deskId, {
+    chainStoryboard: migrateDeskFromGlobalStoryboard(globalStoryboard),
+    storyboardSchemaVersion: 1,
+    migratedFromGlobalStoryboard: true,
+    migratedAt: now,
+  });
+  return true;
+}
+
+export function validateDirectorHandoff(input: {
+  handoff: Record<string, unknown> | undefined;
+  chain: ChainStoryboardPayload | undefined;
+  episodeId: string | undefined;
+  scriptHash: string | undefined;
+}): { valid: boolean; reason: string } {
+  const { handoff, chain, episodeId, scriptHash } = input;
+  if (!handoff || !chain || !episodeId) return { valid: false, reason: '缺少交接数据' };
+  const checks = [
+    ['scriptHash', handoff.scriptHash, scriptHash],
+    ['storyboardHash', handoff.storyboardHash, chainStoryboardHash(chain)],
+    ['lineartVersion', handoff.lineartVersion, lineArtVersionHash(chain, episodeId)],
+  ] as const;
+  const mismatch = checks.find(([, expected, actual]) => !expected || !actual || expected !== actual);
+  if (mismatch) return { valid: false, reason: `交接${mismatch[0]}不匹配` };
+  if (!Number.isInteger(handoff.handoffVersion) || Number(handoff.handoffVersion) < 1) {
+    return { valid: false, reason: '交接版本无效' };
+  }
+  if (typeof handoff.confirmedAt !== 'string' || !handoff.confirmedAt) {
+    return { valid: false, reason: '交接确认时间缺失' };
+  }
+  if (!chain.shots.some((shot) => shot.episodeId === episodeId)) {
+    return { valid: false, reason: '交接集不存在' };
+  }
+  return { valid: true, reason: '' };
 }
 
 /**

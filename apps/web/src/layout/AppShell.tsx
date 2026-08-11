@@ -46,6 +46,9 @@ const Director3dPanel = lazy(() =>
   import('../panels/Director3dPanel').then((m) => ({ default: m.Director3dPanel })),
 );
 
+/** StrictMode 双挂载时防止并发创建默认「我的第一部剧」 */
+let defaultWorkspaceBootstrapLock = false;
+
 export default function AppShell() {
   const surface = useAppSurface((s) => s.surface);
   const goHome = useAppSurface((s) => s.goHome);
@@ -103,10 +106,17 @@ export default function AppShell() {
   useEffect(() => {
     void (async () => {
       await fetchAll();
-      const current = useWorkspaceCatalog.getState().items;
-      if (current.length === 0 && !bootstrapped.current) {
+      const current = useWorkspaceCatalog.getState().items.filter(isPrivateWorkspace);
+      // StrictMode / HMR 下用模块级锁，避免空列表时连建多个默认项目
+      if (current.length === 0 && !bootstrapped.current && !defaultWorkspaceBootstrapLock) {
         bootstrapped.current = true;
-        await create({ title: '我的第一部剧', visibility: 'private' });
+        defaultWorkspaceBootstrapLock = true;
+        try {
+          await create({ title: '我的第一部剧', visibility: 'private' });
+        } catch {
+          bootstrapped.current = false;
+          defaultWorkspaceBootstrapLock = false;
+        }
       }
     })();
   }, [fetchAll, create]);
@@ -162,6 +172,12 @@ export default function AppShell() {
       ),
     [catalogItems, openWorkspaceIds],
   );
+  const privateProjectCount = useMemo(
+    () => catalogItems.filter(isPrivateWorkspace).length,
+    [catalogItems],
+  );
+  /** 打开对话框时的建议名：按私有项目总数，避免用 rail 长度跳号/撞名 */
+  const createDefaultTitle = `项目 ${privateProjectCount + 1}`;
 
   const handleBatchRun = useCallback(async () => {
     if (!runtime) {
@@ -252,7 +268,7 @@ export default function AppShell() {
               onClose={closeCreateDialog}
               onConfirm={handleCreatePrivate}
               submitting={createSubmitting}
-              defaultTitle={`项目 ${railItems.length + 1}`}
+              defaultTitle={createDefaultTitle}
               defaultBootstrapCore
             />
           </Suspense>

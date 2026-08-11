@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Clapperboard, FolderLock, X } from 'lucide-react';
 import './create-workspace-dialog.css';
 
@@ -22,28 +22,42 @@ export function CreateWorkspaceDialog({
 }: CreateWorkspaceDialogProps) {
   const [title, setTitle] = useState(defaultTitle ?? '');
   const [bootstrapCore, setBootstrapCore] = useState(defaultBootstrapCore);
+  /** 防止 Enter / 连点在 submitting 状态回写前重复创建 */
+  const submitLockRef = useRef(false);
 
+  // 仅在打开瞬间灌入默认名；提交过程中 rail 变长会改 defaultTitle，不能回写覆盖/触发二次感
   useEffect(() => {
-    if (!open) return;
+    if (!open) {
+      submitLockRef.current = false;
+      return;
+    }
     setTitle(defaultTitle ?? `私有项目 ${new Date().toLocaleDateString('zh-CN')}`);
     setBootstrapCore(defaultBootstrapCore);
-  }, [open, defaultTitle, defaultBootstrapCore]);
+    submitLockRef.current = false;
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- 只在 open 从关→开时取一次默认名
+  }, [open]);
 
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
+      if (e.key === 'Escape' && !submitting && !submitLockRef.current) onClose();
     };
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
-  }, [open, onClose]);
+  }, [open, onClose, submitting]);
 
   if (!open) return null;
 
   const handleSubmit = async () => {
+    if (submitting || submitLockRef.current) return;
     const name = title.trim();
     if (!name) return;
-    await onConfirm(name, { bootstrapCorePipeline: bootstrapCore });
+    submitLockRef.current = true;
+    try {
+      await onConfirm(name, { bootstrapCorePipeline: bootstrapCore });
+    } catch {
+      submitLockRef.current = false;
+    }
   };
 
   return (
@@ -86,7 +100,10 @@ export function CreateWorkspaceDialog({
               className="nx9-create-project__input w-full rounded-xl px-3 py-2 text-sm focus:outline-none"
               autoFocus
               onKeyDown={(e) => {
-                if (e.key === 'Enter') void handleSubmit();
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  void handleSubmit();
+                }
               }}
             />
           </label>

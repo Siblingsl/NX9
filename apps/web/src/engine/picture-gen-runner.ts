@@ -20,6 +20,7 @@ export interface PictureGenJobInput {
   /** 清晰度档位 1k/2k/4k，透传 Gemini imageSize */
   imageSizeTier?: string;
   resolutionTier?: string;
+  signal?: AbortSignal;
 }
 
 export const PANORAMA_720_PROMPT_SUFFIX = [
@@ -86,9 +87,12 @@ export async function runPictureGenJob(input: PictureGenJobInput): Promise<strin
       input.referenceImageUrls?.find((u) => u?.trim())?.trim() ||
       '';
     const style = input.styleImageUrl?.trim();
+    // fal 的 supportsReference 表示「该端点是图生图专用」，文生图应换模型，而不是在这里硬失败
     if (def.supportsReference) {
       if (!ref && !style) {
-        throw new Error('图生图需要参考图（上传、连接上游，或角色参考）');
+        throw new Error(
+          '当前模型仅支持图生图：请添加参考图，或改用文生图模型（如 Gemini / FLUX Dev）',
+        );
       }
       falInput.image_url = ref || style;
       const s = input.strength;
@@ -98,7 +102,7 @@ export async function runPictureGenJob(input: PictureGenJobInput): Promise<strin
         falInput.prompt = `${safePrompt}\n\n[Style reference attached; match visual style]`;
       }
     }
-    const res = await api.proxyFal({ model: def.model, input: falInput });
+     const res = await api.proxyFal({ model: def.model, input: falInput }, { signal: input.signal });
     if (!res.url) throw new Error('Fal 未返回图片');
     const urls = [res.url];
     return panorama ? normalizePanoramaUrls(urls) : urls;
@@ -138,7 +142,7 @@ export async function runPictureGenJob(input: PictureGenJobInput): Promise<strin
           ...(extraRefs.length ? { referenceImageUrls: extraRefs } : {}),
         }
       : {}),
-  })) as {
+  }, { signal: input.signal })) as {
     ok?: boolean;
     url?: string;
     urls?: string[];

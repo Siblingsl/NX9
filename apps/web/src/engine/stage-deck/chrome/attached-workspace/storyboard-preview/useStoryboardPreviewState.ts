@@ -4,8 +4,8 @@ import {
   buildStoryboardPreviewFrames,
   activeEpisodeShots,
   buildStoryboardPreviewFramesFromBreakdown,
+  buildLineArtShotPatch,
   buildPictureGenDelegatePatch,
-  canConfirmStoryboardPreview,
   emptyStoryboardPreview,
   flattenScriptBreakdownShots,
   patchChainShot,
@@ -43,11 +43,7 @@ function patchDeskChainFrame(
   return {
     chainStoryboard: {
       ...chain,
-      shots: patchChainShot(chain, sourceShotId, {
-        firstFrameAssetId: imageUrl,
-        keyframeStatus: 'review',
-        status: 'review',
-      }),
+      shots: patchChainShot(chain, sourceShotId, buildLineArtShotPatch(imageUrl)),
     },
   };
 }
@@ -579,13 +575,6 @@ export function useStoryboardPreviewState(blockId: string) {
           batchCount: 1,
           lastResult: { count: 1, urls: [imageUrl], frameId },
         });
-        if (targetFrame.sourceShotId) {
-          useWorkspaceDocument.getState().updateShot(targetFrame.sourceShotId, {
-            firstFrameAssetId: imageUrl,
-            keyframeStatus: 'review',
-            status: 'review',
-          });
-        }
         appendLog(`已重新生成 ${targetFrame.label}`);
       } catch (e) {
         updateNodeData(blockId, (node) => {
@@ -606,7 +595,7 @@ export function useStoryboardPreviewState(blockId: string) {
   );
 
   const generateAllFrames = useCallback(
-    async (onlyMissing = true) => {
+    async (onlyMissing = true, frameIds?: string[]) => {
       const pictureNode = connectedPictureNode();
       if (!pictureNode) {
         appendLog('请先连接图像生成节点（红线连接）');
@@ -624,7 +613,9 @@ export function useStoryboardPreviewState(blockId: string) {
       }
       const pictureSettings = current.pictureSettings;
       syncPictureSettingsToExecNode(pictureSettings);
+      const scopedIds = frameIds ? new Set(frameIds) : null;
       const targets = current.frames.filter((f) => {
+        if (scopedIds && !scopedIds.has(f.id)) return false;
         if (f.locked) return false;
         if (f.status === 'generating') return false;
         if (onlyMissing && (f.imageUrl || f.status === 'success' || f.status === 'locked')) return false;
@@ -651,14 +642,6 @@ export function useStoryboardPreviewState(blockId: string) {
             f.id === frame.id ? { ...f, imageUrl, status: 'success' as const, errorMessage: null } : f,
           );
           breakdown = writeBackBreakdownPreviewImage(breakdown, frame.sourceShotId, imageUrl);
-          // 写回故事板 SSOT（核心路径 readiness 依赖 firstFrameAssetId）
-          if (frame.sourceShotId) {
-            useWorkspaceDocument.getState().updateShot(frame.sourceShotId, {
-              firstFrameAssetId: imageUrl,
-              keyframeStatus: 'review',
-              status: 'review',
-            });
-          }
           updateNodeData(pictureNode.id, {
             status: 'success',
             previewUrl: imageUrl,
@@ -770,26 +753,20 @@ export function useStoryboardPreviewState(blockId: string) {
     [appendLog, blockId, connectedPictureNode, readPayload, storyboard.activeEpisodeId, updateNodeData],
   );
 
-  const confirmAll = useCallback(() => {
+  const confirmAll = useCallback((frameIds?: string[]) => {
     updateNodeData(blockId, (node) => {
       const data = (node.data ?? {}) as Record<string, unknown>;
       const current = readPayload(data);
-      if (!canConfirmStoryboardPreview(current)) return {};
+      const scopedFrames = frameIds
+        ? current.frames.filter((frame) => frameIds.includes(frame.id))
+        : current.frames;
+      if (scopedFrames.length === 0 || !scopedFrames.every((frame) => frame.status === 'success' || frame.status === 'locked')) return {};
       // 分镜预览只提交批审；批准动作统一由下游导演台「审阅送出」完成。
-      for (const frame of current.frames) {
-        if (frame.sourceShotId && frame.imageUrl) {
-          useWorkspaceDocument.getState().updateShot(frame.sourceShotId, {
-            firstFrameAssetId: frame.imageUrl,
-            keyframeStatus: 'review',
-            status: 'review',
-          });
-        }
-      }
       return {
           ...data,
           storyboardPreview: {
             ...current,
-            confirmed: true,
+             confirmed: frameIds ? current.confirmed : true,
             confirmedAt: new Date().toISOString(),
           },
           status: 'success',

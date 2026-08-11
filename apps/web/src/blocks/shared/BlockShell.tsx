@@ -59,7 +59,7 @@ export const BlockShell = memo(function BlockShell({
   const { setEdges, updateNodeData } = useReactFlow();
   const meta = lookupBlock(type ?? '');
   const emits = resolveEmits(type ?? '', data as Record<string, unknown>);
-  const accepts = resolveAccepts(type ?? '');
+  const accepts = resolveAccepts(type ?? '', data as Record<string, unknown>);
   const verticalSockets = resolveVerticalSockets(type ?? '');
   const verticalTop = verticalSockets.filter((s) => s.position === 'top');
   const verticalBottom = verticalSockets.filter((s) => s.position === 'bottom');

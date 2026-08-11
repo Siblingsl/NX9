@@ -7,6 +7,7 @@ import { existsSync, mkdirSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { PATHS } from '../../config/app.config';
 import { SettingsService } from '../settings/settings.service';
+import { upstreamTimeout } from './upstream-error';
 
 /**
  * Google Gemini / Imagen 原生图片生成
@@ -261,7 +262,7 @@ export class GeminiAdapter {
 
   private async geminiFetch(url: string, init: RequestInit): Promise<Response> {
     try {
-      return await fetch(url, init);
+      return await fetch(url, { ...init, signal: init.signal ?? AbortSignal.timeout(120_000) });
     } catch (err) {
       const raw = err instanceof Error ? err.message : String(err);
       const cause =
@@ -269,6 +270,9 @@ export class GeminiAdapter {
           ? String((err as { cause?: unknown }).cause ?? "")
           : "";
       const detail = [raw, cause].filter(Boolean).join(" | ");
+      if (/AbortError|timed out|timeout/i.test(detail)) {
+        throw upstreamTimeout('Gemini', 120_000);
+      }
       const blocked =
         /fetch failed|ECONNREFUSED|ENOTFOUND|ETIMEDOUT|ECONNRESET|certificate|network|连接|timed out/i.test(
           detail,

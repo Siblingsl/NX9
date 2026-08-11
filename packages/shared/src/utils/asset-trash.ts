@@ -111,6 +111,7 @@ export function restoreAssetById<T extends SoftDeletable>(
 export type AssetTrashKind =
   | 'character'
   | 'costume'
+  | 'prop'
   | 'scene'
   | 'shot'
   | 'emotion'

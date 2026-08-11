@@ -73,6 +73,44 @@ export function readPictureGenMode(data: Record<string, unknown>): PictureGenMod
   return 'text-to-image';
 }
 
+/** 不锁定模式的专业动作（仍按参考图自动文生/图生/多参考） */
+const BASIC_PRO_ACTION_IDS = new Set(['text-to-image', 'image-to-image', 'multi-prompt']);
+
+export function isSpecializedPictureMode(
+  mode: PictureGenMode,
+  proActionId?: string | null,
+): boolean {
+  if (mode === 'upscale-hd' || mode === 'panorama-720' || mode === 'style-ref') return true;
+  const pro = (proActionId ?? '').trim();
+  return Boolean(pro && !BASIC_PRO_ACTION_IDS.has(pro));
+}
+
+/** 按有效参考图数量推断基础模式：0→文生图 / 1→图生图 / ≥2→多参考 */
+export function inferBasicPictureGenMode(refCount: number): PictureGenMode {
+  if (refCount >= 2) return 'multi-ref';
+  if (refCount >= 1) return 'image-to-image';
+  return 'text-to-image';
+}
+
+/**
+ * 运行时模式：专业玩法保持锁定；基础路径按参考图自动文生/图生/多参考。
+ * effectiveRefUrls = 本节点上传 + 上游传入（已排除 excluded）+ 风格图。
+ */
+export function resolveRuntimePictureGenMode(
+  data: Record<string, unknown>,
+  effectiveRefUrls: string[] = [],
+): PictureGenMode {
+  const mode = readPictureGenMode(data);
+  const proActionId = data.pictureProAction as string | undefined;
+  if (isSpecializedPictureMode(mode, proActionId)) return mode;
+
+  const urls = effectiveRefUrls
+    .map((u) => u.trim())
+    .filter(Boolean)
+    .filter((u, i, arr) => arr.indexOf(u) === i);
+  return inferBasicPictureGenMode(urls.length);
+}
+
 export function modeNeedsPrimaryRef(mode: PictureGenMode): boolean {
   return (
     mode === 'image-to-image' ||
@@ -115,18 +153,52 @@ export function patchPictureGenMode(mode: PictureGenMode): Record<string, unknow
   };
 }
 
-/** 从节点 data 解析全部参考图（上传 + 多参考槽） */
-export function resolvePictureReferenceUrls(data: Record<string, unknown>): string[] {
+/** 本节点上传的主体参考（不含风格图） */
+export function resolveUploadedReferenceUrls(data: Record<string, unknown>): string[] {
   const urls: string[] = [];
   const push = (u?: string | null) => {
     const v = u?.trim();
     if (v && !urls.includes(v)) urls.push(v);
   };
   push(data.referenceImageUrl as string | undefined);
-  push(data.styleImageUrl as string | undefined);
   const multi = data.referenceImageUrls as string[] | undefined;
   if (Array.isArray(multi)) {
     for (const u of multi) push(u);
   }
   return urls;
+}
+
+/** 从节点 data 解析全部参考图（上传 + 风格 + 多参考槽） */
+export function resolvePictureReferenceUrls(data: Record<string, unknown>): string[] {
+  const urls = resolveUploadedReferenceUrls(data);
+  const style = (data.styleImageUrl as string | undefined)?.trim();
+  if (style && !urls.includes(style)) urls.push(style);
+  return urls;
+}
+
+/** 本节点上传参考上限（与视频参考上限对齐） */
+export const MAX_PICTURE_UPLOAD_REFS = 9;
+
+/** 写入主参考 + 额外参考槽（首张进 referenceImageUrl，其余进 referenceImageUrls） */
+export function patchUploadedReferenceUrls(
+  urls: string[],
+  currentMode: PictureGenMode,
+  proActionId?: string | null,
+): Record<string, unknown> {
+  const next = urls
+    .map((u) => u.trim())
+    .filter(Boolean)
+    .filter((u, i, arr) => arr.indexOf(u) === i)
+    .slice(0, MAX_PICTURE_UPLOAD_REFS);
+
+  const pictureGenMode = isSpecializedPictureMode(currentMode, proActionId)
+    ? currentMode
+    : inferBasicPictureGenMode(next.length);
+
+  return {
+    referenceImageUrl: next[0],
+    referenceImageUrls: next.slice(1),
+    useImageReference: next.length > 0,
+    pictureGenMode,
+  };
 }

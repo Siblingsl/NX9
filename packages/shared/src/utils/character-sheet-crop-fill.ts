@@ -1,7 +1,7 @@
 ﻿import type { CharacterProfile } from '../types/character';
 import type { CharacterCreativeExtension, CreativeVariantEntry } from '../types/creative-asset-center';
 import {
-  CHARACTER_SHEET_PANEL_LAYOUT,
+  CHARACTER_SHEET_PANEL_DEFS,
   type CharacterSheetPanelLayout,
 } from './character-sheet-master';
 import { getCharacterCreative } from './creative-asset-prompts';
@@ -13,6 +13,8 @@ export interface ApplyCroppedPanelsOptions {
   overwrite?: boolean;
   /** 完整设定板 URL，写入 fullSheetUrl */
   fullSheetUrl?: string;
+  /** 五张分类母图 URL，写入 categorySheetUrls */
+  categorySheetUrls?: Record<string, string>;
 }
 
 function upsertVariant(
@@ -44,8 +46,13 @@ export function applyCroppedPanelsToCharacter(
   if (opts.fullSheetUrl) {
     next.fullSheetUrl = opts.fullSheetUrl;
   }
+  if (opts.categorySheetUrls) {
+    next.categorySheetUrls = { ...next.categorySheetUrls, ...opts.categorySheetUrls };
+  }
 
-  for (const panel of CHARACTER_SHEET_PANEL_LAYOUT) {
+  for (const panel of CHARACTER_SHEET_PANEL_DEFS) {
+    // 完整设定板专用格不参与五类裁切回填
+    if (panel.id.startsWith('master-')) continue;
     const url = opts.panelUrls[panel.id];
     if (!url) continue;
     if (panel.fill.kind === 'field') {
@@ -72,9 +79,9 @@ export function applyCroppedPanelsToCharacter(
   }
 
   const referenceImageUrl =
-    next.fullSheetUrl
+    character.referenceImageUrl?.trim()
     || next.frontViewUrl
-    || character.referenceImageUrl
+    || next.fullSheetUrl
     || null;
 
   return {
@@ -85,5 +92,13 @@ export function applyCroppedPanelsToCharacter(
 }
 
 export function listCharacterSheetPanels(): CharacterSheetPanelLayout[] {
-  return CHARACTER_SHEET_PANEL_LAYOUT;
+  return CHARACTER_SHEET_PANEL_DEFS.map((def) => ({
+    id: def.id,
+    label: def.label,
+    enLabel: def.enLabel,
+    group: def.group,
+    grid: def.masterGrid ?? { col: 0, row: 0, colSpan: 1, rowSpan: 1 },
+    rect: [0, 0, 0, 0] as [number, number, number, number],
+    fill: def.fill,
+  }));
 }

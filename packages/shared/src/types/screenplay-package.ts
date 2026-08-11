@@ -158,7 +158,7 @@ export function emptyScreenplayPackage(): ScreenplayPackage {
     version: 1,
     status: 'empty',
     brief: {},
-    bible: { characters: [], scenes: [] },
+    bible: { world: {}, characters: [], scenes: [] },
     screenplay: { episodes: [] },
     diagnostics: [],
     updatedAt: nowIso(),

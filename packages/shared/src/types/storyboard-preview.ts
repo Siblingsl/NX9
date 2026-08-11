@@ -346,6 +346,14 @@ export function canRegenerateFrame(frame: StoryboardPreviewFrame): boolean {
   return !frame.locked && frame.status !== 'generating';
 }
 
+export function scopeStoryboardPreviewFrames(
+  frames: StoryboardPreviewFrame[],
+  shotIds: Set<string> | undefined,
+): StoryboardPreviewFrame[] {
+  if (!shotIds || shotIds.size === 0) return frames;
+  return frames.filter((frame) => Boolean(frame.sourceShotId && shotIds.has(frame.sourceShotId)));
+}
+
 export function canConfirmStoryboardPreview(payload: StoryboardPreviewPayload): boolean {
   if (payload.frames.length === 0) return false;
   return payload.frames.every((f) => f.status === 'success' || f.status === 'locked');
@@ -358,6 +366,5 @@ export function getEpisodeContactSheet(
   if (!preview || !episodeId) return { url: null, signature: null };
   const byEp = preview.contactSheetsByEpisode?.[episodeId];
   if (byEp?.url) return { url: byEp.url, signature: byEp.signature };
-  if (preview.contactSheetUrl) return { url: preview.contactSheetUrl, signature: preview.contactSheetSignature ?? null };
   return { url: null, signature: null };
 }

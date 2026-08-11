@@ -1033,10 +1033,40 @@ body {
 .nx9-app-dark .nx9-asset-library-modal .bg-surface,
 .nx9-app-dark .nx9-asset-library-modal .bg-surface\/35,
 .nx9-app-dark .nx9-asset-library-modal .bg-surface\/50,
+.nx9-app-dark .nx9-asset-library-modal .bg-surface\/80,
+.nx9-app-dark .nx9-asset-library-modal .bg-surface\/90,
+.nx9-app-dark .nx9-asset-library-modal .bg-surface\/95,
 .nx9-app-dark-body .nx9-asset-library-modal .bg-surface,
 .nx9-app-dark-body .nx9-asset-library-modal .bg-surface\/35,
-.nx9-app-dark-body .nx9-asset-library-modal .bg-surface\/50 {
+.nx9-app-dark-body .nx9-asset-library-modal .bg-surface\/50,
+.nx9-app-dark-body .nx9-asset-library-modal .bg-surface\/80,
+.nx9-app-dark-body .nx9-asset-library-modal .bg-surface\/90,
+.nx9-app-dark-body .nx9-asset-library-modal .bg-surface\/95 {
   background: rgba(255, 255, 255, 0.06) !important;
+}
+
+/* 粘性操作条需不透底，避免滚动时露白 / 字色反相看不见 */
+.nx9-app-dark .nx9-asset-library-modal .nx9-asset-lib-sticky,
+.nx9-app-dark-body .nx9-asset-library-modal .nx9-asset-lib-sticky {
+  background: #1a1816 !important;
+}
+
+/* 卡片更多菜单：暗色下 bg-surface 会被压成半透明，需实底以免透字、裁切难看 */
+.nx9-app-dark .nx9-asset-library-modal .nx9-asset-lib-menu,
+.nx9-app-dark-body .nx9-asset-library-modal .nx9-asset-lib-menu {
+  background: #1a1816 !important;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.45);
+}
+
+/* 镜头库筛选条：隐藏滚动条，仍可横向滑动 / 触控板 / 拖拽 */
+.nx9-asset-library-modal .nx9-shot-filter .nx9-scroll {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.nx9-asset-library-modal .nx9-shot-filter .nx9-scroll::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
 }
 
 .nx9-app-dark .nx9-asset-library-modal .text-ink,
@@ -1044,19 +1074,38 @@ body {
   color: #e8e6e3 !important;
 }
 
+/* 低不透明度档：未覆盖时会残留浅色主题深色 ink，叠在暗底上几乎看不见 */
 .nx9-app-dark .nx9-asset-library-modal .text-ink\/30,
+.nx9-app-dark .nx9-asset-library-modal .text-ink\/35,
 .nx9-app-dark .nx9-asset-library-modal .text-ink\/40,
 .nx9-app-dark .nx9-asset-library-modal .text-ink\/45,
+.nx9-app-dark-body .nx9-asset-library-modal .text-ink\/30,
+.nx9-app-dark-body .nx9-asset-library-modal .text-ink\/35,
+.nx9-app-dark-body .nx9-asset-library-modal .text-ink\/40,
+.nx9-app-dark-body .nx9-asset-library-modal .text-ink\/45 {
+  color: rgba(232, 230, 227, 0.48) !important;
+}
+
 .nx9-app-dark .nx9-asset-library-modal .text-ink\/50,
 .nx9-app-dark .nx9-asset-library-modal .text-ink\/55,
 .nx9-app-dark .nx9-asset-library-modal .text-ink\/60,
-.nx9-app-dark-body .nx9-asset-library-modal .text-ink\/30,
-.nx9-app-dark-body .nx9-asset-library-modal .text-ink\/40,
-.nx9-app-dark-body .nx9-asset-library-modal .text-ink\/45,
 .nx9-app-dark-body .nx9-asset-library-modal .text-ink\/50,
 .nx9-app-dark-body .nx9-asset-library-modal .text-ink\/55,
 .nx9-app-dark-body .nx9-asset-library-modal .text-ink\/60 {
-  color: rgba(232, 230, 227, 0.55) !important;
+  color: rgba(232, 230, 227, 0.68) !important;
+}
+
+.nx9-app-dark .nx9-asset-library-modal .text-ink\/70,
+.nx9-app-dark .nx9-asset-library-modal .text-ink\/75,
+.nx9-app-dark .nx9-asset-library-modal .text-ink\/80,
+.nx9-app-dark .nx9-asset-library-modal .text-ink\/85,
+.nx9-app-dark .nx9-asset-library-modal .text-ink\/90,
+.nx9-app-dark-body .nx9-asset-library-modal .text-ink\/70,
+.nx9-app-dark-body .nx9-asset-library-modal .text-ink\/75,
+.nx9-app-dark-body .nx9-asset-library-modal .text-ink\/80,
+.nx9-app-dark-body .nx9-asset-library-modal .text-ink\/85,
+.nx9-app-dark-body .nx9-asset-library-modal .text-ink\/90 {
+  color: rgba(232, 230, 227, 0.88) !important;
 }
 
 .nx9-app-dark .nx9-asset-library-modal .border-line,

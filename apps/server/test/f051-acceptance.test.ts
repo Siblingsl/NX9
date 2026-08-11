@@ -2,7 +2,7 @@
  * F-051 acceptance test — 服装/道具预检字段（缺口点击跳转资产库）
  *
  * G1: 服装缺口 chip → <button> 点击打开 asset library costume tab
- * G2: 道具缺口 chip → <button> 点击打开 asset library scene tab（无独立 prop tab）
+ * G2: 道具缺口 chip → <button> 点击打开 asset library prop tab
  * G3: extractCostumeNames / extractPropNames 存在
  * G4: AssetReadinessState 含 missingCostumes / missingProps
  */
@@ -31,33 +31,38 @@ describe('F-051 acceptance — 服装/道具预检字段', () => {
     });
 
     it('服装缺口区域含有提示文字"打开服装库"', () => {
-      expect(src).toContain('点击缺口打开服装库');
+      expect(src).toContain('打开服装库');
     });
 
     it('服装 chip 有 title="点击打开服装库"', () => {
       expect(src).toContain('title="点击打开服装库"');
     });
+
+    it('服装 chip 带 suggestCreateLabel / query（一键建档深链）', () => {
+      expect(src).toContain('suggestCreateLabel: name');
+      expect(src).toContain('query: name');
+    });
   });
 
-  // ═══════════ G2: 道具缺口 chip 可点击，跳转到 scene tab ═══════════
+  // ═══════════ G2: 道具缺口 chip 可点击，跳转到 prop tab ═══════════
   describe('G2: AssetReadinessPanel — 道具缺口 chip 可点击', () => {
     const src = read('components/asset/AssetReadinessPanel.tsx');
 
     it('missingProps 用 <button> 渲染（非 <span>）', () => {
       expect(src).toMatch(/missingProps[.\s\S]*?<button/);
-      expect(src).toMatch(/openAssetAt\(\s*\{[^}]*tab:\s*'scene'/);
+      expect(src).toMatch(/openAssetAt\(\s*\{[^}]*tab:\s*'prop'/);
     });
 
-    it('道具 chip 有 onClick 跳转 scene tab', () => {
-      expect(src).toContain("tab: 'scene'");
+    it('道具 chip 有 onClick 跳转 prop tab', () => {
+      expect(src).toContain("tab: 'prop'");
     });
 
-    it('道具缺口区域含有提示文字"打开场景库"', () => {
-      expect(src).toContain('点击缺口打开场景库');
+    it('道具缺口区域含有提示文字"打开道具库"', () => {
+      expect(src).toContain('打开道具库');
     });
 
-    it('道具 chip 有 title="点击打开场景库"', () => {
-      expect(src).toContain('title="点击打开场景库"');
+    it('道具 chip 有 title="点击打开道具库"', () => {
+      expect(src).toContain('title="点击打开道具库"');
     });
   });
 
@@ -79,6 +84,17 @@ describe('F-051 acceptance — 服装/道具预检字段', () => {
 
     it('extractPropNames 从 Bible scene 提取道具名', () => {
       expect(src).toMatch(/道具|物品|摆设/);
+    });
+
+    it('服装缺口对照服装库 label（非角色名）', () => {
+      expect(src).toContain("libraryBacklotLabelSet('costume')");
+      expect(src).not.toMatch(
+        /missingCostumes = requiredCostumes\.filter\(\s*\(c\) => !existingCharacters/,
+      );
+    });
+
+    it('道具缺口对照道具库 label', () => {
+      expect(src).toContain("libraryBacklotLabelSet('prop')");
     });
   });
 

@@ -1,7 +1,9 @@
 import { Box, X } from 'lucide-react';
 import type { StoryboardPreviewFrame } from '@nx9/shared';
-import { canRegenerateFrame } from '@nx9/shared';
+import { canRegenerateFrame, resolveStylePresets } from '@nx9/shared';
 import { AssetMentionInput } from '../../asset-mention/AssetMentionInput';
+import { useWorkspaceDocument } from '../../../../../stores/workspace-document';
+import { usePublicAssetLibrary } from '../../../../../stores/public-asset-library';
 
 function stop(e: React.SyntheticEvent) {
   e.stopPropagation();
@@ -26,6 +28,10 @@ export function StoryboardPreviewFrameEditor({
   director3dConnected,
 }: StoryboardPreviewFrameEditorProps) {
   const canRegen = canRegenerateFrame(frame);
+  const projectStyles = useWorkspaceDocument((s) => s.styleLibrary.styles);
+  const publicStyles = usePublicAssetLibrary((s) => s.payload.styles ?? []);
+  // 风格 SSOT = 公共库；遗留项目 styleLibrary 仍合并，避免旧帧点选丢失
+  const styleOptions = resolveStylePresets([...(publicStyles ?? []), ...projectStyles]);
 
   return (
     <div className="kp__panel nodrag nopan" onMouseDown={stop}>
@@ -52,21 +58,27 @@ export function StoryboardPreviewFrameEditor({
             as="textarea"
             value={frame.promptSummary}
             onChange={(next) => onUpdate({ promptSummary: next, userModified: true })}
-            placeholder="修改 Prompt… 输入 @ 引用角色、场景、镜头"
-            kinds={['character', 'scene', 'shot', 'emotion']}
+            placeholder="修改 Prompt… 输入 @ 引用角色、场景、镜头、风格"
+            kinds={['character', 'scene', 'shot', 'style']}
             className="kp__field-area"
             rows={3}
           />
           <div className="kp__row">
-            <input
-              type="text"
+            <select
               value={frame.stylePreset ?? ''}
               onChange={(e) => onUpdate({ stylePreset: e.target.value || null })}
               onMouseDown={stop}
-              placeholder="风格 preset"
               className="kp__field-input"
               style={{ flex: 1, minWidth: 120 }}
-            />
+              title="从风格预设点选（Sty-03）；线稿等内置值保留"
+            >
+              <option value="">风格 preset…</option>
+              {styleOptions.map((s) => (
+                <option key={s.id} value={s.builtinKey || s.name}>
+                  {s.name}
+                </option>
+              ))}
+            </select>
             <input
               type="text"
               value={frame.referenceImageUrl ?? ''}
@@ -98,24 +110,23 @@ export function StoryboardPreviewFrameEditor({
           disabled={!director3dConnected || frame.locked}
           onClick={onOpenDirector3d}
           title={
-            director3dConnected
-              ? frame.locked
-                ? '请先解锁此分镜'
-                : '在 3D 导演台中设计此帧机位'
-              : '请先连接 3D 导演台节点'
+            !director3dConnected
+              ? '请先连接 3D 导演台'
+              : frame.locked
+                ? '帧已锁定'
+                : '打开 3D 机位'
           }
-          className="kp__btn"
+          className="kp__btn is-ghost"
         >
-          <Box size={12} />
-          3D 构图
+          <Box size={14} /> 3D
         </button>
         <button
           type="button"
           disabled={!canRegen}
           onClick={onRegenerate}
-          className="kp__btn is-solid"
+          className="kp__btn"
         >
-          仅重新生成此张
+          重新生成
         </button>
       </div>
     </div>

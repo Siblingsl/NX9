@@ -12,9 +12,10 @@ import { AssetMentionPicker } from '../asset-mention/AssetMentionPicker';
 const ASSET_FIELDS: { kind: AssetLibraryKind; field: string }[] = [
   { kind: 'character', field: 'characterAssetRef' },
   { kind: 'scene', field: 'sceneAssetRef' },
+  { kind: 'costume', field: 'costumeAssetRef' },
+  { kind: 'prop', field: 'propAssetRef' },
   { kind: 'shot', field: 'shotAssetRef' },
-  { kind: 'emotion', field: 'emotionAssetRef' },
-  { kind: 'hook', field: 'assetRef' },
+  { kind: 'style', field: 'styleAssetRef' },
   { kind: 'sound', field: 'soundAssetRef' },
 ];
 

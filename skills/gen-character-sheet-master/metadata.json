@@ -1,13 +1,13 @@
 {
   "name": "gen-character-sheet-master",
   "title": "角色设定板 Master",
-  "description": "高精度角色 ID 锁定设定板：多格布局、表情系统、配色与禁改项；生产级骨架。",
-  "version": "2.0.0",
+  "description": "两步角色 ID 锁定：先独立版式「角色完整设定板」（色彩/要点/三视/六角/表情3×3/细节12），确认后再生成五张分类母图；版式脱钩；禁乱码、禁漂移。",
+  "version": "3.1.0",
   "entry": "SKILL.md",
   "author": "nx9",
   "status": "stable",
   "language": "zh-CN",
-  "updated_at": "2026-07-30T08:00:00Z",
+  "updated_at": "2026-08-11T07:00:00Z",
   "tags": [
     "gen",
     "character-sheet"

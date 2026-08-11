@@ -2,6 +2,7 @@ import { memo, useCallback, useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useReactFlow, type NodeProps } from '@xyflow/react';
 import { Crop, Loader2, Sparkles, X } from 'lucide-react';
+import { resolveMediaPinKind, type MediaPinKind } from '@nx9/shared';
 import { api } from '../../api/client';
 import { useFlowRuntime } from '../../stores/flow-runtime';
 import { CanvasNodeShell } from '../shared/CanvasNodeShell';
@@ -23,7 +24,7 @@ function stop(e: React.SyntheticEvent) {
 
 type LightboxPanel = 'view' | 'crop' | 'clarity';
 
-function PinLightbox({
+function ImagePinLightbox({
   url,
   onClose,
   onCommitUrl,
@@ -237,6 +238,76 @@ function PinLightbox({
   );
 }
 
+function GenericPinLightbox({
+  pinKind,
+  url,
+  label,
+  textContent,
+  onClose,
+}: {
+  pinKind: MediaPinKind;
+  url: string;
+  label?: string;
+  textContent?: string;
+  onClose: () => void;
+}) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      document.body.style.overflow = prev;
+    };
+  }, [onClose]);
+
+  return createPortal(
+    <div className="nx9-media-pin-lightbox" onClick={onClose} onPointerDown={stop}>
+      <div
+        className="nx9-media-pin-lightbox__stage"
+        onClick={(e) => e.stopPropagation()}
+        onPointerDown={stop}
+      >
+        <div className="nx9-media-pin-lightbox__toolbar">
+          <div className="nx9-media-pin-lightbox__tools">
+            <span className="nx9-media-pin-lightbox__tool is-active">{label || pinKind}</span>
+          </div>
+          <button
+            type="button"
+            className="nx9-media-pin-lightbox__close"
+            onClick={onClose}
+            aria-label="关闭"
+          >
+            <X size={16} />
+          </button>
+        </div>
+        {pinKind === 'clip' && url ? (
+          <video src={url} controls autoPlay className="nx9-media-pin-lightbox__img" />
+        ) : pinKind === 'sound' && url ? (
+          <audio src={url} controls autoPlay className="nx9-media-pin-lightbox__audio-lg" />
+        ) : pinKind === 'text' ? (
+          <pre className="nx9-media-pin-lightbox__text">{textContent || url}</pre>
+        ) : pinKind === 'mesh' && url ? (
+          <div className="nx9-media-pin-lightbox__panel">
+            <p className="nx9-media-pin-lightbox__panel-title">{label || '3D 模型'}</p>
+            <p className="nx9-media-pin-lightbox__hint">模型已钉到画布，可连下游 3D 口</p>
+            <a href={url} target="_blank" rel="noreferrer" className="nx9-media-pin-lightbox__link">
+              打开资源
+            </a>
+          </div>
+        ) : null}
+      </div>
+    </div>,
+    document.body,
+  );
+}
+
 function MediaPinBlock(props: NodeProps) {
   const data = (props.data ?? {}) as Record<string, unknown>;
   const url =
@@ -244,6 +315,12 @@ function MediaPinBlock(props: NodeProps) {
     (data.previewUrl as string | undefined) ||
     (data.assetUrl as string | undefined) ||
     '';
+  const pinKind = resolveMediaPinKind(data.pinKind, url);
+  const label =
+    (data.pinLabel as string | undefined) ||
+    (data.filename as string | undefined) ||
+    undefined;
+  const textContent = data.textContent as string | undefined;
   const [lightbox, setLightbox] = useState(false);
   const [liveUrl, setLiveUrl] = useState(url);
   const { updateNodeData } = useReactFlow();
@@ -258,7 +335,7 @@ function MediaPinBlock(props: NodeProps) {
       setLiveUrl(nextUrl);
       const patch = {
         pinUrl: nextUrl,
-        previewUrl: nextUrl,
+        previewUrl: pinKind === 'picture' ? nextUrl : '',
         assetUrl: nextUrl,
         status: 'done' as const,
       };
@@ -268,17 +345,28 @@ function MediaPinBlock(props: NodeProps) {
       }
       updateNodeData(props.id, patch);
     },
-    [flowRuntime, props.id, updateNodeData],
+    [flowRuntime, pinKind, props.id, updateNodeData],
   );
+
+  const canOpen = Boolean(url || textContent);
 
   return (
     <>
-      <CanvasNodeShell {...props} onPreviewOpen={url ? () => setLightbox(true) : undefined} />
-      {lightbox && liveUrl ? (
-        <PinLightbox
+      <CanvasNodeShell {...props} onPreviewOpen={canOpen ? () => setLightbox(true) : undefined} />
+      {lightbox && pinKind === 'picture' && liveUrl ? (
+        <ImagePinLightbox
           url={liveUrl}
           onClose={() => setLightbox(false)}
           onCommitUrl={commitUrl}
+        />
+      ) : null}
+      {lightbox && pinKind !== 'picture' && (liveUrl || textContent) ? (
+        <GenericPinLightbox
+          pinKind={pinKind}
+          url={liveUrl}
+          label={label}
+          textContent={textContent}
+          onClose={() => setLightbox(false)}
         />
       ) : null}
     </>

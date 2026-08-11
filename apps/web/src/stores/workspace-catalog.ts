@@ -57,6 +57,9 @@ function saveOpenIds(ownerId: string | undefined, ids: string[]) {
   localStorage.setItem(storageKey(ownerId), JSON.stringify(ids));
 }
 
+/** 防止并发 create 打出成对「项目 N」 */
+let createInFlight = false;
+
 export const useWorkspaceCatalog = create<WorkspaceCatalogState>((set, get) => ({
   items: [],
   activeId: null,
@@ -120,17 +123,26 @@ export const useWorkspaceCatalog = create<WorkspaceCatalogState>((set, get) => (
     const { title, visibility } = normalizeCreateOptions(options);
     const { useUserSession } = await import('./user-session');
     const ownerId = useUserSession.getState().userId ?? undefined;
-    const item = await api.createWorkspace(title, ownerId, visibility);
-    const openIds =
-      visibility === 'private' ? [...get().openIds, item.id] : get().openIds;
-    if (visibility === 'private') saveOpenIds(ownerId, openIds);
-    set({
-      items: [...get().items, item],
-      activeId: visibility === 'private' ? item.id : get().activeId,
-      openIds,
-      reloadToken: visibility === 'private' ? get().reloadToken + 1 : get().reloadToken,
-    });
-    return item;
+    // 创建中加锁：防止对话框连点 / 并发把同一标题建两次
+    if (createInFlight) {
+      throw new Error('正在创建项目，请稍候');
+    }
+    createInFlight = true;
+    try {
+      const item = await api.createWorkspace(title, ownerId, visibility);
+      const openIds =
+        visibility === 'private' ? [...get().openIds, item.id] : get().openIds;
+      if (visibility === 'private') saveOpenIds(ownerId, openIds);
+      set({
+        items: [...get().items, item],
+        activeId: visibility === 'private' ? item.id : get().activeId,
+        openIds,
+        reloadToken: visibility === 'private' ? get().reloadToken + 1 : get().reloadToken,
+      });
+      return item;
+    } finally {
+      createInFlight = false;
+    }
   },
 
   rename: async (id, title) => {

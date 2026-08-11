@@ -25,13 +25,20 @@ export class GatewayController {
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache');
     res.setHeader('Connection', 'keep-alive');
-    const full = await this.gateway.proxyLlmStream(
-      body.messages || [],
-      userId,
-      (text: string) => { res.write(`data: ${JSON.stringify({ text })}\n\n`); },
-    );
-    res.write(`data: ${JSON.stringify({ done: true, full })}\n\n`);
-    res.end();
+    try {
+      const full = await this.gateway.proxyLlmStream(
+        body.messages || [],
+        userId,
+        (text: string) => { res.write(`data: ${JSON.stringify({ text })}\n\n`); },
+      );
+      res.write(`data: ${JSON.stringify({ done: true, full })}\n\n`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (res.headersSent) res.write(`data: ${JSON.stringify({ error: message })}\n\n`);
+      else throw error;
+    } finally {
+      res.end();
+    }
   }
 
   @Post('image')

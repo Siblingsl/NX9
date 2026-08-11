@@ -32,7 +32,7 @@ export const CardShell = memo(function CardShell({
   const mode = useViewMode((s) => s.mode);
   const meta = lookupBlock(type ?? '');
   const emits = resolveEmits(type ?? '', data as Record<string, unknown>);
-  const accepts = resolveAccepts(type ?? '');
+  const accepts = resolveAccepts(type ?? '', data as Record<string, unknown>);
   const status = (data as { status?: string }).status;
   const expanded = (data as { expanded?: boolean }).expanded;
   const dimmed = Boolean((data as { dimmed?: boolean }).dimmed);

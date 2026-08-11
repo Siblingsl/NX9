@@ -25,8 +25,7 @@ vi.mock('@xyflow/react', async () => {
 });
 
 // Mock workspace document store
-vi.mock('../../../stores/workspace-document', () => ({
-  useWorkspaceDocument: (selector?: any) => {
+vi.mock('../../../stores/workspace-document', () => {
     const state = {
       storyboard: {
         title: '测试剧本',
@@ -39,13 +38,21 @@ vi.mock('../../../stores/workspace-document', () => ({
       environments: { environments: [] },
       backlotWorkspace: { items: [] },
       scriptPlan: null,
+      scriptDeskDrafts: [],
+      saveScriptDeskDraft: vi.fn(),
+      trashScriptDeskSnapshot: vi.fn(),
+      moveScriptDeskDraftToTrash: vi.fn(),
+      getScriptDeskDraft: vi.fn(),
+      upsertScriptDeskWorkingDraft: vi.fn(),
+      renameScriptDeskDraft: vi.fn(),
       setStoryboard: vi.fn(),
       updateShot: vi.fn(),
       addShots: vi.fn(),
     };
-    return selector ? selector(state) : state;
-  },
-}));
+    const useWorkspaceDocument: any = (selector?: any) => selector ? selector(state) : state;
+    useWorkspaceDocument.getState = () => state;
+    return { useWorkspaceDocument };
+});
 
 // Mock BlockShell
 vi.mock('../../shared/BlockShell', () => ({
@@ -91,7 +98,7 @@ vi.mock('../../../stores/dev-prompt-overrides', () => ({
 
 // Mock asset library items hook
 vi.mock('../../../hooks/use-asset-library-items', () => ({
-  useAllAssetLibraryItems: () => [],
+  useAllAssetLibraryItems: () => ({ privateItems: [], publicItems: [], allItems: [] }),
 }));
 
 // Mock activity log store

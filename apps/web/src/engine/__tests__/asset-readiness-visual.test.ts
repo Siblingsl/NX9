@@ -69,8 +69,9 @@ function pkgWithChars(
       episodes: episodeBodies.map((bodyMd, i) => ({
         id: `ep-${i + 1}`,
         index: i + 1,
-        title: `第${i + 1}集`,
-        bodyMd,
+         title: `第${i + 1}集`,
+         updatedAt: new Date().toISOString(),
+         bodyMd,
       })),
     },
   };

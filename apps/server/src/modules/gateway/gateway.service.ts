@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  HttpException,
   Injectable,
   ServiceUnavailableException,
 } from '@nestjs/common';
@@ -14,6 +15,8 @@ import { LuxTtsAdapter, type LuxTtsProbeResult } from './luxtts.adapter';
 import { MagicHourAdapter } from './magic-hour.adapter';
 import { GeminiAdapter } from './gemini.adapter';
 import { VoiceboxAdapter } from './voicebox.adapter';
+import { upstreamException, upstreamTimeout } from './upstream-error';
+import { isRetryableUpstreamStatus, retryAfterMs } from './upstream-retry';
 import type { LuxTtsNoGpuFallback } from '@nx9/shared';
 
 export interface TtsFallbackInfo {
@@ -128,6 +131,38 @@ export class GatewayService {
     } finally {
       clearTimeout(timer);
     }
+  }
+
+  private async fetchWithRetry(
+    url: string,
+    init: RequestInit = {},
+    opts: { attempts?: number; timeoutMs?: number } = {},
+  ): Promise<Response> {
+    const attempts = opts.attempts ?? 3;
+    let lastError: unknown;
+    for (let attempt = 0; attempt < attempts; attempt++) {
+      try {
+        const response = await this.fetchWithTimeout(url, init, opts.timeoutMs ?? 60_000);
+        if (!isRetryableUpstreamStatus(response.status) || attempt === attempts - 1) return response;
+        await response.body?.cancel();
+        await new Promise((resolve) => setTimeout(resolve, retryAfterMs(response.headers, attempt)));
+      } catch (error) {
+        lastError = error;
+        if (attempt === attempts - 1) throw error;
+        await new Promise((resolve) => setTimeout(resolve, retryAfterMs(new Headers(), attempt)));
+      }
+    }
+    throw lastError instanceof Error ? lastError : new Error(String(lastError));
+  }
+
+  private readWithTimeout<T>(read: () => Promise<T>, timeoutMs: number): Promise<T> {
+    return new Promise<T>((resolve, reject) => {
+      const timer = setTimeout(
+        () => reject(new DOMException('stream read timeout', 'AbortError')),
+        timeoutMs,
+      );
+      read().then(resolve, reject).finally(() => clearTimeout(timer));
+    });
   }
 
   private resolveVideoProvider(body: Record<string, unknown>): VideoProviderRuntime {
@@ -246,32 +281,45 @@ export class GatewayService {
     const baseUrl = this.baseUrl(undefined, 'llm');
     const cfg = this.settings.getRaw();
     const model = cfg.llmModel || 'auto';
-    const res = await fetch(`${baseUrl}/chat/completions`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
-      body: JSON.stringify({ model, messages, stream: true }),
-    });
+    let res: Response;
+    try {
+      res = await this.fetchWithTimeout(`${baseUrl}/chat/completions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+        body: JSON.stringify({ model, messages, stream: true }),
+      }, 180_000);
+    } catch (error) {
+      if (error instanceof Error && error.name === 'AbortError') throw upstreamTimeout('LLM stream', 180_000);
+      throw upstreamException('LLM stream', 502, error instanceof Error ? error.message : String(error));
+    }
     if (!res.ok) {
       const text = await res.text();
-      throw new ServiceUnavailableException(`LLM stream error: ${text.slice(0, 300)}`);
+      throw upstreamException('LLM stream', res.status, text);
     }
     const reader = res.body?.getReader();
-    if (!reader) throw new ServiceUnavailableException('No response body');
+    if (!reader) throw upstreamException('LLM stream', 502, 'response body missing');
     const decoder = new TextDecoder();
     let full = '';
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      const chunk = decoder.decode(value, { stream: true });
-      for (const line of chunk.split('\n').filter((l) => l.startsWith('data: '))) {
-        const json = line.slice(6).trim();
-        if (json === '[DONE]') continue;
-        try {
+    let pending = '';
+    try {
+      while (true) {
+        const { done, value } = await this.readWithTimeout(() => reader.read(), 30_000);
+        if (done) break;
+        pending += decoder.decode(value, { stream: true });
+        const lines = pending.split('\n');
+        pending = lines.pop() ?? '';
+        for (const line of lines.filter((l) => l.startsWith('data: '))) {
+          const json = line.slice(6).trim();
+          if (json === '[DONE]') continue;
           const parsed = JSON.parse(json) as { choices?: { delta?: { content?: string } }[] };
           const text = parsed.choices?.[0]?.delta?.content ?? '';
           if (text) { full += text; onChunk(text); }
-        } catch { /* ignore parse errors */ }
+        }
       }
+    } catch (error) {
+      await reader.cancel().catch(() => undefined);
+      if (error instanceof Error && error.name === 'AbortError') throw upstreamTimeout('LLM stream read', 30_000);
+      throw upstreamException('LLM stream disconnected', 502, error instanceof Error ? error.message : String(error));
     }
     return full;
   }
@@ -307,15 +355,13 @@ export class GatewayService {
     } catch (error) {
       const aborted = (error instanceof DOMException && error.name === 'AbortError')
         || (error instanceof Error && error.name === 'AbortError');
-      if (aborted) {
-        throw new ServiceUnavailableException('LLM 调用超时（180s），请缩短成稿或稍后重试');
-      }
+      if (aborted) throw upstreamTimeout('LLM', 180_000);
       throw error;
     }
 
     if (!res.ok) {
       const text = await res.text();
-      throw new ServiceUnavailableException(`Upstream LLM error: ${text.slice(0, 200)}`);
+      throw upstreamException('LLM', res.status, text);
     }
     const json = await res.json();
     void this.track('llm', { userId, model, workspaceId });
@@ -402,7 +448,7 @@ export class GatewayService {
 
     if (!res.ok) {
       const text = await res.text();
-      throw new ServiceUnavailableException(`Upstream image error: ${text.slice(0, 300)}`);
+      throw upstreamException('Image', res.status, text);
     }
 
     const json = (await res.json()) as {
@@ -418,8 +464,8 @@ export class GatewayService {
       if (item.b64_json) {
         writeFileSync(join(PATHS.images, name), Buffer.from(item.b64_json, 'base64'));
       } else if (item.url) {
-        const imgRes = await fetch(item.url);
-        if (!imgRes.ok) throw new ServiceUnavailableException('Failed to download image URL');
+        const imgRes = await this.fetchWithRetry(item.url, {}, { attempts: 3, timeoutMs: 60_000 });
+        if (!imgRes.ok) throw upstreamException('Image download', imgRes.status, await imgRes.text());
         writeFileSync(join(PATHS.images, name), Buffer.from(await imgRes.arrayBuffer()));
       } else {
         continue;
@@ -468,11 +514,11 @@ export class GatewayService {
       throw new BadRequestException('参考图无法读取：请确认 @上游/@生成 对应的图片仍在工作区');
     }
 
-    return fetch(`${opts.baseUrl}/images/edits`, {
+    return this.fetchWithTimeout(`${opts.baseUrl}/images/edits`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${opts.apiKey}` },
       body: form,
-    });
+    }, 180_000);
   }
 
   private async loadReferenceImageBytes(
@@ -766,7 +812,7 @@ export class GatewayService {
           'xAI 官方接口无法读取本机图片地址。请先使用可公网访问的图片 URL，或切换到本地 GrokGo 测试桥。',
         );
       }
-      throw new ServiceUnavailableException(`Upstream video error: ${text.slice(0, 300)}`);
+      throw upstreamException('Video', res.status, text);
     }
 
     const json = (await res.json()) as Record<string, unknown>;
@@ -982,16 +1028,23 @@ export class GatewayService {
     for (const path of [`/videos/generations/${taskId}`, `/videos/${taskId}`]) {
       let res: Response;
       try {
-        res = await this.fetchWithTimeout(
+        res = await this.fetchWithRetry(
           `${provider.baseUrl}${path}`,
           { headers: { Authorization: `Bearer ${provider.apiKey}` } },
-          15000,
+          { attempts: 3, timeoutMs: 15_000 },
         );
-      } catch {
-        continue;
+      } catch (error) {
+        throw upstreamException('Video polling', 502, error instanceof Error ? error.message : String(error));
       }
-      if (!res.ok) continue;
-      return (await res.json()) as Record<string, unknown>;
+      if (!res.ok) {
+        if (res.status === 404) continue;
+        throw upstreamException('Video polling', res.status, await res.text());
+      }
+      try {
+        return (await res.json()) as Record<string, unknown>;
+      } catch (error) {
+        throw upstreamException('Video polling', 502, error instanceof Error ? error.message : String(error));
+      }
     }
     return null;
   }
@@ -1045,7 +1098,7 @@ export class GatewayService {
     const absoluteUrl = this.resolveUpstreamUrl(url, baseUrl);
     let res: Response;
     try {
-      res = await this.fetchWithTimeout(absoluteUrl, {}, 60000);
+      res = await this.fetchWithRetry(absoluteUrl, {}, { attempts: 3, timeoutMs: 60_000 });
     } catch {
       return absoluteUrl;
     }
@@ -1254,7 +1307,7 @@ export class GatewayService {
 
     if (!res.ok) {
       const text = await res.text();
-      throw new ServiceUnavailableException(`Upstream TTS error: ${text.slice(0, 200)}`);
+      throw upstreamException('TTS', res.status, text);
     }
 
     const buf = Buffer.from(await res.arrayBuffer());
@@ -1398,6 +1451,9 @@ export class GatewayService {
           signal: AbortSignal.timeout(12000),
         });
         if (!res.ok) {
+          if (res.status === 401 || res.status === 403 || res.status === 429 || res.status >= 500) {
+            throw upstreamException('Models', res.status, await res.text());
+          }
           lastError =
             res.status === 401
               ? '鉴权失败 (HTTP 401)，请检查 API Key 是否正确'
@@ -1421,6 +1477,10 @@ export class GatewayService {
         }
         return { models, baseUrl: root };
       } catch (e) {
+        if (e instanceof HttpException) throw e;
+        if (e instanceof Error && e.name === 'AbortError') {
+          throw upstreamTimeout('Models', 12_000);
+        }
         lastError = e instanceof Error ? e.message : String(e);
       }
     }
@@ -1442,8 +1502,8 @@ export class GatewayService {
   }
 
   private async saveRemoteImage(url: string, prefix = 'fal'): Promise<string> {
-    const res = await fetch(url);
-    if (!res.ok) throw new ServiceUnavailableException('Failed to download Fal output');
+    const res = await this.fetchWithRetry(url, {}, { attempts: 3, timeoutMs: 60_000 });
+    if (!res.ok) throw upstreamException('Image download', res.status, await res.text());
     if (!existsSync(PATHS.images)) mkdirSync(PATHS.images, { recursive: true });
     const name = `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}.png`;
     writeFileSync(join(PATHS.images, name), Buffer.from(await res.arrayBuffer()));

@@ -353,7 +353,7 @@ export const ATTACHED_WORKSPACE_REGISTRY: Record<string, AttachedWorkspaceSpec> 
     showPreview: true,
     phase: 'P3',
   },
-  /** 画布钉图：无底部工作区，纯展示 + 可输出图像 */
+  /** 画布钉板：无底部工作区，纯展示 + 按媒体类型输出 */
   'media-pin': {
     kind: 'media-pin',
     functionalClass: 'media-editor',
@@ -363,7 +363,7 @@ export const ATTACHED_WORKSPACE_REGISTRY: Record<string, AttachedWorkspaceSpec> 
     showRun: false,
     showPreview: true,
     phase: 'P2',
-    note: 'internal-only；由工作区拖出创建，不进能力区',
+    note: 'internal-only；由工作区拖出或本地文件投放创建，不进能力区',
   },
   'preview-sink': {
     kind: 'preview-sink',

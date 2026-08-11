@@ -29,7 +29,7 @@ import {
   type OnNodeDrag,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import { PERF, validateLink, validateConnectionWithHandles, WORKFLOW_TEMPLATES, lookupBlock, canExecuteNode, resolveNodeInteraction, isPromptBarKind, syncAssetImportNodeFields, isStoryboardExecLink, isDirector3dDeskLink, buildMediaPinNodeData, parseMediaPinPayload } from '@nx9/shared';
+import { PERF, validateLink, validateConnectionWithHandles, WORKFLOW_TEMPLATES, lookupBlock, canExecuteNode, resolveNodeInteraction, isPromptBarKind, syncAssetImportNodeFields, isStoryboardExecLink, isDirector3dDeskLink, buildMediaPinNodeData, parseMediaPinPayload, guessMediaPinKindFromFile, isMediaPinDropFile, mediaPinKindToSocket, resolveMediaPinKind } from '@nx9/shared';
 import { blockTypes, preloadBlockTypes } from '../blocks/registry';
 import { MEDIA_PIN_MIME } from './media-pin-drag';
 import { api } from '../api/client';
@@ -1793,7 +1793,9 @@ const FlowSurfaceInner = memo(function FlowSurfaceInner({
   const onDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     const types = Array.from(e.dataTransfer.types);
-    e.dataTransfer.dropEffect = types.includes(MEDIA_PIN_MIME) ? 'copy' : 'move';
+    const hasFiles = types.includes('Files');
+    e.dataTransfer.dropEffect =
+      types.includes(MEDIA_PIN_MIME) || hasFiles ? 'copy' : 'move';
   }, []);
 
   const onDrop = useCallback((e: React.DragEvent) => {
@@ -1806,12 +1808,64 @@ const FlowSurfaceInner = memo(function FlowSurfaceInner({
       x: flowAt.x - 110,
       y: flowAt.y - 80,
     });
+    const localFiles = Array.from(e.dataTransfer.files ?? []).filter(isMediaPinDropFile);
+    if (localFiles.length > 0 && !mediaPinRaw) {
+      pushFlowSnapshot(nodesRef.current, edgesRef.current);
+      void (async () => {
+        const created: Node[] = [];
+        for (let i = 0; i < localFiles.length; i += 1) {
+          const file = localFiles[i];
+          const pinKind = guessMediaPinKindFromFile(file);
+          if (!pinKind) continue;
+          try {
+            let textContent: string | undefined;
+            if (pinKind === 'text') {
+              textContent = await file.text();
+            }
+            const res = await api.uploadAsset(file);
+            const id = `blk-pin-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+            const blockIndex = nextIndexRef.current++;
+            created.push({
+              id,
+              type: 'media-pin',
+              position: {
+                x: dropAt.x + i * 36,
+                y: dropAt.y + i * 28,
+              },
+              data: buildMediaPinNodeData(
+                {
+                  url: res.url,
+                  source: 'local',
+                  label: file.name || pinKind,
+                  pinKind,
+                  filename: res.filename ?? file.name,
+                  textContent,
+                },
+                blockIndex,
+              ) as unknown as Record<string, unknown>,
+              selected: true,
+            });
+            appendLog(`本地投放钉板：${file.name}`);
+          } catch (err) {
+            appendLog(`本地投放失败：${file.name} · ${String(err)}`);
+          }
+        }
+        if (created.length === 0) return;
+        setNodes((nds) => [
+          ...nds.map((n) => ({ ...n, selected: false })),
+          ...created,
+        ]);
+      })();
+      return;
+    }
     if (mediaPinRaw) {
       const payload = parseMediaPinPayload(mediaPinRaw);
       if (!payload) return;
       const id = `blk-pin-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
       pushFlowSnapshot(nodesRef.current, edgesRef.current);
       const blockIndex = nextIndexRef.current++;
+      const pinKind = resolveMediaPinKind(payload.pinKind, payload.url);
+      const socket = mediaPinKindToSocket(pinKind);
       setNodes((nds) => [
         ...nds.map((n) => ({ ...n, selected: false })),
         {
@@ -1827,7 +1881,12 @@ const FlowSurfaceInner = memo(function FlowSurfaceInner({
         const sourceNode = nodesRef.current.find((n) => n.id === sourceId);
         const canLink =
           sourceNode &&
-          validateLink(sourceNode.type ?? '', 'media-pin', sourceNode.data as Record<string, unknown>);
+          validateLink(
+            sourceNode.type ?? '',
+            'media-pin',
+            sourceNode.data as Record<string, unknown>,
+            { pinKind },
+          );
         if (canLink) {
           setEdges((eds) =>
             addEdge(
@@ -1835,8 +1894,8 @@ const FlowSurfaceInner = memo(function FlowSurfaceInner({
                 id: `link-pin-${Date.now()}`,
                 source: sourceId,
                 target: id,
-                sourceHandle: 'picture',
-                targetHandle: 'picture',
+                sourceHandle: socket,
+                targetHandle: socket,
                 ...(isStageDeck
                   ? {
                       type: 'channel',

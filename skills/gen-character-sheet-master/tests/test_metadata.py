@@ -22,6 +22,12 @@ def test_layout_complete():
     ]:
         assert (ROOT / rel).exists(), rel
 
+def test_skill_requires_fixed_sheet_contract():
+    skill = (ROOT / "SKILL.md").read_text(encoding="utf-8")
+    assert "1536×1152" in skill
+    assert "12×10" in skill
+    assert "简体中文" in skill
+
 if __name__ == "__main__":
     test_metadata_name_matches_dir()
     test_layout_complete()

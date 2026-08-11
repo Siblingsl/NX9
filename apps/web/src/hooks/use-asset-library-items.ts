@@ -2,11 +2,13 @@ import { useMemo } from 'react';
 import type { AssetLibraryItem, AssetLibraryKind, AssetScope } from '@nx9/shared';
 import {
   BUILTIN_BACKLOT_TEMPLATES,
-  BUILTIN_PUBLIC_SOUND_ASSETS,
   characterToItem,
   isAssetActive,
   listBacklotTemplates,
+  resolvePublicSounds,
+  resolveStylePresets,
   soundToItem,
+  styleToItem,
   templateToAsset,
   workspaceItemToAsset,
 } from '@nx9/shared';
@@ -32,8 +34,10 @@ export function useAssetLibraryItems(scope: AssetScope, kind?: AssetLibraryKind)
       if (!isAssetActive(s)) continue;
       privateItems.push(soundToItem(s, 'private'));
     }
+    // 风格 / 镜头词典只在公共库维护；私有列表不挂 style（遗留 project styleLibrary 仍可供帧解析兼容）
     for (const ws of backlotWorkspace) {
       if (!isAssetActive(ws)) continue;
+      if (ws.kind === 'shot' || ws.kind === 'emotion' || ws.kind === 'hook') continue;
       privateItems.push(workspaceItemToAsset(ws, 'private'));
     }
     for (const tpl of listBacklotTemplates('character', backlotCustom)) {
@@ -42,7 +46,7 @@ export function useAssetLibraryItems(scope: AssetScope, kind?: AssetLibraryKind)
         privateItems.push(templateToAsset(tpl, 'private'));
       }
     }
-    for (const kindKey of ['costume', 'scene', 'shot', 'emotion', 'hook'] as const) {
+    for (const kindKey of ['costume', 'scene', 'prop'] as const) {
       for (const tpl of listBacklotTemplates(kindKey, backlotCustom)) {
         if ('createdAt' in tpl) {
           if (!isAssetActive(tpl)) continue;
@@ -55,18 +59,25 @@ export function useAssetLibraryItems(scope: AssetScope, kind?: AssetLibraryKind)
       if (!isAssetActive(c)) continue;
       publicItems.push(characterToItem(c, 'public'));
     }
-    for (const s of publicPayload.sounds) {
-      if (!isAssetActive(s)) continue;
-      publicItems.push(soundToItem(s, 'public'));
+    for (const s of resolvePublicSounds(publicPayload.sounds)) {
+      publicItems.push({
+        ...soundToItem(s, 'public'),
+        builtin: Boolean(s.builtinKey) || s.id.startsWith('builtin-sound-'),
+      });
     }
-    for (const s of BUILTIN_PUBLIC_SOUND_ASSETS) {
-      publicItems.push({ ...soundToItem(s, 'public'), builtin: true });
+    for (const s of resolveStylePresets(publicPayload.styles ?? [])) {
+      publicItems.push({
+        ...styleToItem(s, 'public'),
+        builtin: Boolean(s.builtinKey),
+      });
     }
     for (const tpl of publicPayload.templates) {
       if (!isAssetActive(tpl)) continue;
       publicItems.push(templateToAsset(tpl, 'public'));
     }
+    const publicTemplateIds = new Set(publicPayload.templates.map((t) => t.id));
     for (const tpl of BUILTIN_BACKLOT_TEMPLATES) {
+      if (publicTemplateIds.has(tpl.id)) continue;
       publicItems.push(templateToAsset(tpl as any, 'public', true));
     }
 

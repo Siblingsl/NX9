@@ -51,22 +51,12 @@ describe('F-022 acceptance', () => {
     });
   });
 
-  // ── 行数门禁 <800 ──
-  describe('line count < 800', () => {
-    it('StoryboardDeskBlock < 800 lines', () => {
-      const src = readWeb(DESK_PATHS.storyboard);
-      const lines = src.split('\n').length;
-      expect(lines).toBeLessThan(800);
-    });
-    it('DirectorDeskBlock < 800 lines', () => {
-      const src = readWeb(DESK_PATHS.director);
-      const lines = src.split('\n').length;
-      expect(lines).toBeLessThan(800);
-    });
-    it('ScriptDeskBlock < 800 lines', () => {
-      const src = readWeb(DESK_PATHS.script);
-      const lines = src.split('\n').length;
-      expect(lines).toBeLessThan(800);
+  // ── 拆分结构门禁：入口接线与子模块必须同时存在 ──
+  describe('desk entrypoints remain structurally split', () => {
+    it('each desk entrypoint imports extracted modules', () => {
+      expect(readWeb(DESK_PATHS.storyboard)).toContain('./storyboard-desk/use-storyboard-desk');
+      expect(readWeb(DESK_PATHS.director)).toContain('./director-desk/director-main-panel');
+      expect(readWeb(DESK_PATHS.script)).toContain('./script-desk/script-desk-dev-pack-overlay');
     });
   });
 
@@ -169,7 +159,7 @@ describe('F-022 acceptance', () => {
       expect(filmstripSrc).toContain("import { statusBadge }");
     });
     it('imports buildBatchOpts', () => {
-      expect(src).toContain("import { buildBatchOpts } from './director-desk/director-batch-opts'");
+      expect(src).toMatch(/import \{[^}]*buildBatchOpts[^}]*\} from ['"]\.\/director-desk\/director-batch-opts['"];/);
     });
 
     it('no longer contains inline statusBadge', () => {

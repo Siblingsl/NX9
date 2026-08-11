@@ -3,6 +3,7 @@ import type {
   CharacterProfile,
   PublicLibraryPayload,
   SoundAssetProfile,
+  StylePresetProfile,
 } from '@nx9/shared';
 import {
   emptyPublicLibrary,
@@ -35,6 +36,10 @@ interface PublicAssetLibraryState {
   removeSound: (id: string) => void;
   restoreSound: (id: string) => { restoredId: string; conflictRenamed: boolean };
   purgeSound: (id: string) => void;
+  upsertStyle: (style: StylePresetProfile) => void;
+  removeStyle: (id: string) => void;
+  restoreStyle: (id: string) => { restoredId: string; conflictRenamed: boolean };
+  purgeStyle: (id: string) => void;
   /** F-010: 清理过期资产（≥30天） */
   purgeExpiredTrashedAssets: () => number;
 }
@@ -51,14 +56,16 @@ export const usePublicAssetLibrary = create<PublicAssetLibraryState>((set, get) 
       const chars = purgeExpiredAssets(payload.characters ?? []);
       const sounds = purgeExpiredAssets(payload.sounds ?? []);
       const templates = purgeExpiredAssets(payload.templates ?? []);
+      const styles = purgeExpiredAssets(payload.styles ?? []);
       const next: PublicLibraryPayload = {
         ...payload,
         characters: chars.items,
         sounds: sounds.items,
         templates: templates.items,
+        styles: styles.items,
       };
       set({ payload: next, hydrated: true });
-      if (chars.purgedCount + sounds.purgedCount + templates.purgedCount > 0) {
+      if (chars.purgedCount + sounds.purgedCount + templates.purgedCount + styles.purgedCount > 0) {
         void api.savePublicLibrary(next);
       }
     } finally {
@@ -181,7 +188,7 @@ export const usePublicAssetLibrary = create<PublicAssetLibraryState>((set, get) 
     let result = { restoredId: id, conflictRenamed: false };
     set((s) => {
       const next = restoreAssetById(s.payload.sounds, id, () =>
-        `sound-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        `snd-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
       );
       result = { restoredId: next.restoredId, conflictRenamed: next.conflictRenamed };
       return { payload: { ...s.payload, sounds: next.items } };
@@ -200,19 +207,64 @@ export const usePublicAssetLibrary = create<PublicAssetLibraryState>((set, get) 
     void get().save();
   },
 
+  upsertStyle: (style) => {
+    set((s) => ({
+      payload: {
+        ...s.payload,
+        styles: [...(s.payload.styles ?? []).filter((x) => x.id !== style.id), style],
+      },
+    }));
+    void get().save();
+  },
+
+  removeStyle: (id) => {
+    set((s) => ({
+      payload: {
+        ...s.payload,
+        styles: softDeleteAssetById(s.payload.styles ?? [], id),
+      },
+    }));
+    void get().save();
+  },
+
+  restoreStyle: (id) => {
+    let result = { restoredId: id, conflictRenamed: false };
+    set((s) => {
+      const next = restoreAssetById(s.payload.styles ?? [], id, () =>
+        `style-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      );
+      result = { restoredId: next.restoredId, conflictRenamed: next.conflictRenamed };
+      return { payload: { ...s.payload, styles: next.items } };
+    });
+    void get().save();
+    return result;
+  },
+
+  purgeStyle: (id) => {
+    set((s) => ({
+      payload: {
+        ...s.payload,
+        styles: purgeAssetById(s.payload.styles ?? [], id),
+      },
+    }));
+    void get().save();
+  },
+
   purgeExpiredTrashedAssets: () => {
     let total = 0;
     set((s) => {
       const chars = purgeExpiredAssets(s.payload.characters);
       const sounds = purgeExpiredAssets(s.payload.sounds);
       const templates = purgeExpiredAssets(s.payload.templates);
-      total = chars.purgedCount + sounds.purgedCount + templates.purgedCount;
+      const styles = purgeExpiredAssets(s.payload.styles ?? []);
+      total = chars.purgedCount + sounds.purgedCount + templates.purgedCount + styles.purgedCount;
       return {
         payload: {
           ...s.payload,
           characters: chars.items,
           sounds: sounds.items,
           templates: templates.items,
+          styles: styles.items,
         },
       };
     });

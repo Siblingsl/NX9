@@ -232,6 +232,35 @@ describe('patchUpstreamShot integration', () => {
     expect((nodes[1].data.chainStoryboard as typeof chain).shots[0].firstFrameAssetId).toBe('generated-keyframe-url');
   });
 
+  it('concurrent-style upstream patches read the latest chain and preserve both updates', () => {
+    const first = makeShot({ id: 's1', index: 1 });
+    const second = makeShot({ id: 's2', index: 2 });
+    const chain = { version: 2 as const, activeEpisodeId: 'ep-1', shots: [first, second] };
+    const nodes: Node[] = [
+      { id: 'desk', type: 'director-desk', position: { x: 0, y: 0 }, data: {} },
+      { id: 'sb', type: 'storyboard-desk', position: { x: 100, y: 0 }, data: { chainStoryboard: chain } },
+    ];
+    const edges: Edge[] = [{ id: 'e1', source: 'sb', target: 'desk' }];
+    const updateNodeData = (id: string, patch: Record<string, unknown>) => {
+      const node = nodes.find((item) => item.id === id);
+      if (node) node.data = { ...node.data, ...patch };
+    };
+    const latestNodes = () => nodes;
+
+    expect(patchUpstreamShot(updateNodeData, 'desk', nodes, edges, 's1', {
+      firstFrameAssetId: 'frame-1',
+      keyframeStatus: 'review',
+    }, latestNodes)).toBe(true);
+    expect(patchUpstreamShot(updateNodeData, 'desk', nodes, edges, 's2', {
+      firstFrameAssetId: 'frame-2',
+      keyframeStatus: 'review',
+    }, latestNodes)).toBe(true);
+
+    const shots = (nodes[1].data.chainStoryboard as typeof chain).shots;
+    expect(shots.find((shot) => shot.id === 's1')?.firstFrameAssetId).toBe('frame-1');
+    expect(shots.find((shot) => shot.id === 's2')?.firstFrameAssetId).toBe('frame-2');
+  });
+
   it('batch generation fails explicitly when patchShot is absent', async () => {
     const summary = await runDirectorDeskBatch({
       shots: [makeShot({ id: 's1', index: 1, firstFrameAssetId: null })],

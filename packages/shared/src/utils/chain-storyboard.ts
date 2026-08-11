@@ -16,6 +16,37 @@ export interface ChainStoryboardPayload {
   exportHistory?: EpisodeExportRecord[];
 }
 
+function stableSerializeValue(value: unknown): string {
+  if (value === null || typeof value !== 'object') return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map(stableSerializeValue).join(',')}]`;
+  const record = value as Record<string, unknown>;
+  return `{${Object.keys(record).sort().map((key) => `${JSON.stringify(key)}:${stableSerializeValue(record[key])}`).join(',')}}`;
+}
+
+function stableHash(value: string): string {
+  let hash = 2166136261;
+  for (let i = 0; i < value.length; i++) {
+    hash ^= value.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(16).padStart(8, '0');
+}
+
+export function chainStoryboardHash(chain: ChainStoryboardPayload): string {
+  return stableHash(stableSerializeValue(chain));
+}
+
+export function lineArtVersionHash(
+  chain: ChainStoryboardPayload,
+  episodeId: string | null | undefined,
+): string {
+  const shots = chain.shots
+    .filter((shot) => !episodeId || shot.episodeId === episodeId)
+    .sort((a, b) => a.id.localeCompare(b.id))
+    .map((shot) => ({ shotId: shot.id, lineArtUrl: shot.lineArtUrl ?? null }));
+  return stableHash(stableSerializeValue(shots));
+}
+
 /**
  * 从 storyboard-desk 节点 data 中安全读取 ChainStoryboardPayload。
  */
@@ -60,13 +91,26 @@ export function patchChainShot(
 }
 
 /**
+ * 构造分镜台线稿写回字段，避免复用导演台关键帧字段。
+ */
+export function buildLineArtShotPatch(
+  imageUrl: string,
+  sketchPrompt?: string,
+): Pick<StoryboardShot, 'lineArtUrl' | 'sketchPrompt'> {
+  return {
+    lineArtUrl: imageUrl,
+    ...(sketchPrompt === undefined ? {} : { sketchPrompt }),
+  };
+}
+
+/**
  * 从 chainStoryboard 解析当前活动的剧集镜头。
  */
 export function activeChainEpisodeShots(chain: ChainStoryboardPayload): StoryboardShot[] {
   const activeEpisodeId = chain.activeEpisodeId;
   if (!activeEpisodeId) return chain.shots;
   const scoped = chain.shots.filter((shot) => shot.episodeId === activeEpisodeId);
-  return scoped.length > 0 ? scoped : chain.shots;
+  return scoped;
 }
 
 /**

@@ -1,4 +1,4 @@
-/* 画布钉图 — 图像主导、轻量钉板，与 stage-card 同色系 */
+/* 画布钉板 — 多媒体轻量钉，与 stage-card 同色系 */
 
 .nx9-stage-card:has(.nx9-media-pin) {
   width: 220px;
@@ -29,6 +29,23 @@
   cursor: default;
 }
 
+.nx9-media-pin__frame--static {
+  cursor: default;
+}
+
+.nx9-media-pin__icon-hit {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  border: none;
+  background: transparent;
+  color: inherit;
+  cursor: zoom-in;
+  padding: 0;
+  max-width: 100%;
+}
+
 .nx9-media-pin__img {
   width: 100%;
   height: 100%;
@@ -44,6 +61,50 @@
   height: 100%;
   font-size: 11px;
   color: var(--desk-faint, rgba(255, 255, 255, 0.28));
+}
+
+.nx9-media-pin__badge {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  height: 100%;
+  padding: 12px 10px;
+  color: rgba(255, 255, 255, 0.78);
+  font-size: 11px;
+  text-align: center;
+}
+
+.nx9-media-pin__badge span {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.nx9-media-pin__badge--text {
+  align-items: flex-start;
+  text-align: left;
+  gap: 6px;
+}
+
+.nx9-media-pin__text-preview {
+  display: -webkit-box;
+  -webkit-line-clamp: 6;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  white-space: pre-wrap;
+  line-height: 1.35;
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.55);
+  text-align: left;
+}
+
+.nx9-media-pin__audio {
+  width: 100%;
+  height: 28px;
 }
 
 .nx9-media-pin-lightbox {
@@ -246,4 +307,29 @@
   margin: 0;
   font-size: 11px;
   color: #f0a0a0;
+}
+
+.nx9-media-pin-lightbox__audio-lg {
+  width: min(92vw, 480px);
+}
+
+.nx9-media-pin-lightbox__text {
+  margin: 0;
+  max-width: min(92vw, 720px);
+  max-height: min(72vh, 640px);
+  overflow: auto;
+  padding: 16px 18px;
+  border-radius: 12px;
+  background: rgba(18, 19, 22, 0.94);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: rgba(255, 255, 255, 0.88);
+  font-size: 13px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.nx9-media-pin-lightbox__link {
+  color: #c4a574;
+  font-size: 12px;
 }
