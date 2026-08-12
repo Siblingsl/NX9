@@ -13,6 +13,8 @@ import {
   inspectBibleAssets,
   syncBibleAssets,
   markScriptAssetReady,
+  getStrictCostumePropGate,
+  setStrictCostumePropGate,
   type AssetReadinessState,
   type CharacterVisualGap,
   toggleLibraryCharacterRole,
@@ -58,7 +60,28 @@ export const AssetReadinessPanel = memo(function AssetReadinessPanel({
 }) {
   const [report, setReport] = useState<AssetReadinessState | null>(null);
   const [syncing, setSyncing] = useState(false);
+  const [strictCostumeProp, setStrictCostumeProp] = useState(() => getStrictCostumePropGate());
   const openAssetAt = useAssetLibraryModalUi((s) => s.openAt);
+  const resumeFocus = useAssetLibraryModalUi((s) => s.resumeFocus);
+  const clearResumeFocus = useAssetLibraryModalUi((s) => s.clearResumeFocus);
+  const libraryOpen = useAssetLibraryModalUi((s) => s.open);
+
+  // 从素材库「返回设定就绪」后高亮对应缺口区
+  useEffect(() => {
+    if (libraryOpen || !resumeFocus) return;
+    const section = resumeFocus.section ?? 'characters';
+    const el = document.querySelector(`[data-ready-section="${section}"]`);
+    el?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    if (resumeFocus.gapKey) {
+      const tag = document.querySelector(
+        `[data-ready-section="${section}"] [data-ready-gap="${CSS.escape(resumeFocus.gapKey)}"]`,
+      ) as HTMLElement | null;
+      tag?.classList.add('sd2-ready-tag--resume');
+      tag?.focus?.();
+      window.setTimeout(() => tag?.classList.remove('sd2-ready-tag--resume'), 2400);
+    }
+    clearResumeFocus();
+  }, [libraryOpen, resumeFocus, clearResumeFocus]);
 
   // 监听素材库 tags 的变化，以便角色主/配角切换后即时刷新就绪 UI
   const libraryCharacters = useWorkspaceDocument((s) => s.characters.characters);
@@ -93,7 +116,18 @@ export const AssetReadinessPanel = memo(function AssetReadinessPanel({
       return;
     }
     setReport(inspectBibleAssets(pkg));
-  }, [onPackageChange, pkg]);
+  }, [onPackageChange, pkg, strictCostumeProp]);
+
+  const handleToggleStrictCostumeProp = useCallback(() => {
+    const next = !getStrictCostumePropGate();
+    setStrictCostumePropGate(next);
+    setStrictCostumeProp(next);
+    if (pkg.status === 'confirmed') {
+      const nextReport = inspectBibleAssets(pkg);
+      setReport(nextReport);
+      onReadinessChange?.(nextReport);
+    }
+  }, [onReadinessChange, pkg]);
 
   const handleToggleRole = useCallback((name: string) => {
     if (!pkg) return;
@@ -150,6 +184,8 @@ export const AssetReadinessPanel = memo(function AssetReadinessPanel({
 
   const handleMarkReady = useCallback((force = false) => {
     const base = report ?? inspectBibleAssets(pkg);
+    const softCostumes = base.warnings?.costumes ?? base.missingCostumes ?? [];
+    const softProps = base.warnings?.props ?? base.missingProps ?? [];
     const state: AssetReadinessState = {
       ...base,
       ...markScriptAssetReady(),
@@ -157,8 +193,10 @@ export const AssetReadinessPanel = memo(function AssetReadinessPanel({
       requiredScenes: base.requiredScenes,
       missingCharacters: force ? base.missingCharacters : [],
       missingScenes: force ? base.missingScenes : [],
-      missingCostumes: force ? base.missingCostumes : [],
-      missingProps: force ? base.missingProps : [],
+      // 服/道始终保留为警告层（除非强制清空）
+      missingCostumes: force ? [] : softCostumes,
+      missingProps: force ? [] : softProps,
+      warnings: force ? { costumes: [], props: [] } : { costumes: softCostumes, props: softProps },
       missingCharacterRefs: force ? base.missingCharacterRefs : [],
       missingCharacterTurnarounds: force ? base.missingCharacterTurnarounds : [],
       characterVisualGaps: force ? base.characterVisualGaps : [],
@@ -169,10 +207,13 @@ export const AssetReadinessPanel = memo(function AssetReadinessPanel({
     const hasVisualGap =
       (base.missingCharacterRefs?.length ?? 0) > 0 ||
       (base.missingCharacterTurnarounds?.length ?? 0) > 0;
+    const softLeft = (state.warnings?.costumes.length ?? 0) + (state.warnings?.props.length ?? 0);
     toastSuccess(
       force && (base.missingCharacters.length > 0 || base.missingScenes.length > 0 || hasVisualGap)
         ? '已强制标记设定就绪'
-        : '已标记设定就绪',
+        : softLeft > 0
+          ? `已标记设定就绪（仍有 ${softLeft} 项服装/道具警告）`
+          : '已标记设定就绪',
     );
   }, [onReadinessChange, pkg, report]);
 
@@ -208,17 +249,35 @@ export const AssetReadinessPanel = memo(function AssetReadinessPanel({
   const hasVisualGap =
     (report.missingCharacterRefs?.length ?? 0) > 0 ||
     (report.missingCharacterTurnarounds?.length ?? 0) > 0;
-  const hasAnyGap = hasMissing || hasVisualGap;
+  const warnCostumes = report.warnings?.costumes ?? report.missingCostumes ?? [];
+  const warnProps = report.warnings?.props ?? report.missingProps ?? [];
+  const hasSoftWarnings = warnCostumes.length > 0 || warnProps.length > 0;
+  const strict = report.strictCostumeProp ?? strictCostumeProp;
+  /** 硬缺口：阻断「真正就绪」；默认服/道仅为警告，strict 时服/道也硬拦 */
+  const hasHardGap = hasMissing || hasVisualGap || (strict && hasSoftWarnings);
+  const hasAnyGap = hasHardGap;
   /** 有角色文本可补全时也允许同步（不仅限「未入库」） */
   const canSync = hasMissing || report.requiredCharacters.length > 0;
+
+  const statusKind = !report.ready && hasHardGap
+    ? 'blocked'
+    : report.ready && hasSoftWarnings && !strict
+      ? 'ready-warn'
+      : report.ready
+        ? 'ready'
+        : 'blocked';
 
   return (
     <div className="sd2-ready-body" data-block-id={blockId}>
       <div className="sd2-ready-header">
         <span className="sd2-ready-header__label">设定就绪检查</span>
-        {report.ready ? (
+        {statusKind === 'ready' ? (
           <span className="sd2-ready-status sd2-ready-status--ok">
             <Check size={12} /> 已就绪
+          </span>
+        ) : statusKind === 'ready-warn' ? (
+          <span className="sd2-ready-status sd2-ready-status--warn" title="角色/场景已齐；服装或道具仍有建议补齐项">
+            <AlertTriangle size={12} /> 就绪 · 有警告
           </span>
         ) : (
           <span className="sd2-ready-status sd2-ready-status--warn">
@@ -227,8 +286,19 @@ export const AssetReadinessPanel = memo(function AssetReadinessPanel({
         )}
       </div>
 
+      <label className="sd2-ready-section__empty" style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
+        <input
+          type="checkbox"
+          checked={strict}
+          onChange={handleToggleStrictCostumeProp}
+        />
+        <span title="OL-09：开启后服装/道具缺口也阻止「已就绪」">
+          服装/道具缺口硬拦（可选）
+        </span>
+      </label>
+
       {/* 角色入库（含主角/配角与缺图提示） */}
-      <div className="sd2-ready-section">
+      <div className="sd2-ready-section" data-ready-section="characters">
         <p className="sd2-ready-section__title">角色入库（{report.requiredCharacters.length}）</p>
         {report.requiredCharacters.length === 0 ? (
           <p className="sd2-ready-section__empty">设定中无角色</p>
@@ -243,15 +313,28 @@ export const AssetReadinessPanel = memo(function AssetReadinessPanel({
                 <button
                   type="button"
                   key={name}
+                  data-ready-gap={name}
                   onClick={(e) => {
                     // 缺失角色：必须先进素材库建档/补信息
                     if (missingInLibrary) {
-                      openAssetAt({ tab: 'character', itemId: name });
+                      openAssetAt({
+                        tab: 'character',
+                        itemId: name,
+                        returnHint: '设定就绪',
+                        resumeGapKey: name,
+                        resumeSection: 'characters',
+                      });
                       return;
                     }
                     // Ctrl/⌘/Shift 点击仍可打开详情
                     if (e.metaKey || e.ctrlKey || e.shiftKey) {
-                      openAssetAt({ tab: 'character', itemId: name });
+                      openAssetAt({
+                        tab: 'character',
+                        itemId: name,
+                        returnHint: '设定就绪',
+                        resumeGapKey: name,
+                        resumeSection: 'characters',
+                      });
                       return;
                     }
                     handleToggleRole(name);
@@ -275,7 +358,7 @@ export const AssetReadinessPanel = memo(function AssetReadinessPanel({
       </div>
 
       {/* 场景 */}
-      <div className="sd2-ready-section">
+      <div className="sd2-ready-section" data-ready-section="scenes">
         <p className="sd2-ready-section__title">场景（{report.requiredScenes.length}）</p>
         {report.requiredScenes.length === 0 ? (
           <p className="sd2-ready-section__empty">设定中无场景</p>
@@ -284,6 +367,7 @@ export const AssetReadinessPanel = memo(function AssetReadinessPanel({
             {report.requiredScenes.map((name) => (
               <span
                 key={name}
+                data-ready-gap={name}
                 className={`sd2-ready-tag ${report.missingScenes.includes(name) ? 'sd2-ready-tag--warn' : 'sd2-ready-tag--ok'}`}
               >
                 {name}
@@ -294,23 +378,26 @@ export const AssetReadinessPanel = memo(function AssetReadinessPanel({
         )}
       </div>
 
-      {/* 服装/道具（F-051） */}
-      {report.missingCostumes && report.missingCostumes.length > 0 && (
-        <div className="sd2-ready-section">
+      {/* 服装/道具：警告层（不阻断 ready） */}
+      {warnCostumes.length > 0 && (
+        <div className="sd2-ready-section" data-ready-section="costumes">
           <p className="sd2-ready-section__title">
-            服装参考（点击缺口打开服装库并建议建档）
+            警告 · 服装建议补齐（不阻断就绪）
           </p>
           <div className="sd2-ready-tags">
-            {report.missingCostumes.map((name) => (
+            {warnCostumes.map((name) => (
               <button
                 type="button"
                 key={name}
+                data-ready-gap={name}
                 onClick={() =>
                   openAssetAt({
                     tab: 'costume',
                     query: name,
                     suggestCreateLabel: name,
                     returnHint: '设定就绪',
+                    resumeGapKey: name,
+                    resumeSection: 'costumes',
                   })
                 }
                 className="sd2-ready-tag sd2-ready-tag--warn sd2-ready-tag--clickable"
@@ -322,22 +409,25 @@ export const AssetReadinessPanel = memo(function AssetReadinessPanel({
           </div>
         </div>
       )}
-      {report.missingProps && report.missingProps.length > 0 && (
-        <div className="sd2-ready-section">
+      {warnProps.length > 0 && (
+        <div className="sd2-ready-section" data-ready-section="props">
           <p className="sd2-ready-section__title">
-            道具参考（点击缺口打开道具库并建议建档）
+            警告 · 道具建议补齐（不阻断就绪）
           </p>
           <div className="sd2-ready-tags">
-            {report.missingProps.map((name) => (
+            {warnProps.map((name) => (
               <button
                 type="button"
                 key={name}
+                data-ready-gap={name}
                 onClick={() =>
                   openAssetAt({
                     tab: 'prop',
                     query: name,
                     suggestCreateLabel: name,
                     returnHint: '设定就绪',
+                    resumeGapKey: name,
+                    resumeSection: 'props',
                   })
                 }
                 className="sd2-ready-tag sd2-ready-tag--warn sd2-ready-tag--clickable"

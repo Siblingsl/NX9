@@ -3,6 +3,21 @@ import { join } from 'path';
 import { writeFileSync, existsSync, mkdirSync } from 'fs';
 import { timelineToHyperFramesHtml } from '@nx9/shared';
 import type { TimelinePayload } from '@nx9/shared';
+import {
+  applyHyperframesTaskUpdate,
+  HF_PRODUCER_UNAVAILABLE,
+  type HyperframesTaskRecord,
+} from './hyperframes-task';
+import {
+  HF_TASKS_FILE,
+  loadTaskRecords,
+  mapToRecords,
+  recordsToMap,
+  saveTaskRecords,
+} from './render-task-store';
+
+export { applyHyperframesTaskUpdate, HF_PRODUCER_UNAVAILABLE };
+export type { HyperframesTaskRecord };
 
 const PATHS = {
   exports: process.env.NX9_MEDIA_EXPORTS_DIR || join(process.cwd(), 'media', 'exports'),
@@ -21,32 +36,54 @@ export interface RenderResult {
 export class HyperframesService {
   private readonly logger = new Logger(HyperframesService.name);
   private taskCounter = 0;
-  private readonly tasks = new Map<string, { status: string; url?: string }>();
+  private readonly tasks: Map<string, HyperframesTaskRecord>;
+  private persistFile = HF_TASKS_FILE;
+
+  constructor() {
+    this.tasks = recordsToMap(loadTaskRecords<HyperframesTaskRecord>(this.persistFile));
+  }
 
   async renderTimeline(
     timeline: TimelinePayload,
     opts?: { templateId?: string; transitionPack?: string },
   ): Promise<RenderResult> {
     const taskId = `hf-${Date.now()}-${++this.taskCounter}`;
-    this.tasks.set(taskId, { status: 'queued' });
+    this.tasks.set(taskId, { status: 'queued', updatedAt: Date.now() });
+    this.persist();
 
-    // 异步渲染（不阻塞返回）
     this.processRender(taskId, timeline, opts).catch((e) => {
       this.logger.error(`HF render ${taskId} failed: ${e.message}`);
-      this.tasks.set(taskId, { status: 'error' });
+      this.commitTask(taskId, { status: 'error', message: e.message });
     });
 
     return { ok: true, taskId, status: 'queued' };
   }
 
-  getTaskStatus(taskId: string): { status: string; url?: string } | null {
+  getTaskStatus(taskId: string): HyperframesTaskRecord | null {
     return this.tasks.get(taskId) ?? null;
   }
 
-  /** F-046: 取消渲染任务 */
+  /** F-046: 取消渲染任务；已结束的任务不可再改 */
   cancelTask(taskId: string): boolean {
-    if (!this.tasks.has(taskId)) return false;
-    this.tasks.set(taskId, { status: 'cancelled' });
+    const current = this.tasks.get(taskId);
+    if (!current) return false;
+    if (current.status === 'done' || current.status === 'error' || current.status === 'cancelled') {
+      return false;
+    }
+    this.tasks.set(taskId, { status: 'cancelled', updatedAt: Date.now() });
+    this.persist();
+    return true;
+  }
+
+  private persist(): void {
+    saveTaskRecords(this.persistFile, mapToRecords(this.tasks));
+  }
+
+  private commitTask(taskId: string, next: HyperframesTaskRecord): boolean {
+    const applied = applyHyperframesTaskUpdate(this.tasks.get(taskId), next);
+    if (!applied) return false;
+    this.tasks.set(taskId, { ...applied, updatedAt: Date.now() });
+    this.persist();
     return true;
   }
 
@@ -55,7 +92,7 @@ export class HyperframesService {
     timeline: TimelinePayload,
     opts?: { templateId?: string },
   ): Promise<void> {
-    this.tasks.set(taskId, { status: 'rendering' });
+    if (!this.commitTask(taskId, { status: 'rendering' })) return;
 
     try {
       if (!existsSync(PATHS.exports)) {
@@ -70,32 +107,46 @@ export class HyperframesService {
       const outFilename = `episode-hf-${Date.now()}.mp4`;
       const outPath = join(PATHS.exports, outFilename);
 
-      // 优先尝试 programmatic @hyperframes/producer，不可用时 fallback FFmpeg
+      type HfProducer = {
+        render: (opts: {
+          entry: string;
+          out: string;
+          fps?: number;
+          width?: number;
+          height?: number;
+        }) => Promise<unknown>;
+      };
+      let producer: HfProducer;
       try {
-        const hf = await import('@hyperframes/producer') as any;
-        await hf.producer.render({
-          entry: join(workDir, 'index.html'),
-          out: outPath,
-          fps: timeline.fps,
-          width: timeline.width,
-          height: timeline.height,
-        });
+        const hf = (await import('@hyperframes/producer')) as unknown as {
+          producer?: HfProducer;
+        };
+        if (!hf.producer?.render) throw new Error('no render');
+        producer = hf.producer;
       } catch {
-        // FFmpeg fallback: 将 HTML 转为静帧序列再编码
-        this.logger.warn('@hyperframes/producer 不可用，使用 FFmpeg 占位渲染');
-        const { execSync } = await import('child_process');
-        execSync(
-          `ffmpeg -f lavfi -i color=c=#000:s=${timeline.width}x${timeline.height}:d=${timeline.durationSec} -c:v libx264 -preset ultrafast "${outPath}"`,
-          { stdio: 'ignore' },
-        );
+        throw new Error(HF_PRODUCER_UNAVAILABLE);
       }
 
+      if (!this.commitTask(taskId, { status: 'rendering' })) return;
+
+      await producer.render({
+        entry: join(workDir, 'index.html'),
+        out: outPath,
+        fps: timeline.fps,
+        width: timeline.width,
+        height: timeline.height,
+      });
+
       const url = `/media/exports/${outFilename}`;
-      this.tasks.set(taskId, { status: 'done', url });
+      if (!this.commitTask(taskId, { status: 'done', url })) {
+        this.logger.log(`HF render ${taskId} finished after cancel, discarded ${url}`);
+        return;
+      }
       this.logger.log(`HF render ${taskId} done: ${url}`);
     } catch (e) {
-      this.logger.error(`HF render ${taskId} error: ${(e as Error).message}`);
-      this.tasks.set(taskId, { status: 'error' });
+      const message = (e as Error).message;
+      this.logger.error(`HF render ${taskId} error: ${message}`);
+      this.commitTask(taskId, { status: 'error', message });
     }
   }
 }

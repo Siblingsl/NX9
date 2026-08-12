@@ -128,10 +128,10 @@ describe('F-017 构图模板 / 参考板强约束', () => {
   });
 
   it('StoryboardDeskBlock 编辑弹窗有构图模板下拉', () => {
-    const src = readWeb('blocks/craft/storyboard-desk/use-storyboard-desk.tsx');
-    expect(src).toContain('构图模板');
-    expect(src).toContain('compositionTemplateId');
-    expect(src).toContain('BUILTIN_COMPOSITION_TEMPLATES');
+    const modal = readWeb('blocks/craft/storyboard-desk/shot-edit-modal.tsx');
+    expect(modal).toContain('构图模板');
+    expect(modal).toContain('compositionTemplateId');
+    expect(modal).toContain('BUILTIN_COMPOSITION_TEMPLATES');
   });
 
   it('StoryboardDeskBlock 保存时写入 compositionTemplateId', () => {
@@ -142,7 +142,8 @@ describe('F-017 构图模板 / 参考板强约束', () => {
 
   // ─── flow-runner 源码守卫 ───
   it('flow-runner 含 upstreamDeskEnforcesComposition 辅助函数', () => {
-    const src = readWeb('engine/flow-runner.ts');
+    // 出图执行已拆到 picture-gen-executor，强约束递归仍在出图主路径
+    const src = readWeb('engine/executors/picture-gen-executor.ts');
     expect(src).toContain('upstreamDeskEnforcesComposition');
     expect(src).toContain('构图强约束：上游分镜台已开启强约束');
   });

@@ -99,40 +99,36 @@ describe('F-018 导演台多机位预设', () => {
 
   // ─── 内置预设应用时生成 cameraPrompt ───
   it('内置预设应用时写入 cameraPrompt', () => {
-    const src = readWeb('blocks/core/director-desk/director-3d-stage-embed.tsx');
-
-    // 应用预设时 guide 对象含 cameraPrompt
-    expect(src).toContain('cameraPrompt');
-    // 具体：cameraPrompt 由 preset 标签和参数组成
-    expect(src).toContain('p.name');
-    expect(src).toContain('p.position');
+    const bar = readFileSync(resolve(root, 'packages/director3d/src/ui/CameraPresetBar.tsx'), 'utf8');
+    const store = readFileSync(resolve(root, 'packages/director3d/src/store/directorStore.ts'), 'utf8');
+    expect(bar).toContain('p.name');
+    expect(bar).toContain('p.position');
+    expect(bar).toContain('applyCamera');
+    expect(store).toContain('cameraPrompt: buildCameraPrompt(camera)');
   });
 
   it('用户预设保存时含 captureUrl', () => {
-    const src = readWeb('blocks/core/director-desk/director-3d-stage-embed.tsx');
-
-    // savePreset 中 captureUrl 从 director3dGuide 读取
-    const saveSection = src.slice(
-      src.indexOf('const savePreset'),
-      src.indexOf('updateNodeData(blockId, { cameraPresets: updated })'),
-    );
+    const bar = readFileSync(resolve(root, 'packages/director3d/src/ui/CameraPresetBar.tsx'), 'utf8');
+    const start = bar.indexOf('const savePreset');
+    const saveSection = bar.slice(start, bar.indexOf('return (', start));
     expect(saveSection).toContain('captureUrl');
+    expect(saveSection).toContain('cameraPrompt');
   });
 
   it('用户预设恢复时写回 cameraPrompt', () => {
-    const src = readWeb('blocks/core/director-desk/director-3d-stage-embed.tsx');
-
-    // 恢复预设时 director3dGuide 含 cameraPrompt
-    expect(src).toContain('cameraPrompt');
+    const bar = readFileSync(resolve(root, 'packages/director3d/src/ui/CameraPresetBar.tsx'), 'utf8');
+    expect(bar).toContain('cameraPrompt');
+    expect(bar).toContain('shotPresets');
   });
 
   // ─── 导演台 3D 预设条 UI 守卫 ───
   it('导演台含预设横滑条 UI', () => {
-    const src = readWeb('blocks/core/director-desk/director-3d-stage-embed.tsx');
-
-    expect(src).toContain('shotPresets');
-    expect(src).toContain('机位预设');
-    expect(src).toContain('p.name');
+    const shell = readFileSync(resolve(root, 'packages/director3d/src/ui/StageDeckShell.tsx'), 'utf8');
+    const bar = readFileSync(resolve(root, 'packages/director3d/src/ui/CameraPresetBar.tsx'), 'utf8');
+    expect(shell).toContain('CameraPresetBar');
+    expect(bar).toContain('shotPresets');
+    expect(bar).toContain('机位预设');
+    expect(bar).toContain('p.name');
   });
 
   // ─── 批出请求体含 cameraPrompt ───
@@ -145,13 +141,10 @@ describe('F-018 导演台多机位预设', () => {
 
   // ─── DirectorDeskBlock 用户预设含 cameraPrompt ───
   it('director-3d-stage-embed 恢复用户预设含 cameraPrompt', () => {
-    const src = readWeb('blocks/core/director-desk/director-3d-stage-embed.tsx');
-
-    const restoreSection = src.slice(
-      src.indexOf('useWorkspaceDocument.getState().updateShot(currentShotId'),
-      src.indexOf('appliedAt: new Date().toISOString()') + 50,
-    );
-    expect(restoreSection).toContain('cameraPrompt');
+    const bar = readFileSync(resolve(root, 'packages/director3d/src/ui/CameraPresetBar.tsx'), 'utf8');
+    expect(bar).toContain('shotPresets.map');
+    expect(bar).toContain('preset.cameraPrompt');
+    expect(bar).toContain('applyCamera(preset.name');
   });
 
   // ─── 批出路径：director3dGuide 数据完整 ───

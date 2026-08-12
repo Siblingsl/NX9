@@ -1,5 +1,5 @@
 import {
-  activeEpisodeShots,
+  type StoryboardShot,
 } from '@nx9/shared';
 import { useWorkspaceDocument } from '../../../stores/workspace-document';
 import { useFlowRuntime, useStoryboardUi } from '../../../stores/flow-runtime';
@@ -15,25 +15,41 @@ export type OpenReviewGateOptions = {
   stage?: 'keyframe' | 'video';
   /** banner 文案来源 */
   source?: 'director-desk' | 'clip-gen' | 'cascade';
+  /** DD-P1-03：显式作用域，禁止回猜全局 active episode */
+  episodeId?: string;
+  sourceChainDeskId?: string;
+  shots?: StoryboardShot[];
 };
 
-function resolveReviewShots() {
+function resolveReviewShots(opts?: Pick<OpenReviewGateOptions, 'shots' | 'episodeId'>) {
+  if (opts?.shots?.length) {
+    const ep = opts.episodeId;
+    return ep
+      ? opts.shots.filter((s) => s.episodeId === ep || !s.episodeId)
+      : opts.shots;
+  }
   const nodes = useFlowRuntime.getState().runtime?.getNodes() ?? [];
   const chain = getAllChainShots(nodes);
-  if (chain.length > 0) return chain;
-  // 无链数据时仅作迁移兼容读全局
-  return getAllChainShots(nodes, { allowGlobalFallback: true });
+  if (chain.length > 0) {
+    const ep = opts?.episodeId ?? useWorkspaceDocument.getState().storyboard.activeEpisodeId;
+    return ep
+      ? chain.filter((s) => s.episodeId === ep || !s.episodeId)
+      : chain;
+  }
+  // DD-R-01：无链镜表时不回退全局 storyboard，避免误审旧档全局镜头
+  return [];
 }
 
 /** 收集当前集「有图且未 approved」的关键帧待审 index */
-export function collectPendingKeyframeIndices(): number[] {
-  const nodes = useFlowRuntime.getState().runtime?.getNodes() ?? [];
-  const chain = getAllChainShots(nodes);
-  const shots =
-    chain.length > 0
-      ? chain
-      : activeEpisodeShots(useWorkspaceDocument.getState().storyboard);
-  const activeEp = useWorkspaceDocument.getState().storyboard.activeEpisodeId;
+export function collectPendingKeyframeIndices(
+  opts?: Pick<OpenReviewGateOptions, 'shots' | 'episodeId'>,
+): number[] {
+  const shots = resolveReviewShots(opts);
+  const activeEp =
+    opts?.episodeId
+    ?? (opts?.shots?.length
+      ? undefined
+      : useWorkspaceDocument.getState().storyboard.activeEpisodeId);
   const scoped = activeEp
     ? shots.filter((s) => s.episodeId === activeEp || !s.episodeId)
     : shots;
@@ -59,7 +75,7 @@ export function openReviewGateSession(
     : pendingIndicesOrOpts ?? {};
 
   let pendingIndices = opts.pendingIndices ? [...opts.pendingIndices] : [];
-  const shots = resolveReviewShots();
+  const shots = resolveReviewShots(opts);
 
   if (opts.pendingShotIds?.length) {
     const byId = new Map(shots.map((s) => [s.id, s]));
@@ -70,7 +86,7 @@ export function openReviewGateSession(
   }
 
   if (!pendingIndices.length && opts.stage !== 'video') {
-    pendingIndices = collectPendingKeyframeIndices();
+    pendingIndices = collectPendingKeyframeIndices(opts);
   }
 
   useViewMode.getState().setMode('review');

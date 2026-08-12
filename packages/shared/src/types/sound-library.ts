@@ -218,3 +218,27 @@ export function isSoundFavorite(sound: SoundAssetProfile | undefined | null): bo
   if (typeof sound.favorite === 'boolean') return sound.favorite;
   return Boolean(sound.creative?.favorite);
 }
+
+/**
+ * OL-19 加深：角色参考音解析。
+ * 优先声音库 `soundAssetId` → audioUrl；否则回退 `referenceAudioUrl`。
+ */
+export function resolveCharacterReferenceAudio(
+  character: {
+    soundAssetId?: string | null;
+    referenceAudioUrl?: string | null;
+  } | null | undefined,
+  sounds: ReadonlyArray<Pick<SoundAssetProfile, 'id' | 'audioUrl'>> = [],
+): { audioUrl?: string; soundAssetId?: string } {
+  if (!character) return {};
+  const sid = character.soundAssetId?.trim();
+  if (sid) {
+    const hit = sounds.find((s) => s.id === sid);
+    const fromLib = hit?.audioUrl?.trim();
+    if (fromLib) return { audioUrl: fromLib, soundAssetId: sid };
+    // id 仍保留，便于成片轨溯源；URL 可回退角色直链
+  }
+  const direct = character.referenceAudioUrl?.trim();
+  if (direct) return { audioUrl: direct, soundAssetId: sid || undefined };
+  return sid ? { soundAssetId: sid } : {};
+}

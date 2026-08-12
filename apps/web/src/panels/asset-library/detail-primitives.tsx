@@ -1,14 +1,51 @@
 import type { ReactNode } from 'react';
-import { useMemo, useState } from 'react';
-import { Copy, MoreHorizontal, RefreshCw, ZoomIn } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Copy, MoreHorizontal, RefreshCw, RotateCcw, ZoomIn } from 'lucide-react';
 import { ImageLightbox, type ImageLightboxItem } from '../../components/ui/ImageLightbox';
 
-export function DetailSection({ title, children }: { title: string; children: ReactNode }) {
+export function DetailSection({
+  title,
+  children,
+  id,
+}: {
+  title: string;
+  children: ReactNode;
+  /** OL-17：分区锚点 id（不含 #） */
+  id?: string;
+}) {
   return (
-    <section className="space-y-2 pt-3 border-t border-line/70 first:border-t-0 first:pt-0">
-      <h4 className="text-[11px] font-semibold text-ink/55 uppercase tracking-wide">{title}</h4>
+    <section
+      id={id}
+      className="scroll-mt-10 space-y-2 border-t border-line/70 pt-3 first:border-t-0 first:pt-0"
+    >
+      <h4 className="text-[11px] font-semibold uppercase tracking-wide text-ink/55">{title}</h4>
       {children}
     </section>
+  );
+}
+
+/** OL-17：详情分区粘性导航 */
+export function DetailSectionNav({
+  sections,
+}: {
+  sections: Array<{ id: string; label: string }>;
+}) {
+  if (sections.length === 0) return null;
+  return (
+    <nav className="sticky top-0 z-10 -mx-1 mb-2 flex flex-wrap gap-1 border-b border-line/50 bg-surface/95 px-1 py-1.5 backdrop-blur-sm">
+      {sections.map((s) => (
+        <button
+          key={s.id}
+          type="button"
+          className="rounded-full border border-line px-2 py-0.5 text-[10px] text-ink/55 hover:border-brand/40 hover:text-brand"
+          onClick={() => {
+            document.getElementById(s.id)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          }}
+        >
+          {s.label}
+        </button>
+      ))}
+    </nav>
   );
 }
 
@@ -69,6 +106,117 @@ export function TextArea({
       rows={rows}
       className={`w-full text-xs rounded-lg border border-line px-2 py-1.5 resize-y focus:outline-none focus:border-brand/40 ${mono ? 'font-mono' : ''}`}
     />
+  );
+}
+
+/**
+ * 捏脸参数滑块：-100 ~ +100，0 为中性。
+ *
+ * 拖动只改内部 draft，松手 / 失焦 / 300ms 静默才向上提交，
+ * 避免 45 项滑块每帧整档写库（见 docs/8.12/NX9-CHARACTER-FACE-SCULPT-2026-08-12.md）。
+ */
+export function ParamSlider({
+  label,
+  value,
+  onCommit,
+  onInput,
+  hint,
+  low,
+  high,
+  min = -100,
+  max = 100,
+  disabled = false,
+}: {
+  label: string;
+  value: number;
+  onCommit: (v: number) => void;
+  /** 拖动过程立刻回调（不写库）；用于 3D 视口实时变形 */
+  onInput?: (v: number) => void;
+  hint?: string;
+  low: string;
+  high: string;
+  min?: number;
+  max?: number;
+  disabled?: boolean;
+}) {
+  const [draft, setDraft] = useState(value);
+  const dragging = useRef(false);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    if (!dragging.current) setDraft(value);
+  }, [value]);
+
+  useEffect(() => () => {
+    if (timer.current) clearTimeout(timer.current);
+  }, []);
+
+  const commit = (v: number) => {
+    dragging.current = false;
+    if (timer.current) {
+      clearTimeout(timer.current);
+      timer.current = null;
+    }
+    if (v !== value) onCommit(v);
+  };
+
+  const handleInput = (v: number) => {
+    dragging.current = true;
+    setDraft(v);
+    onInput?.(v);
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = setTimeout(() => commit(v), 300);
+  };
+
+  const deviated = draft !== 0;
+
+  return (
+    <div className="space-y-0.5">
+      <div className="flex items-center justify-between gap-2">
+        <span className={`text-[10px] ${deviated ? 'text-ink/70' : 'text-ink/40'}`}>
+          {label}
+          {hint ? <span className="ml-1 font-normal text-ink/30">{hint}</span> : null}
+        </span>
+        <div className="flex items-center gap-1">
+          <span className={`font-mono text-[10px] tabular-nums ${deviated ? 'text-brand' : 'text-ink/35'}`}>
+            {draft > 0 ? `+${draft}` : draft}
+          </span>
+          {deviated && !disabled ? (
+            <button
+              type="button"
+              title="重置为中性"
+              aria-label={`重置 ${label}`}
+              className="rounded p-0.5 text-ink/40 hover:bg-brand/10 hover:text-brand"
+              onClick={() => {
+                setDraft(0);
+                onInput?.(0);
+                commit(0);
+              }}
+            >
+              <RotateCcw size={10} />
+            </button>
+          ) : null}
+        </div>
+      </div>
+      <input
+        type="range"
+        min={min}
+        max={max}
+        step={1}
+        value={draft}
+        disabled={disabled}
+        aria-label={label}
+        className="w-full accent-brand disabled:opacity-40"
+        onChange={(e) => handleInput(Number(e.target.value))}
+        onPointerUp={() => commit(draft)}
+        onKeyUp={() => commit(draft)}
+        onBlur={() => commit(draft)}
+      />
+      <div className="flex justify-between gap-2 text-[9px] leading-tight text-ink/30">
+        <span className="truncate">{low}</span>
+        <span className="truncate text-right">{high}</span>
+      </div>
+    </div>
   );
 }
 

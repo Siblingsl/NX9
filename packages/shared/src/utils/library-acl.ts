@@ -1,8 +1,10 @@
 /**
  * library-acl.ts — 公共库/私有库权限模型（F-038，工作室版）。
  *
- * 公共库只读；私有库读写；「复制到项目私有」；禁止公共库直接删改。
- * 显式管理员开关 allowPublicWrite 默认 false。
+ * - 私有库：读写删
+ * - 公共库：共享包默认只读；Web 工作室启动时 `setLibraryAclConfig({ allowPublicWrite: true })`
+ *   以维护跨项目词典/实体。内置条目仍由 UI 强制「导入副本」只读。
+ * - 「复制到项目私有」始终允许
  */
 export type LibraryScope = 'public' | 'private';
 

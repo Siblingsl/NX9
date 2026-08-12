@@ -95,6 +95,7 @@ export interface DirectorShotCamera {
 
 export interface Director3dCandidate {
   id: string;
+  name?: string;
   shotId: string;
   stateVersion: number;
   imageUrl?: string;
@@ -114,6 +115,17 @@ export interface Director3dCandidate {
   status: Director3dCandidateStatus;
   error?: string;
   createdAt: string;
+  committedAt?: string;
+  commitId?: string;
+}
+
+export interface Director3dCommittedSceneSnapshot {
+  stateVersion: number;
+  candidateId: string;
+  environment: Director3dShotState['environment'];
+  objects: DirectorObject[];
+  camera: DirectorShotCamera;
+  committedAt: string;
 }
 
 export interface Director3dSceneTemplate {
@@ -164,6 +176,7 @@ export interface Director3dShotState {
   candidates: Director3dCandidate[];
   selectedCandidateId?: string | null;
   committedCandidateId?: string | null;
+  committedSnapshot?: Director3dCommittedSceneSnapshot | null;
   dirty: boolean;
   updatedAt: string;
 }
@@ -265,6 +278,7 @@ export function shotStateFromProject(
     candidates: [],
     selectedCandidateId: null,
     committedCandidateId: null,
+    committedSnapshot: null,
     dirty: false,
     updatedAt: new Date().toISOString(),
   };
@@ -352,6 +366,120 @@ export function sceneTemplateFromProject(project: DirectorProject, name: string)
         visible: object.visible,
         locked: object.locked,
       })),
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+/**
+ * 把场景模板深拷贝到当前镜头：替换环境与非角色物体，保留角色以便后续重绑定。
+ */
+export function applySceneTemplateToShotState(
+  state: Director3dShotState,
+  template: Director3dSceneTemplate,
+): Director3dShotState {
+  const templated = projectFromSceneTemplate(template);
+  const characters = state.objects.filter((object) => object.kind === 'character');
+  const sceneObjects = templated.objects.filter((object) => object.kind !== 'character');
+  return {
+    ...state,
+    sceneTemplateId: template.id,
+    environment: {
+      ...state.environment,
+      panoramaUrl: template.environment.panoramaUrl,
+      backgroundColor: template.environment.backgroundColor,
+      groundVisible: template.environment.ground.visible,
+      groundOpacity: template.environment.ground.opacity,
+    },
+    objects: [...clone(sceneObjects), ...clone(characters)],
+    dirty: true,
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+/**
+ * 候选帧上传结果写回。切镜后 shotId 对不上则忽略，避免长时间会话把过期上传写进新镜。
+ */
+export function applyCandidateUploadResult(
+  state: Director3dShotState,
+  input: {
+    candidateId: string;
+    expectedShotId: string;
+    imageUrl?: string;
+    error?: string;
+    /** 无上传通道时允许本地 ready（仍不能 commit Data URL） */
+    allowReadyWithoutUrl?: boolean;
+  },
+): Director3dShotState {
+  if (state.shotId !== input.expectedShotId) return state;
+  if (!state.candidates.some((item) => item.id === input.candidateId)) return state;
+  return {
+    ...state,
+    candidates: state.candidates.map((item) => {
+      if (item.id !== input.candidateId) return item;
+      if (input.error) return { ...item, status: 'failed' as const, error: input.error };
+      if (input.imageUrl) {
+        return { ...item, imageUrl: input.imageUrl, status: 'ready' as const, error: undefined };
+      }
+      if (input.allowReadyWithoutUrl) {
+        return { ...item, status: 'ready' as const, error: undefined };
+      }
+      return { ...item, status: 'failed' as const, error: '候选帧未获得持久化图片 URL' };
+    }),
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+function isDataMediaUrl(url: string | null | undefined): boolean {
+  return Boolean(url?.trim().toLowerCase().startsWith('data:'));
+}
+
+/**
+ * 把 3D 节点草稿里误当作持久 URL 的 Data URL 降回本地草稿，禁止继续提交。
+ */
+export function quarantineDirector3dShotStates(
+  states: Record<string, Director3dShotState>,
+): { states: Record<string, Director3dShotState>; quarantinedCount: number } {
+  let quarantinedCount = 0;
+  const next: Record<string, Director3dShotState> = {};
+  for (const [shotId, state] of Object.entries(states)) {
+    let shotChanged = false;
+    const candidates = state.candidates.map((candidate) => {
+      if (!isDataMediaUrl(candidate.imageUrl)) return candidate;
+      quarantinedCount += 1;
+      shotChanged = true;
+      const keepStatus =
+        candidate.status === 'failed'
+        || candidate.status === 'capturing'
+        || candidate.status === 'uploading';
+      return {
+        ...candidate,
+        localDataUrl: candidate.localDataUrl || candidate.imageUrl,
+        imageUrl: undefined,
+        status: keepStatus ? candidate.status : 'failed' as const,
+        error: candidate.error || '截图仍是本地草稿，请重新上传后再提交',
+      };
+    });
+    next[shotId] = shotChanged ? { ...state, candidates } : state;
+  }
+  return {
+    states: quarantinedCount > 0 ? next : states,
+    quarantinedCount,
+  };
+}
+
+/** 把当前镜头场景恢复到最近一次提交快照；无快照时返回 null。 */
+export function restoreCommittedSnapshot(
+  state: Director3dShotState,
+): Director3dShotState | null {
+  const snapshot = state.committedSnapshot;
+  if (!snapshot) return null;
+  return {
+    ...state,
+    environment: clone(snapshot.environment),
+    objects: clone(snapshot.objects),
+    camera: clone(snapshot.camera),
+    selectedCandidateId: snapshot.candidateId,
+    dirty: false,
     updatedAt: new Date().toISOString(),
   };
 }

@@ -18,6 +18,8 @@ import {
   buildCharacterBiblePrompt,
   refreshCharacterPrompts,
   splitCharacterDisplayName,
+  extractCostumeEntityNames,
+  extractPropEntityNames,
 } from '@nx9/shared';
 import { useWorkspaceDocument } from '../stores/workspace-document';
 import {
@@ -47,6 +49,18 @@ export interface AssetReadinessState {
   missingScenes: string[];
   missingCostumes?: string[];
   missingProps?: string[];
+  /**
+   * P0：服/道缺口为警告，不进入 ready 硬闸。
+   * 与 missingCostumes/missingProps 同值，便于 UI 分层展示。
+   */
+  warnings?: {
+    costumes: string[];
+    props: string[];
+  };
+  /**
+   * OL-09：为 true 时服装/道具缺口计入 ready=false（可选硬拦）。
+   */
+  strictCostumeProp?: boolean;
   /** 已入库但仍缺定妆图的角色（配角与主角共用） */
   missingCharacterRefs?: string[];
   /** 主角缺三视图/设定板 */
@@ -61,6 +75,25 @@ export interface AssetReadinessState {
 
 function uniq(items: string[]): string[] {
   return [...new Set(items.map((item) => item.trim()).filter(Boolean))];
+}
+
+const STRICT_COSTUME_PROP_KEY = 'nx9.assetReadiness.strictCostumeProp';
+
+/** OL-09：服装/道具缺口是否硬拦 ready */
+export function getStrictCostumePropGate(): boolean {
+  try {
+    return localStorage.getItem(STRICT_COSTUME_PROP_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
+export function setStrictCostumePropGate(enabled: boolean): void {
+  try {
+    localStorage.setItem(STRICT_COSTUME_PROP_KEY, enabled ? '1' : '0');
+  } catch {
+    /* ignore */
+  }
 }
 
 function pickNonEmptyText(
@@ -383,34 +416,17 @@ function libraryBacklotLabelSet(kind: 'costume' | 'prop' | 'scene'): Set<string>
   );
 }
 
-/** F-051: 从 Bible 中提取服装名 */
+/** F-051 / R-05: 与一致性检查共用实体抽取表 */
 export function extractCostumeNames(pkg: ScreenplayPackage): string[] {
-  const names = new Set<string>();
-  for (const char of pkg.bible.characters) {
-    const text = [char.appearance, char.personality, char.voiceNotes].filter(Boolean).join(' ');
-    const costumeMatch = text.match(/(?:穿着|身穿|着|穿)[：:]?([^。，；]+)/g);
-    if (costumeMatch) {
-      for (const m of costumeMatch) {
-        names.add(m.replace(/(?:穿着|身穿|着|穿)[：:]?/, '').trim());
-      }
-    }
-  }
-  return [...names].filter(Boolean);
+  return extractCostumeEntityNames(pkg.bible.characters);
 }
 
-/** F-051: 从 Bible 中提取道具名 */
+/** F-051 / R-05: 与一致性检查共用实体抽取表 */
 export function extractPropNames(pkg: ScreenplayPackage): string[] {
-  const names = new Set<string>();
-  for (const scene of pkg.bible.scenes) {
-    const text = [scene.summary, scene.dramaticFunction].filter(Boolean).join(' ');
-    const propMatch = text.match(/(?:道具|物品|摆设)[：:]?([^。，；]+)/g);
-    if (propMatch) {
-      for (const m of propMatch) {
-        names.add(m.replace(/(?:道具|物品|摆设)[：:]?/, '').trim());
-      }
-    }
-  }
-  return [...names].filter(Boolean);
+  return extractPropEntityNames({
+    scenes: pkg.bible.scenes,
+    characters: pkg.bible.characters,
+  });
 }
 
 function buildReadinessState(
@@ -444,11 +460,14 @@ function buildReadinessState(
     .filter((g) => g.missingTurnaround)
     .map((g) => g.name);
 
+  const strictCostumeProp = getStrictCostumePropGate();
   const ready =
     missingCharacters.length === 0 &&
     missingScenes.length === 0 &&
     missingCharacterRefs.length === 0 &&
-    missingCharacterTurnarounds.length === 0;
+    missingCharacterTurnarounds.length === 0 &&
+    (!strictCostumeProp
+      || (missingCostumes.length === 0 && missingProps.length === 0));
 
   return {
     ready,
@@ -460,6 +479,11 @@ function buildReadinessState(
     missingScenes,
     missingCostumes,
     missingProps,
+    warnings: {
+      costumes: missingCostumes,
+      props: missingProps,
+    },
+    strictCostumeProp,
     missingCharacterRefs,
     missingCharacterTurnarounds,
     characterVisualGaps,

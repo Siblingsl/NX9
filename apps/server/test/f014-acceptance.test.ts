@@ -91,13 +91,14 @@ describe('F-014 sound-gen BGM 真接入', () => {
     expect(result.sounds).toHaveLength(2);
   });
 
-  // ─── buildVoiceDramaTimeline：bgmUrl → BGM 轨 ───
+  // ─── buildVoiceDramaTimeline：bgmUrl → BGM 轨（v3 规范 ID：A 前缀 + label） ───
   it('buildVoiceDramaTimeline 传入 bgmUrl 时添加 BGM 音轨', () => {
     const tl = { ...FIXTURE_TIMELINE_V2, durationSec: 30 };
     const updated = buildVoiceDramaTimeline(tl, [], '/bgm/test.mp3');
 
-    const bgmTrack = updated.tracks.find((t) => t.id === 'track-bgm' && t.kind === 'audio');
+    const bgmTrack = updated.tracks.find((t) => t.label === 'BGM' && t.kind === 'audio');
     expect(bgmTrack).toBeDefined();
+    expect(bgmTrack!.id).toMatch(/^A\d+$/);
     expect(bgmTrack!.clips[0].assetUrl).toBe('/bgm/test.mp3');
     expect(bgmTrack!.clips[0].label).toBe('BGM');
     expect(bgmTrack!.clips[0].durationSec).toBe(30);
@@ -107,7 +108,7 @@ describe('F-014 sound-gen BGM 真接入', () => {
     const tl = { ...FIXTURE_TIMELINE_V2, durationSec: 30 };
     const updated = buildVoiceDramaTimeline(tl, [], undefined);
 
-    const bgmTrack = updated.tracks.find((t) => t.id === 'track-bgm');
+    const bgmTrack = updated.tracks.find((t) => t.label === 'BGM');
     expect(bgmTrack).toBeUndefined();
   });
 
@@ -119,10 +120,11 @@ describe('F-014 sound-gen BGM 真接入', () => {
     ];
     const updated = buildVoiceDramaTimeline(tl, voiceLines, '/bgm/ost.mp3');
 
-    const voTrack = updated.tracks.find((t) => t.id === 'track-vo');
-    const bgmTrack = updated.tracks.find((t) => t.id === 'track-bgm');
+    const voTrack = updated.tracks.find((t) => t.label === '对白' && t.kind === 'audio');
+    const bgmTrack = updated.tracks.find((t) => t.label === 'BGM' && t.kind === 'audio');
     expect(voTrack).toBeDefined();
     expect(bgmTrack).toBeDefined();
+    expect(voTrack!.id).not.toBe(bgmTrack!.id);
     expect(voTrack!.clips).toHaveLength(2);
     expect(bgmTrack!.clips[0].assetUrl).toBe('/bgm/ost.mp3');
   });
@@ -159,8 +161,8 @@ describe('F-014 sound-gen BGM 真接入', () => {
     // drama 分支传 bgmUrl
     expect(src).toMatch(/bgmUrl:\s*upstreamSounds\[0\]/);
 
-    // buildVoiceDramaTimeline 传 bgmUrl
-    expect(src).toMatch(/buildVoiceDramaTimeline\(tl,\s*voiceLines,\s*bgmUrl\)/);
+    // buildVoiceDramaTimeline 传 bgmUrl（外层可能套 migrate）
+    expect(src).toMatch(/buildVoiceDramaTimeline\([^)]*voiceLines,\s*bgmUrl\)/);
   });
 
   it('smart-edit-orchestrator：orchestrateDramaTimeline 收到 bgmUrl 时添加 BGM 轨', () => {
@@ -169,8 +171,8 @@ describe('F-014 sound-gen BGM 真接入', () => {
     // bgmUrl 参数声明
     expect(src).toMatch(/bgmUrl\?:\s*string/);
 
-    // BGM 轨注入逻辑
-    const hasBgmInjection = src.includes('track-bgm') && src.includes("label: 'BGM'");
+    // BGM 轨注入逻辑（v3：nextTrackId 分配规范 A 前缀 ID + BGM label）
+    const hasBgmInjection = src.includes("label: 'BGM'") && src.includes("nextTrackId(");
     expect(hasBgmInjection).toBe(true);
 
     // viral 分支也支持

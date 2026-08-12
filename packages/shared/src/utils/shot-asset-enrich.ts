@@ -15,6 +15,8 @@ export interface ShotAssetEnrichInput {
   characterNames?: string[];
   costumeOverrides?: ShotCostumeOverrideLike[];
   propIds?: string[];
+  /** Shot-01：镜头库条目 id */
+  shotAssetId?: string | null;
 }
 
 export interface CostumePromptSource {
@@ -24,6 +26,12 @@ export interface CostumePromptSource {
 }
 
 export interface PropPromptSource {
+  id: string;
+  label: string;
+  prompt: string;
+}
+
+export interface ShotLexiconPromptSource {
   id: string;
   label: string;
   prompt: string;
@@ -60,6 +68,31 @@ export function propSourcesFromWorkspace(items: BacklotWorkspaceItem[]): PropPro
     });
 }
 
+export function shotLexiconSourcesFromWorkspace(items: BacklotWorkspaceItem[]): Array<
+  ShotLexiconPromptSource & { cameraMove?: string; shotSize?: string }
+> {
+  return items
+    .filter((i) => i.kind === 'shot')
+    .map((i) => {
+      const ext = (i.creative ?? {}) as {
+        purpose?: string;
+        cameraMove?: string;
+        shotSize?: string;
+      };
+      return {
+        id: i.id,
+        label: i.label,
+        prompt:
+          i.promptEn?.trim()
+          || i.promptZh?.trim()
+          || ext.purpose?.trim()
+          || i.label,
+        cameraMove: ext.cameraMove,
+        shotSize: ext.shotSize,
+      };
+    });
+}
+
 /** Cos-06：把镜级换装叠到角色 creative，供 enrichPromptWithCharacters 使用 */
 export function applyShotCostumeOverridesToCharacters(
   characters: CharacterProfile[],
@@ -78,7 +111,6 @@ export function applyShotCostumeOverridesToCharacters(
       .filter((o) => o.characterId?.trim())
       .map((o) => [o.characterId!.trim(), o]),
   );
-
   return characters.map((c) => {
     const hit = byName.get(c.name.trim().toLowerCase()) || byCharId.get(c.id);
     if (!hit) return c;
@@ -112,8 +144,7 @@ export function buildShotPropPromptSuffix(
 }
 
 /**
- * 镜级服装覆盖 + 本镜道具 → 追加到生成 Prompt。
- * 服装通过改写角色 costume 字段进入 character enrich；道具单独后缀。
+ * 镜级服装覆盖 + 本镜道具 + 可选镜头库 Prompt → 追加到生成 Prompt。
  */
 export function enrichPromptWithShotAssets(
   basePrompt: string,
@@ -121,12 +152,20 @@ export function enrichPromptWithShotAssets(
   characters: CharacterProfile[],
   costumes: CostumePromptSource[],
   props: PropPromptSource[],
+  shotLexicon?: ShotLexiconPromptSource[],
 ): string {
   const patched = applyShotCostumeOverridesToCharacters(characters, shot.costumeOverrides, costumes);
   let next = enrichPromptWithCharacters(basePrompt, patched);
   const propSuffix = buildShotPropPromptSuffix(shot.propIds, props);
   if (propSuffix) {
     next = next.trim() ? `${next.trim()}\n\n${propSuffix}` : propSuffix;
+  }
+  if (shot.shotAssetId?.trim() && shotLexicon?.length) {
+    const hit = shotLexicon.find((s) => s.id === shot.shotAssetId);
+    if (hit?.prompt?.trim()) {
+      const lex = `[Camera lexicon ${hit.label}]: ${hit.prompt.trim()}`;
+      next = next.trim() ? `${next.trim()}\n\n${lex}` : lex;
+    }
   }
   return next;
 }

@@ -65,16 +65,26 @@ export function StoryboardPreviewFrameEditor({
           />
           <div className="kp__row">
             <select
-              value={frame.stylePreset ?? ''}
-              onChange={(e) => onUpdate({ stylePreset: e.target.value || null })}
+              value={frame.styleAssetId || frame.stylePreset || ''}
+              onChange={(e) => {
+                const raw = e.target.value || '';
+                const hit = styleOptions.find(
+                  (s) => s.id === raw || s.builtinKey === raw || s.name === raw,
+                );
+                onUpdate({
+                  stylePreset: hit ? (hit.builtinKey || hit.name) : (raw || null),
+                  styleAssetId: hit?.id ?? null,
+                  userModified: true,
+                });
+              }}
               onMouseDown={stop}
               className="kp__field-input"
               style={{ flex: 1, minWidth: 120 }}
-              title="从风格预设点选（Sty-03）；线稿等内置值保留"
+              title="从风格预设点选（写入 styleAssetId + stylePreset）"
             >
               <option value="">风格 preset…</option>
               {styleOptions.map((s) => (
-                <option key={s.id} value={s.builtinKey || s.name}>
+                <option key={s.id} value={s.id}>
                   {s.name}
                 </option>
               ))}

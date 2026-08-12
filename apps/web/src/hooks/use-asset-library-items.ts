@@ -2,6 +2,8 @@ import { useMemo } from 'react';
 import type { AssetLibraryItem, AssetLibraryKind, AssetScope } from '@nx9/shared';
 import {
   BUILTIN_BACKLOT_TEMPLATES,
+  BUILTIN_PUBLIC_SOUND_ASSETS,
+  BUILTIN_STYLE_PRESETS,
   characterToItem,
   isAssetActive,
   listBacklotTemplates,
@@ -15,6 +17,10 @@ import {
 import { useWorkspaceDocument } from '../stores/workspace-document';
 import { usePublicAssetLibrary } from '../stores/public-asset-library';
 
+function nameKey(value: string | undefined): string {
+  return (value ?? '').trim().toLowerCase();
+}
+
 export function useAssetLibraryItems(scope: AssetScope, kind?: AssetLibraryKind) {
   const characters = useWorkspaceDocument((s) => s.characters.characters);
   const sounds = useWorkspaceDocument((s) => s.soundLibrary.sounds);
@@ -25,6 +31,12 @@ export function useAssetLibraryItems(scope: AssetScope, kind?: AssetLibraryKind)
   return useMemo(() => {
     const privateItems: AssetLibraryItem[] = [];
     const publicItems: AssetLibraryItem[] = [];
+    const builtinSoundNames = new Set(
+      BUILTIN_PUBLIC_SOUND_ASSETS.map((b) => nameKey(b.name)).filter(Boolean),
+    );
+    const builtinStyleNames = new Set(
+      BUILTIN_STYLE_PRESETS.map((b) => nameKey(b.name)).filter(Boolean),
+    );
 
     for (const c of characters) {
       if (!isAssetActive(c)) continue;
@@ -60,15 +72,19 @@ export function useAssetLibraryItems(scope: AssetScope, kind?: AssetLibraryKind)
       publicItems.push(characterToItem(c, 'public'));
     }
     for (const s of resolvePublicSounds(publicPayload.sounds)) {
+      const builtin = Boolean(s.builtinKey) || s.id.startsWith('builtin-sound-');
       publicItems.push({
         ...soundToItem(s, 'public'),
-        builtin: Boolean(s.builtinKey) || s.id.startsWith('builtin-sound-'),
+        builtin,
+        overridesBuiltin: !builtin && builtinSoundNames.has(nameKey(s.name)),
       });
     }
     for (const s of resolveStylePresets(publicPayload.styles ?? [])) {
+      const builtin = Boolean(s.builtinKey);
       publicItems.push({
         ...styleToItem(s, 'public'),
-        builtin: Boolean(s.builtinKey),
+        builtin,
+        overridesBuiltin: !builtin && builtinStyleNames.has(nameKey(s.name)),
       });
     }
     for (const tpl of publicPayload.templates) {

@@ -17,13 +17,14 @@ export interface DirectorCanvasProps {
   nodeCount?: number;
   onRendererReady?: (renderer: { dispose: () => void }) => void;
   onGLCreated?: (gl: WebGLRenderer) => void;
+  onContextLost?: () => void;
   viewMode?: 'director' | 'camera';
   lineArtUrl?: string;
   compareMode?: boolean;
   diagnosticMode?: boolean;
 }
 
-export function DirectorCanvas({ performanceMode = 'normal', onCaptureReady, nodeCount = 0, onRendererReady, onGLCreated, viewMode: viewModeProp, lineArtUrl, compareMode, diagnosticMode }: DirectorCanvasProps) {
+export function DirectorCanvas({ performanceMode = 'normal', onCaptureReady, nodeCount = 0, onRendererReady, onGLCreated, onContextLost, viewMode: viewModeProp, lineArtUrl, compareMode, diagnosticMode }: DirectorCanvasProps) {
   const storeViewMode = useDirectorStore((s) => s.viewMode);
   const viewMode = viewModeProp ?? storeViewMode;
   const controlsRef = useRef<OrbitControlsImpl | null>(null);
@@ -43,10 +44,17 @@ export function DirectorCanvas({ performanceMode = 'normal', onCaptureReady, nod
       }}
       onCreated={({ gl, scene }) => {
         gl.setClearColor('#0f1115');
+        const canvas = gl.domElement;
+        const onLost = (event: Event) => {
+          event.preventDefault();
+          onContextLost?.();
+        };
+        canvas.addEventListener('webglcontextlost', onLost, false);
         onGLCreated?.(gl);
         onCaptureReady?.(() => captureViewport(gl));
         onRendererReady?.({
           dispose: () => {
+            canvas.removeEventListener('webglcontextlost', onLost, false);
             scene.traverse((child) => {
               const obj = child as import('three').Mesh;
               if (obj.geometry) obj.geometry.dispose();

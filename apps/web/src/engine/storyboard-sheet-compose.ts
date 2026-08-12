@@ -357,7 +357,7 @@ export function deskSheetCellsFromBreakdownShots(
     storyboardUrlByShotId?: Map<string, string | undefined>;
     workspaceShotById?: Map<string, Pick<
       StoryboardShot,
-      | 'firstFrameAssetId'
+      | 'lineArtUrl'
       | 'subtitleText'
       | 'lighting'
       | 'colorGrade'
@@ -397,7 +397,7 @@ export function deskSheetCellsFromBreakdownShots(
         || frameAny?.imageUrl?.trim()
         || shot.referenceImageUrl?.trim()
         || urlByShot?.get(shot.id)?.trim()
-        || ws?.firstFrameAssetId?.trim()
+        || ws?.lineArtUrl?.trim()
         || null;
 
       const dialogueRaw =

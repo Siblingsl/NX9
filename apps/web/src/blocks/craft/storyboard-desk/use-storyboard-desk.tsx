@@ -1,6 +1,5 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Clock, ImagePlus, Loader2, Pencil } from 'lucide-react';
-import { type NodeProps, useReactFlow } from '@xyflow/react';
+import { type NodeProps, useEdges, useNodes, useReactFlow } from '@xyflow/react';
 import {
   type AssetLibraryKind,
   type BacklotWorkspaceItem,
@@ -10,20 +9,16 @@ import {
   buildLineArtPanelGridPrompt,
   LINE_ART_GRID_PAGE_SIZE,
   pickLineArtGridLayout,
-  createScriptBreakdownPromptPack,
-  parseScriptBreakdownPromptPack,
-  DEFAULT_SCRIPT_BREAKDOWN_PROMPTS,
   normalizeScriptBreakdownConfig,
   normalizeScriptBreakdownPrompts,
   screenplayFullText,
-  type ScriptBreakdownPromptPack,
-  type ScriptBreakdownPromptTemplates,
   buildPictureGenDelegatePatch,
   emptyStoryboardPreview,
   flattenScriptBreakdownShots,
   getEpisodeContactSheet,
   buildLineArtShotPatch,
   patchChainShot,
+  CHAIN_STORYBOARD_HANDOFF_HASH_SCHEMA_VERSION,
   chainStoryboardHash,
   lineArtVersionHash,
   readChainStoryboard,
@@ -32,7 +27,6 @@ import {
   type StoryboardPreviewPictureSettings,
   bindStoryboardShotAssets,
   writeBackBreakdownPreviewImage,
-  BUILTIN_COMPOSITION_TEMPLATES,
   type ScriptBreakdownPayload,
   type ScriptBreakdownShot,
   type StoryboardPreviewFrame,
@@ -40,13 +34,18 @@ import {
   costumeSourcesFromWorkspace,
   propSourcesFromWorkspace,
   enrichPromptWithShotAssets,
-  getSceneCreative,
+  shotLexiconSourcesFromWorkspace,
+  BUILTIN_BACKLOT_TEMPLATES,
+  getShotCreative,
+  templateToWorkspaceItem,
 } from '@nx9/shared';
+import { usePublicAssetLibrary } from '../../../stores/public-asset-library';
 import { BlockShell } from '../../shared/BlockShell';
 import { ScreenModal } from '../../../components/ui/ScreenModal';
 import { useActivityLog } from '../../../stores/activity-log';
 import { useWorkspaceDocument } from '../../../stores/workspace-document';
-import { isDevPromptEnabled, useDevPromptOverrides } from '../../../stores/dev-prompt-overrides';
+import { isDevPromptEnabled } from '../../../stores/dev-prompt-overrides';
+import { persistChainStoryboardHygiene } from '../../../engine/chain-storyboard-utils';
 import {
   applyScriptBreakdownPayload,
   runProductionScriptBreakdownForEpisodes,
@@ -57,13 +56,18 @@ import {
   applyDeskBreakdown,
   buildBreakdownDiagnostics,
   buildEpisodeReadyMeta,
+  captureDeskUndoSnapshot,
+  serializeDeskSessionDraft,
+  parseDeskSessionDraft,
   computeCompositionStats,
+  deskLineArtUrl,
+  type DeskUndoSnapshot,
   filterShots,
   isShotBound,
   isShotComposed,
   mergeIncrementalBreakdown,
-  mergeShotsInBreakdown,
   packageSourceHash,
+  removeFramesForShotIds,
   removeShotFromBreakdown,
   reorderShotsInBreakdown,
   resolveDeskActiveEpisodeId,
@@ -71,12 +75,10 @@ import {
   splitShotInBreakdown,
   stripEpisodeConfirmation,
   type ShotListFilter,
-  type StoryboardDeskMode,
 } from '../../../engine/storyboard-desk-runner';
 import { checkAssetReadinessInEdges, runStoryboardPreflight } from '../../../engine/asset-readiness';
 import { useToast } from '../../../stores/toast';
 import { confirmDelete, askConfirm } from '../../../stores/confirm-dialog';
-import { getAllChainShots } from '../../../engine/chain-storyboard-aggregate';
 import { AssetMentionInput } from '../../../engine/stage-deck/chrome/asset-mention/AssetMentionInput';
 import { StoryboardPreviewWorkspace } from '../../../engine/stage-deck/chrome/attached-workspace/storyboard-preview/StoryboardPreviewWorkspace';
 import { ComposerModelSelect } from '../../../engine/stage-deck/chrome/attached-workspace/composer/ComposerModelSelect';
@@ -107,12 +109,16 @@ import { useFlowCommands } from '../../../stores/flow-commands';
 import '../storyboard-desk.css';
 import '../storyboard-desk.v2.css';
 
-import { useUpstreamBreakdown, useUpstreamScreenplay, findUpstreamScriptDeskId, compact, clonePayload, namesToText, textToNames, stripMentionToken, scenePresetName, characterMeta, GLOBAL_MENTION_KINDS, CHARACTER_MENTION_KINDS, SCENE_MENTION_KINDS, patchShotInPayload, createShotEditDraft, shotDialogueLine, SHOT_SIZES, CAMERA_MOVES, type ShotEditDraft, type StudioTab } from './helpers';
+import { useUpstreamBreakdown, useUpstreamScreenplay, findUpstreamScriptDeskId, compact, clonePayload, stripMentionToken, scenePresetName, patchShotInPayload, createShotEditDraft, shotDialogueLine, type ShotEditDraft, type StudioTab } from './helpers';
 import { ShotStoryCell } from './shot-story-cell';
+import ShotEditModal from './shot-edit-modal';
+import StoryboardStaleBanner from './stale-banner';
 import HandoffPanel from './handoff-panel';
 import BreakdownPanel from './breakdown-panel';
 import ComposePanel from './compose-panel';
 import GridPanel from './grid-panel';
+import { PipelineBar } from './pipeline-bar';
+import { StoryboardDeskDevPack } from './desk-dev-pack';
 export function useStoryboardDesk(props: NodeProps) {
   const { updateNodeData, getEdges, getNodes } = useReactFlow();
   const appendLog = useActivityLog((s) => s.append);
@@ -154,6 +160,11 @@ export function useStoryboardDesk(props: NodeProps) {
     if (status === 'running' && !breakingDown) {
       updateNodeData(props.id, { status: 'idle', breakdownProgress: null });
     }
+    persistChainStoryboardHygiene(
+      updateNodeData,
+      props.id,
+      (props.data ?? {}) as Record<string, unknown>,
+    );
     // 仅挂载时检查一次
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -169,6 +180,41 @@ export function useStoryboardDesk(props: NodeProps) {
   );
   const costumeOptions = useMemo(() => costumeSourcesFromWorkspace(workspaceItems), [workspaceItems]);
   const propOptions = useMemo(() => propSourcesFromWorkspace(workspaceItems), [workspaceItems]);
+  const publicTemplates = usePublicAssetLibrary((s) => s.payload.templates);
+  const shotLexiconOptions = useMemo(() => {
+    const fromPublic = publicTemplates
+      .filter((t) => t.kind === 'shot' && !t.deletedAt)
+      .map((t) => templateToWorkspaceItem(t))
+      .filter((x): x is NonNullable<typeof x> => Boolean(x));
+    const fromBuiltin = BUILTIN_BACKLOT_TEMPLATES
+      .filter((t) => t.kind === 'shot')
+      .map((t) => templateToWorkspaceItem(t))
+      .filter((x): x is NonNullable<typeof x> => Boolean(x));
+    const fromWorkspace = workspaceItems.filter((i) => i.kind === 'shot');
+    const byId = new Map<string, (typeof fromWorkspace)[number]>();
+    for (const item of [...fromBuiltin, ...fromPublic, ...fromWorkspace]) {
+      byId.set(item.id, item);
+    }
+    return shotLexiconSourcesFromWorkspace([...byId.values()]);
+  }, [publicTemplates, workspaceItems]);
+  const shotLexiconById = useMemo(() => {
+    const map = new Map<string, ReturnType<typeof getShotCreative> & { label: string; cameraMove?: string; shotSize?: string }>();
+    const pool = [
+      ...BUILTIN_BACKLOT_TEMPLATES.filter((t) => t.kind === 'shot').map((t) => templateToWorkspaceItem(t)),
+      ...publicTemplates.filter((t) => t.kind === 'shot').map((t) => templateToWorkspaceItem(t)),
+      ...workspaceItems.filter((i) => i.kind === 'shot'),
+    ].filter((x): x is NonNullable<typeof x> => Boolean(x));
+    for (const item of pool) {
+      const ext = getShotCreative(item);
+      map.set(item.id, {
+        ...ext,
+        label: item.label,
+        cameraMove: ext.cameraMove,
+        shotSize: ext.shotSize,
+      });
+    }
+    return map;
+  }, [publicTemplates, workspaceItems]);
   const currentEpisodeId = activeEpisodeId ?? payload?.episodes[0]?.id ?? null;
   const confirmedEpisodeIds = Array.isArray(props.data?.confirmedEpisodeIds)
     ? (props.data.confirmedEpisodeIds as string[])
@@ -190,24 +236,49 @@ export function useStoryboardDesk(props: NodeProps) {
     prevConfirmedRef.current = { episodeId: currentEpisodeId, confirmed: currentEpisodeConfirmed };
   }, [currentEpisodeConfirmed, currentEpisodeId]);
 
-  /** S-01: 分镜表草稿自动暂存（sessionStorage，同一浏览器会话内恢复） */
+  /** S-01: 分镜台会话草稿（镜表 + 预览帧 + 确认态） */
   const draftKey = `nx9-sb-draft-${props.id}`;
+  const previewDraftSig = useMemo(() => {
+    const preview = props.data?.storyboardPreview as StoryboardPreviewPayload | undefined;
+    const frames = preview?.frames ?? [];
+    return [
+      frames.length,
+      frames.map((f) => `${f.id}:${f.imageUrl ?? ''}`).join(','),
+      preview?.contactSheetUrl ?? '',
+      JSON.stringify(preview?.contactSheetsByEpisode ?? {}),
+    ].join('|');
+  }, [props.data?.storyboardPreview]);
   useEffect(() => {
     if (!payload) return;
     try {
-      sessionStorage.setItem(draftKey, JSON.stringify(payload));
+      const live = (getNodes().find((n) => n.id === props.id)?.data ?? props.data) as Record<string, unknown>;
+      sessionStorage.setItem(draftKey, JSON.stringify(serializeDeskSessionDraft(live, payload)));
     } catch { /* ignore quota */ }
-  }, [draftKey, payload]);
+  }, [confirmedEpisodeIds, draftKey, getNodes, payload, previewDraftSig, props.data, props.id]);
 
-  /** S-01: 无镜表时尝试从草稿恢复 */
+  /** S-01: 无镜表时从草稿恢复（兼容 v1 仅镜表） */
   useEffect(() => {
     if (payload) return;
     try {
       const raw = sessionStorage.getItem(draftKey);
       if (!raw) return;
-      const draft = JSON.parse(raw) as ScriptBreakdownPayload;
-      if (!draft?.version) return;
-      applyScriptBreakdownPayload(props.id, draft);
+      const parsed = parseDeskSessionDraft(raw);
+      if (!parsed) return;
+      if (parsed.kind === 'v2') {
+        const snap = parsed.draft.snapshot;
+        applyDeskBreakdown(props.id, snap.payload, updateNodeData, {
+          confirmedEpisodeIds: snap.confirmedEpisodeIds,
+          gridConfirmed: snap.gridConfirmed,
+          chainStoryboard: snap.chainStoryboard,
+        });
+        updateNodeData(props.id, {
+          storyboardPreview: snap.storyboardPreview ?? emptyStoryboardPreview(),
+          contactSheetUrl: snap.contactSheetUrl,
+        });
+        appendLog('已从本次会话草稿恢复镜表/预览/确认态');
+        return;
+      }
+      applyScriptBreakdownPayload(props.id, parsed.payload);
       appendLog('已从本次会话草稿恢复镜表');
     } catch { /* ignore corrupted draft */ }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -263,19 +334,29 @@ export function useStoryboardDesk(props: NodeProps) {
   const [sheetComposing, setSheetComposing] = useState(false);
   const batchRunning = batchMode !== null;
   const lineArtAbortRef = useRef<AbortController | null>(null);
-  /** X-06: 本地撤销栈，仅 mirror scriptBreakdown 结构（不强制恢复确认） */
-  const undoStackRef = useRef<ScriptBreakdownPayload[]>([]);
+  /** SB-OL-12: 单镜线稿 / 增量补拆的请求控制器 + 拼版写回代际（关台取消需全覆盖） */
+  const singleLineArtAbortRef = useRef<AbortController | null>(null);
+  const incrementalAbortRef = useRef<AbortController | null>(null);
+  const sheetEpochRef = useRef(0);
+  /** X-06: 本地撤销栈（镜表 + 预览帧 + 确认态，改字段/重置可悔） */
+  const undoStackRef = useRef<DeskUndoSnapshot[]>([]);
+  // SB-OL-13: ref 变化不触发渲染，按钮禁用态需用 state 跟踪栈深
+  const [undoDepth, setUndoDepth] = useState(0);
   const pushUndo = useCallback((currentPayload: ScriptBreakdownPayload | undefined) => {
     if (!currentPayload) return;
+    const live = (getNodes().find((n) => n.id === props.id)?.data ?? props.data) as Record<string, unknown>;
     const stack = undoStackRef.current;
-    stack.push(JSON.parse(JSON.stringify(currentPayload)));
+    stack.push(captureDeskUndoSnapshot(live, currentPayload));
     if (stack.length > 20) stack.shift();
-  }, []);
+    setUndoDepth(stack.length);
+  }, [getNodes, props.data, props.id]);
   /** F-016: 多集拆镜队列状态 */
   const [queueState, setQueueState] = useState<EpisodeQueueState>(() => createEpisodeQueue([]));
   const [queueProgress, setQueueProgress] = useState<QueueProgress>(() => ({ total: 0, current: 0, currentId: null, status: 'idle', succeeded: 0, failed: 0, skipped: 0, errorList: [] }));
   const queuePauseRef = useRef<(() => void) | null>(null);
   const queueCancelRef = useRef(false);
+  /** SB-OL-06: 当前集的拆镜请求控制器 —「跳过」需中止在途请求而非等它拆完 */
+  const episodeAbortRef = useRef<AbortController | null>(null);
   const [queueCurrentTitle, setQueueCurrentTitle] = useState('');
   /** F-016: 队列状态的 mutable ref（runner 通过它读暂停状态） */
   const queueStateRef = useRef(queueState);
@@ -289,7 +370,16 @@ export function useStoryboardDesk(props: NodeProps) {
     const stack = undoStackRef.current;
     if (stack.length === 0 || deskBusy) return;
     const prev = stack.pop()!;
-    applyDeskBreakdown(props.id, prev, updateNodeData, {});
+    setUndoDepth(stack.length);
+    applyDeskBreakdown(props.id, prev.payload, updateNodeData, {
+      confirmedEpisodeIds: prev.confirmedEpisodeIds,
+      gridConfirmed: prev.gridConfirmed,
+      chainStoryboard: prev.chainStoryboard,
+    });
+    updateNodeData(props.id, {
+      storyboardPreview: prev.storyboardPreview ?? emptyStoryboardPreview(),
+      contactSheetUrl: prev.contactSheetUrl,
+    });
     appendLog('已撤销');
   }, [deskBusy, props.id, updateNodeData, appendLog]);
 
@@ -374,8 +464,14 @@ export function useStoryboardDesk(props: NodeProps) {
         cancelLabel: '继续任务',
       });
       if (!ok) return;
+      // SB-OL-12: 关台取消须覆盖全部在途任务（批量/单镜线稿、增量补拆、拼版写回）
       lineArtAbortRef.current?.abort();
       lineArtAbortRef.current = null;
+      singleLineArtAbortRef.current?.abort();
+      singleLineArtAbortRef.current = null;
+      incrementalAbortRef.current?.abort();
+      incrementalAbortRef.current = null;
+      sheetEpochRef.current += 1;
       setBatchMode(null);
       setBatchProgress(null);
       setGeneratingShotId(null);
@@ -472,6 +568,36 @@ export function useStoryboardDesk(props: NodeProps) {
   );
 
   const previewPayloadEarly = props.data?.storyboardPreview as StoryboardPreviewPayload | undefined;
+
+  /**
+   * SB-OL-02: 不变量守护 —「本集已确认」期间任何写回改动了本集帧
+   * （含构图页嵌入的 StoryboardPreviewWorkspace 单帧重生/上传/批量出图），
+   * 都必须摘除本集确认。桌面自身的写回路径已在同一次更新里同步摘除
+   * （摘除后 confirmed 变 false，此 effect 不会二次触发）；
+   * 这里兜底覆盖所有绕过桌面 handler 的写回入口。
+   */
+  const episodeFramesSignature = useMemo(() => {
+    return (previewPayloadEarly?.frames ?? [])
+      .filter((f) => f.sourceShotId && currentEpisodeShotIds.has(f.sourceShotId))
+      .map((f) => `${f.sourceShotId}:${f.imageUrl ?? ''}`)
+      .sort()
+      .join('|');
+  }, [previewPayloadEarly, currentEpisodeShotIds]);
+  const prevFramesSigRef = useRef<{ episodeId: string | null; sig: string } | null>(null);
+  useEffect(() => {
+    const prev = prevFramesSigRef.current;
+    prevFramesSigRef.current = { episodeId: currentEpisodeId, sig: episodeFramesSignature };
+    // 首次挂载 / 切集导致的签名变化不算「内容变更」
+    if (!prev || prev.episodeId !== currentEpisodeId) return;
+    if (prev.sig === episodeFramesSignature) return;
+    if (!currentEpisodeConfirmed || !currentEpisodeId) return;
+    updateNodeData(props.id, (node) => ({
+      ...((node.data ?? {}) as Record<string, unknown>),
+      ...stripEpisodeConfirmation((node.data ?? {}) as Record<string, unknown>, currentEpisodeId),
+    }));
+    appendLog('分镜台：本集线稿已变更，确认状态已撤销');
+  }, [appendLog, currentEpisodeConfirmed, currentEpisodeId, episodeFramesSignature, props.id, updateNodeData]);
+
   const storyboardUrlMapEarly = useMemo(() => {
     const map = new Map<string, string | undefined>();
     // Q-04 优先级 1: 本节点 storyboardPreview 帧（SSOT）
@@ -480,9 +606,9 @@ export function useStoryboardDesk(props: NodeProps) {
         map.set(frame.sourceShotId, frame.imageUrl);
       }
     }
-    // Q-04 优先级 2: 本节点 chainStoryboard 镜图
+    // Q-04 优先级 2: 本节点 chain 线稿（不含导演关键帧）
     for (const s of storyboardShots) {
-      const url = s.lineArtUrl || s.firstFrameAssetId;
+      const url = deskLineArtUrl(s);
       if (url && !map.get(s.id)) map.set(s.id, url);
     }
     return map;
@@ -523,16 +649,20 @@ export function useStoryboardDesk(props: NodeProps) {
     [characterNameSet, previewPayloadEarly, sceneNameSet, shotFilter, storyboardUrlMapEarly, visibleShots],
   );
 
+  // SB-OL-08: getNodes/getEdges 是稳定引用，useMemo 永不重算；
+  // 换用响应式 useNodes/useEdges，连线/上游设定变化时就绪条与「未连图像」chip 实时刷新
+  const flowNodes = useNodes();
+  const flowEdges = useEdges();
   const connectedPictureGenId = useMemo(
-    () => resolveConnectedPictureGenId(props.id, getNodes(), getEdges()),
-    [props.id, getNodes, getEdges],
+    () => resolveConnectedPictureGenId(props.id, flowNodes as any, flowEdges as any),
+    [props.id, flowNodes, flowEdges],
   );
 
   const readiness = useMemo(() => {
     try {
-      return checkAssetReadinessInEdges(props.id, getNodes() as any, getEdges() as any);
+      return checkAssetReadinessInEdges(props.id, flowNodes as any, flowEdges as any);
     } catch { return null; }
-  }, [props.id, getNodes, getEdges]);
+  }, [props.id, flowNodes, flowEdges]);
   const ready = readiness?.ready ?? false;
   const preflightMode: 'soft' | 'hard' = (props.data as Record<string, unknown>)?.preflightMode === 'hard' ? 'hard' : 'soft';
   /** F-017: 强约束开关 — 启用后无构图模板不得出图 */
@@ -589,9 +719,19 @@ export function useStoryboardDesk(props: NodeProps) {
       if (!ok) return;
     }
     applyBreakdownPayload(upstream, '已导入旧镜表（迁移路径）');
+    // SB-OL-09: 旧镜表并非由当前成稿包拆出，写哨兵 hash 保证 stale 检测可触发；
+    // 上游存在 confirmed package 时 Banner 会诚实提示「与当前镜表不同步」，可「稍后」关闭
+    updateNodeData(props.id, {
+      breakdownJob: {
+        phase: 'done',
+        sourcePackageId: 'legacy-import',
+        sourcePackageHash: 'legacy-import',
+        startedAt: new Date().toISOString(),
+      },
+    });
     setStudioTab('grid');
     setStudioOpen(true);
-  }, [applyBreakdownPayload, local, upstream]);
+  }, [applyBreakdownPayload, local, props.id, updateNodeData, upstream]);
 
   /** 主路径：从编剧台 confirmed package 拆镜 */
   const breakdownFromPackage = useCallback(async (_episodeIndex?: number, multiEpisode?: boolean) => {
@@ -698,6 +838,9 @@ export function useStoryboardDesk(props: NodeProps) {
       useToast.getState().push({ message: gate.reason, variant: 'info' });
     }
     setIncrementalBusy(true);
+    // SB-OL-12: 增量补拆挂控制器，关台取消能中止在途请求
+    const incAbort = new AbortController();
+    incrementalAbortRef.current = incAbort;
     try {
       const cfg = (props.data as Record<string, unknown>)?.scriptBreakdownConfig as
         import('@nx9/shared').ScriptBreakdownConfig | undefined;
@@ -707,7 +850,8 @@ export function useStoryboardDesk(props: NodeProps) {
         sourceText: text,
         config: cfg ? normalizeScriptBreakdownConfig(cfg) : undefined,
         prompts: pro ? normalizeScriptBreakdownPrompts(pro) : undefined,
-      });
+      }, { signal: incAbort.signal });
+      if (incAbort.signal.aborted) { appendLog('增量补拆已取消 · 镜表不变'); return; }
       if (!result.ok || !result.payload) throw new Error('API 返回异常');
       const incremental = result.payload;
       const existing = payload ?? { version: 1, title: '', sourceText: '', generatedAt: new Date().toISOString(), episodes: [] };
@@ -720,15 +864,31 @@ export function useStoryboardDesk(props: NodeProps) {
         setStudioTab('grid');
         return;
       }
+      // SB-OL-14: AI 每次生成新 id，无法按 id 去重；按正文/标题归一比对，
+      // 命中的镜在预览里标「疑似重复」提醒用户核对后再合并
+      const normalizeShotText = (s: ScriptBreakdownShot) =>
+        (s.scriptText || s.title || '').replace(/\s+/g, '').slice(0, 80);
+      const existingTexts = new Set(
+        flattenScriptBreakdownShots(existing).map(normalizeShotText).filter(Boolean),
+      );
+      const isSuspectDuplicate = (s: ScriptBreakdownShot) => {
+        const key = normalizeShotText(s);
+        return Boolean(key) && existingTexts.has(key);
+      };
+      const suspectCount = newShots.filter(isSuspectDuplicate).length;
       const previewLines = newShots.slice(0, 15).map((s) =>
-        `${s.sceneCode || `#${s.index}`} ${s.title || ''}`.trim(),
+        `${s.sceneCode || `#${s.index}`} ${s.title || ''}${isSuspectDuplicate(s) ? '　⚠ 疑似重复' : ''}`.trim(),
       ).join('\n');
       const moreHint = newShots.length > 15 ? `\n... 共 ${newShots.length} 镜` : '';
+      const dupHint = suspectCount > 0
+        ? `\n\n⚠ 有 ${suspectCount} 镜与现有镜正文相同（疑似重复补拆），合并前请核对。`
+        : '';
       const ok = await askConfirm({
         title: '增量补拆预览',
-        description: `将新增 ${newShots.length} 镜：\n\n${previewLines}${moreHint}\n\n合并前请核对镜号与分期。`,
+        description: `将新增 ${newShots.length} 镜：\n\n${previewLines}${moreHint}${dupHint}\n\n合并前请核对镜号与分期。`,
         confirmLabel: '合并入镜表',
         cancelLabel: '取消',
+        ...(suspectCount > 0 ? { tone: 'danger' as const } : {}),
       });
       if (!ok) { appendLog('增量补拆已取消 · 镜表不变'); return; }
       applyDeskBreakdown(props.id, merged, updateNodeData, stripEpisodeConfirmation(props.data, currentEpisodeId));
@@ -736,9 +896,14 @@ export function useStoryboardDesk(props: NodeProps) {
       appendLog(`增量补拆完成 · 新增 ${newShots.length} 镜合并入镜表`);
       setStudioTab('grid');
     } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      appendLog(`[SB_BREAKDOWN_FAIL] 增量补拆失败：${msg}`);
+      if (incAbort.signal.aborted) {
+        appendLog('增量补拆已取消 · 镜表不变');
+      } else {
+        const msg = e instanceof Error ? e.message : String(e);
+        appendLog(`[SB_BREAKDOWN_FAIL] 增量补拆失败：${msg}`);
+      }
     } finally {
+      if (incrementalAbortRef.current === incAbort) incrementalAbortRef.current = null;
       setIncrementalBusy(false);
     }
   }, [appendLog, incrementalText, payload, preflightMode, props.data, props.id, readiness, updateNodeData, upstreamPackage, currentEpisodeId]);
@@ -769,6 +934,8 @@ export function useStoryboardDesk(props: NodeProps) {
 
   const handleQueueSkip = useCallback(() => {
     setQueueState((prev) => { const s = queueSkipEpisode(prev); setQueueProgress(buildProgress(s)); return s; });
+    // SB-OL-06: 运行中点跳过 → 中止当前集在途请求；暂停中点跳过 → 唤醒循环走 skip 分支
+    episodeAbortRef.current?.abort();
     queueResumeRef.current?.();
   }, [buildProgress]);
 
@@ -858,6 +1025,19 @@ export function useStoryboardDesk(props: NodeProps) {
       const body = (episodeData?.bodyMd ?? ep.bodyMd ?? '').trim();
       setQueueCurrentTitle(epTitle);
 
+      // SB-OL-06: 用户已点「跳过」（暂停中点击 / 请求发起前点击）→ 本集不再发起请求
+      if (queueStateRef.current.skipped.includes(ep.id)) {
+        if (!initQs.skipped.includes(ep.id)) initQs.skipped.push(ep.id);
+        appendLog(`分镜台 · 已跳过第 ${idx + 1}/${episodes.length} 集：${epTitle}`);
+        idx++;
+        initQs.index = idx;
+        if (idx >= episodes.length) initQs.status = 'done';
+        const snap = { ...initQs };
+        setQueueState(snap);
+        setQueueProgress(buildProgress(snap));
+        continue;
+      }
+
       const progress: QueueProgress = {
         total: episodes.length,
         current: idx,
@@ -889,6 +1069,12 @@ export function useStoryboardDesk(props: NodeProps) {
         continue;
       }
 
+      // SB-OL-06: 每集独立控制器，链接外层 signal —「跳过」只中止当前集，不影响队列
+      const epAbort = new AbortController();
+      const onOuterAbort = () => epAbort.abort();
+      if (signal?.aborted) epAbort.abort();
+      signal?.addEventListener('abort', onOuterAbort);
+      episodeAbortRef.current = epAbort;
       try {
         const live = (
           getNodes().find((n) => n.id === props.id)?.data as Record<string, unknown> | undefined
@@ -918,7 +1104,7 @@ export function useStoryboardDesk(props: NodeProps) {
           existingPayload,
           config: cfg ? normalizeScriptBreakdownConfig(cfg) : undefined,
           prompts: pro ? normalizeScriptBreakdownPrompts(pro) : undefined,
-          signal,
+          signal: epAbort.signal,
         });
 
         if (signal?.aborted || queueCancelRef.current) {
@@ -938,17 +1124,28 @@ export function useStoryboardDesk(props: NodeProps) {
         });
         initQs.results[ep.id] = true;
       } catch (e) {
-        const aborted = signal?.aborted
-          || (e instanceof DOMException && e.name === 'AbortError')
+        const abortError = (e instanceof DOMException && e.name === 'AbortError')
           || (e instanceof Error && e.name === 'AbortError');
-        if (aborted || queueCancelRef.current) {
+        // SB-OL-06: 区分「跳过当前集」与「取消整个队列」——
+        // 仅本集控制器被中止且外层未取消时，按跳过处理并继续下一集
+        const skipRequested = (abortError || epAbort.signal.aborted)
+          && !signal?.aborted
+          && !queueCancelRef.current;
+        if (skipRequested) {
+          if (!initQs.skipped.includes(ep.id)) initQs.skipped.push(ep.id);
+          appendLog(`分镜台 · 已跳过第 ${idx + 1}/${episodes.length} 集：${epTitle}`);
+        } else if (signal?.aborted || abortError || queueCancelRef.current) {
           appendLog(`分镜台 · 第 ${idx + 1} 集拆镜已取消`);
           break;
+        } else {
+          const msg = e instanceof Error ? e.message : String(e);
+          initQs.errors[ep.id] = msg;
+          initQs.results[ep.id] = false;
+          appendLog(`[SB_BREAKDOWN_FAIL] 分镜台 · 第 ${idx + 1} 集拆镜失败：${msg}`);
         }
-        const msg = e instanceof Error ? e.message : String(e);
-        initQs.errors[ep.id] = msg;
-        initQs.results[ep.id] = false;
-        appendLog(`[SB_BREAKDOWN_FAIL] 分镜台 · 第 ${idx + 1} 集拆镜失败：${msg}`);
+      } finally {
+        signal?.removeEventListener('abort', onOuterAbort);
+        if (episodeAbortRef.current === epAbort) episodeAbortRef.current = null;
       }
 
       idx++;
@@ -1154,9 +1351,11 @@ export function useStoryboardDesk(props: NodeProps) {
         urlMap.set(frame.sourceShotId, frame.imageUrl);
       }
     }
-    // Q-04 优先级 2: chainStoryboard 镜图
-    for (const s of getAllChainShots(getNodes())) {
-      const url = s.lineArtUrl || s.firstFrameAssetId;
+    // Q-04 优先级 2: 本节点 chain 线稿（不含导演关键帧，避免覆盖率把彩图当线稿）
+    // SB-OL-16: 不再 getAllChainShots 扫全画布 —— 多分镜台并存时会吃他台镜图，覆盖率虚高
+    const ownChain = readChainStoryboard(props.data as Record<string, unknown>);
+    for (const s of ownChain?.shots ?? []) {
+      const url = deskLineArtUrl(s);
       if (url && !urlMap.get(s.id)) urlMap.set(s.id, url);
     }
     const sceneNameSet = new Set([
@@ -1220,10 +1419,21 @@ export function useStoryboardDesk(props: NodeProps) {
       shotCount: visibleShots.length,
       compositionCoverage: stats.coverage,
     });
+    const nextConfirmedEpisodeIds = [...new Set([...confirmedEpisodeIds, currentEpisodeId])];
+    const currentChain = readChainStoryboard(props.data as Record<string, unknown>);
     updateNodeData(props.id, {
       status: 'success',
       gridConfirmed: true,
-      confirmedEpisodeIds: [...new Set([...confirmedEpisodeIds, currentEpisodeId])],
+      confirmedEpisodeIds: nextConfirmedEpisodeIds,
+      ...(currentChain
+        ? {
+            chainStoryboard: {
+              ...currentChain,
+              gridConfirmed: true,
+              confirmedEpisodeIds: nextConfirmedEpisodeIds,
+            },
+          }
+        : {}),
       confirmedAt: new Date().toISOString(),
       meta: readyMeta,
       episodeReadyMeta: readyMeta,
@@ -1242,7 +1452,7 @@ export function useStoryboardDesk(props: NodeProps) {
     deskBusy,
     environments,
     packageStale,
-    props.data?.storyboardPreview,
+    props.data,
     props.id,
     ready,
     updateNodeData,
@@ -1261,7 +1471,7 @@ export function useStoryboardDesk(props: NodeProps) {
       .map((f) => ({ shotId: f.sourceShotId!, imageUrl: f.imageUrl! }));
     const chain = readChainStoryboard(props.data as Record<string, unknown>);
     const scriptHash = upstreamPackage ? packageSourceHash(upstreamPackage) : '';
-    const storyboardHash = chain ? chainStoryboardHash(chain) : '';
+    const storyboardHash = chain ? chainStoryboardHash(chain, currentEpisodeId) : '';
     const lineartVersion = chain ? lineArtVersionHash(chain, currentEpisodeId) : '';
     const handoffVersion = Number(props.data?.handoffVersion ?? 0) + 1;
     const handoff = {
@@ -1269,6 +1479,7 @@ export function useStoryboardDesk(props: NodeProps) {
       scriptHash,
       storyboardHash,
       lineartVersion,
+      hashSchemaVersion: CHAIN_STORYBOARD_HANDOFF_HASH_SCHEMA_VERSION,
       handoffVersion,
       confirmedAt: props.data?.confirmedAt as string | undefined,
       episodeId: currentEpisodeId,
@@ -1291,6 +1502,8 @@ export function useStoryboardDesk(props: NodeProps) {
           fromId: props.id,
           ...handoff,
         },
+        lastHandoffStatus: 'ready',
+        lastHandoffInvalidReason: null,
       });
       focusBlock(desk.id);
       appendLog('已聚焦导演台 · 交接数据已同步');
@@ -1298,7 +1511,7 @@ export function useStoryboardDesk(props: NodeProps) {
     }
     useFlowCommands.getState().requestSpawn('director-desk', undefined, {
       connectToSource: props.id,
-      handoff: {
+      lastHandoff: {
         from: 'storyboard-desk',
         to: 'director-desk',
         fromId: props.id,
@@ -1307,6 +1520,7 @@ export function useStoryboardDesk(props: NodeProps) {
         scriptHash,
         storyboardHash,
         lineartVersion,
+        hashSchemaVersion: CHAIN_STORYBOARD_HANDOFF_HASH_SCHEMA_VERSION,
         handoffVersion,
         confirmedAt: handoff.confirmedAt,
         episodeId: currentEpisodeId,
@@ -1319,6 +1533,7 @@ export function useStoryboardDesk(props: NodeProps) {
         lineArtFrameIds: handoff.lineArtFrameIds,
         lineArtFrames: handoff.lineArtFrames,
       },
+      lastHandoffStatus: 'ready',
     });
     appendLog('已创建导演台并连线 · 交接数据已推送');
   }, [appendLog, focusBlock, getAllNodes, getNodes, props.data, props.id, currentEpisodeId, currentEpisodeConfirmed, confirmedEpisodeIds, visibleEpisodes, visibleShots, compositionStats, updateNodeData, currentEpisodeShotIds, upstreamPackage]);
@@ -1340,11 +1555,29 @@ export function useStoryboardDesk(props: NodeProps) {
           .split(/[；;\n]+/)
           .map((s) => s.trim())
           .filter(Boolean);
+    /** P0：写入正式库名；chain 侧由 applyDeskBreakdown → bindStoryboardShotAssets 填 id */
+    const resolveCharacterName = (raw: string): string => {
+      const token = stripMentionToken(raw);
+      const hit = characters.find((c) => {
+        const keys = [c.name, c.creative?.nickname, ...(c.creative?.aliases ?? [])]
+          .map((x) => x?.trim().toLowerCase())
+          .filter(Boolean);
+        return keys.includes(token.trim().toLowerCase());
+      });
+      return hit?.name.trim() || token.trim();
+    };
+    const nextCharacters = editDraft.characters
+      .map(resolveCharacterName)
+      .filter(Boolean);
+    const nextScene = stripMentionToken(editDraft.scene);
+    const sceneHit =
+      scenePresets.find((s) => s.label.trim().toLowerCase() === nextScene.trim().toLowerCase())
+      ?? null;
     const next = patchShotInPayload(payload, editingShot.id, {
       title: editDraft.title,
       durationSec: Math.max(1, Math.round(Number(editDraft.durationSec) || editingShot.durationSec || 5)),
-      scene: stripMentionToken(editDraft.scene),
-      characters: editDraft.characters,
+      scene: sceneHit?.label ?? nextScene,
+      characters: nextCharacters,
       purpose: editDraft.purpose,
       scriptText: editDraft.scriptText,
       imagePrompt: editDraft.imagePrompt,
@@ -1366,18 +1599,25 @@ export function useStoryboardDesk(props: NodeProps) {
       costumeOverrides: (editDraft.costumeOverrides ?? [])
         .filter((o) => o.characterName?.trim() && o.costumeId?.trim())
         .map((o) => ({
-          characterName: o.characterName.trim(),
+          characterName: resolveCharacterName(o.characterName),
           costumeId: o.costumeId,
           costumeLabel: o.costumeLabel,
         })),
       propIds: [...(editDraft.propIds ?? [])],
+      shotAssetId: editDraft.shotAssetId?.trim() || null,
     });
+    pushUndo(payload);
     applyDeskBreakdown(props.id, next, updateNodeData, {
       ...stripEpisodeConfirmation(props.data, currentEpisodeId),
+      chainStoryboard: (props.data as Record<string, unknown>)?.chainStoryboard,
     });
     setEditingShotId(null);
-    appendLog(`已修改分镜 · ${editingShot.sceneCode} ${editDraft.title}`);
-  }, [appendLog, editDraft, editingShot, payload, props.id, updateNodeData]);
+    appendLog(
+      `已修改分镜 · ${editingShot.sceneCode} ${editDraft.title}`
+      + (sceneHit ? ` · 场景已绑 ${sceneHit.id.slice(0, 8)}` : '')
+      + (nextCharacters.length ? ` · 角色 ${nextCharacters.length}` : ''),
+    );
+  }, [appendLog, characters, editDraft, editingShot, payload, props.data, props.id, pushUndo, scenePresets, updateNodeData, currentEpisodeId]);
 
   const toggleDraftCharacter = useCallback((name: string) => {
     setEditDraft((current) => {
@@ -1443,9 +1683,9 @@ export function useStoryboardDesk(props: NodeProps) {
         map.set(frame.sourceShotId, frame.imageUrl);
       }
     }
-    // Q-04 优先级 2: 本节点 chainStoryboard 镜图
+    // Q-04 优先级 2: 本节点 chain 线稿（不含导演关键帧）
     for (const s of storyboardShots) {
-      const url = s.lineArtUrl || s.firstFrameAssetId;
+      const url = deskLineArtUrl(s);
       if (url && !map.has(s.id)) map.set(s.id, url);
     }
     return map;
@@ -1526,8 +1766,28 @@ export function useStoryboardDesk(props: NodeProps) {
           };
       });
     },
-    [getNodes, payload, props.id, updateNodeData],
+    // SB-OL-05: currentEpisodeId 必须入 deps，否则切集后旧闭包会摘掉上一集的确认
+    [currentEpisodeId, getNodes, payload, props.id, updateNodeData],
   );
+
+  /**
+   * SB-OL-07: 删镜 / 清线稿后清理关联的 storyboardPreview 帧与 previewUrls，
+   * 避免孤儿帧继续出现在拼版 / 交接 / 导演台画面。
+   */
+  const cleanupFramesForShots = useCallback((shotIds: string[]) => {
+    updateNodeData(props.id, (node) => {
+      const data = (node.data ?? {}) as Record<string, unknown>;
+      const raw = data.storyboardPreview as StoryboardPreviewPayload | undefined;
+      if (raw?.version !== 1 || !Array.isArray(raw.frames)) return data;
+      const frames = removeFramesForShotIds(raw.frames, shotIds);
+      if (!frames) return data;
+      return {
+        ...data,
+        storyboardPreview: { ...raw, frames },
+        previewUrls: frames.map((f) => f.imageUrl).filter(Boolean),
+      };
+    });
+  }, [props.id, updateNodeData]);
 
   const handleDeleteShot = useCallback(async (shotId: string) => {
     if (!payload) return;
@@ -1550,28 +1810,39 @@ export function useStoryboardDesk(props: NodeProps) {
     applyDeskBreakdown(props.id, next, updateNodeData, {
       ...stripEpisodeConfirmation(props.data, currentEpisodeId),
     });
+    cleanupFramesForShots([shotId]);
     if (selectedId === shotId) setSelectedId(null);
     if (editingShotId === shotId) setEditingShotId(null);
     appendLog(`已删除镜 · ${shot?.sceneCode || shotId}`);
-  }, [appendLog, currentEpisodeId, editingShotId, payload, pushUndo, props.data, props.id, selectedId, updateNodeData]);
+  }, [appendLog, cleanupFramesForShots, currentEpisodeId, editingShotId, payload, pushUndo, props.data, props.id, selectedId, updateNodeData]);
 
-  /** X-17: 清除本镜线稿，清空 previewImageUrl/referenceImageUrl */
+  /**
+   * X-17 / SB-OL-03: 清除本镜线稿。
+   * 除拆分结构的 previewImageUrl/referenceImageUrl/sketchUrl 外，
+   * 还必须移除 storyboardPreview 里的对应帧，否则 isShotComposed 仍判定「已成图」，
+   * 拼版/交接会继续引用被清除的旧图。chain 的 lineArtUrl 由 applyDeskBreakdown
+   * 重建时按空 previewImageUrl 覆盖，无需单独处理。
+   */
   const handleClearLineArt = useCallback(async (shotId: string) => {
-    if (!payload) return;
+    const livePayload = (getNodes().find((n) => n.id === props.id)?.data as Record<string, unknown> | undefined)?.scriptBreakdown as ScriptBreakdownPayload | undefined;
+    const base = livePayload ?? payload;
+    if (!base) return;
     const ok = await confirmDelete({
       title: '清除本镜线稿？',
       description: '将清空该镜头已生成的线稿图，可重新生成。',
     });
     if (!ok) return;
-    const next = patchShotInPayload(payload, shotId, {
+    const next = patchShotInPayload(base, shotId, {
       previewImageUrl: '',
       referenceImageUrl: '',
-    });
+      sketchUrl: '',
+    } as Partial<ScriptBreakdownShot>);
     applyDeskBreakdown(props.id, next, updateNodeData, {
       ...stripEpisodeConfirmation(props.data, currentEpisodeId),
     });
+    cleanupFramesForShots([shotId]);
     appendLog(`已清除线稿 · ${shotId}`);
-  }, [appendLog, currentEpisodeId, payload, props.data, props.id, updateNodeData]);
+  }, [appendLog, cleanupFramesForShots, currentEpisodeId, getNodes, payload, props.data, props.id, updateNodeData]);
 
   /** G-03: 复制当前选中镜 */
   const handleCopyShot = useCallback((shotId: string) => {
@@ -1652,10 +1923,11 @@ export function useStoryboardDesk(props: NodeProps) {
     applyDeskBreakdown(props.id, next, updateNodeData, {
       ...stripEpisodeConfirmation(props.data, currentEpisodeId),
     });
+    cleanupFramesForShots([...selectedShotIds]);
     setSelectedShotIds(new Set());
     if (selectedId && selectedShotIds.has(selectedId)) setSelectedId(newShots[0]?.id ?? null);
     appendLog(`已批量删除 · ${selectedShotIds.size} 镜`);
-  }, [appendLog, currentEpisodeId, payload, props.data, props.id, pushUndo, selectedId, selectedShotIds, updateNodeData]);
+  }, [appendLog, cleanupFramesForShots, currentEpisodeId, payload, props.data, props.id, pushUndo, selectedId, selectedShotIds, updateNodeData]);
 
   const referenceBoardData = useMemo(() => {
     // Find connected reference-board nodes
@@ -1722,6 +1994,7 @@ export function useStoryboardDesk(props: NodeProps) {
         characters,
         costumeOptions,
         propOptions,
+        shotLexiconOptions,
       );
       const frame: StoryboardPreviewFrame = {
         id: `frame-line-${shot.id}`,
@@ -1738,6 +2011,9 @@ export function useStoryboardDesk(props: NodeProps) {
         locked: false,
         stylePreset: 'line-art',
       };
+      // SB-OL-12: 单镜线稿也挂控制器，关台取消能中止在途请求并跳过写回
+      const singleAbort = new AbortController();
+      singleLineArtAbortRef.current = singleAbort;
       try {
         const nodeData = (getNodes().find((n) => n.id === props.id)?.data ?? {}) as Record<string, unknown>;
         const previewRaw = nodeData.storyboardPreview as StoryboardPreviewPayload | undefined;
@@ -1746,7 +2022,13 @@ export function useStoryboardDesk(props: NodeProps) {
           frame,
           (pictureNode.data ?? {}) as Record<string, unknown>,
           pictureSettings,
+          false,
+          singleAbort.signal,
         );
+        if (singleAbort.signal.aborted) {
+          appendLog(`分镜线稿已取消 · ${shot.sceneCode || shot.id}`);
+          return;
+        }
         if (!payload) {
           setShotFrameUrl(shot.id, imageUrl);
         } else {
@@ -1808,12 +2090,18 @@ export function useStoryboardDesk(props: NodeProps) {
         appendLog(`分镜线稿已生成 · ${shot.sceneCode || shot.id}`);
         toastSuccess(`已生成 ${shot.sceneCode || '分镜'} 线稿`);
       } catch (e) {
-        appendLog(`[SB_LINEART_FAIL] 分镜线稿生成失败: ${String(e)}`);
+        if (singleAbort.signal.aborted) {
+          appendLog(`分镜线稿已取消 · ${shot.sceneCode || shot.id}`);
+        } else {
+          appendLog(`[SB_LINEART_FAIL] 分镜线稿生成失败: ${String(e)}`);
+        }
       } finally {
+        if (singleLineArtAbortRef.current === singleAbort) singleLineArtAbortRef.current = null;
         setGeneratingShotId(null);
       }
     },
-    [appendLog, batchRunning, characters, costumeOptions, getEdges, getNodes, payload, propOptions, props.id, resolveSketchPrompt, setShotFrameUrl, updateNodeData],
+    // SB-OL-05: currentEpisodeId 必须入 deps，否则切集后旧闭包会摘掉上一集的确认
+    [appendLog, batchRunning, characters, costumeOptions, currentEpisodeId, generatingShotId, getEdges, getNodes, payload, propOptions, props.id, resolveSketchPrompt, setShotFrameUrl, shotLexiconOptions, updateNodeData],
   );
 
   /** X-12: 键盘快捷键 · ↑↓ 选镜，E 编辑，L 线稿，Del 删镜 */
@@ -1917,6 +2205,7 @@ export function useStoryboardDesk(props: NodeProps) {
             characters,
             costumeOptions,
             propOptions,
+            shotLexiconOptions,
           );
           const frame: StoryboardPreviewFrame = {
             id: `frame-line-${liveShot.id}`,
@@ -2025,6 +2314,8 @@ export function useStoryboardDesk(props: NodeProps) {
       batchScopeMode,
       characters,
       costumeOptions,
+      // SB-OL-05: currentEpisodeId 必须入 deps，否则切集后旧闭包会摘掉上一集的确认
+      currentEpisodeId,
       getEdges,
       getNodes,
       payload,
@@ -2032,6 +2323,7 @@ export function useStoryboardDesk(props: NodeProps) {
       props.id,
       resolveSketchPrompt,
       setShotFrameUrl,
+      shotLexiconOptions,
       shots,
       updateNodeData,
       visibleShots,
@@ -2063,9 +2355,21 @@ export function useStoryboardDesk(props: NodeProps) {
       lineArtAbortRef.current = controller;
       const { signal } = controller;
 
-      const targetShots = (scope === 'visible' ? visibleShots : shots).filter(Boolean);
+      let targetShots = (scope === 'visible' ? visibleShots : shots).filter(Boolean);
       if (targetShots.length === 0) {
         appendLog('分镜台：当前没有可生成线稿的镜头');
+        lineArtAbortRef.current = null;
+        return;
+      }
+
+      // SB-OL-10: 与逐镜批量同口径，尊重「缺图优先 / 全部覆盖」范围开关
+      const onlyMissing = batchScopeMode === 'missing';
+      if (onlyMissing) {
+        const preview = (getNodes().find((n) => n.id === props.id)?.data as Record<string, unknown> | undefined)?.storyboardPreview as StoryboardPreviewPayload | undefined;
+        targetShots = targetShots.filter((s) => !isShotComposed(s, preview));
+      }
+      if (targetShots.length === 0) {
+        appendLog('分镜台：当前没有需要补线稿的镜头');
         lineArtAbortRef.current = null;
         return;
       }
@@ -2077,7 +2381,7 @@ export function useStoryboardDesk(props: NodeProps) {
       setBatchMode('grid-line-art');
       setBatchProgress(`0/${pageCount}`);
       appendLog(
-        `开始宫格线稿 · ${targetShots.length} 镜 · ${pageCount} 张四宫格（${scope === 'visible' ? '当前可见' : '全部'}）`,
+        `开始宫格线稿 · ${targetShots.length} 镜 · ${pageCount} 张四宫格（${scope === 'visible' ? '当前可见' : '全部'} · ${onlyMissing ? '缺图优先' : '全部覆盖'}）`,
       );
 
       let ok = 0;
@@ -2103,6 +2407,7 @@ export function useStoryboardDesk(props: NodeProps) {
               characters,
               costumeOptions,
               propOptions,
+              shotLexiconOptions,
             );
             return {
               shot: liveShot,
@@ -2133,11 +2438,13 @@ export function useStoryboardDesk(props: NodeProps) {
             `宫格出图中 · 第 ${page + 1}/${pageCount} 张 · 2×2 · ${size} · ${chunk.length} 镜`
               + (blankSlots > 0 ? ` · 白板补 ${blankSlots} 格` : ''),
           );
+          // SB-OL-10: 透传 signal，「停止」能中止在途宫格出图而非只拦下一页
           const urls = await runPictureGenJob({
             prompt: gridPrompt,
             modelId,
             size,
             n: 1,
+            signal,
           });
           const gridUrl = urls[0];
           if (!gridUrl) throw new Error('宫格线稿未返回图片');
@@ -2286,8 +2593,11 @@ export function useStoryboardDesk(props: NodeProps) {
     },
     [
       appendLog,
+      batchScopeMode,
       characters,
       costumeOptions,
+      // SB-OL-05: currentEpisodeId 必须入 deps，否则切集后旧闭包会摘掉上一集的确认
+      currentEpisodeId,
       getEdges,
       getNodes,
       payload,
@@ -2295,6 +2605,7 @@ export function useStoryboardDesk(props: NodeProps) {
       props.id,
       resolveSketchPrompt,
       setShotFrameUrl,
+      shotLexiconOptions,
       shots,
       updateNodeData,
       visibleShots,
@@ -2408,6 +2719,8 @@ export function useStoryboardDesk(props: NodeProps) {
       }
 
       setSheetComposing(true);
+      // SB-OL-12: 记录代际，关台取消后在途拼版不再写回节点
+      const sheetEpoch = sheetEpochRef.current;
       try {
         const epTitle = visibleEpisodes[0]?.title || payload.title || '本集';
         const blob = await composeStoryboardSheetPng(cells, {
@@ -2420,6 +2733,10 @@ export function useStoryboardDesk(props: NodeProps) {
           { type: 'image/png' },
         );
         const uploaded = await api.uploadAsset(file);
+        if (sheetEpochRef.current !== sheetEpoch) {
+          appendLog('分镜故事板合成已取消 · 结果未写回');
+          return;
+        }
         updateNodeData(props.id, (node) => {
           const data = (node.data ?? {}) as Record<string, unknown>;
           const raw = data.storyboardPreview as StoryboardPreviewPayload | undefined;
@@ -2745,167 +3062,54 @@ export function useStoryboardDesk(props: NodeProps) {
           </button>
         </div>
         {packageStale && upstreamPackage && !staleBannerDismissed ? (
-          <div className="sg3-stale-banner">
-            <span className="sg3-stale-banner__icon">&#x26A0;&#xFE0F;</span>
-            <span className="sg3-stale-banner__msg">
-              {upstreamNeedsConfirm
-                ? `上游「${upstreamTitleShort}」已更新，但尚未确认成稿 · 先确认再同步`
-                : incrementalNewEpisodeCount > 0
-                  ? `上游新增 ${incrementalNewEpisodeCount} 集（可只拆新增，保留现有 1…集镜表）`
-                  : '上游成稿已更新（与当前镜表不同步）'}
-            </span>
-            <div className="sg3-stale-banner__acts">
-              <button type="button" className="sg3-btn sg3-btn--ghost" onClick={() => setStaleBannerShowDiff((v) => !v)}>
-                {staleBannerShowDiff ? '收起差异' : '查看差异摘要'}
-              </button>
-              {upstreamNeedsConfirm ? (
-                <button
-                  type="button"
-                  className="sg3-btn sg3-btn--primary"
-                  disabled={deskBusy}
-                  onClick={openUpstreamScriptDeskForConfirm}
-                >
-                  打开上游编剧台 · 确认成稿
-                </button>
-              ) : (
-                <>
-                  {incrementalNewEpisodeCount > 0 ? (
-                    <button type="button" className="sg3-btn sg3-btn--primary" disabled={breakingDown || breakdownBlocked || deskBusy} onClick={() => {
-                      setStaleBannerDismissed(true);
-                      void breakdownNewEpisodesOnly();
-                    }}>
-                      只拆新增 {incrementalNewEpisodeCount} 集
-                    </button>
-                  ) : (
-                    <button type="button" className="sg3-btn sg3-btn--ghost" disabled={breakingDown || breakdownBlocked || deskBusy} onClick={() => {
-                      setStaleBannerDismissed(true);
-                      void breakdownFromPackage();
-                    }}>
-                      同步最新成稿
-                    </button>
-                  )}
-                  {upstreamPackage.screenplay.episodes.length > 1 ? (
-                    <>
-                      <button type="button" className="sg3-btn sg3-btn--ghost" disabled={breakingDown || breakdownBlocked || deskBusy} onClick={() => {
-                        setStaleBannerDismissed(true);
-                        void breakdownFromPackage(undefined, true);
-                      }}>
-                        重拆全部
-                      </button>
-                      {upstreamPackage.screenplay.episodes.some((ep) => !confirmedEpisodeIds.includes(ep.id)) ? (
-                        <button type="button" className="sg3-btn sg3-btn--ghost" disabled={breakingDown || breakdownBlocked || deskBusy} onClick={() => {
-                          setStaleBannerDismissed(true);
-                          void breakdownUnconfirmedOnly();
-                        }}>
-                          重拆仅未确认
-                        </button>
-                      ) : null}
-                    </>
-                  ) : null}
-                </>
-              )}
-              <button type="button" className="sg3-btn sg3-btn--ghost" onClick={() => setStaleBannerDismissed(true)}>
-                稍后
-              </button>
-            </div>
-            {staleBannerShowDiff ? (
-              <div className="sg3-stale-banner__diff" style={{ width: '100%', marginTop: 6, padding: 8, background: 'rgba(0,0,0,0.25)', borderRadius: 8, fontSize: 11, lineHeight: 1.6 }}>
-                <div>上游集数: {upstreamPackage.screenplay.episodes.length}</div>
-                <div>上游标题: {upstreamPackage.brief.title || '-'}</div>
-                <div>上游状态: {upstreamPackage.status}</div>
-                <div>上游 hash: {packageSourceHash(upstreamPackage).slice(0, 16)}...</div>
-                <div>本地 hash: {(breakdownJob?.sourcePackageHash ?? '-').slice(0, 16)}...</div>
-              </div>
-            ) : null}
-          </div>
+          <StoryboardStaleBanner
+            upstreamPackage={upstreamPackage}
+            upstreamNeedsConfirm={upstreamNeedsConfirm}
+            upstreamTitleShort={upstreamTitleShort}
+            incrementalNewEpisodeCount={incrementalNewEpisodeCount}
+            deskBusy={deskBusy}
+            breakingDown={breakingDown}
+            breakdownBlocked={breakdownBlocked}
+            confirmedEpisodeIds={confirmedEpisodeIds}
+            localPackageHash={breakdownJob?.sourcePackageHash ?? '-'}
+            showDiff={staleBannerShowDiff}
+            onToggleDiff={() => setStaleBannerShowDiff((v) => !v)}
+            onDismiss={() => setStaleBannerDismissed(true)}
+            onOpenUpstreamConfirm={openUpstreamScriptDeskForConfirm}
+            onBreakdownNewOnly={() => {
+              setStaleBannerDismissed(true);
+              void breakdownNewEpisodesOnly();
+            }}
+            onSyncLatest={() => {
+              setStaleBannerDismissed(true);
+              void breakdownFromPackage();
+            }}
+            onRebreakAll={() => {
+              setStaleBannerDismissed(true);
+              void breakdownFromPackage(undefined, true);
+            }}
+            onRebreakUnconfirmed={() => {
+              setStaleBannerDismissed(true);
+              void breakdownUnconfirmedOnly();
+            }}
+          />
         ) : null}
         <div className="sg3-studio">
-          <div className="sg3-pipeline" aria-label="分镜流程">
-            <div className="sg3-pipeline__steps">
-              {(() => {
-                const hasBreakdown = Boolean(payload?.episodes?.length);
-                // F-01：有镜表 → 1/2 done；有线稿 → 3 done；已确认 → 4 done
-                // 未绑定是设定/梳表质量信号，不挡「镜表」步骤完成态（否则设定未就绪时会出现 3 亮而 2 不亮）
-                const hasLineArt = compositionStats.composed > 0;
-                const stepDone: Record<string, boolean> = {
-                  breakdown: hasBreakdown,
-                  grid: hasBreakdown,
-                  compose: hasLineArt,
-                  handoff: currentEpisodeConfirmed,
-                };
-                return ([
-                  ['breakdown', '1', '拆镜'],
-                  ['grid', '2', '镜表'],
-                  ['compose', '3', '构图'],
-                  ['handoff', '4', '交接'],
-                ] as const).map(([id, num, label], i) => (
-                  <span key={id} className="sg3-pipeline__item">
-                    {i > 0 ? <span className="sg3-pipeline__sep" aria-hidden /> : null}
-                    <button
-                      type="button"
-                      className={`sg3-pipeline__step ${studioTab === id ? 'is-on' : ''} ${stepDone[id] ? 'is-done' : ''}`}
-                      onClick={() => setStudioTab(id)}
-                    >
-                      <b>{num}</b> {label}
-                    </button>
-                  </span>
-                ));
-              })()}
-            </div>
-            <div className="sg3-pipeline__episode">
-              {(payload?.episodes?.length ?? 0) > 0 ? (
-                <select
-                  className="sg3-episode-select sg3-episode-select--pipeline"
-                  value={activeEpisodeId ?? payload!.episodes[0]?.id ?? ''}
-                  onChange={(event) => {
-                    updateNodeData(props.id, { activeEpisodeId: event.target.value || null });
-                    setSelectedId(null);
-                  }}
-                  aria-labelledby="sg3-episode-label"
-                  title="选择要编辑的剧集；左侧镜表与中间构图会跟随切换"
-                >
-                  {payload!.episodes.map((episode) => {
-                    const done = confirmedEpisodeIds.includes(episode.id);
-                    return (
-                      <option key={episode.id} value={episode.id}>
-                        {episode.title}
-                        {done ? ' · 已确认' : ''}
-                        {` · ${episode.shots.length} 镜`}
-                      </option>
-                    );
-                  })}
-                </select>
-              ) : breakdownBusy ? (
-                <span className="sg3-episode-select sg3-episode-select--pipeline sg3-episode-select--busy" aria-live="polite">
-                  {queueProgress.total > 0
-                    ? `拆镜中 ${Math.min(queueProgress.current + 1, queueProgress.total)}/${queueProgress.total} 集`
-                    : '拆镜中…'}
-                </span>
-              ) : (
-                <span className="sg3-episode-select sg3-episode-select--pipeline sg3-episode-select--empty">暂无剧集</span>
-              )}
-              <span
-                className={`sg3-pipeline__episode-meta ${currentEpisodeConfirmed ? 'is-ok' : ''}`}
-                title={
-                  breakdownBusy
-                    ? '拆镜进行中'
-                    : (payload?.episodes?.length ?? 0) > 1
-                      ? `全片已确认 ${(payload?.episodes ?? []).filter((ep) => confirmedEpisodeIds.includes(ep.id)).length}/${payload?.episodes?.length ?? 0} 集 · 本集构图 ${Math.round(compositionStats.coverage * 100)}%`
-                      : currentEpisodeConfirmed
-                        ? '本集已确认，可交导演台'
-                        : '本集尚未确认交接'
-                }
-              >
-                {breakdownBusy
-                  ? (queueProgress.total > 0
-                    ? `拆镜 ${Math.min(queueProgress.current + 1, queueProgress.total)}/${queueProgress.total}`
-                    : '拆镜中')
-                  : (payload?.episodes?.length ?? 0) > 1
-                    ? `已确认 ${(payload?.episodes ?? []).filter((ep) => confirmedEpisodeIds.includes(ep.id)).length}/${payload?.episodes?.length ?? 0} 集`
-                    : currentEpisodeConfirmed ? '本集已确认' : '本集未确认'}
-              </span>
-            </div>
-          </div>
+          <PipelineBar
+            studioTab={studioTab}
+            setStudioTab={setStudioTab}
+            payload={payload}
+            hasLineArt={compositionStats.composed > 0}
+            coveragePct={Math.round(compositionStats.coverage * 100)}
+            currentEpisodeConfirmed={currentEpisodeConfirmed}
+            confirmedEpisodeIds={confirmedEpisodeIds}
+            activeEpisodeId={activeEpisodeId}
+            blockId={props.id}
+            updateNodeData={updateNodeData}
+            setSelectedId={setSelectedId}
+            breakdownBusy={breakdownBusy}
+            queueProgress={queueProgress}
+          />
 
           {unconfirmBannerEpisodeId === currentEpisodeId ? (
             <div className="sg3-unconfirm-banner">
@@ -3056,7 +3260,7 @@ export function useStoryboardDesk(props: NodeProps) {
                   selectedId={selectedId}
                   setSelectedId={setSelectedId}
                   editingShotId={editingShotId}
-                  undoStackRef={undoStackRef}
+                  canUndo={undoDepth > 0}
                   undo={undo}
                   selectedShotIds={selectedShotIds}
                   setSelectedShotIds={setSelectedShotIds}
@@ -3076,6 +3280,7 @@ export function useStoryboardDesk(props: NodeProps) {
                   handleCopyShot={handleCopyShot}
                   handleCopySelected={handleCopySelected}
                   handleDeleteSelected={handleDeleteSelected}
+                  cleanupFramesForShots={cleanupFramesForShots}
                 />
               )}
 
@@ -3163,696 +3368,23 @@ export function useStoryboardDesk(props: NodeProps) {
         </div>
         {isDevPromptEnabled() && <StoryboardDeskDevPack blockId={props.id} />}
       </ScreenModal>
-      {/* 编辑分镜 — 功能全保留 */}
-      <ScreenModal
-        open={Boolean(editingShot && editDraft)}
+      {/* 编辑分镜 — 功能全保留（SB-OL-11 拆至 shot-edit-modal.tsx） */}
+      <ShotEditModal
+        editingShot={editingShot}
+        editDraft={editDraft}
+        setEditDraft={setEditDraft}
         onClose={() => setEditingShotId(null)}
-        title="编辑分镜"
-        subtitle={
-          editingShot
-            ? `${editingShot.sceneCode} · 文案 / Prompt · @人物 @场景`
-            : undefined
-        }
-        width={860}
-        variant="default"
-        className="sg3-modal sg3-modal--edit"
-        label="编辑分镜"
-      >
-        {editingShot && editDraft && (
-          <div className="sg sg-studio" style={{ minHeight: 'auto', maxHeight: 'min(86vh, 760px)' }}>
-            <div className="sg-studio__body">
-              <div className="sg-grid-2">
-                <label className="sg-field" style={{ gridColumn: 'span 1' }}>
-                  <span className="sg-label">标题</span>
-                  <input
-                    className="sg-input"
-                    value={editDraft.title}
-                    onChange={(event) => setEditDraft({ ...editDraft, title: event.target.value })}
-                  />
-                </label>
-                <label className="sg-field">
-                  <span className="sg-label">
-                    时长 s
-                    {' '}
-                    <Clock size={10} style={{ display: 'inline', verticalAlign: 'middle' }} />
-                  </span>
-                  <input
-                    className="sg-input"
-                    type="number"
-                    value={editDraft.durationSec}
-                    onChange={(event) =>
-                      setEditDraft({ ...editDraft, durationSec: Number(event.target.value) || 1 })
-                    }
-                  />
-                </label>
-              </div>
-
-              <div className="sg-grid-2" style={{ gridTemplateColumns: 'repeat(4, 1fr)' }}>
-                <label className="sg-field">
-                  <span className="sg-label">景别</span>
-                  <select
-                    className="sg-select"
-                    value={editDraft.shotSize ?? ''}
-                    onChange={(e) => setEditDraft({
-                      ...editDraft,
-                      shotSize: (e.target.value || undefined) as ShotEditDraft['shotSize'],
-                    })}
-                  >
-                    <option value="">—</option>
-                    {SHOT_SIZES.map((s) => (
-                      <option key={s} value={s}>{s}</option>
-                    ))}
-                  </select>
-                </label>
-                <label className="sg-field">
-                  <span className="sg-label">运镜</span>
-                  <select
-                    className="sg-select"
-                    value={editDraft.cameraMove ?? ''}
-                    onChange={(e) => setEditDraft({
-                      ...editDraft,
-                      cameraMove: (e.target.value || undefined) as ShotEditDraft['cameraMove'],
-                    })}
-                  >
-                    <option value="">—</option>
-                    {CAMERA_MOVES.map((m) => (
-                      <option key={m} value={m}>{m}</option>
-                    ))}
-                  </select>
-                </label>
-                <label className="sg-field">
-                  <span className="sg-label">机位</span>
-                  <input
-                    className="sg-input"
-                    value={editDraft.cameraAngle ?? ''}
-                    onChange={(e) => setEditDraft({ ...editDraft, cameraAngle: e.target.value })}
-                    placeholder="平视 / 俯 / 仰…"
-                  />
-                </label>
-                <label className="sg-field">
-                  <span className="sg-label">镜头焦距</span>
-                  <input
-                    className="sg-input"
-                    value={editDraft.cameraLens ?? ''}
-                    onChange={(e) => setEditDraft({ ...editDraft, cameraLens: e.target.value })}
-                    placeholder="广角 / 标准 / 长焦"
-                  />
-                </label>
-              </div>
-
-              {/* F-017: 构图模板选择 */}
-              <label className="sg-field">
-                <span className="sg-label">构图模板</span>
-                <select
-                  className="sg-select"
-                  value={editDraft.compositionTemplateId ?? ''}
-                  onChange={(e) => setEditDraft({ ...editDraft, compositionTemplateId: e.target.value || null })}
-                >
-                  <option value="">— 无模板 —</option>
-                  {BUILTIN_COMPOSITION_TEMPLATES.map((t) => (
-                    <option key={t.id} value={t.id}>{t.name}</option>
-                  ))}
-                </select>
-              </label>
-
-              <label className="sg-field">
-                <span className="sg-label">
-                  场景
-                  {editDraft.scene
-                    && !scenePresets.some((scene) => scene.label === stripMentionToken(editDraft.scene)) && (
-                      <span className="is-req">未入库</span>
-                    )}
-                </span>
-                <select
-                  className="sg-select"
-                  value={
-                    scenePresets.some((scene) => scene.label === stripMentionToken(editDraft.scene))
-                      ? stripMentionToken(editDraft.scene)
-                      : ''
-                  }
-                  onChange={(event) => {
-                    const next = event.target.value;
-                    if (next) setEditDraft({ ...editDraft, scene: next });
-                  }}
-                >
-                  <option value="">
-                    {editDraft.scene ? `当前：${stripMentionToken(editDraft.scene)}` : '选择场景预设'}
-                  </option>
-                  {scenePresets.map((scene) => (
-                    <option key={scene.id} value={scene.label}>
-                      {scene.label} · {scene.source}
-                    </option>
-                  ))}
-                </select>
-                <div style={{ marginTop: 6 }}>
-                  <AssetMentionInput
-                    value={editDraft.scene}
-                    onChange={(next) => setEditDraft({ ...editDraft, scene: next })}
-                    kinds={SCENE_MENTION_KINDS}
-                    placeholder="@场景 或输入"
-                    className="sg-input"
-                  />
-                </div>
-              </label>
-
-              <label className="sg-field">
-                <span className="sg-label">
-                  角色
-                  {editDraft.characters.some((n) => !characterNameSet.has(stripMentionToken(n))) && (
-                    <span className="is-req">含未入库</span>
-                  )}
-                  <span className="text-[10px] text-ink/40 font-normal ml-1">从 @ 列表选库内角色（写入正式名）</span>
-                </span>
-                <AssetMentionInput
-                  value={namesToText(editDraft.characters)}
-                  onChange={(next) => setEditDraft({ ...editDraft, characters: textToNames(next) })}
-                  kinds={CHARACTER_MENTION_KINDS}
-                  placeholder="@角色:名 从库选择"
-                  className="sg-input"
-                />
-              </label>
-
-              {editDraft.characters.length > 0 && costumeOptions.length > 0 ? (
-                <div className="sg-field">
-                  <span className="sg-label">本镜换装（Cos-06 · 优先于角色默认服装）</span>
-                  <div className="sg-grid-2" style={{ gap: 8 }}>
-                    {editDraft.characters.map((rawName) => {
-                      const name = stripMentionToken(rawName);
-                      const current = (editDraft.costumeOverrides ?? []).find(
-                        (o) => o.characterName.trim().toLowerCase() === name.trim().toLowerCase(),
-                      );
-                      return (
-                        <label key={name} className="sg-field" style={{ margin: 0 }}>
-                          <span className="sg-label" style={{ fontWeight: 400 }}>{name}</span>
-                          <select
-                            className="sg-select"
-                            value={current?.costumeId ?? ''}
-                            onChange={(e) => {
-                              const costumeId = e.target.value;
-                              const hit = costumeOptions.find((c) => c.id === costumeId);
-                              const rest = (editDraft.costumeOverrides ?? []).filter(
-                                (o) => o.characterName.trim().toLowerCase() !== name.trim().toLowerCase(),
-                              );
-                              setEditDraft({
-                                ...editDraft,
-                                costumeOverrides: costumeId
-                                  ? [...rest, { characterName: name, costumeId, costumeLabel: hit?.label }]
-                                  : rest,
-                              });
-                            }}
-                          >
-                            <option value="">角色默认服装</option>
-                            {costumeOptions.map((c) => (
-                              <option key={c.id} value={c.id}>{c.label}</option>
-                            ))}
-                          </select>
-                        </label>
-                      );
-                    })}
-                  </div>
-                </div>
-              ) : null}
-
-              {propOptions.length > 0 ? (
-                <div className="sg-field">
-                  <span className="sg-label">本镜道具（Prop-06）</span>
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                    {propOptions.map((p) => {
-                      const on = (editDraft.propIds ?? []).includes(p.id);
-                      return (
-                        <button
-                          key={p.id}
-                          type="button"
-                          className={`sg-chip ${on ? 'is-on' : ''}`}
-                          style={{
-                            border: '1px solid var(--nx9-line, #333)',
-                            borderRadius: 999,
-                            padding: '2px 8px',
-                            fontSize: 11,
-                            background: on ? 'rgba(45, 212, 191, 0.12)' : 'transparent',
-                            color: on ? 'var(--nx9-brand, #2dd4bf)' : 'inherit',
-                          }}
-                          onClick={() => {
-                            const cur = editDraft.propIds ?? [];
-                            setEditDraft({
-                              ...editDraft,
-                              propIds: on ? cur.filter((id) => id !== p.id) : [...cur, p.id],
-                            });
-                          }}
-                        >
-                          {p.label}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-              ) : null}
-
-              {(() => {
-                const sceneLabel = stripMentionToken(editDraft.scene || '');
-                const sceneItem = workspaceScenes.find(
-                  (s) => s.label.trim().toLowerCase() === sceneLabel.trim().toLowerCase(),
-                );
-                const rec = sceneItem ? getSceneCreative(sceneItem) : null;
-                const hasRec = Boolean(
-                  rec
-                  && (
-                    (rec.recommendedShots?.length ?? 0)
-                    || (rec.recommendedEmotions?.length ?? 0)
-                    || (rec.recommendedCharacters?.length ?? 0)
-                  ),
-                );
-                if (!hasRec || !rec) return null;
-                return (
-                  <div className="sg-field">
-                    <span className="sg-label">场景创作推荐（点选写入本镜）</span>
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                      {(rec.recommendedShots ?? []).map((v) => (
-                        <button
-                          key={`shot-${v}`}
-                          type="button"
-                          className="sg-chip"
-                          style={{ border: '1px solid var(--nx9-line,#333)', borderRadius: 999, padding: '2px 8px', fontSize: 11 }}
-                          onClick={() => setEditDraft({
-                            ...editDraft,
-                            shotSize: (SHOT_SIZES as readonly string[]).includes(v)
-                              ? (v as ShotEditDraft['shotSize'])
-                              : editDraft.shotSize,
-                            purpose: editDraft.purpose?.trim()
-                              ? `${editDraft.purpose} · 推荐镜头:${v}`
-                              : `推荐镜头:${v}`,
-                          })}
-                        >
-                          镜头·{v}
-                        </button>
-                      ))}
-                      {(rec.recommendedEmotions ?? []).map((v) => (
-                        <button
-                          key={`emo-${v}`}
-                          type="button"
-                          className="sg-chip"
-                          style={{ border: '1px solid var(--nx9-line,#333)', borderRadius: 999, padding: '2px 8px', fontSize: 11 }}
-                          onClick={() => setEditDraft({
-                            ...editDraft,
-                            purpose: editDraft.purpose?.trim()
-                              ? `${editDraft.purpose} · @情绪:${v}`
-                              : `@情绪:${v}`,
-                          })}
-                        >
-                          情绪·{v}
-                        </button>
-                      ))}
-                      {(rec.recommendedCharacters ?? []).map((v) => (
-                        <button
-                          key={`char-${v}`}
-                          type="button"
-                          className="sg-chip"
-                          style={{ border: '1px solid var(--nx9-line,#333)', borderRadius: 999, padding: '2px 8px', fontSize: 11 }}
-                          onClick={() => {
-                            if (editDraft.characters.some((n) => stripMentionToken(n) === v)) return;
-                            setEditDraft({ ...editDraft, characters: [...editDraft.characters, v] });
-                          }}
-                        >
-                          角色·{v}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                );
-              })()}
-
-              <div className="sg-grid-2">
-                <label className="sg-field">
-                  <span className="sg-label">对白说话人</span>
-                  <input
-                    className="sg-input"
-                    value={editDraft.dialogueSpeaker}
-                    onChange={(e) => setEditDraft({ ...editDraft, dialogueSpeaker: e.target.value })}
-                    placeholder="角色名 / 旁白"
-                  />
-                </label>
-                <label className="sg-field">
-                  <span className="sg-label">对白文本</span>
-                  <input
-                    className="sg-input"
-                    value={editDraft.dialogueText}
-                    onChange={(e) => setEditDraft({ ...editDraft, dialogueText: e.target.value })}
-                    placeholder="首条对白"
-                  />
-                </label>
-              </div>
-
-              <label className="sg-field">
-                <span className="sg-label">镜头目的</span>
-                <AssetMentionInput
-                  value={editDraft.purpose ?? ''}
-                  onChange={(next) => setEditDraft({ ...editDraft, purpose: next })}
-                  kinds={GLOBAL_MENTION_KINDS}
-                  placeholder="可 @情绪 @镜头"
-                  className="sg-input"
-                />
-              </label>
-
-              <div className="sg-grid-2">
-                <label className="sg-field">
-                  <span className="sg-label">画面描述 visual</span>
-                  <textarea
-                    className="sg-textarea"
-                    rows={3}
-                    value={editDraft.visual ?? ''}
-                    onChange={(e) => setEditDraft({ ...editDraft, visual: e.target.value })}
-                    placeholder="画面：环境、人物位置、光线、情绪、构图"
-                  />
-                </label>
-                <label className="sg-field">
-                  <span className="sg-label">动作设计 action</span>
-                  <textarea
-                    className="sg-textarea"
-                    rows={3}
-                    value={editDraft.action ?? ''}
-                    onChange={(e) => setEditDraft({ ...editDraft, action: e.target.value })}
-                    placeholder="开始动作 → 变化 → 结束"
-                  />
-                </label>
-              </div>
-
-              <label className="sg-field">
-                <span className="sg-label">视听语言</span>
-                <textarea
-                  className="sg-textarea"
-                  rows={3}
-                  value={editDraft.audiovisualLanguage ?? ''}
-                  onChange={(e) => setEditDraft({ ...editDraft, audiovisualLanguage: e.target.value })}
-                  placeholder="成段镜头叙事：运镜如何服务情绪、景别功能、光色对比、声画关系…"
-                />
-              </label>
-
-              <div className="sg-grid-2">
-                <label className="sg-field">
-                  <span className="sg-label">旁白</span>
-                  <input
-                    className="sg-input"
-                    value={editDraft.narration ?? ''}
-                    onChange={(e) => setEditDraft({ ...editDraft, narration: e.target.value })}
-                  />
-                </label>
-                <label className="sg-field">
-                  <span className="sg-label">声音 / 音效</span>
-                  <input
-                    className="sg-input"
-                    value={editDraft.sound ?? ''}
-                    onChange={(e) => setEditDraft({ ...editDraft, sound: e.target.value })}
-                    placeholder="环境声、音乐设计"
-                  />
-                </label>
-              </div>
-
-              <label className="sg-field">
-                <span className="sg-label">连贯备注（分号分隔）</span>
-                <input
-                  className="sg-input"
-                  value={(editDraft.continuityNotes ?? []).join('；')}
-                  onChange={(e) => setEditDraft({
-                    ...editDraft,
-                    continuityNotes: e.target.value
-                      .split(/[；;\n]+/)
-                      .map((s) => s.trim())
-                      .filter(Boolean),
-                  })}
-                  placeholder="服装/道具/位置/朝向/光线延续"
-                />
-              </label>
-
-              <div className="sg-edit-grid">
-                <div className="sg-panel">
-                  <div className="sg-panel__head">
-                    <h3 className="sg-panel__title">角色预选</h3>
-                    <span className="sg-panel__meta">{characters.length}</span>
-                  </div>
-                  {characters.length === 0 ? (
-                    <p className="sg-warn" style={{ margin: 0 }}>暂无角色，先在角色设定补齐</p>
-                  ) : (
-                    <div className="sg-chip-wrap">
-                      {characters.map((character) => {
-                        const active = editDraft.characters.includes(character.name);
-                        return (
-                          <button
-                            key={character.id}
-                            type="button"
-                            className={`sg-chip ${active ? 'is-on' : ''}`}
-                            onClick={() => toggleDraftCharacter(character.name)}
-                            title={characterMeta(character)}
-                          >
-                            {character.name}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
-                <div className="sg-panel">
-                  <div className="sg-panel__head">
-                    <h3 className="sg-panel__title">场景预选</h3>
-                    <span className="sg-panel__meta">{scenePresets.length}</span>
-                  </div>
-                  {scenePresets.length === 0 ? (
-                    <p className="sg-warn" style={{ margin: 0 }}>暂无场景，先在场景设定补齐</p>
-                  ) : (
-                    <div className="sg-chip-wrap">
-                      {scenePresets.map((scene) => {
-                        const active = stripMentionToken(editDraft.scene) === scene.label;
-                        return (
-                          <button
-                            key={scene.id}
-                            type="button"
-                            className={`sg-chip ${active ? 'is-on' : ''}`}
-                            onClick={() => setEditDraft({ ...editDraft, scene: scene.label })}
-                            title={scene.description}
-                          >
-                            {scene.label}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              <label className="sg-field">
-                <span className="sg-label">分镜剧本 / 文案</span>
-                <AssetMentionInput
-                  as="textarea"
-                  rows={3}
-                  value={editDraft.scriptText}
-                  onChange={(next) => setEditDraft({ ...editDraft, scriptText: next })}
-                  kinds={GLOBAL_MENTION_KINDS}
-                  placeholder="可 @ 角色、场景、镜头、情绪、声音"
-                  className="sg-textarea"
-                />
-              </label>
-              <label className="sg-field">
-                <span className="sg-label">画面图片提示词 imagePrompt</span>
-                <AssetMentionInput
-                  as="textarea"
-                  rows={4}
-                  value={editDraft.imagePrompt}
-                  onChange={(next) => setEditDraft({ ...editDraft, imagePrompt: next })}
-                  kinds={GLOBAL_MENTION_KINDS}
-                  className="sg-textarea"
-                />
-              </label>
-              <label className="sg-field">
-                <span className="sg-label">画面视频提示词 videoPrompt</span>
-                <AssetMentionInput
-                  as="textarea"
-                  rows={4}
-                  value={editDraft.videoPrompt}
-                  onChange={(next) => setEditDraft({ ...editDraft, videoPrompt: next })}
-                  kinds={GLOBAL_MENTION_KINDS}
-                  className="sg-textarea"
-                />
-              </label>
-              <label className="sg-field">
-                <span className="sg-label">线稿构图提示词 sketchPrompt</span>
-                <AssetMentionInput
-                  as="textarea"
-                  rows={3}
-                  value={editDraft.sketchPrompt ?? ''}
-                  onChange={(next) => setEditDraft({ ...editDraft, sketchPrompt: next })}
-                  kinds={GLOBAL_MENTION_KINDS}
-                  placeholder="黑白线稿构图：站位 / 前中后景 / 轮廓 / 机位；无色彩无材质"
-                  className="sg-textarea"
-                />
-                <div style={{ display: 'flex', gap: 6, marginTop: 6, flexWrap: 'wrap' }}>
-                  <button
-                    type="button"
-                    className="sg-btn sg-btn--ghost"
-                    onClick={() => {
-                      const filled = buildLineArtShotPrompt(
-                        [
-                          editDraft.scriptText || editDraft.visual || editDraft.title,
-                          editDraft.scene ? `location: ${editDraft.scene}` : '',
-                          editDraft.shotSize ? `${editDraft.shotSize} shot` : '',
-                          editDraft.cameraMove ? `camera: ${editDraft.cameraMove}` : '',
-                          editDraft.cameraAngle ? `angle: ${editDraft.cameraAngle}` : '',
-                          editDraft.characters?.length ? `characters: ${editDraft.characters.join(', ')}` : '',
-                        ].filter(Boolean).join('\n'),
-                        editDraft.shotSize,
-                      );
-                      setEditDraft({ ...editDraft, sketchPrompt: filled });
-                    }}
-                  >
-                    用镜头信息填充线稿词
-                  </button>
-                  <button
-                    type="button"
-                    className="sg-btn sg-btn--ghost"
-                    disabled={!editDraft.sketchPrompt?.trim()}
-                    onClick={() => {
-                      const v = (editDraft.sketchPrompt ?? '').trim();
-                      if (!v) return;
-                      void navigator.clipboard.writeText(v).then(
-                        () => toastSuccess('已复制线稿提示词'),
-                        () => toastSuccess('已复制线稿提示词'),
-                      );
-                    }}
-                  >
-                    复制线稿词
-                  </button>
-                </div>
-              </label>
-              <label className="sg-field">
-                <span className="sg-label">排除项 negativePrompt</span>
-                <textarea
-                  className="sg-textarea"
-                  rows={2}
-                  value={editDraft.negativePrompt ?? ''}
-                  onChange={(e) => setEditDraft({ ...editDraft, negativePrompt: e.target.value })}
-                  placeholder="不想出现的元素"
-                />
-              </label>
-            </div>
-
-            <div className="sg-studio__foot">
-              <p className="sg-studio__foot-hint">
-                {editingShot.sceneCode}
-                {' · '}
-                修改写回剧本拆分结构与故事板
-              </p>
-              <div className="sg-studio__foot-actions">
-                <button
-                  type="button"
-                  className="sg-btn sg-btn--ghost"
-                  onClick={() => setEditingShotId(null)}
-                >
-                  取消
-                </button>
-                <button type="button" className="sg-btn sg-btn--primary" onClick={saveShotEdit}>
-                  保存修改
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-      </ScreenModal>
+        onSave={saveShotEdit}
+        scenePresets={scenePresets}
+        characterNameSet={characterNameSet}
+        characters={characters}
+        costumeOptions={costumeOptions}
+        propOptions={propOptions}
+        shotLexiconOptions={shotLexiconOptions}
+        shotLexiconById={shotLexiconById}
+        workspaceScenes={workspaceScenes}
+        toggleDraftCharacter={toggleDraftCharacter}
+      />
     </div>
   );
-function StoryboardDeskDevPack({ blockId: _bid }: { blockId: string }) {
-  const { values: gv, importJson: _gj } = useDevPromptOverrides();
-  const [prompts, setPrompts] = useState<ScriptBreakdownPromptTemplates>(() => normalizeScriptBreakdownPrompts(undefined));
-  const [tip, setTip] = useState('');
-  const fileRef = useRef<HTMLInputElement>(null);
-
-  const fullTemplates = useMemo(() => {
-    const dft = DEFAULT_SCRIPT_BREAKDOWN_PROMPTS;
-    return {
-      episodePlannerSystem: prompts.episodePlannerSystem || dft.episodePlannerSystem,
-      episodeBreakdownSystem: prompts.episodeBreakdownSystem || dft.episodeBreakdownSystem,
-    };
-  }, [prompts]);
-
-  const nodeOverride = useMemo(() => {
-    const result: Partial<Record<string, boolean>> = {};
-    for (const key of ['episodePlannerSystem', 'episodeBreakdownSystem'] as const) {
-      result[key] = Boolean(prompts[key as keyof ScriptBreakdownPromptTemplates]?.trim());
-    }
-    return result;
-  }, [prompts]);
-
-  const globalOverrides = useMemo(() => {
-    const result: Partial<Record<string, boolean>> = {};
-    for (const key of ['storyboard.episodeBreakdownSystem', 'storyboard.episodePlannerSystem'] as const) {
-      result[key] = Boolean(gv[key]?.trim());
-    }
-    return result;
-  }, [gv]);
-
-  const sourceLabel = useCallback((key: 'episodePlannerSystem' | 'episodeBreakdownSystem'): string => {
-    const globalKey = key === 'episodePlannerSystem' ? 'storyboard.episodePlannerSystem' : 'storyboard.episodeBreakdownSystem';
-    if (nodeOverride[key]) return '来源：节点 Pack';
-    if (globalOverrides[globalKey]) return '来源：全局 Override';
-    return '来源：DEFAULT';
-  }, [nodeOverride, globalOverrides]);
-
-  const patch = useCallback((key: 'episodePlannerSystem' | 'episodeBreakdownSystem', value: string) => {
-    setPrompts((prev) => ({ ...prev, [key]: value.trim() }));
-  }, []);
-
-  const reset = useCallback(() => { setPrompts(normalizeScriptBreakdownPrompts(undefined)); setTip('已恢复默认'); }, []);
-
-  const importPack = useCallback(async (file: File) => {
-    try {
-      const text = await file.text();
-      const parsed = JSON.parse(text) as ScriptBreakdownPromptPack;
-      const result = parseScriptBreakdownPromptPack(parsed);
-      if (result && result.prompts) {
-        setPrompts(normalizeScriptBreakdownPrompts(result.prompts));
-        setTip('导入成功');
-      } else {
-        setTip('非法 Pack 格式，拒绝导入');
-      }
-    } catch { setTip('JSON 解析失败'); }
-  }, []);
-
-  return (
-    <details className="sg-warn" style={{ marginTop: 8, padding: 8, borderRadius: 10, border: '1px dashed var(--desk-warn)' }}>
-      <summary style={{ cursor: 'pointer', fontWeight: 700, fontSize: 11, color: 'var(--desk-warn)' }}>
-        ⚠ 开发 · 分镜台 Prompt Pack（仅开发）
-      </summary>
-      <div className="flex flex-col gap-2 mt-2 max-h-60 overflow-auto">
-        {(['episodePlannerSystem', 'episodeBreakdownSystem'] as const).map((key) => (
-          <div key={key}>
-            <label className="text-[10px] font-bold opacity-60">{key}</label>
-            <textarea
-              className="w-full border border-line rounded text-[10px] p-1.5 mt-1 bg-surface resize-none font-mono"
-              rows={4}
-              value={fullTemplates[key]}
-              onChange={(e) => patch(key, e.target.value)}
-            />
-            <div className="flex justify-between text-[8px] text-ink/40">
-              <span>{sourceLabel(key)}</span>
-            </div>
-          </div>
-        ))}
-      </div>
-      <div className="flex flex-wrap gap-2 mt-2" style={{ maxHeight: 60, overflow: 'visible' }}>
-        <button type="button" className="sg-btn" onClick={reset}>恢复默认</button>
-        <button type="button" className="sg-btn" onClick={() => {
-          const pack = createScriptBreakdownPromptPack(undefined, prompts);
-          const blob = new Blob([JSON.stringify(pack, null, 2)], { type: 'application/json' });
-          const url = URL.createObjectURL(blob);
-          const a = document.createElement('a'); a.href = url; a.download = 'storyboard-prompt-pack.json'; a.click();
-          URL.revokeObjectURL(url);
-        }}>导出</button>
-        <button type="button" className="sg-btn" onClick={() => fileRef.current?.click()}>导入</button>
-        <input ref={fileRef} type="file" accept=".json" hidden onChange={(e) => {
-          const f = e.target.files?.[0];
-          if (f) void importPack(f);
-          e.target.value = '';
-        }} />
-      </div>
-      {tip ? <p className="text-[10px] mt-1" style={{ color: 'var(--desk-ok)' }}>{tip}</p> : null}
-    </details>
-  );
-}
 }

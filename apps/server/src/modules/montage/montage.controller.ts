@@ -6,18 +6,8 @@ import { AnalyzeService } from './analyze.service';
 import { MontageService } from './montage.service';
 import { HyperframesService, type RenderResult } from './hyperframes.service';
 import { RemotionRenderer } from './remotion.renderer';
+import { VideoEditService } from './video-edit.service';
 import { WorkspaceService } from '../workspace/workspace.service';
-
-interface RemotionTask {
-  taskId: string;
-  status: 'queued' | 'processing' | 'done' | 'failed';
-  progress: number;
-  message: string;
-  createdAt: number;
-  url?: string;
-}
-
-const remotionTasks = new Map<string, RemotionTask>();
 
 @Controller('api/montage')
 export class MontageController {
@@ -26,6 +16,7 @@ export class MontageController {
     private readonly analyze: AnalyzeService,
     private readonly remotionRenderer: RemotionRenderer,
     private readonly hyperframes: HyperframesService,
+    private readonly videoEdit: VideoEditService,
     private readonly workspace: WorkspaceService,
   ) {}
 
@@ -218,6 +209,27 @@ export class MontageController {
   getRemotionTaskStatus(@Param('taskId') taskId: string) {
     const task = this.remotionRenderer.getStatus(taskId);
     if (!task) return { ok: false, message: 'task not found' };
+    return { ok: true, ...task };
+  }
+
+  @Delete('remotion-tasks/:taskId')
+  cancelRemotionTask(@Param('taskId') taskId: string) {
+    const cancelled = this.remotionRenderer.cancelTask(taskId);
+    return { ok: cancelled, message: cancelled ? '已取消' : '任务未找到' };
+  }
+
+  /** P3: 视频级智能替换（Fal 队列，长任务） */
+  @Post('video-edit')
+  submitVideoEdit(
+    @Body() body: { videoUrl: string; maskUrl?: string; prompt: string; providerId?: string },
+  ) {
+    return this.videoEdit.submit(body);
+  }
+
+  @Get('video-edit-tasks/:taskId')
+  getVideoEditStatus(@Param('taskId') taskId: string) {
+    const task = this.videoEdit.getStatus(taskId);
+    if (!task) return { ok: false, status: 'error', message: 'task not found' };
     return { ok: true, ...task };
   }
 }

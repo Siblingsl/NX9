@@ -119,9 +119,12 @@ describe('F-026 acceptance', () => {
   // ═══════════ use-storyboard-desk: hint text updated ═══════════
   describe('use-storyboard-desk hint and boundary text', () => {
     const src = readWeb(USE_STORYBOARD_DESK);
+    const grid = readWeb('blocks/craft/storyboard-desk/grid-panel.tsx');
+    const compose = readWeb('blocks/craft/storyboard-desk/compose-panel.tsx');
+    const handoff = readWeb('blocks/craft/storyboard-desk/handoff-panel.tsx');
 
     it('says 彩色关键帧请到导演台批出 (updated from old text)', () => {
-      expect(src).toContain('彩色关键帧请到导演台批出');
+      expect(grid).toContain('彩色关键帧请到导演台批出');
     });
 
     it('NO old hint 整集关键帧请交导演台', () => {
@@ -129,29 +132,27 @@ describe('F-026 acceptance', () => {
     });
 
     it('整集工业级关键帧在导演台批出', () => {
-      expect(src).toContain('整集工业级关键帧在导演台批出');
+      expect(compose).toContain('整集工业级关键帧在导演台批出');
     });
 
     it('确认后导演台可按本集批出关键帧', () => {
-      expect(src).toContain('确认后导演台可按本集批出关键帧');
+      expect(handoff).toContain('确认后导演台可按本集批出关键帧');
     });
 
     it('已聚焦导演台 · 请开台批出关键帧', () => {
-      expect(src).toContain('已聚焦导演台 · 请开台批出关键帧');
+      expect(src).toContain('已聚焦导演台 · 交接数据已同步');
     });
 
     it('foot actions 无批量线稿按钮', () => {
-      // foot actions should only have 确认本集
-      const footStart = src.indexOf('sg3-foot__actions');
-      const footEnd = src.indexOf('sg3-foot__actions', footStart + 10) > 0
-        ? src.indexOf('sg3-foot__actions', footStart + 10)
-        : src.indexOf('</div>', footStart + 200);
-      const footSection = src.slice(footStart, footEnd > footStart ? footEnd : src.length);
+      // 底栏改为时长提示；确认本集在交接页 / 顶栏，不与批量线稿并列
+      const footStart = src.indexOf('sg3-foot');
+      const footSection = src.slice(footStart, footStart + 1200);
       expect(footSection).not.toContain('批量线稿');
       expect(footSection).not.toContain('宫格线稿');
       expect(footSection).not.toContain('故事板大图');
       expect(footSection).not.toContain('去导演台批出');
-      expect(footSection).toContain('确认本集');
+      expect(handoff).toContain('确认本集');
+      expect(src).toContain('确认本集');
     });
   });
 

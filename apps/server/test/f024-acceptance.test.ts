@@ -95,19 +95,19 @@ describe('F-024 acceptance — contract tests', () => {
 
     it('handles no mentions', () => {
       const { resolved, unresolved } = resolveMentionsForPrompt(
-        '无@引用',
+        '没有引用记号',
         [],
       );
-      expect(resolved).toBe('无@引用');
+      expect(resolved).toBe('没有引用记号');
       expect(unresolved).toHaveLength(0);
     });
 
     it('text without mention tokens stays unchanged', () => {
       const { resolved, unresolved } = resolveMentionsForPrompt(
-        '无@引用',
+        '没有引用记号',
         [],
       );
-      expect(resolved).toBe('无@引用');
+      expect(resolved).toBe('没有引用记号');
       expect(unresolved).toHaveLength(0);
     });
   });

@@ -2,6 +2,7 @@ import { join } from 'path';
 import { writeFileSync, existsSync, mkdirSync } from 'fs';
 import { timelineToHyperFramesHtml } from '@nx9/shared';
 import type { TimelinePayload } from '@nx9/shared';
+import { HF_PRODUCER_UNAVAILABLE } from './hyperframes-task';
 
 const PATHS = {
   exports: process.env.NX9_MEDIA_EXPORTS_DIR || join(process.cwd(), 'media', 'exports'),
@@ -20,7 +21,8 @@ export interface HyperFramesRenderResult {
 }
 
 /**
- * 低层渲染器：将 TimelinePayload 转为 HTML → 调用 @hyperframes/producer 或 FFmpeg fallback
+ * 低层渲染器：将 TimelinePayload 转为 HTML → 调用 @hyperframes/producer。
+ * producer 不可用时明确失败，禁止 FFmpeg 黑片占位。
  */
 export async function renderTimelineToMp4(
   timeline: TimelinePayload,
@@ -39,27 +41,33 @@ export async function renderTimelineToMp4(
     const outFilename = `episode-hf-${Date.now()}.mp4`;
     const outPath = join(PATHS.exports, outFilename);
 
-    // 优先 programmatic API
-    try {
-      const hf = await import('@hyperframes/producer') as any;
-      await hf.producer.render({
-        entry: join(workDir, 'index.html'),
-        out: outPath,
-        fps: timeline.fps,
-        width: timeline.width,
-        height: timeline.height,
-      });
-    } catch {
-      // FFmpeg fallback
-      const { execSync } = await import('child_process');
-      execSync(
-        `ffmpeg -f lavfi -i color=c=#000:s=${timeline.width}x${timeline.height}:d=${timeline.durationSec} -c:v libx264 -preset ultrafast "${outPath}"`,
-        { stdio: 'ignore' },
-      );
+    const hf = (await import('@hyperframes/producer')) as unknown as {
+      producer?: {
+        render: (opts: {
+          entry: string;
+          out: string;
+          fps?: number;
+          width?: number;
+          height?: number;
+        }) => Promise<unknown>;
+      };
+    };
+    if (!hf.producer?.render) {
+      return { ok: false, message: HF_PRODUCER_UNAVAILABLE };
     }
+    await hf.producer.render({
+      entry: join(workDir, 'index.html'),
+      out: outPath,
+      fps: timeline.fps,
+      width: timeline.width,
+      height: timeline.height,
+    });
 
     return { ok: true, url: `/media/exports/${outFilename}` };
   } catch (e) {
-    return { ok: false, message: (e as Error).message };
+    const message = (e as Error).message;
+    const unavailable =
+      /cannot find module|producer/i.test(message) ? HF_PRODUCER_UNAVAILABLE : message;
+    return { ok: false, message: unavailable };
   }
 }

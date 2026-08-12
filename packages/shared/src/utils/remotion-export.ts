@@ -16,7 +16,7 @@ export interface RemotionComposition {
 
 export interface RemotionTrack {
   id: string;
-  kind: 'video' | 'audio';
+  kind: 'video' | 'audio' | 'subtitle' | 'overlay';
   clips: RemotionClipSequence[];
 }
 
@@ -126,22 +126,26 @@ export function timelineToRemotionStudioBundle(
     'import { VideoClip } from "./clips/VideoClip";',
     'import { SubtitleClip } from "./clips/SubtitleClip";',
     '',
+    '// v3 时间线：按轨道 kind 遍历（勿按固定轨道 ID 查找）',
     'export const Nx9Episode: React.FC<{ timeline: any }> = ({ timeline }) => {',
     '  const fps = timeline.fps || 30;',
-    '  const videoTrack = timeline.tracks.find((t: any) => t.id === "video-1");',
-    '  const subtitleTrack = timeline.tracks.find((t: any) => t.id === "subtitle-1");',
+    '  const tracks = (timeline.tracks ?? []).filter((t: any) => !t.muted);',
+    '  const seq = (clip: any, node: React.ReactNode) => (',
+    '    <Sequence key={clip.id} from={Math.round(clip.startSec * fps)} durationInFrames={Math.max(1, Math.round(clip.durationSec * fps))}>',
+    '      {node}',
+    '    </Sequence>',
+    '  );',
     '  return (',
     '    <AbsoluteFill style={{ backgroundColor: "#000" }}>',
-    '      {videoTrack?.clips.map((clip: any) => (',
-    '        <Sequence key={clip.id} from={Math.round(clip.startSec * fps)} durationInFrames={Math.max(1, Math.round(clip.durationSec * fps))}>',
-    '          <VideoClip clip={clip} />',
-    '        </Sequence>',
-    '      ))}',
-    '      {subtitleTrack?.clips.map((clip: any) => (',
-    '        <Sequence key={clip.id} from={Math.round(clip.startSec * fps)} durationInFrames={Math.max(1, Math.round(clip.durationSec * fps))}>',
-    '          <SubtitleClip clip={clip} />',
-    '        </Sequence>',
-    '      ))}',
+    '      {tracks.filter((t: any) => t.kind === "video" || t.kind === "overlay").flatMap((t: any) =>',
+    '        t.clips.map((clip: any) => seq(clip, clip.type === "subtitle" ? <SubtitleClip clip={clip} /> : <VideoClip clip={clip} />)),',
+    '      )}',
+    '      {tracks.filter((t: any) => t.kind === "subtitle").flatMap((t: any) =>',
+    '        t.clips.map((clip: any) => seq(clip, <SubtitleClip clip={clip} />)),',
+    '      )}',
+    '      {tracks.filter((t: any) => t.kind === "audio").flatMap((t: any) =>',
+    '        t.clips.map((clip: any) => (clip.assetUrl ? seq(clip, <Audio src={clip.assetUrl} volume={clip.volume ?? 1} />) : null)),',
+    '      )}',
     '    </AbsoluteFill>',
     '  );',
     '};',
@@ -208,8 +212,8 @@ export function timelineToRemotionStudioBundle(
 /** 校验时间线，返回警告列表 */
 export function validateRemotionTimeline(timeline: TimelinePayload): { ok: boolean; warnings: string[] } {
   const warnings: string[] = [];
-  if (!timeline || timeline.version < 2) {
-    warnings.push('时间线版本过旧，建议升级到 v2');
+  if (!timeline || timeline.version < 3) {
+    warnings.push('时间线版本过旧，请经 migrateTimelinePayload 升级到 v3');
   }
   if (timeline.durationSec <= 0) {
     warnings.push('时间线时长为 0，请先添加素材');

@@ -16,6 +16,7 @@ import {
   type ScriptPlanPayload,
   type StoryboardShot,
   type VoiceLine,
+  resolveCharacterReferenceAudio,
 } from '@nx9/shared';
 import { useWorkspaceDocument } from '../../stores/workspace-document';
 import { useFlowGraphMirror } from '../../stores/flow-graph-mirror';
@@ -745,7 +746,9 @@ export function useStudioDesk() {
           const char = characters.characters.find(
             (c) => c.name === line.speaker || c.id === line.voiceProfileId,
           );
-          const refAudio = char?.referenceAudioUrl || undefined;
+          const sounds = useWorkspaceDocument.getState().soundLibrary.sounds;
+          const resolved = resolveCharacterReferenceAudio(char, sounds);
+          const refAudio = resolved.audioUrl;
           const res = await api.proxyTts({
             input: line.text,
             voice: refAudio ? `luxtts:${refAudio}` : 'alloy',
@@ -758,6 +761,7 @@ export function useStudioDesk() {
             status: 'ready',
             audioAssetId: res.url,
             voiceProfileId: char?.id ?? line.voiceProfileId,
+            soundAssetId: resolved.soundAssetId ?? null,
           });
           if (line.shotId) {
             patchShot(line.shotId, { audioAssetId: res.url });

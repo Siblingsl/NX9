@@ -183,9 +183,12 @@ describe('F-042 acceptance', () => {
     it('全量 TSX 无 bg-white', () => {
       const tsxFiles = walkFiles(WEB_SRC, '.tsx').map(relativeFromSrc);
       const violators: string[] = [];
+      // 禁止实心白底 bg-white；bg-white/α 是深色表面上的半透明叠层
+      //（与「白色文字覆盖深色按钮」同属允许的覆盖模式），不算硬编码白底
+      const solidBgWhite = /bg-white(?![\/\w-])/;
       for (const f of tsxFiles) {
         const content = readTsx(f);
-        if (content.includes('bg-white')) violators.push(f);
+        if (solidBgWhite.test(content)) violators.push(f);
       }
       expect(violators).toEqual([]);
     });

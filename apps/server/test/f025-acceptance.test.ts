@@ -75,7 +75,8 @@ describe('F-025 acceptance', () => {
     });
 
     it('handleHandoffToStoryboard searches for storyboard-desk node', () => {
-      expect(src).toContain("n.type === 'storyboard-desk'");
+      expect(src).toContain('resolveConnectedStoryboardDeskId');
+      expect(src).toContain("to: 'storyboard-desk'");
     });
 
     it('handleHandoffToStoryboard calls requestSpawn with connectToSource', () => {
@@ -189,11 +190,13 @@ describe('F-025 acceptance', () => {
     });
 
     it('renders handoff checklist', () => {
-      expect(src).toContain('sg3-checklist');
+      const panel = readWeb('blocks/craft/storyboard-desk/handoff-panel.tsx');
+      expect(panel).toContain('sg3-checklist');
     });
 
     it('renders storyboard sheet preview in handoff tab', () => {
-      expect(src).toContain('sg3-sheet--handoff');
+      const panel = readWeb('blocks/craft/storyboard-desk/handoff-panel.tsx');
+      expect(panel).toContain('sg3-sheet--handoff');
     });
 
     it('has confirm episode button in handoff tab', () => {

@@ -117,15 +117,16 @@ export function buildTimelineFromShots(
     offset += dur;
   }
 
+  // v3 规范轨道：V/A/S/O 前缀 ID + 语义 kind
   const tracks: TimelineTrack[] = [];
-  if (videoClips.length) tracks.push({ id: 'video-1', kind: 'video', clips: videoClips });
-  if (overlayClips.length) tracks.push({ id: 'video-2', kind: 'video', clips: overlayClips });
-  if (audioClips.length) tracks.push({ id: 'audio-1', kind: 'audio', clips: audioClips });
-  if (voiceClips.length) tracks.push({ id: 'audio-2', kind: 'audio', clips: voiceClips });
-  if (subtitleClips.length) tracks.push({ id: 'subtitle-1', kind: 'video', clips: subtitleClips });
+  if (videoClips.length) tracks.push({ id: 'V1', kind: 'video', label: '视频', clips: videoClips });
+  if (overlayClips.length) tracks.push({ id: 'O1', kind: 'overlay', label: '贴片', clips: overlayClips });
+  if (audioClips.length) tracks.push({ id: 'A1', kind: 'audio', label: '配音', clips: audioClips });
+  if (voiceClips.length) tracks.push({ id: 'A2', kind: 'audio', label: '语音', clips: voiceClips });
+  if (subtitleClips.length) tracks.push({ id: 'S1', kind: 'subtitle', label: '字幕', clips: subtitleClips });
 
   return {
-    version: 2,
+    version: 3,
     title,
     fps: 30,
     durationSec: offset,
@@ -167,7 +168,7 @@ export function buildTimelineFromShotsV2(
 
   // 追加 transcribe cues 到字幕轨
   if (transcribeCues && transcribeCues.length > 0 && subtitleEnabled) {
-    const existing = result.tracks.find((t) => t.id === 'subtitle-1');
+    const existing = result.tracks.find((t) => t.kind === 'subtitle');
     const cueClips: TimelineClip[] = transcribeCues.map((cue, i) => ({
       id: `tc-${i}`,
       label: `字幕 ${i + 1}`,
@@ -180,23 +181,23 @@ export function buildTimelineFromShotsV2(
     if (existing) {
       existing.clips.push(...cueClips);
     } else {
-      result.tracks.push({ id: 'subtitle-1', kind: 'video', clips: cueClips });
+      result.tracks.push({ id: 'S1', kind: 'subtitle', label: '字幕', clips: cueClips });
     }
   }
 
-  // 默认转场
+  // 默认转场（仅视频轨衔接处）
+  const applyDefaultTransition = (transition: TimelineTransition) => {
+    for (const track of result.tracks) {
+      if (track.kind !== 'video') continue;
+      for (let i = 0; i < track.clips.length - 1; i++) {
+        track.clips[i].transitionOut = transition;
+      }
+    }
+  };
   if (defaultTransition) {
-    for (const track of result.tracks) {
-      for (let i = 0; i < track.clips.length - 1; i++) {
-        track.clips[i].transitionOut = defaultTransition;
-      }
-    }
+    applyDefaultTransition(defaultTransition);
   } else if (result.renderPreset === 'hyperframes-vertical') {
-    for (const track of result.tracks) {
-      for (let i = 0; i < track.clips.length - 1; i++) {
-        track.clips[i].transitionOut = { kind: 'fade', durationSec: 0.3 };
-      }
-    }
+    applyDefaultTransition({ kind: 'fade', durationSec: 0.3 });
   }
 
   return {

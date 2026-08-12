@@ -6,29 +6,44 @@ import type { Edge, Node } from '@xyflow/react';
 import { findChainShot } from './chain-storyboard-aggregate';
 import {
   appendStoryboardReviewEvent,
-  enrichPromptWithCharacters,
   enrichPromptWithEnvironment,
+  enrichPromptWithShotAssets,
+  costumeSourcesFromWorkspace,
+  propSourcesFromWorkspace,
+  shotLexiconSourcesFromWorkspace,
   pickReferenceImage,
   resolveBlockCharacters,
   buildConstrainedPrompt,
   resolveCompositionTemplate,
   extractReferenceConstraints,
   BUILTIN_COMPOSITION_TEMPLATES,
+  BUILTIN_BACKLOT_TEMPLATES,
+  templateToWorkspaceItem,
   type CharacterProfile,
+  type DirectorKeyframeBatch,
   type EnvironmentProfile,
   type ReferenceConstraint,
   type CompositionTemplate,
+  type ChainStoryboardPayload,
   type StoryboardShot,
   type GenPromptPack,
+  type KeyframeColorCheck,
+  readChainStoryboard,
+  emptyKeyframeColorCheck,
+  normalizeKeyframeColorCheck,
 } from '@nx9/shared';
+import { usePublicAssetLibrary } from '../stores/public-asset-library';
 import { useWorkspaceDocument } from '../stores/workspace-document';
 import { resolvePictureGenSettings } from './storyboard-preview-runner';
 import { runPictureGenJob } from './picture-gen-runner';
 import { getGenPack } from './gen-skill-runtime';
 import {
-  collectPendingKeyframeIndices,
   openReviewGateSession,
 } from './stage-deck/utils/review-gate-session';
+import {
+  resolveUpstreamChainDesk,
+  validateDirectorHandoff,
+} from './chain-storyboard-utils';
 
 export type DirectorDeskQueueFilter = 'missing' | 'failed' | 'selected' | '3donly' | 'all';
 
@@ -45,6 +60,10 @@ export type DirectorShotPhase =
   | 'cancelled';
 
 export interface DirectorDeskBatchOptions {
+  /** 关键帧 provenance 的唯一生产者节点。 */
+  sourceDirectorDeskId?: string;
+  /** 本批批出 id（写入 keyframeProvenance.batchId） */
+  keyframeBatchId?: string;
   shotIds?: string[];
   filter?: DirectorDeskQueueFilter;
   skipExisting?: boolean;
@@ -104,6 +123,11 @@ export interface DirectorDeskBatchOptions {
   ) => void;
   shouldAbort?: () => boolean;
   signal?: AbortSignal;
+  /**
+   * 像素级彩色质检。默认走 image-ops；失败时记 unknown。
+   * 疑似黑白只警告并强制进审阅，禁止标 failed。
+   */
+  inspectKeyframeColor?: (url: string) => Promise<KeyframeColorCheck>;
 }
 
 export interface DirectorDeskShotResult {
@@ -117,6 +141,7 @@ export interface DirectorDeskShotResult {
   attempts?: number;
   phase?: DirectorShotPhase;
   usedRefs?: string[];
+  colorCheck?: KeyframeColorCheck;
 }
 
 export interface DirectorDeskBatchSummary {
@@ -127,6 +152,226 @@ export interface DirectorDeskBatchSummary {
   total: number;
   lastUrl?: string;
   retried?: number;
+}
+
+export type DirectorRunContextBlockCode =
+  | 'missing-upstream'
+  | 'missing-chain'
+  | 'missing-handoff'
+  | 'stale-handoff'
+  | 'missing-episode'
+  | 'empty-episode';
+
+export interface DirectorRunContext {
+  status: 'ready' | 'blocked';
+  blockCode?: DirectorRunContextBlockCode;
+  reason?: string;
+  sourceDeskId?: string;
+  sourceDeskData?: Record<string, unknown>;
+  chain?: ChainStoryboardPayload;
+  episodeId?: string;
+  shots: StoryboardShot[];
+  lineArtByShotId: Record<string, string>;
+  handoffValidation: { valid: boolean; reason: string };
+  episodeConfirmed: boolean;
+  patchShot?: (shotId: string, patch: Partial<StoryboardShot>) => boolean;
+}
+
+export interface ResolveDirectorRunContextOptions {
+  deskBlockId: string;
+  nodes: Node[];
+  edges: Edge[];
+  blockData?: Record<string, unknown>;
+  updateNodeData: (id: string, patch: Record<string, unknown>) => void;
+  getLatestNodes?: () => Node[];
+  updateNodeDataAtomically?: (
+    id: string,
+    updater: (node: Node) => Record<string, unknown>,
+  ) => void;
+}
+
+function blockedDirectorRunContext(
+  blockCode: DirectorRunContextBlockCode,
+  reason: string,
+  partial: Partial<DirectorRunContext> = {},
+): DirectorRunContext {
+  return {
+    status: 'blocked',
+    blockCode,
+    reason,
+    shots: [],
+    lineArtByShotId: {},
+    handoffValidation: { valid: false, reason },
+    episodeConfirmed: false,
+    ...partial,
+  };
+}
+
+/**
+ * 导演台 UI、画布 Run 与 Cascade 的唯一运行上下文。
+ * 解析 chain / handoff / episode / line art，并提供并发安全的 chain 写回适配器。
+ */
+export function resolveDirectorRunContext(
+  options: ResolveDirectorRunContextOptions,
+): DirectorRunContext {
+  const sourceDeskId = resolveUpstreamChainDesk(
+    options.deskBlockId,
+    options.nodes,
+    options.edges,
+  );
+  if (!sourceDeskId) {
+    return blockedDirectorRunContext('missing-upstream', '未连接上游分镜台');
+  }
+  const sourceNode = options.nodes.find((node) => node.id === sourceDeskId);
+  const sourceDeskData = (sourceNode?.data ?? {}) as Record<string, unknown>;
+  const chain = readChainStoryboard(sourceDeskData);
+  if (!chain) {
+    return blockedDirectorRunContext('missing-chain', '上游分镜台没有可用镜表', {
+      sourceDeskId,
+      sourceDeskData,
+    });
+  }
+
+  const directorNode = options.nodes.find((node) => node.id === options.deskBlockId);
+  const blockData = options.blockData
+    ?? ((directorNode?.data ?? {}) as Record<string, unknown>);
+  const handoff = (
+    blockData.lastHandoff
+    ?? blockData.handoff
+  ) as Record<string, unknown> | undefined;
+  if (!handoff) {
+    return blockedDirectorRunContext('missing-handoff', '缺少分镜台交接数据', {
+      sourceDeskId,
+      sourceDeskData,
+      chain,
+    });
+  }
+  const episodeId = typeof handoff.episodeId === 'string'
+    ? handoff.episodeId
+    : chain.activeEpisodeId ?? undefined;
+  if (!episodeId) {
+    return blockedDirectorRunContext('missing-episode', '交接未指定有效剧集', {
+      sourceDeskId,
+      sourceDeskData,
+      chain,
+    });
+  }
+  const currentScriptHash = (
+    (sourceDeskData.breakdownJob as Record<string, unknown> | undefined)?.sourcePackageHash
+    ?? (sourceDeskData.handoff as Record<string, unknown> | undefined)?.scriptHash
+  ) as string | undefined;
+  const handoffValidation = validateDirectorHandoff({
+    handoff,
+    chain,
+    episodeId,
+    scriptHash: currentScriptHash,
+  });
+  if (!handoffValidation.valid) {
+    return blockedDirectorRunContext('stale-handoff', handoffValidation.reason, {
+      sourceDeskId,
+      sourceDeskData,
+      chain,
+      episodeId,
+      handoffValidation,
+    });
+  }
+
+  const shots = chain.shots.filter((shot) => shot.episodeId === episodeId);
+  if (shots.length === 0) {
+    return blockedDirectorRunContext('empty-episode', '交接剧集在上游镜表中不存在或没有镜头', {
+      sourceDeskId,
+      sourceDeskData,
+      chain,
+      episodeId,
+      handoffValidation,
+    });
+  }
+
+  const scopedShotIds = new Set(shots.map((shot) => shot.id));
+  const lineArtByShotId: Record<string, string> = {};
+  for (const shot of shots) {
+    if (shot.lineArtUrl) lineArtByShotId[shot.id] = shot.lineArtUrl;
+  }
+  const handoffFrames = handoff.lineArtFrames as
+    | Array<{ shotId?: string; sourceShotId?: string; imageUrl?: string }>
+    | undefined;
+  for (const frame of handoffFrames ?? []) {
+    const shotId = frame.shotId ?? frame.sourceShotId;
+    if (shotId && scopedShotIds.has(shotId) && frame.imageUrl && !lineArtByShotId[shotId]) {
+      lineArtByShotId[shotId] = frame.imageUrl;
+    }
+  }
+  const preview = sourceDeskData.storyboardPreview as
+    | { frames?: Array<{ sourceShotId?: string; id?: string; imageUrl?: string; lineArtUrl?: string }> }
+    | undefined;
+  for (const frame of preview?.frames ?? []) {
+    const shotId = frame.sourceShotId ?? frame.id;
+    const url = frame.lineArtUrl ?? frame.imageUrl;
+    if (shotId && scopedShotIds.has(shotId) && url && !lineArtByShotId[shotId]) {
+      lineArtByShotId[shotId] = url;
+    }
+  }
+
+  const accumulatedPatches = new Map<string, Partial<StoryboardShot>>();
+  let fallbackChain = chain;
+  const patchShot = (shotId: string, patch: Partial<StoryboardShot>): boolean => {
+    if (!scopedShotIds.has(shotId)) return false;
+    if (options.updateNodeDataAtomically) {
+      options.updateNodeDataAtomically(sourceDeskId, (node) => {
+        const latestChain = readChainStoryboard(node.data as Record<string, unknown>);
+        if (!latestChain) return {};
+        return {
+          chainStoryboard: {
+            ...latestChain,
+            shots: latestChain.shots.map((shot) =>
+              shot.id === shotId ? { ...shot, ...patch } : shot,
+            ),
+          },
+        };
+      });
+      return true;
+    }
+
+    accumulatedPatches.set(shotId, {
+      ...(accumulatedPatches.get(shotId) ?? {}),
+      ...patch,
+    });
+    const latestSourceNode = options.getLatestNodes?.()
+      .find((node) => node.id === sourceDeskId);
+    const latestChain = latestSourceNode
+      ? readChainStoryboard(latestSourceNode.data as Record<string, unknown>)
+      : undefined;
+    const baseChain = latestChain ?? fallbackChain;
+    fallbackChain = {
+      ...baseChain,
+      shots: baseChain.shots.map((shot) => {
+        const accumulated = accumulatedPatches.get(shot.id);
+        return accumulated ? { ...shot, ...accumulated } : shot;
+      }),
+    };
+    options.updateNodeData(sourceDeskId, { chainStoryboard: fallbackChain });
+    return true;
+  };
+
+  const confirmedIds = Array.isArray(handoff.confirmedEpisodeIds)
+    ? handoff.confirmedEpisodeIds as string[]
+    : [];
+  const episodeConfirmed = handoff.confirmed === true
+    || confirmedIds.includes(episodeId)
+    || (chain.confirmedEpisodeIds?.includes(episodeId) ?? false);
+
+  return {
+    status: 'ready',
+    sourceDeskId,
+    sourceDeskData,
+    chain,
+    episodeId,
+    shots,
+    lineArtByShotId,
+    handoffValidation,
+    episodeConfirmed,
+    patchShot,
+  };
 }
 
 function buildDirectorReviewPatch(
@@ -248,6 +493,15 @@ export function syncStyleToPictureGen(args: {
   return { pictureGenId: picture.id, synced: true, patch };
 }
 
+function shortPromptHash(prompt: string): string {
+  let h = 2166136261;
+  for (let i = 0; i < prompt.length; i++) {
+    h ^= prompt.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return (h >>> 0).toString(16).padStart(8, '0');
+}
+
 /**
  * 批出成功后：打开审片会话（宫格批审）；门禁以镜头 keyframeStatus 为准
  */
@@ -256,36 +510,60 @@ export function openReviewAfterDirectorBatch(args: {
   nodes: Node[];
   edges: Edge[];
   updateNodeData: (id: string, patch: Record<string, unknown>) => void;
-  /** 本次成功出帧的 shot id（保留参数，兼容调用方） */
+  /** 本次成功出帧的 shot id */
   succeededShotIds?: string[];
+  /** 显式本集镜头（禁止回退猜全局 active episode） */
+  shots?: StoryboardShot[];
+  episodeId?: string | null;
+  sourceChainDeskId?: string;
   openSession?: boolean;
 }): {
   pendingIndices: number[];
   opened: boolean;
   gatePassed: boolean;
 } {
-  void args.nodes;
-  void args.edges;
-  void args.updateNodeData;
-  void args.succeededShotIds;
-  const synced = summarizePendingKeyframeGate();
+  const shots = args.shots ?? [];
+  const pendingFromShots = shots
+    .filter(
+      (s) =>
+        Boolean(s.firstFrameAssetId)
+        && s.keyframeStatus !== 'approved'
+        && s.status !== 'approved'
+        && s.keyframeStatus !== 'failed'
+        && s.status !== 'failed',
+    )
+    .map((s) => s.index)
+    .sort((a, b) => a - b);
+
+  const succeededPendingIds = (args.succeededShotIds ?? []).filter((id) => {
+    const shot = shots.find((s) => s.id === id);
+    if (!shot?.firstFrameAssetId) return false;
+    return shot.keyframeStatus !== 'approved' && shot.status !== 'approved';
+  });
+
+  const synced = summarizePendingKeyframeGate(undefined, shots);
+  const pendingIndices = pendingFromShots.length
+    ? pendingFromShots
+    : synced.pendingIndices;
 
   let opened = false;
   if (args.openSession !== false) {
     openReviewGateSession({
-      pendingIndices: synced.pendingIndices.length
-        ? synced.pendingIndices
-        : collectPendingKeyframeIndices(),
+      pendingIndices,
+      pendingShotIds: succeededPendingIds.length ? succeededPendingIds : undefined,
       stage: 'keyframe',
       source: 'director-desk',
+      episodeId: args.episodeId ?? undefined,
+      sourceChainDeskId: args.sourceChainDeskId,
+      shots,
     });
     opened = true;
   }
 
   return {
-    pendingIndices: synced.pendingIndices,
+    pendingIndices,
     opened,
-    gatePassed: synced.gatePassed,
+    gatePassed: shots.length > 0 && pendingIndices.length === 0,
   };
 }
 
@@ -605,9 +883,32 @@ export function buildShotPrompt(
   const usedRefs: string[] = [];
   const referenceImageUrls: string[] = [];
 
-  // 角色
-  if (characters.length > 0) {
-    prompt = enrichPromptWithCharacters(prompt, characters);
+  // 角色 + 镜级服装/道具/镜头库（OL-18）
+  const workspaceItems = doc.backlotWorkspace?.items ?? [];
+  const costumes = costumeSourcesFromWorkspace(workspaceItems);
+  const props = propSourcesFromWorkspace(workspaceItems);
+  const publicTemplates = usePublicAssetLibrary.getState().payload.templates ?? [];
+  const shotLexiconPool = [
+    ...BUILTIN_BACKLOT_TEMPLATES.filter((t) => t.kind === 'shot').map((t) => templateToWorkspaceItem(t)),
+    ...publicTemplates.filter((t) => t.kind === 'shot' && !t.deletedAt).map((t) => templateToWorkspaceItem(t)),
+    ...workspaceItems.filter((i) => i.kind === 'shot'),
+  ].filter((x): x is NonNullable<typeof x> => Boolean(x));
+  const shotLexicon = shotLexiconSourcesFromWorkspace(shotLexiconPool);
+
+  if (characters.length > 0 || shot.costumeOverrides?.length || shot.propIds?.length || shot.shotAssetId) {
+    prompt = enrichPromptWithShotAssets(
+      prompt,
+      {
+        characterNames: shot.characterNames,
+        costumeOverrides: shot.costumeOverrides,
+        propIds: shot.propIds,
+        shotAssetId: shot.shotAssetId,
+      },
+      characters,
+      costumes,
+      props,
+      shotLexicon,
+    );
   } else if (forceChar && (shot.characterIds?.length || shot.characterNames?.length)) {
     missingForced.push('角色参考未入库');
   }
@@ -673,8 +974,8 @@ export function buildShotPrompt(
     missingForced.push('角色缺参考图');
   }
 
-  // C-09：使用 3D 机位时仍强制要求 2D 定妆/设定板，避免舞台与定妆脱节
-  if (prefer3d && d3 && forceChar && characters.length > 0) {
+  // C-09 / OL-21：使用 3D 机位时强制要求对应角色有 2D 定妆/设定板（与「锁角色参考」解耦）
+  if (prefer3d && d3 && characters.length > 0) {
     const lacking = characters.filter((c) => {
       const url =
         c.referenceImageUrl?.trim()
@@ -684,7 +985,7 @@ export function buildShotPrompt(
     });
     if (lacking.length > 0) {
       missingForced.push(
-        `3D机位缺对应定妆：${lacking.map((c) => c.name).join('、')}`,
+        `不可拍·3D机位缺定妆：${lacking.map((c) => c.name).join('、')}`,
       );
     }
   }
@@ -717,12 +1018,14 @@ export function buildShotPrompt(
       pack?.camera3dHint?.trim() || '[Match 3D blocking camera composition and staging]';
     prompt = `${prompt}\n\n${camHint}`;
   }
-  // D-03/R-01: 线稿构图提示
+  // D-03/R-01: 线稿构图提示 → 强制彩色关键帧契约（DD-P1-01）
   if (preferLineArt && lineArtUrl) {
     const lineArtHint =
       pack?.lineArtHint?.trim() ||
-      '[Match the line-art composition and camera framing; colorize consistently]';
+      '[Match the line-art composition and camera framing; produce a full-color cinematic keyframe, not a sketch or line drawing]';
     prompt = `${prompt}\n\n${lineArtHint}`;
+  } else {
+    prompt = `${prompt}\n\n[Produce a full-color cinematic production keyframe; do not output monochrome line art]`;
   }
   if (pack?.overlay?.trim()) {
     prompt = `${prompt}\n\n${pack.overlay.trim()}`;
@@ -764,6 +1067,19 @@ export function buildShotPrompt(
     usedRefs,
     missingForced,
   };
+}
+
+async function inspectDirectorKeyframeColor(
+  url: string,
+  inspect?: (url: string) => Promise<KeyframeColorCheck>,
+): Promise<KeyframeColorCheck> {
+  try {
+    if (inspect) return normalizeKeyframeColorCheck(await inspect(url));
+    const { api } = await import('../api/client');
+    return normalizeKeyframeColorCheck(await api.assessKeyframeColor({ sourceUrl: url }));
+  } catch {
+    return emptyKeyframeColorCheck('unknown');
+  }
 }
 
 async function attemptGenerate(
@@ -853,16 +1169,48 @@ async function attemptGenerate(
     const url = urls[0];
     if (!url) throw new Error('图像生成未返回 URL');
 
+    const colorCheck = await inspectDirectorKeyframeColor(url, opts.inspectKeyframeColor);
     const reviewMode = opts.reviewMode ?? (opts.blockData?.reviewMode as 'manual' | 'auto' | undefined) ?? 'manual';
-    const nextStatus = reviewMode === 'manual' ? 'review' : 'approved';
+    // 疑似黑白强制进审阅；未知/彩色才允许 auto 直接批准。禁止因质检标失败。
+    const nextStatus =
+      colorCheck.verdict === 'suspect-monochrome'
+        ? 'review'
+        : reviewMode === 'manual'
+          ? 'review'
+          : 'approved';
+    const keyframeRevision = Math.max(
+      0,
+      shot.keyframeRevision ?? (shot.firstFrameAssetId ? 1 : 0),
+    ) + 1;
     opts.patchShot(shot.id, {
       status: nextStatus,
       keyframeStatus: nextStatus,
       firstFrameAssetId: url,
+      keyframeRevision,
+      keyframeProvenance: {
+        role: 'director-color-keyframe',
+        generator: 'picture-gen',
+        sourceDirectorDeskId: opts.sourceDirectorDeskId,
+        sourceLineArtUrl: opts.lineArtByShotId?.[shot.id] ?? shot.lineArtUrl ?? null,
+        sourceDirector3dCaptureId: shot.director3dGuide?.captureId ?? null,
+        generatedAt: new Date().toISOString(),
+        model: modelId ?? null,
+        promptHash: shortPromptHash(built.prompt),
+        batchId: opts.keyframeBatchId ?? null,
+        usedRefs: built.usedRefs,
+        negativePromptApplied: Boolean(negativePrompt?.trim()),
+        colorCheck,
+      },
     });
 
     const phase: DirectorShotPhase = nextStatus === 'approved' ? 'approved' : 'review';
-    opts.onShotPhase?.(shot, phase);
+    opts.onShotPhase?.(
+      shot,
+      phase,
+      colorCheck.verdict === 'suspect-monochrome'
+        ? '结果疑似线稿/黑白，已保留关键帧，请人工确认'
+        : undefined,
+    );
 
     return {
       shotId: shot.id,
@@ -873,6 +1221,7 @@ async function attemptGenerate(
       attempts: attempt,
       phase,
       usedRefs: built.usedRefs,
+      colorCheck,
     };
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
@@ -996,25 +1345,27 @@ function buildQueue(opts: DirectorDeskBatchOptions): StoryboardShot[] {
 export async function runDirectorDeskBatch(
   opts: DirectorDeskBatchOptions = {},
 ): Promise<DirectorDeskBatchSummary> {
-  const queue = buildQueue(opts);
+  const keyframeBatchId = opts.keyframeBatchId ?? `kf-batch-${Date.now().toString(36)}`;
+  const batchOpts: DirectorDeskBatchOptions = { ...opts, keyframeBatchId };
+  const queue = buildQueue(batchOpts);
 
   if (queue.length === 0) {
     return { results: [], done: 0, failed: 0, skipped: 0, total: 0, retried: 0 };
   }
 
-  const concurrency = Math.min(3, Math.max(1, opts.concurrency ?? 2));
+  const concurrency = Math.min(3, Math.max(1, batchOpts.concurrency ?? 2));
   let completed = 0;
   let retried = 0;
 
   for (const shot of queue) {
-    opts.onShotPhase?.(shot, 'queued');
+    batchOpts.onShotPhase?.(shot, 'queued');
   }
 
   const results = await mapPool(
     queue,
     concurrency,
     async (shot, index) => {
-      if (opts.shouldAbort?.()) {
+      if (batchOpts.shouldAbort?.()) {
         return {
           shotId: shot.id,
           index: shot.index,
@@ -1024,14 +1375,14 @@ export async function runDirectorDeskBatch(
           phase: 'cancelled' as const,
         } satisfies DirectorDeskShotResult;
       }
-      opts.onShotStart?.(shot, index, queue.length);
-      const result = await generateOneShotWithRetry(shot, opts);
+      batchOpts.onShotStart?.(shot, index, queue.length);
+      const result = await generateOneShotWithRetry(shot, batchOpts);
       if ((result.attempts ?? 1) > 1) retried += 1;
       completed += 1;
-      opts.onShotDone?.(shot, result, completed - 1, queue.length);
+      batchOpts.onShotDone?.(shot, result, completed - 1, queue.length);
       return result;
     },
-    opts.shouldAbort,
+    batchOpts.shouldAbort,
   );
 
   const done = results.filter((r) => r.ok).length;
@@ -1066,22 +1417,59 @@ export function pushKeyframesToClipGen(args: {
   shotIds?: string[];
   /** D-01: 预计算的镜头队列（从 chain 传入） */
   shots?: StoryboardShot[];
+  episodeId?: string;
   /** 强制推送时跳过 clip-gen 关键帧门禁 */
   bypassKeyframeGate?: boolean;
-}): { clipGenId?: string; shotCount: number; firstShotId?: string } {
+}): { clipGenId?: string; shotCount: number; firstShotId?: string; batchId?: string } {
   const clip = findDirectorClipGenNode(args.deskBlockId, args.nodes, args.edges);
   if (!clip) return { shotCount: 0 };
+  const sourceChainDeskId = resolveUpstreamChainDesk(
+    args.deskBlockId,
+    args.nodes,
+    args.edges,
+  );
+  if (!sourceChainDeskId) return { clipGenId: clip.id, shotCount: 0 };
 
   const active = args.shots ?? [];
   const targets = (args.shotIds?.length
     ? active.filter((s) => args.shotIds!.includes(s.id))
     : active
-  ).filter((s) => s.firstFrameAssetId);
+  )
+    .filter((s) => s.firstFrameAssetId)
+    .filter((s) => args.bypassKeyframeGate === true || isShotKeyframeApproved(s))
+    .sort((a, b) => a.index - b.index);
 
   if (targets.length === 0) return { clipGenId: clip.id, shotCount: 0 };
 
   const first = targets[0];
+  const episodeId = args.episodeId ?? first.episodeId ?? undefined;
+  if (!episodeId) return { clipGenId: clip.id, shotCount: 0 };
+  const createdAt = new Date().toISOString();
+  const batchId = `director-keyframes-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   const pictures = targets.map((s) => s.firstFrameAssetId!).filter(Boolean);
+  const batch: DirectorKeyframeBatch = {
+    version: 1,
+    batchId,
+    sourceDirectorDeskId: args.deskBlockId,
+    sourceChainDeskId,
+    episodeId,
+    createdAt,
+    bypassKeyframeGate: args.bypassKeyframeGate === true,
+    status: 'ready',
+    shots: targets.map((shot) => ({
+      shotId: shot.id,
+      index: shot.index,
+      imageUrl: shot.firstFrameAssetId!,
+      prompt:
+        shot.videoPromptPro
+        || shot.videoPromptEn
+        || shot.promptEn
+        || shot.descriptionZh
+        || '',
+      durationSec: Math.max(1, shot.durationSec || 3),
+      keyframeRevision: Math.max(1, shot.keyframeRevision ?? 1),
+    })),
+  };
   args.updateNodeData(clip.id, {
     linkedShotId: first.id,
     linkedShotIds: targets.map((s) => s.id),
@@ -1093,18 +1481,26 @@ export function pushKeyframesToClipGen(args: {
       '',
     previewUrl: first.firstFrameAssetId,
     directorDeskRefs: pictures,
+    directorKeyframeBatch: batch,
+    requireKeyframeGate: true,
     message: `已从导演台写入 ${targets.length} 镜关键帧参考`,
     bypassKeyframeGate: args.bypassKeyframeGate === true,
   });
   args.updateNodeData(args.deskBlockId, {
     lastPushReceipt: {
-      at: new Date().toISOString(),
+      at: createdAt,
+      batchId,
       shotCount: targets.length,
       clipGenId: clip.id,
     },
   });
 
-  return { clipGenId: clip.id, shotCount: targets.length, firstShotId: first.id };
+  return {
+    clipGenId: clip.id,
+    shotCount: targets.length,
+    firstShotId: first.id,
+    batchId,
+  };
 }
 
 /** O-6: 根据镜头描述生成 3D 摆位文本建议（无自动桥，仅供提示） */
@@ -1117,20 +1513,25 @@ export function suggestCameraPosition(shot: {
   cameraAngle?: string;
   scene?: string;
   characters?: string[];
+  /** OL-18：若绑定镜头库，优先用库条景别/运镜 */
+  shotAssetId?: string | null;
+  shotLexiconSize?: string | null;
+  shotLexiconMove?: string | null;
 }): { shotIndex: number; suggestedCamera: string; suggestedAngle: string; suggestedDistance: string; notes: string } {
-  const size = shot.shotSize || 'MS';
-  const move = shot.cameraMove || '固定';
+  const size = shot.shotLexiconSize || shot.shotSize || 'MS';
+  const move = shot.shotLexiconMove || shot.cameraMove || '固定';
   const angle = shot.cameraAngle || '平拍';
   const distMap: Record<string, string> = { ECU: '0.3m', CU: '1m', MS: '2m', FS: '3m', WS: '6m' };
   const angleMap: Record<string, string> = { '平拍': 'eye-level', '俯拍': 'overhead', '仰拍': 'low-angle' };
   const desc = shot.descriptionZh || shot.promptEn || '';
   const chars = shot.characters?.join('/') || '主体';
   const scene = shot.scene || '场景';
+  const lexNote = shot.shotAssetId ? ' · 镜头库绑定' : '';
   return {
     shotIndex: shot.index ?? 0,
     suggestedCamera: `${scene} · ${move}机位，焦段 ${distMap[size] || '2m'}`,
     suggestedAngle: angleMap[angle] || 'eye-level',
     suggestedDistance: distMap[size] || '2m',
-    notes: `角色 ${chars} · ${size}景别 · ${angle}${desc ? ` · ${desc.slice(0, 40)}` : ''}`,
+    notes: `角色 ${chars} · ${size}景别 · ${angle}${lexNote}${desc ? ` · ${desc.slice(0, 40)}` : ''}`,
   };
 }

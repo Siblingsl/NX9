@@ -202,7 +202,10 @@ describe('TEST-AG — Agent Service (pure function tests)', () => {
           });
       return { choices: [{ message: { content } }] };
     });
-    const service = new AgentService({ proxyLlm } as any);
+    const service = new AgentService(
+      { proxyLlm } as any,
+      { resolveSystemPrompt: (_name: string, fallback: string) => fallback } as any,
+    );
     const result = await service.productionScriptBreakdown({
       sourceText: '第1集 雨夜相遇\n林夏进入咖啡馆并发现照片，故事由此开始。\n第2集 车站争执\n林夏在车站质问周远，二人的矛盾升级。',
       config: { episodeMode: 'auto', allowRuleFallback: false },

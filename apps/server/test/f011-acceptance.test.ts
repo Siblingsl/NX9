@@ -111,7 +111,7 @@ describe('F-011 文案区隔与防假成功（源码门禁）', () => {
     const src = readWeb('engine/export-pack-runner.ts');
     expect(src).toContain('hasEffectiveTimeline');
     expect(src).toContain('NO_TIMELINE_MSG');
-    expect(src).toContain("return { ok: false, message: NO_TIMELINE_MSG }");
+    expect(src).toMatch(/ok:\s*false,\s*message:\s*NO_TIMELINE_MSG/);
     expect(src).toContain('!res.ok || !res.taskId');
   });
 
@@ -125,15 +125,18 @@ describe('F-011 文案区隔与防假成功（源码门禁）', () => {
   });
 
   it('ClipEditor：主 CTA 确认并送交；预览非最终出片', () => {
-    const src = readWeb('blocks/core/ClipEditorBlock.tsx');
-    expect(src).toContain('确认时间线并送交导出');
-    expect(src).toContain('智能剪辑 · 编排');
-    expect(src).toContain('最终出片在交付打包');
-    expect(src).toContain('预览渲染（非最终出片）');
-    expect(src).toContain('confirmedAt');
-    expect(src).toContain('syncToExportPack');
-    // 禁止双主按钮：预览不是 primary
-    expect(src).toMatch(/className="se2-btn"[\s\S]{0,120}预览渲染/);
+    // 剪辑台重构后拆分为节点卡（ClipEditorBlock）+ 剪辑台主体（EditDesk）
+    const block = readWeb('blocks/core/ClipEditorBlock.tsx');
+    const desk = readWeb('blocks/core/clip-editor/EditDesk.tsx');
+    expect(desk).toContain('确认时间线并送交导出');
+    expect(block).toContain('智能剪辑 · 编排');
+    expect(block).toContain('最终出片在交付打包');
+    expect(desk).toContain('预览渲染（非最终出片）');
+    expect(block).toContain('confirmedAt');
+    expect(block).toContain('syncToExportPack');
+    // 禁止双主按钮：确认送交是唯一 primary，预览渲染不是 primary
+    expect(desk).toMatch(/ed-btn--primary[\s\S]{0,600}确认时间线并送交导出/);
+    expect(desk).not.toMatch(/ed-btn--primary[\s\S]{0,160}预览渲染/);
   });
 
   it('run-labels：export-pack=导出成片，clip-editor=智能编排', () => {

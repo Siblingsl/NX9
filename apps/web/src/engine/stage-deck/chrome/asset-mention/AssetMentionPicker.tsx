@@ -93,6 +93,11 @@ export function AssetMentionPicker({
     if (labelQuery) {
       pool = pool.filter((i) => i.label.toLowerCase().includes(labelQuery));
     }
+    // OL-22：私有优先展示，便于同名时先选项目副本
+    pool = [...pool].sort((a, b) => {
+      if (a.scope === b.scope) return 0;
+      return a.scope === 'private' ? -1 : 1;
+    });
     return pool.slice(0, 16);
   }, [allItems, pickKind, labelQuery]);
 
@@ -186,18 +191,42 @@ export function AssetMentionPicker({
       ) : pickOptions.length === 0 ? (
         <p className="px-2 py-2 text-[10px] text-ink/40 text-center">暂无{emptyLabel}素材</p>
       ) : (
-        pickOptions.map((opt: AssetLibraryItem) => (
-          <button
-            key={`${opt.scope}-${opt.id}`}
-            type="button"
-            onMouseDown={stop}
-            className="w-full text-left px-2.5 py-1.5 text-[11px] text-ink/75 hover:bg-ink/[0.04] truncate"
-            onClick={() => onPick(opt)}
-          >
-            <span className="text-ink/40 mr-1">{opt.scope === 'public' ? '公共' : '私有'}</span>
-            {opt.label}
-          </button>
-        ))
+        pickOptions.map((opt: AssetLibraryItem) => {
+          const nameKey = opt.label.trim().toLowerCase();
+          const sameNameOtherScope = allItems.some(
+            (i) =>
+              i.kind === opt.kind
+              && i.scope !== opt.scope
+              && i.label.trim().toLowerCase() === nameKey,
+          );
+          return (
+            <button
+              key={`${opt.scope}-${opt.id}`}
+              type="button"
+              onMouseDown={stop}
+              className="w-full text-left px-2.5 py-1.5 text-[11px] text-ink/75 hover:bg-ink/[0.04] truncate"
+              onClick={() => onPick(opt)}
+              title={
+                sameNameOtherScope
+                  ? opt.scope === 'private'
+                    ? '公私同名：解析优先用私有'
+                    : '公私同名：另有私有条目会优先'
+                  : undefined
+              }
+            >
+              <span className="text-ink/40 mr-1">{opt.scope === 'public' ? '公共' : '私有'}</span>
+              {sameNameOtherScope ? (
+                <span className="mr-1 text-[9px] text-warn">
+                  {opt.scope === 'private' ? '同名优先' : '同名冲突'}
+                </span>
+              ) : null}
+              {opt.overridesBuiltin ? (
+                <span className="mr-1 text-[9px] text-warn">覆盖中</span>
+              ) : null}
+              {opt.label}
+            </button>
+          );
+        })
       )}
     </div>,
     document.body,

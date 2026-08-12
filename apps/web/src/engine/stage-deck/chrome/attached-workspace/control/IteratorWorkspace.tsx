@@ -24,6 +24,7 @@ export function IteratorWorkspace({ blockId, kind, onCollapse }: IteratorWorkspa
   const current = items[idx] ?? '';
   const loopMode = (data.loopMode as string) ?? 'serial';
   const loopCount = (data.loopCount as number) ?? 1;
+  const loopConcurrency = Math.max(1, Math.min(8, Number(data.loopConcurrency ?? 3) || 3));
   const loopVariants = (data.loopVariants as string) ?? '';
   const variantLines = loopVariants.split('\n').filter((s) => s.trim()).length;
   const status = data.status as string | undefined;
@@ -69,6 +70,23 @@ export function IteratorWorkspace({ blockId, kind, onCollapse }: IteratorWorkspa
               <option value="parallel">并行</option>
             </select>
           </label>
+          {loopMode === 'parallel' && (
+            <label className="flex items-center gap-1">
+              并发
+              <input
+                type="number"
+                min={1}
+                max={8}
+                value={loopConcurrency}
+                onChange={(e) =>
+                  updateNodeData(blockId, {
+                    loopConcurrency: Math.max(1, Math.min(8, Number(e.target.value) || 1)),
+                  })
+                }
+                className="w-12 rounded-lg border border-line bg-surface px-2 py-1"
+              />
+            </label>
+          )}
           <label className="flex items-center gap-1">
             轮次
             <input

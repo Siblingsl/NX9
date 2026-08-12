@@ -141,7 +141,7 @@ export function ShotStoryCell({
         <button
           type="button"
           className="sg-story-cell__act"
-          title="快捷出线稿 · 批量主路径在构图"
+          title="快捷出线稿（单镜）· 批量主路径在「构图」Tab"
           aria-label="出线稿"
           disabled={busy || deskBusy}
           onClick={onGenerateLineArt}

@@ -23,7 +23,18 @@ export interface CharacterProfile {
   /** LuxTTS 克隆用参考音频（≥3s，wav/mp3） */
   referenceAudioUrl?: string | null;
   voiceProfileId?: string | null;
+  /**
+   * OL-19：绑定声音库条目 id（配音 / 参考音权威源）。
+   * 与 referenceAudioUrl 并存：有 id 时优先从声音库解析 URL。
+   */
+  soundAssetId?: string | null;
   tags?: string[];
+  /**
+   * P1 / OL-01：轻量版本号。另存新版本时 +1。
+   * 生成/绑定写入镜表 `characterRevisionPins` 与 `usedAssetIds` 的 `id@rev`；
+   * 旧镜钉旧版，不随新建版本自动漂移。缺省视为 1。
+   */
+  revision?: number;
   /** 从自定义模板导入时关联的模板 id，用于覆盖保存 */
   sourceTemplateId?: string;
   /** Character Bible 六层锚点（EPIC-M01） */

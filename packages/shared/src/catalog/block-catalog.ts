@@ -131,7 +131,16 @@ export const BLOCK_CATALOG: BlockDefinition[] = [
     concealed: true,
   },
 
-  // ── 空间（高级）— director-3d 已合并到 director-desk，目录已下架 ──
+  // ── 空间（高级）──
+  {
+    kind: 'director-3d',
+    label: '3D 导演台',
+    category: 'spatial',
+    hint: '独立场景搭建 · 逐镜构图 · 机位候选 · 提交导演参考',
+    glyph: 'Box',
+    accent: '#7C3AED',
+    nx9Native: true,
+  },
 
   // ── 后期 / 交付 ──
   {

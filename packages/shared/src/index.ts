@@ -47,6 +47,7 @@ export type {
   EpisodeMeta,
   EpisodeStatus,
   StoryboardDirector3dGuide,
+  StoryboardKeyframeProvenance,
   StoryboardGuideOverlay,
   StoryboardShot,
   StoryboardPayload,
@@ -132,6 +133,13 @@ export type {
   ScriptDeskAgentSession,
   ScriptDeskNodeData,
 } from './types/screenplay-package';
+export type {
+  DirectorKeyframeBatch,
+  DirectorKeyframeBatchShot,
+  DirectorKeyframeBatchReceipt,
+  DirectorKeyframeBatchFailure,
+  DirectorKeyframeBatchStatus,
+} from './types/director-keyframe-batch';
 export {
   emptyScreenplayPackage,
   isScreenplayPackage,
@@ -327,8 +335,26 @@ export type { ConsistencyIssue, ConsistencyReport } from './utils/consistency-re
 export { buildBridgeContinuationPrompt, type ContinuationInput } from './utils/seedance-continuation';
 
 export { buildTimelineFromShots, buildTimelineFromShotsV2, type TranscribeCue, type ShotInput } from './utils/timeline-export';
-export type { TimelineClip, TimelineTrack, TimelinePayload, TimelineAspect, TimelineTransition } from './types/timeline';
-export { migrateTimelinePayload } from './utils/timeline-migrate';
+export type { TimelineClip, TimelineTrack, TimelineTrackKind, TimelinePayload, TimelineAspect, TimelineTransition, TimelineVolumeKeyframe } from './types/timeline';
+export { migrateTimelinePayload, computeTimelineDuration } from './utils/timeline-migrate';
+export {
+  applyTimelineOp,
+  applyTimelineOps,
+  findTimelineClip,
+  listTimelineMediaUrls,
+  calibrateTimelineWithDurations,
+  nextTrackId,
+  MIN_CLIP_SEC,
+  type TimelineOp,
+  type ClipLocation,
+} from './utils/timeline-ops';
+export {
+  sampleClipVolume,
+  upsertVolumeKeyframe,
+  removeVolumeKeyframe,
+  splitVolumeKeyframes,
+  clampClipVolume,
+} from './utils/timeline-volume';
 export { FIXTURE_TIMELINE_V2, FIXTURE_SHOTS_FOR_TIMELINE } from './utils/fixtures-timeline';
 export {
   parseTimelineDraft,
@@ -366,6 +392,14 @@ export {
   collectLinkedShotIdsFromData,
 } from './engine/flow-graph';
 export type { UpstreamOutputs } from './engine/flow-graph';
+export {
+  extractDialogueLinesFromText,
+  extractDialogueLinesFromPackage,
+  extractDialogueLinesFromBreakdown,
+  normalizeDialogueLines,
+  resolveVoiceCastLines,
+} from './utils/dialogue-lines';
+export type { DialogueLine, VoiceCastLineSource } from './utils/dialogue-lines';
 
 export type {
   PromptBatchItem,
@@ -458,6 +492,10 @@ export {
   BLOCK_KIND_MIGRATIONS,
   BLOCK_KIND_MIGRATION_PATCHES,
   DEPRECATED_BLOCK_KINDS,
+  DIRECTOR3D_NODE_SCHEMA_VERSION,
+  DIRECTOR3D_REVERSE_MIGRATION_VERSION,
+  hasPersistedDirector3dState,
+  hasDirectorDeskProductionState,
   migrateBlockKind,
   migrateBlockKinds,
   stripReviewGateFromGraph,
@@ -509,6 +547,7 @@ export {
   inferSoundAssetKind,
   soundAssetKindLabel,
   SOUND_ASSET_KIND_LABELS,
+  resolveCharacterReferenceAudio,
 } from './types/sound-library';
 export type {
   StylePresetProfile,
@@ -533,6 +572,8 @@ export {
 export type {
   StructuredPrompt,
   CreativeVariantEntry,
+  CharacterFaceRig,
+  FaceRigGroupId,
   CharacterCreativeExtension,
   SceneCreativeExtension,
   CostumeCreativeExtension,
@@ -543,7 +584,20 @@ export type {
   HookCreativeExtension,
   VoiceCreativeExtension,
 } from './types/creative-asset-center';
-export { emptyStructuredPrompt, touchStructuredPrompt } from './types/creative-asset-center';
+export {
+  emptyStructuredPrompt,
+  touchStructuredPrompt,
+  DEFAULT_SCENE_VARIANTS,
+  DEFAULT_PROP_VARIANTS,
+} from './types/creative-asset-center';
+export {
+  COMMON_PROP_KEYWORDS,
+  extractCostumeEntityNames,
+  extractPropEntityNames,
+  type CostumeExtractCharacter,
+  type PropExtractScene,
+  type PropExtractCharacter,
+} from './utils/wardrobe-entity-extract';
 export {
   SHOT_MOVE_FAMILIES,
   shotMoveFamilyLabel,
@@ -568,9 +622,43 @@ export {
   CAC_COSTUME_VARIANT_PRESETS,
 } from './data/creative-asset-presets';
 export {
+  FACE_RIG_DEADZONE,
+  FACE_RIG_MIN,
+  FACE_RIG_MAX,
+  FACE_RIG_GROUPS,
+  FACE_RIG_PARAMS,
+  FACE_RIG_PARAMS_BY_ID,
+  CHARACTER_FACE_RIG_PRESETS,
+  FACE_RIG_PRESETS_BY_ID,
+  faceRigParamsOfGroup,
+  type FaceRigGroupDef,
+  type FaceRigDriver,
+  type FaceRigParamDef,
+  type FaceRigPreset,
+} from './data/character-face-rig-presets';
+export {
+  FACE_RIG_FACE_GROUPS,
+  emptyFaceRig,
+  getFaceRig,
+  faceRigValue,
+  setFaceRigValue,
+  resetFaceRigGroup,
+  applyFaceRigPreset,
+  listFaceRigDeviations,
+  countFaceRigDeviations,
+  isFaceRigNeutral,
+  faceRigSkipBodyIds,
+  buildFaceRigPrompt,
+  describeFaceRig,
+  faceRigHash,
+  type FaceRigDeviation,
+  type BuildFaceRigPromptOptions,
+} from './utils/character-face-rig';
+export {
   CHARACTER_SHEET_PROMPT_TEMPLATE,
   SCENE_SHEET_PROMPT_TEMPLATE,
   buildCharacterBiblePrompt,
+  buildCharacterFaceRigPrompt,
   buildCharacterImagePrompt,
   buildCharacterVideoPrompt,
   buildCharacterSheetGenerationPrompt,
@@ -645,12 +733,33 @@ export {
   enrichPromptWithShotAssets,
   costumeSourcesFromWorkspace,
   propSourcesFromWorkspace,
+  shotLexiconSourcesFromWorkspace,
   buildShotPropPromptSuffix,
   type ShotCostumeOverrideLike,
   type ShotAssetEnrichInput,
   type CostumePromptSource,
   type PropPromptSource,
+  type ShotLexiconPromptSource,
 } from './utils/shot-asset-enrich';
+
+export {
+  DESK_SHOT_SIZES,
+  DESK_CAMERA_MOVES,
+  mapShotSizeToDeskEnum,
+  mapCameraMoveToDeskEnum,
+  mapShotLexiconToDeskEnums,
+  type DeskShotSize,
+  type DeskCameraMove,
+} from './utils/shot-lexicon-desk-map';
+
+export {
+  collectUsedAssetIds,
+  formatAssetPin,
+  parseAssetPin,
+  stripAssetPinRevision,
+  expandUsedAssetIdSet,
+  characterRevisionPinsFromUsed,
+} from './utils/collect-used-assets';
 
 export {
   applyCroppedPanelsToCharacter,
@@ -686,6 +795,7 @@ export {
   soundToItem,
   styleToItem,
   resolveAssetRef,
+  preferPrivateAssetByLabel,
   enrichPromptWithAssets,
   enrichPromptWithAssetMentions,
   type AssetLibraryKind,
@@ -767,9 +877,20 @@ export {
   readChainStoryboard,
   buildChainStoryboardPayload,
   buildLineArtShotPatch,
+  CHAIN_STORYBOARD_HANDOFF_HASH_SCHEMA_VERSION,
   chainStoryboardHash,
   lineArtVersionHash,
+  mergeStoryboardShotFromBreakdown,
+  migrateLegacyLineArtShot,
+  migrateChainStoryboardMediaRoles,
+  quarantineDirector3dDataUrls,
+  hygieneChainStoryboard,
+  isDataMediaUrl,
+  isPersistentMediaUrl,
+  hasDirector3dGuide,
   patchChainShot,
+  nextSourceRevision,
+  upstreamShotContentChanged,
   activeChainEpisodeShots,
   chainHasShots,
   migrateGlobalToChainStoryboard,
@@ -834,7 +955,10 @@ export {
   ECOM_ALL_SPECS,
   lookupEcomSpec,
   buildEcomPackDescription,
+  planEcomPackFiles,
   type EcomSpec,
+  type EcomPackFilePlan,
+  type EcomPackPlanResult,
 } from './utils/ecom-specs';
 export {
   validatePoseCommand,
@@ -1028,8 +1152,10 @@ export {
   matchPictureModel,
   resolvePictureModelForRequest,
   listConnectedPictureModels,
+  listConnectedLlmModels,
   type PictureGenModelDef,
   type ConnectedPictureModelOption,
+  type ConnectedLlmModelOption,
 } from './data/gen-models';
 export {
   PERF,
@@ -1054,6 +1180,14 @@ export {
 } from './utils/line-art-prompt';
 export type { LineArtGridPanel } from './utils/line-art-prompt';
 export {
+  assessKeyframeColorFromRgb,
+  describeKeyframeColorCheck,
+  emptyKeyframeColorCheck,
+  normalizeKeyframeColorCheck,
+  type KeyframeColorCheck,
+  type KeyframeColorVerdict,
+} from './utils/keyframe-color-check';
+export {
   IMAGE_QUALITY_OPTIONS,
   IMAGE_ASPECT_OPTIONS,
   resolveImageRequestSize,
@@ -1063,6 +1197,7 @@ export {
   VIDEO_RESOLUTION_OPTIONS,
   VIDEO_ORIENTATION_OPTIONS,
   VIDEO_SIZE_PRESETS,
+  orientationFromAspect,
   resolveVideoGenParams,
 } from './utils/video-gen-params';
 export {
@@ -1087,7 +1222,13 @@ export type {
   ScriptPlanPayload,
 } from './types/script-plan';
 
-export type { AssetRecord, AssetKind, AssetLibraryPayload } from './types/asset';
+export type {
+  AssetRecord,
+  AssetKind,
+  AssetLibraryPayload,
+  MediaBlob,
+  GeneratedMedia,
+} from './types/asset';
 export type { ProjectStatus, ProjectMeta } from './types/project';
 export type { WorkflowSchemaV1 } from './schema/workflow-schema';
 export { playbookDefToSchema, schemaToJson, jsonToSchema } from './schema/convert-def-to-schema';
@@ -1098,6 +1239,10 @@ export {
   DEFAULT_VIDEO_MODEL,
   DEFAULT_TTS_MODEL,
   type ProviderDef,
+  VIDEO_EDIT_PROVIDERS,
+  DEFAULT_VIDEO_EDIT_PROVIDER,
+  resolveVideoEditProvider,
+  type VideoEditProviderDef,
 } from './data/provider-registry';
 
 export {

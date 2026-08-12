@@ -6,6 +6,12 @@ import { isScreenplayPackage, screenplayFullText } from '../types/screenplay-pac
 import { promptItemsToBatch } from '../types/prompt-batch';
 import { resolveAssetImportItems } from '../utils/asset-import';
 import { resolveUpstreamSources, type UpstreamPolicy } from '../utils/upstream-policy';
+import {
+  type DialogueLine,
+  extractDialogueLinesFromBreakdown,
+  extractDialogueLinesFromPackage,
+  normalizeDialogueLines,
+} from '../utils/dialogue-lines';
 
 export interface UpstreamOutputs {
   prompts: string[];
@@ -22,6 +28,8 @@ export interface UpstreamOutputs {
   screenplayPackages?: ScreenplayPackage[];
   /** 上游节点显式关联的镜头 id（分镜预览帧 / linkedShot* / queue） */
   shotIds?: string[];
+  /** 上游对白（分镜台 lines / 拆镜 dialogue / 编剧台成稿抽取） */
+  lines?: DialogueLine[];
 }
 
 function pushUniqueShotId(target: string[], id: string | null | undefined) {
@@ -67,6 +75,11 @@ function mergeShotIds(out: UpstreamOutputs, ids: string[]) {
   if (ids.length === 0) return;
   out.shotIds = [...(out.shotIds ?? [])];
   for (const id of ids) pushUniqueShotId(out.shotIds, id);
+}
+
+function pushDialogueLines(out: UpstreamOutputs, lines: DialogueLine[]) {
+  if (lines.length === 0) return;
+  out.lines = [...(out.lines ?? []), ...lines];
 }
 
 /** Kahn topological sort — returns block ids in execution order. */
@@ -187,12 +200,14 @@ export function gatherUpstream(
         out.screenplayPackages = [...(out.screenplayPackages ?? []), pkg];
         const full = screenplayFullText(pkg).trim();
         if (full) out.prompts.push(full);
+        pushDialogueLines(out, extractDialogueLinesFromPackage(pkg));
       }
       const legacy =
         (d.legacyScriptBreakdown as ScriptBreakdownPayload | undefined)
         ?? (d.scriptBreakdown as ScriptBreakdownPayload | undefined);
       if (legacy?.version === 1) {
         out.scriptBreakdowns = [...(out.scriptBreakdowns ?? []), legacy];
+        pushDialogueLines(out, extractDialogueLinesFromBreakdown(legacy));
       }
       continue;
     }
@@ -213,6 +228,14 @@ export function gatherUpstream(
       const pkg = d.package as ScreenplayPackage | undefined;
       if (isScreenplayPackage(pkg)) {
         out.screenplayPackages = [...(out.screenplayPackages ?? []), pkg];
+      }
+      const explicitLines = normalizeDialogueLines(d.lines);
+      if (explicitLines.length > 0) {
+        pushDialogueLines(out, explicitLines);
+      } else if (payload?.version === 1) {
+        pushDialogueLines(out, extractDialogueLinesFromBreakdown(payload));
+      } else if (isScreenplayPackage(pkg)) {
+        pushDialogueLines(out, extractDialogueLinesFromPackage(pkg));
       }
       // F-027: 当有多条上游 storyboard-desk 时，默认全部合并
       if (kind === 'storyboard-desk' || kind === 'story-grid') {

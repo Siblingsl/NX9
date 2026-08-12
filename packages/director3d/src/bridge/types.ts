@@ -34,6 +34,8 @@ export interface Director3dShotContext {
   episodeId?: string | null;
   sourceChainDeskId?: string;
   sourceShotRevision?: number;
+  liveSourceShotRevision?: number;
+  sourceStale?: boolean;
   sourceLabel?: string;
   episodeLabel?: string;
   lineArtUrl?: string;
@@ -56,6 +58,9 @@ export interface Director3dHostOptions {
   onProjectChange?: (project: DirectorProject) => void;
   onUploadFile?: (file: File) => Promise<{ url: string; filename?: string }>;
   onSaveSceneTemplate?: (template: Director3dSceneTemplate) => void;
+  sceneTemplates?: Director3dSceneTemplate[];
+  onApplySceneTemplate?: (templateId: string) => void;
+  onReloadSource?: () => void;
   onClose?: () => void;
   onRendererReady?: (renderer: { dispose: () => void }) => void;
 }

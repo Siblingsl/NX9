@@ -18,7 +18,7 @@ NX9/
 - **双主题 Desk**：暖纸底浅色 + 深色画布双模式；卡片式模块面板，古铜金 (#A67C4A) 品牌主色
 - **性能优先画布**：FlowSurface 引擎、懒加载模块、分级性能模式、可见区域渲染、防抖保存
 - **NestJS 后端**：工作区 CRUD、设置、资产上传、API 代理网关、Remotion 服务端真渲染
-- **18 种工作台模块**：11 个 NX9 自研（nx9Native），涵盖编剧、分镜、导演、配音、剪辑、宫格、交付等全流程
+- **19 种工作台模块**：12 个 NX9 自研（nx9Native），涵盖编剧、分镜、导演、配音、剪辑、宫格、交付等全流程
 - **Electron 预留**：`platform/runtime-bridge.ts` 抽象桌面能力，Web 模式零改动扩展
 
 ## 配色（画布 / Desk 视觉）
@@ -79,7 +79,7 @@ pnpm --filter @nx9/shared build
 | 后端 | NestJS (Express) |
 | 前端 | React 19 + Vite |
 | 画布 | FlowSurface + perf-controller + desk-palette |
-| 节点 | 18 种工作台模块 (block-catalog) |
+| 节点 | 19 种工作台模块 (block-catalog) |
 | 3D | Director3d 自研引擎 |
 | 渲染 | Remotion / HyperFrames / FFmpeg |
 | 状态 | workspace-catalog + flow-graph-mirror |

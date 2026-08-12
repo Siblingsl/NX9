@@ -73,6 +73,8 @@ export interface StoryboardDirector3dGuide {
   sourceBlockId: string;
   captureId: string;
   captureUrl: string;
+  /** chain 里曾是 Data URL，已隔离出交付字段，需重新上传。 */
+  captureUrlPendingRepair?: boolean;
   commitId?: string;
   shotId?: string;
   sourceShotRevision?: number;
@@ -84,6 +86,37 @@ export interface StoryboardDirector3dGuide {
   panoramaUrl?: string;
   characterPlacements?: StoryboardDirectorCharacterPlacement[];
   appliedAt: string;
+}
+
+export interface StoryboardKeyframeProvenance {
+  role: 'director-color-keyframe';
+  generator: 'picture-gen';
+  sourceDirectorDeskId?: string;
+  sourceLineArtUrl?: string | null;
+  sourceDirector3dCaptureId?: string | null;
+  generatedAt: string;
+  /** 出图模型 id（若可得） */
+  model?: string | null;
+  /** 最终 prompt 的短哈希，便于对账 */
+  promptHash?: string | null;
+  /** 批出批次 id（画布运行 / 台内批出） */
+  batchId?: string | null;
+  /** 实际注入的参考角色：line-art / 3d / character / scene … */
+  usedRefs?: string[];
+  /** 是否透传了 negativePrompt */
+  negativePromptApplied?: boolean;
+  /**
+   * 像素级彩色质检。`suspect-monochrome` 只作审阅警告，
+   * 不得据此把 `keyframeStatus` 标为 failed。
+   */
+  colorCheck?: {
+    verdict: 'color' | 'suspect-monochrome' | 'unknown';
+    chromaMean?: number;
+    chromaP95?: number;
+    noticeableRatio?: number;
+    sampleCount?: number;
+    sampledAt?: string;
+  };
 }
 
 export interface StoryboardShot {
@@ -99,6 +132,10 @@ export interface StoryboardShot {
   promptEn: string;
   videoPromptEn?: string;
   firstFrameAssetId?: string | null;
+  /** 关键帧像素每次变化递增；视频消费据此拒绝过期批次。 */
+  keyframeRevision?: number;
+  /** 最终关键帧媒体角色；线稿与 3D 截图不得写入。 */
+  keyframeProvenance?: StoryboardKeyframeProvenance | null;
   /** 导演台重出前保留的一档关键帧 URL，可恢复。 */
   keyframePreviousUrl?: string | null;
   lastFrameAssetId?: string | null;
@@ -124,6 +161,19 @@ export interface StoryboardShot {
   }>;
   /** Prop-06：本镜关键道具 */
   propIds?: string[];
+  /** Shot-01：可选绑定公共镜头库条目 */
+  shotAssetId?: string | null;
+  /**
+   * P1 / OL-01：最近一次出图/出视频实际消费的素材 id（角/服/场/道/风格/镜头等）。
+   * 可由 enrich 解析与绑定写入；角色可为 `id@revision` pin。
+   * 供健康「未使用」与版本追溯。
+   */
+  usedAssetIds?: string[];
+  /**
+   * OL-01：本镜钉死的角色版本（characterId → revision）。
+   * 新建角色版本后，旧镜仍可对照此表知「当时用的是哪一版」。
+   */
+  characterRevisionPins?: Record<string, number>;
   director3dGuide?: StoryboardDirector3dGuide | null;
   /** 当前退回修改意见；通过后清空，完整记录保留在 reviewHistory。 */
   keyframeReviewNote?: string | null;
@@ -132,6 +182,11 @@ export interface StoryboardShot {
   notes?: string;
   sketchSource?: SketchSource | null;
   sketchPrompt?: string | null;
+  /**
+   * 分镜台拥有的镜头内容版本。描述、顺序、线稿、角色绑定等上游字段变化时递增。
+   * 导演关键帧、3D guide、视频写回不得递增此字段。
+   */
+  sourceRevision?: number;
   /** 分镜台线稿；与导演台 firstFrameAssetId 严格分离。 */
   lineArtUrl?: string | null;
   sketchApprovedAt?: string | null;
@@ -202,6 +257,8 @@ export interface VoiceLine {
   text: string;
   voiceProfileId?: string | null;
   audioAssetId?: string | null;
+  /** OL-19：生成时钉住的声音库 id（成片轨可继承） */
+  soundAssetId?: string | null;
   status: VoiceLineStatus;
 }
 

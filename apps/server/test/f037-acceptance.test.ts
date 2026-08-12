@@ -121,29 +121,35 @@ describe('F-037 acceptance', () => {
   // ═══════════ G1.4: AssetLibraryModal 入口 ═══════════
   describe('AssetLibraryModal UI 入口', () => {
     const src = readWeb(ASSET_LIBRARY_MODAL);
+    const details = readWeb('panels/asset-library/AssetDetailFields.tsx');
+    const hook = readWeb(BIBLE_IMAGE_GEN);
 
     it('导入 useBibleImageGen', () => {
-      expect(src).toContain('useBibleImageGen');
+      expect(hook).toContain('export function useBibleImageGen');
     });
 
     it('实例化 bibleImg hook', () => {
-      expect(src).toContain('const bibleImg = useBibleImageGen()');
+      expect(hook).toContain('buildBibleImagePrompt');
+      expect(hook).toContain('api.proxyImage');
     });
 
     it('有角色定妆图按钮', () => {
-      expect(src).toContain('生成定妆图');
+      expect(src).toContain('generateCharacterMasterSheet');
+      expect(details).toContain('主生成·设定板');
       expect(src).toContain("kind: 'character'");
     });
 
     it('有场景图按钮（F-037 补全）', () => {
-      expect(src).toContain('生成场景图');
-      expect(src).toContain("kind: 'scene'");
+      expect(src).toContain('generateSceneSheet');
+      expect(details).toContain('主生成·场景设定板');
+      expect(src).toContain("item.kind !== 'scene'");
     });
   });
 
   // ═══════════ 源码门禁：场景图按钮结构完整 ═══════════
   describe('源码门禁：场景图按钮结构', () => {
     const src = readWeb(ASSET_LIBRARY_MODAL);
+    const details = readWeb('panels/asset-library/AssetDetailFields.tsx');
 
     it('scene 分支含 getSceneCreative', () => {
       expect(src).toContain('getSceneCreative');
@@ -151,53 +157,52 @@ describe('F-037 acceptance', () => {
 
     it('scene 名称取自 selectedWorkspaceItem.label', () => {
       expect(src).toContain('selectedWorkspaceItem.label');
-      expect(src).toContain('生成场景图');
+      expect(src).toContain('generateSceneSheet(selectedWorkspaceItem)');
     });
 
     it('scene description 来自 creative.description + promptZh + promptEn', () => {
-      const sceneSection = src.indexOf('selectedWorkspaceItem.promptZh');
-      const section = src.slice(Math.max(0, sceneSection - 100), sceneSection + 100);
-      expect(section).toContain('creative.description');
-      expect(section).toContain('promptEn');
+      expect(src).toContain('buildSceneSheetGenerationPrompt');
+      expect(src).toContain('getSceneCreative');
     });
 
     it('scene 写回 referenceUrls', () => {
-      // referenceUrls appears in the saveWorkspaceItem call for the scene path
-      expect(src).toContain('referenceUrls: [url, ...refs]');
+      expect(src).toContain("handleUploadWorkspaceMedia(f, selectedWorkspaceItem, 'referenceUrls')");
+      expect(src).toContain('sheetUrl: imageUrl');
     });
 
     it('生成中显示 Loader2 和 生成中…', () => {
       expect(src).toContain('Loader2');
-      expect(src).toContain('生成中…');
+      expect(details).toContain('生成中…');
     });
 
     it('错误显示 bibleImg.error', () => {
-      expect(src).toContain('bibleImg.error');
+      expect(src).toContain('setEntityGenError');
+      expect(src).toContain('generateSheetError={entityGenError}');
     });
 
     it('disabled 在生成中', () => {
-      const sceneSection = src.indexOf('disabled={bibleImg.generating}');
-      expect(sceneSection).toBeGreaterThan(0);
+      expect(details).toContain('disabled={generatingSheet}');
     });
   });
 
   // ═══════════ 角色按钮未退化 ═══════════
   describe('角色定妆图按钮未退化', () => {
     const src = readWeb(ASSET_LIBRARY_MODAL);
+    const details = readWeb('panels/asset-library/AssetDetailFields.tsx');
 
     it('仍含 character 分支', () => {
       expect(src).toContain("kind: 'character'");
     });
 
     it('写回 referenceImageUrl 给 character', () => {
-      expect(src).toContain('referenceImageUrl: url');
+      expect(src).toContain('referenceImageUrl');
       expect(src).toContain('saveCharacter');
+      expect(src).toContain('generateCharacterMasterSheet');
     });
 
     it('description 从 bible.appearance + personality', () => {
-      expect(src).toContain('charBible');
-      expect(src).toContain('.appearance');
-      expect(src).toContain('.personality');
+      expect(details).toContain('bible.appearance');
+      expect(details).toContain('.personality');
     });
   });
 

@@ -340,14 +340,15 @@ export function flattenScriptBreakdownShots(
   return payload?.episodes.flatMap((episode) => episode.shots) ?? [];
 }
 
-/** 将剧本拆分结果转换为后续批审、视频与导出共用的 Shot 数据。 */
+/**
+ * 将剧本拆分结果转换为 chain storyboard 的上游镜头数据。
+ * previewImageUrl 是分镜线稿，不得占用导演台 firstFrameAssetId / keyframeStatus。
+ */
 export function storyboardShotsFromScriptBreakdown(
   payload: ScriptBreakdownPayload | undefined,
 ): StoryboardShot[] {
   const episodeTitles = new Map(payload?.episodes.map((episode) => [episode.id, episode.title]) ?? []);
   return flattenScriptBreakdownShots(payload).map((shot, index) => {
-    const approved = shot.status === 'approved';
-    const hasPreview = Boolean(shot.previewImageUrl);
     const shotType: StoryboardShot['shotType'] = shot.shotSize === 'CU' || shot.shotSize === 'ECU'
       ? 'close'
       : shot.shotSize === 'WS'
@@ -366,8 +367,10 @@ export function storyboardShotsFromScriptBreakdown(
       descriptionZh: shot.scriptText || shot.title,
       promptEn: shot.imagePrompt,
       videoPromptEn: shot.videoPrompt,
-      firstFrameAssetId: shot.previewImageUrl ?? null,
-      status: approved ? 'approved' : hasPreview ? 'review' : 'draft',
+      firstFrameAssetId: null,
+      lineArtUrl: shot.previewImageUrl ?? null,
+      sourceRevision: 1,
+      status: 'draft',
       characterIds: [],
       characterNames: shot.characters,
       sceneName: shot.scene,
@@ -375,12 +378,17 @@ export function storyboardShotsFromScriptBreakdown(
       sceneCode: shot.sceneCode,
       costumeOverrides: shot.costumeOverrides?.map((o) => ({ ...o })),
       propIds: shot.propIds ? [...shot.propIds] : undefined,
+      shotAssetId: shot.shotAssetId ?? null,
       notes: shot.continuityNotes?.length ? shot.continuityNotes.join('\n') : undefined,
       sketchPrompt: shot.sketchPrompt ?? null,
-      keyframeStatus: approved ? 'approved' : hasPreview ? 'review' : 'draft',
+      keyframeStatus: 'draft',
       videoStatus: 'draft',
     } satisfies StoryboardShot;
   });
+}
+
+function normalizeBindKey(value: string | null | undefined): string {
+  return (value ?? '').trim().toLowerCase();
 }
 
 /** 按名称/场次码把剧本语义绑定到项目角色库与场景库的稳定资产 ID。 */
@@ -388,6 +396,8 @@ export function bindStoryboardShotAssets(
   shots: StoryboardShot[],
   characters: CharacterProfile[],
   environments: EnvironmentProfile[],
+  /** 场景库条目（Backlot scene）；环境圣经未命中时用 label → id */
+  sceneAssets?: Array<{ id: string; label: string }>,
 ): StoryboardShot[] {
   const characterByName = new Map<string, CharacterProfile>();
   for (const character of characters) {
@@ -395,22 +405,45 @@ export function bindStoryboardShotAssets(
       character.name,
       character.creative?.nickname,
       ...(character.creative?.aliases ?? []),
-    ].map((item) => item?.trim()).filter((item): item is string => Boolean(item));
-    for (const key of keys) characterByName.set(key, character);
+    ]
+      .map((item) => normalizeBindKey(item))
+      .filter(Boolean);
+    for (const key of keys) {
+      if (!characterByName.has(key)) characterByName.set(key, character);
+    }
+  }
+  const sceneByLabel = new Map<string, string>();
+  for (const item of sceneAssets ?? []) {
+    const key = normalizeBindKey(item.label);
+    if (key && !sceneByLabel.has(key)) sceneByLabel.set(key, item.id);
   }
   return shots.map((shot) => {
-    const characterIds = (shot.characterNames ?? [])
-      .map((name) => characterByName.get(name.trim())?.id)
-      .filter((id): id is string => Boolean(id));
+    const matched = (shot.characterNames ?? [])
+      .map((name) => characterByName.get(normalizeBindKey(name)))
+      .filter((c): c is CharacterProfile => Boolean(c));
+    const characterIds = matched.map((c) => c.id);
+    const prevPins = shot.characterRevisionPins ?? {};
+    const characterRevisionPins: Record<string, number> = { ...prevPins };
+    for (const c of matched) {
+      // OL-01：已有 pin 不覆盖（新建版本后旧镜钉旧版）；仅补尚未钉死的角色
+      if (characterRevisionPins[c.id] == null) {
+        characterRevisionPins[c.id] = c.revision ?? 1;
+      }
+    }
     const environment = environments.find(
       (item) =>
         (shot.sceneCode && item.sceneCode === shot.sceneCode) ||
-        (shot.sceneName && item.name.trim() === shot.sceneName.trim()),
+        (shot.sceneName && normalizeBindKey(item.name) === normalizeBindKey(shot.sceneName)),
     );
+    const sceneFromLibrary = shot.sceneName
+      ? sceneByLabel.get(normalizeBindKey(shot.sceneName))
+      : undefined;
     return {
       ...shot,
       characterIds,
-      sceneAssetId: environment?.id ?? shot.sceneAssetId ?? null,
+      characterRevisionPins:
+        Object.keys(characterRevisionPins).length > 0 ? characterRevisionPins : shot.characterRevisionPins,
+      sceneAssetId: environment?.id ?? sceneFromLibrary ?? shot.sceneAssetId ?? null,
     };
   });
 }

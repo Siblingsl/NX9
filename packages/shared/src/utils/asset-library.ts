@@ -26,6 +26,11 @@ export interface AssetLibraryItem {
   imageUrl?: string;
   hookPhase?: 'opening' | 'ending';
   builtin?: boolean;
+  /**
+   * P-25：公共库自定义条目与内置同名，resolve 时覆盖内置展示。
+   * UI 应标「覆盖中」，避免误以为内置丢失。
+   */
+  overridesBuiltin?: boolean;
   /** F-010: 软删除时间戳 */
   deletedAt?: number;
 }
@@ -256,6 +261,34 @@ export function resolveAssetRef(
 ): AssetLibraryItem | undefined {
   const pool = ref.scope === 'private' ? privateItems : publicItems;
   return pool.find((i) => i.id === ref.id && i.kind === ref.kind);
+}
+
+/**
+ * OL-22：按 kind+label 解析时优先私有；若公私同名则标明冲突。
+ */
+export function preferPrivateAssetByLabel(
+  kind: AssetLibraryKind,
+  label: string,
+  privateItems: AssetLibraryItem[],
+  publicItems: AssetLibraryItem[],
+): {
+  item: AssetLibraryItem | undefined;
+  scope: AssetScope | null;
+  nameConflict: boolean;
+} {
+  const key = (label ?? '').trim().toLowerCase();
+  if (!key) return { item: undefined, scope: null, nameConflict: false };
+  const match = (pool: AssetLibraryItem[]) =>
+    pool.find((i) => i.kind === kind && i.label.trim().toLowerCase() === key);
+  const priv = match(privateItems);
+  const pub = match(publicItems);
+  if (priv) {
+    return { item: priv, scope: 'private', nameConflict: Boolean(pub) };
+  }
+  if (pub) {
+    return { item: pub, scope: 'public', nameConflict: false };
+  }
+  return { item: undefined, scope: null, nameConflict: false };
 }
 
 export function enrichPromptWithAssets(

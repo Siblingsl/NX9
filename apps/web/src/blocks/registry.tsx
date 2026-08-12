@@ -14,7 +14,7 @@ const blockLoaders: Record<string, () => Promise<{ default: ComponentType<NodePr
   'sound-gen': () => import('./core/SoundGenBlock').then((m) => ({ default: m.default })),
   'clip-editor': () => import('./core/ClipEditorBlock').then((m) => ({ default: m.default })),
   'director-desk': () => import('./core/DirectorDeskBlock').then((m) => ({ default: m.default })),
-  'director-3d': () => import('./core/DirectorDeskBlock').then((m) => ({ default: m.default })),
+  'director-3d': () => import('./core/Director3dBlock').then((m) => ({ default: m.default })),
 
   'storyboard-desk': () =>
     import('./craft/StoryboardDeskBlock').then((m) => ({ default: m.default })),

@@ -3,36 +3,19 @@ import { type NodeProps, useEdges, useNodes, useReactFlow } from '@xyflow/react'
 import {
   CLIP_GEN_ASPECTS,
   CLIP_GEN_MODELS,
-  enrichPromptWithCharacters,
-  enrichPromptWithAssetMentions,
-  characterToItem,
-  workspaceItemToAsset,
-  soundToItem,
-  templateToAsset,
-  BUILTIN_BACKLOT_TEMPLATES,
   gatherUpstream,
   pickReferenceImage,
   resolveBlockCharacters,
   resolveRunLabel,
-  bridgePromptSuffix,
   validateSClassReferences,
-  SCLASS_MAX_REF_IMAGES,
-  SCLASS_MAX_REF_VIDEOS,
   VIDEO_RESOLUTION_OPTIONS,
   VIDEO_ORIENTATION_OPTIONS,
   VIDEO_DURATION_OPTIONS,
   VIDEO_SIZE_PRESETS,
-  resolveVideoGenParams,
-  buildStudioVideoPrompt,
-  filterStoryboardGuideOverlay,
-  resolveStoryboardGuideOverlay,
-  buildVideoGuidePromptSuffix,
   readChainStoryboard,
-  resolveMentionsForPrompt,
   extractReferencePack,
   readClipGenPlaybook,
-  buildClipGenPlaybookPack,
-  type MentionRef,
+  type DirectorKeyframeBatch,
   type ReferencePack,
 } from '@nx9/shared';
 import { BlockShell } from '../shared/BlockShell';
@@ -41,29 +24,21 @@ import { GenUpstreamHint } from '../shared/upstream-hints';
 import { useUpstreamPrompt } from '../shared/use-upstream-prompt';
 import { useActivityLog } from '../../stores/activity-log';
 import { MentionEditor } from '../../engine/stage-deck/chrome/MentionEditor';
-import { getGenPack } from '../../engine/gen-skill-runtime';
 import { useWorkspaceDocument } from '../../stores/workspace-document';
-import {
-  enabledGuideKinds,
-  readStoryboardGuidePrefs,
-} from '../../stores/storyboard-guide-prefs';
-import { useCredentialVault } from '../../stores/credential-vault';
 import { api } from '../../api/client';
-import { pollClipTask } from '../../engine/picture-gen-runner';
-import { composeStoryboardGuideFrameDataUrl } from '../../engine/storyboard-guide-compose';
+import { describeDirectorKeyframeBatchStatus } from '../../engine/director-keyframe-batch-runner';
 import GenSettingsPills from '../shared/GenSettingsPills';
 
 /**
- * ClipGenBlock — 视频生成节点。
- * F-004: 卡面仅保留单镜生成；批量生成（episode-queue）移至 VideoWorkspace。
- * 只消费上游 chainStoryboard 中的镜头（F-003），不再直接读全局镜表。
+ * ClipGenBlock — 视频生成节点（非 canvasFirst 回退卡面）。
+ * VG-29: run() 委托 flow-runner clip-gen（组装器 / 超时恢复），不自建 proxyVideo。
+ * 批量出片在 VideoWorkspace；卡面只消费上游 chainStoryboard（F-003）。
  */
 function ClipGenBlock(props: NodeProps) {
   const { updateNodeData, fitView } = useReactFlow();
   const nodes = useNodes();
   const edges = useEdges();
   const appendLog = useActivityLog((s) => s.append);
-  const openSettingsTo = useCredentialVault((s) => s.openSettingsTo);
   const characters = useWorkspaceDocument((s) => s.characters.characters);
   const rawVideoMode = (props.data?.videoMode as string) ?? 'single';
   const videoMode =
@@ -154,6 +129,8 @@ function ClipGenBlock(props: NodeProps) {
     () => shots.find((s) => s.id === linkedShotId),
     [shots, linkedShotId],
   );
+  const directorKeyframeBatch = props.data?.directorKeyframeBatch as DirectorKeyframeBatch | undefined;
+  const directorBatchImages = directorKeyframeBatch?.shots.map((shot) => shot.imageUrl) ?? [];
   const directorDeskRefs = (props.data?.directorDeskRefs as string[] | undefined) ?? [];
   const packImages =
     (localPlaybook
@@ -167,6 +144,7 @@ function ClipGenBlock(props: NodeProps) {
     (s) => s.role === 'depth_motion' && s.assetUrl,
   )?.assetUrl;
   const imageUrl =
+    directorBatchImages[0] ||
     packImages[0] ||
     linkedShot?.firstFrameAssetId ||
     directorDeskRefs[0] ||
@@ -187,225 +165,56 @@ function ClipGenBlock(props: NodeProps) {
   const overRefVideos = refVideoCount > 3;
 
   const run = useCallback(async () => {
-    updateNodeData(props.id, { status: 'running' });
+    // VG-29: 卡面 run 委托 flow-runner clip-gen 路径（组装器 / 超时恢复），避免与工作台双实现漂移
+    updateNodeData(props.id, { status: 'running', error: undefined });
     appendLog(`视频生成启动 · ${props.id}`);
     try {
-      let activePack: ReferencePack | null = null;
-      if (localPlaybook) {
-        const skillId =
-          localPlaybook.playbookId === 'depth-action-replica'
-            ? 'gen-depth-action-replica'
-            : undefined;
-        const depthPack = skillId ? await getGenPack(skillId) : null;
-        activePack = buildClipGenPlaybookPack(localPlaybook, localContent, depthPack);
-      } else if (upstreamReferencePack) {
-        activePack = upstreamReferencePack;
-      }
-
-      if (activePack?.enforce) {
-        if (activePack.blockReason || !activePack.ready) {
-          const reason =
-            activePack.blockReason || '热门玩法未就绪：请补齐必填槽位';
-          updateNodeData(props.id, { status: 'error', error: reason });
-          appendLog(`视频生成已阻断 · ${reason}`);
-          return;
-        }
-      }
-
-      const bridgeRefs: string[] = [];
-      const incomingEdges = edges.filter((e) => e.target === props.id);
-      for (const e of incomingEdges) {
-        const up = nodes.find((n) => n.id === e.source);
-        const refs = (up?.data?.bridgeRefs as string[] | undefined);
-        if (refs) bridgeRefs.push(...refs);
-      }
-      const videoParams = resolveVideoGenParams({
-        resolution,
-        orientation,
-        aspect: activePack?.aspect || aspect,
-        durationSec,
-      });
-      const videoPack = await getGenPack('gen-studio-video');
-      const studioVideo = linkedShot
-        ? buildStudioVideoPrompt(
-            {
-              shot: linkedShot,
-              characters: activeCharacters,
-            },
-            videoPack,
-          )
-        : '';
-      const base =
-        activePack?.assembledPrompt?.trim() ||
-        upstreamMedia.prompts.filter(Boolean).join('\n\n') ||
-        localContent ||
-        linkedShot?.videoPromptPro ||
-        linkedShot?.videoPromptEn ||
-        studioVideo ||
-        linkedShot?.promptEn ||
-        (props.data?.content as string) ||
-        '';
-      const bridgeSuffix = bridgePromptSuffix(
-        bridgeRefs.length ? [{ bridgePreset: 'dissolve', durationSec: 0.5, refImageIds: bridgeRefs }] : [],
+      const { runFlowBatch } = await import('../../engine/flow-runner');
+      let finalPhase = '';
+      let finalError = '';
+      await runFlowBatch(
+        nodes,
+        edges,
+        (id, patch) => updateNodeData(id, patch),
+        (progress) => {
+          finalPhase = progress.phase;
+          finalError = progress.error ?? '';
+        },
+        undefined,
+        new Set([props.id]),
       );
-      const motionLocks = [
-        videoParams.aspect !== '16:9' ? `aspect ratio ${videoParams.aspect}` : '',
-        videoParams.durationSec ? `${videoParams.durationSec}s continuous clip` : '',
-        'identity-locked motion, no jump cuts, no text overlay',
-      ].filter(Boolean).join(', ');
-      let prompt = enrichPromptWithCharacters(
-        `${base}${bridgeSuffix ? `\n${bridgeSuffix}` : ''}${motionLocks ? `\n${motionLocks}` : ''}`.trim(),
-        activeCharacters,
-      );
-      {
-        const doc = useWorkspaceDocument.getState();
-        const privateItems = [
-          ...doc.characters.characters.map((c) => characterToItem(c, 'private')),
-          ...doc.soundLibrary.sounds.map((s) => soundToItem(s, 'private')),
-          ...doc.backlotWorkspace.items.map((i) => workspaceItemToAsset(i, 'private')),
-        ];
-        const publicItems = BUILTIN_BACKLOT_TEMPLATES.map((tpl) => templateToAsset(tpl as any, 'public', true));
-        prompt = enrichPromptWithAssetMentions(prompt, privateItems, publicItems);
+      if (finalPhase === 'done') {
+        appendLog(
+          directorKeyframeBatch?.version === 1
+            ? `导演关键帧批次消费完成 · ${directorKeyframeBatch.shots.length} 镜`
+            : `视频生成完成 · ${props.id}`,
+        );
+      } else {
+        appendLog(
+          `视频生成${finalPhase === 'blocked' ? '已阻断' : '执行结束'}${finalError ? ` · ${finalError}` : ''}`,
+        );
       }
-      // F-024 + 热门玩法槽位：解析 @block / @人物 / @深度视频
-      {
-        const refs: MentionRef[] = [];
-        const pics = [
-          ...(activePack?.imageUrls ?? []),
-          ...upstreamMedia.pictures,
-        ];
-        const uniquePics = [...new Set(pics.filter(Boolean))];
-        uniquePics.forEach((url, i) => refs.push({ id: `pic-${i}`, kind: 'picture', url, label: `上游图片 ${i + 1}` }));
-        if (activePack?.characterUrls) {
-          activePack.characterUrls.forEach((url, i) => {
-            refs.push({ id: `char-${i}`, kind: 'picture', url, label: `人物${i + 1}` });
-          });
-        }
-        if (activePack?.sceneUrl) {
-          refs.push({ id: 'scene', kind: 'picture', url: activePack.sceneUrl, label: '场景' });
-        }
-        const clips = [
-          ...(activePack?.videoUrls ?? []),
-          ...upstreamMedia.clips,
-        ];
-        const uniqueClips = [...new Set(clips.filter(Boolean))];
-        uniqueClips.forEach((url, i) => refs.push({ id: `clip-${i}`, kind: 'clip', url, label: i === 0 ? '深度视频' : `上游视频 ${i + 1}` }));
-        if (activePack?.depthVideoUrl) {
-          refs.push({
-            id: 'depth',
-            kind: 'clip',
-            url: activePack.depthVideoUrl,
-            label: '深度视频',
-          });
-        }
-        const { resolved } = resolveMentionsForPrompt(prompt, refs);
-        prompt = resolved;
-      }
-      let refImageUrl = imageUrl;
-      if (linkedShot && imageUrl) {
-        const guidePrefs = readStoryboardGuidePrefs();
-        if (guidePrefs.useForVideo) {
-          const guide = filterStoryboardGuideOverlay(
-            resolveStoryboardGuideOverlay(linkedShot),
-            { enabled: true, kinds: enabledGuideKinds(guidePrefs) },
-          );
-          prompt = `${prompt}\n\n${buildVideoGuidePromptSuffix(guide)}`.trim();
-          if (guide.arrows.length || guide.marks.length) {
-            try {
-              const composed = await composeStoryboardGuideFrameDataUrl(imageUrl, guide);
-              if (composed) refImageUrl = composed;
-            } catch {
-              /* keep clean frame */
-            }
-          }
-        }
-      }
-      const audioUrl = hasAudioUpstream ? upstreamMedia.sounds[0] : undefined;
-      const referenceImages = [
-        ...(activePack?.imageUrls ?? []),
-        ...upstreamMedia.pictures,
-      ].filter(Boolean);
-      const referenceVideos = [
-        ...(activePack?.videoUrls ?? []),
-        ...upstreamMedia.clips,
-      ].filter(Boolean);
-      let res;
-      try {
-        res = await api.proxyVideo({
-          prompt,
-          model,
-          imageUrl: refImageUrl,
-          duration: videoParams.durationSec,
-          aspect_ratio: videoParams.aspect,
-          size: videoParams.size,
-          resolution: videoParams.resolution,
-          generateAudio,
-          referenceImages: [...new Set(referenceImages)].slice(0, SCLASS_MAX_REF_IMAGES),
-          referenceVideos: [...new Set(referenceVideos)].slice(0, SCLASS_MAX_REF_VIDEOS),
-          ...(audioUrl ? { audioUrl } : {}),
-        });
-      } catch (e) {
-        const err = String(e);
-        if (/API Key|未配置|401|Unauthorized/i.test(err)) {
-          openSettingsTo('connection');
-          throw new Error(`${err} · 已打开设置 → 连接（请配置视频连接）`);
-        }
-        throw e;
-      }
-      updateNodeData(props.id, {
-        status: res.status === 'success' ? 'success' : res.status === 'processing' ? 'running' : 'error',
-        videoUrl: res.url,
-        taskId: res.taskId,
-        message: res.message,
-        content: prompt,
-        referenceImageUsed: imageUrl,
-        referencePackUsed: activePack?.playbookId,
-        characterInjected: activeCharacters.map((c) => c.id),
-        lastResult: res,
-      });
-      // F-003/F-004: 写回上游 desk 的 chainStoryboard；无上游则拒绝写全局
-      if (res.url && linkedShot) {
-        const deskId = findUpstreamDeskId(props.id, nodes, edges);
-        if (deskId) {
-          const deskNode = nodes.find((n) => n.id === deskId);
-          if (deskNode) {
-            const chain = readChainStoryboard(deskNode.data as Record<string, unknown>);
-            if (chain) {
-              const newShots = chain.shots.map((s) =>
-                s.id === linkedShot.id
-                  ? { ...s, videoAssetId: res.url, videoStatus: 'review' as const, status: 'review' as const }
-                  : s,
-              );
-              updateNodeData(deskId, { chainStoryboard: { ...chain, shots: newShots } } as Record<string, unknown>);
-            }
-          }
-        } else {
-          appendLog('无上游分镜台，已跳过镜表写回（F-004 禁止写全局）');
-        }
-      }
-      appendLog(
-        res.status === 'success'
-          ? `视频生成完成 · ${props.id}`
-          : res.message ?? `视频任务 · ${res.status}`,
-      );
     } catch (e) {
       updateNodeData(props.id, { status: 'error', error: String(e) });
       appendLog(`视频生成失败 · ${String(e)}`);
     }
   }, [
-    appendLog, model, aspect, durationSec, resolution, imageUrl, linkedShot,
-    orientation, generateAudio, localContent, props.data, props.id,
-    updateNodeData, activeCharacters, upstreamMedia, edges, nodes,
-    localPlaybook, upstreamReferencePack, openSettingsTo,
+    appendLog, props.id, updateNodeData, nodes, edges, directorKeyframeBatch,
   ]);
 
   const poll = useCallback(async () => {
     if (!taskId) return;
     updateNodeData(props.id, { status: 'running' });
     try {
-      const url = await pollClipTask(taskId);
-      if (url) {
-        updateNodeData(props.id, { status: 'success', videoUrl: url, message: undefined });
+      const providerBaseUrl = props.data?.providerBaseUrl as string | undefined;
+      const res = await api.pollVideo(taskId, providerBaseUrl);
+      if (res.status === 'success' && res.url) {
+        updateNodeData(props.id, {
+          status: 'success',
+          videoUrl: res.url,
+          message: undefined,
+          error: undefined,
+        });
         if (linkedShot) {
           const deskId = findUpstreamDeskId(props.id, nodes, edges);
           if (deskId) {
@@ -415,7 +224,7 @@ function ClipGenBlock(props: NodeProps) {
               if (chain) {
                 const newShots = chain.shots.map((s) =>
                   s.id === linkedShot.id
-                    ? { ...s, videoAssetId: url, videoStatus: 'review' as const, status: 'review' as const }
+                    ? { ...s, videoAssetId: res.url, videoStatus: 'review' as const, status: 'review' as const }
                     : s,
                 );
                 updateNodeData(deskId, { chainStoryboard: { ...chain, shots: newShots } } as Record<string, unknown>);
@@ -426,13 +235,15 @@ function ClipGenBlock(props: NodeProps) {
           }
         }
         appendLog('视频轮询完成');
+      } else if (res.status === 'failed') {
+        updateNodeData(props.id, { status: 'error', error: res.message ?? '视频生成任务失败' });
       } else {
         updateNodeData(props.id, { status: 'running', message: '仍在生成中，请稍后再查' });
       }
     } catch (e) {
       updateNodeData(props.id, { status: 'error', error: String(e) });
     }
-  }, [taskId, props.id, updateNodeData, appendLog, linkedShot, nodes, edges]);
+  }, [taskId, props.id, props.data, updateNodeData, appendLog, linkedShot, nodes, edges]);
 
   const nodesAll = useNodes();
 
@@ -470,6 +281,12 @@ function ClipGenBlock(props: NodeProps) {
         )}
         {videoMode === 'single' && linkedShot?.firstFrameAssetId && (
           <p className="text-[10px] text-ink/45">将使用关联镜头关键帧作为图生视频参考</p>
+        )}
+        {directorKeyframeBatch?.version === 1 && (
+          <p className="text-[10px] text-brand/70">
+            {describeDirectorKeyframeBatchStatus(directorKeyframeBatch)
+              ?? `导演关键帧批次 · ${directorKeyframeBatch.shots.length} 镜 · ${directorKeyframeBatch.status}`}
+          </p>
         )}
         <GenUpstreamHint hasUpstream={hasUpstream} />
         {shots.length === 0 && (

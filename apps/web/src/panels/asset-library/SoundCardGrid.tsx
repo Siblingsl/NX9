@@ -15,6 +15,7 @@ import {
   Download,
   Star,
 } from 'lucide-react';
+import { VirtualizedCardGrid } from './VirtualizedCardGrid';
 
 /** 无音频时的内置色板（暖纸壳内克制渐变） */
 const KIND_SWATCH: Record<SoundAssetKind, { from: string; to: string; mark: string }> = {
@@ -57,6 +58,8 @@ export interface SoundCardGridProps {
     description?: string;
     audioUrl?: string;
     builtin?: boolean;
+    overridesBuiltin?: boolean;
+    scope?: 'private' | 'public';
   }>;
   soundsById: Map<string, SoundAssetProfile>;
   canDelete: boolean;
@@ -90,8 +93,11 @@ export function SoundCardGrid({
   }
 
   return (
-    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-4">
-      {items.map((item) => {
+    <VirtualizedCardGrid
+      items={items}
+      getKey={(item) => item.id}
+      estimateCardHeight={(cardWidth) => cardWidth * (3 / 4) + 72}
+      renderItem={(item) => {
         const sound = soundsById.get(item.id);
         const isBuiltin = Boolean(item.builtin || isBuiltinSoundAsset(sound));
         const favorite = isSoundFavorite(sound);
@@ -104,22 +110,32 @@ export function SoundCardGrid({
 
         return (
           <article
-            key={item.id}
-            className="group relative flex flex-col overflow-hidden rounded-xl border border-line bg-surface transition-colors hover:border-brand/35"
+            className="group relative flex h-full flex-col overflow-hidden rounded-xl border border-line bg-surface transition-colors hover:border-brand/35"
           >
             <SoundCover
               audioUrl={audioUrl}
               swatch={swatch}
               favorite={favorite}
               allowFavorite={!isBuiltin}
+              onOpen={() => onEdit(item.id)}
               onToggleFavorite={() => onToggleFavorite(item.id)}
             />
 
             <div className="relative z-10 flex items-start gap-1 border-t border-line px-2.5 py-2">
-              <div className="min-w-0 flex-1">
+              <button
+                type="button"
+                className="min-w-0 flex-1 text-left hover:text-brand"
+                title="点击编辑 · 可用菜单复制 @"
+                onClick={() => onEdit(item.id)}
+              >
                 <p className="truncate text-xs font-medium text-ink">
                   {isBuiltin ? (
                     <span className="mr-1 text-[9px] font-normal text-ink/50">内置</span>
+                  ) : null}
+                  {item.overridesBuiltin ? (
+                    <span className="mr-1 text-[9px] font-normal text-warn" title="自定义同名覆盖内置展示">
+                      覆盖中
+                    </span>
                   ) : null}
                   {item.label || '未命名声音'}
                 </p>
@@ -129,7 +145,7 @@ export function SoundCardGrid({
                 {kindLabel ? (
                   <p className="mt-1 truncate text-[10px] text-ink/35">{kindLabel}</p>
                 ) : null}
-              </div>
+              </button>
               <div className="relative shrink-0">
                 <button
                   type="button"
@@ -170,8 +186,8 @@ export function SoundCardGrid({
             </div>
           </article>
         );
-      })}
-    </div>
+      }}
+    />
   );
 }
 
@@ -180,16 +196,30 @@ function SoundCover({
   swatch,
   favorite,
   allowFavorite,
+  onOpen,
   onToggleFavorite,
 }: {
   audioUrl?: string;
   swatch: { from: string; to: string; mark: string };
   favorite: boolean;
   allowFavorite: boolean;
+  onOpen: () => void;
   onToggleFavorite: () => void;
 }) {
   return (
-    <div className="relative aspect-[16/10] w-full overflow-hidden bg-black/15">
+    <div
+      role="button"
+      tabIndex={0}
+      title="点击编辑"
+      className="relative aspect-[16/10] w-full cursor-pointer overflow-hidden bg-black/15"
+      onClick={onOpen}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          onOpen();
+        }
+      }}
+    >
       <div
         className="flex h-full w-full flex-col items-center justify-center gap-3"
         style={{

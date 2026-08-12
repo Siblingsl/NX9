@@ -6,8 +6,6 @@ import {
   CLIP_GEN_MODELS,
   lookupBlock,
   rejectStoryboardVideoShot,
-  resolveStoryboardVideoVersions,
-  resolveVideoStatusBadge,
 } from '@nx9/shared';
 import { useReactFlow, useNodes, useEdges } from '@xyflow/react';
 import { AssetMentionInput } from '../../../asset-mention/AssetMentionInput';
@@ -21,6 +19,8 @@ import { usePromptHistory } from '../../../../stores/prompt-history';
 import { useAttachedNodeData } from '../use-attached-node-data';
 import { useLocalNodePrompt } from '../use-local-node-prompt';
 import { useUpstreamShots } from '../use-upstream-shots';
+import { useUpstreamMedia } from '../use-upstream-media';
+import { useExecutionQueue } from '../../../../../../stores/execution-queue';
 import {
   buildClipGenPlaybookPatch,
   clearClipGenPlaybookPatch,
@@ -29,8 +29,9 @@ import {
   type ReferenceSlot,
 } from '@nx9/shared';
 import { VideoGenModeChip } from './VideoGenModeChip';
+import { VideoShotReviewGrid } from './VideoShotReviewGrid';
 import { VideoParamChips } from './VideoParamChips';
-import { VideoFrameStrip } from './VideoFrameStrip';
+import { VideoFrameStrip, VideoSourceStrip } from './VideoFrameStrip';
 import { VideoPlaybookMenu } from './VideoPlaybookMenu';
 import { VideoPlaybookTools } from './VideoPlaybookTools';
 import { lookupVideoPlaybookAction, type VideoPlaybookActionDef } from './video-playbooks';
@@ -38,9 +39,16 @@ import {
   patchVideoGenMode,
   readVideoGenMode,
   showVideoFrameStrip,
+  showVideoSourceStrip,
+  videoFrameStripSlots,
   type VideoGenMode,
 } from './video-gen-modes';
-import { batchGenerateVideosFromShots } from '../../../../../core-pipeline-runner';
+import {
+  batchGenerateVideosFromShots,
+  resumePendingVideoTasks,
+  type PendingVideoTask,
+} from '../../../../../core-pipeline-runner';
+import { api } from '../../../../../../api/client';
 import { setMediaPinDragData } from '../../../../../media-pin-drag';
 
 const EMPTY_HISTORY: { id: string; blockId: string; text: string; savedAt: number }[] = [];
@@ -75,6 +83,8 @@ export function VideoWorkspace({ blockId, kind, onCollapse }: VideoWorkspaceProp
 
   const data = useAttachedNodeData(blockId);
   const { hasUpstream, shots, shotIds } = useUpstreamShots(blockId);
+  const { clips: upstreamClips } = useUpstreamMedia(blockId);
+  const runAbortRef = useRef<AbortController | null>(null);
   const nodes = useNodes();
   const edges = useEdges();
   const { getNodes } = useReactFlow();
@@ -116,7 +126,6 @@ export function VideoWorkspace({ blockId, kind, onCollapse }: VideoWorkspaceProp
     updateNodeDataFlow(deskId, { chainStoryboard: { ...chain, shots: newShots } } as any);
   }, [deskId, getNodes, updateNodeDataFlow]);
   const [retryingShotId, setRetryingShotId] = useState<string | null>(null);
-  const [previewVersionIds, setPreviewVersionIds] = useState<Record<string, string>>({});
 
   useEffect(() => {
     if (!hasUpstream) {
@@ -159,6 +168,9 @@ export function VideoWorkspace({ blockId, kind, onCollapse }: VideoWorkspaceProp
   const status = (data.status as string) ?? 'idle';
   const videoGenMode = readVideoGenMode(data);
   const showFrames = showVideoFrameStrip(videoGenMode);
+  const frameSlots = videoFrameStripSlots(videoGenMode);
+  const showSource = showVideoSourceStrip(videoGenMode);
+  const sourceClipUrl = (data.sourceClipUrl as string | undefined) || undefined;
   const playbookState = useMemo(
     () => readClipGenPlaybook(data as Record<string, unknown>),
     [data],
@@ -197,10 +209,31 @@ export function VideoWorkspace({ blockId, kind, onCollapse }: VideoWorkspaceProp
   const handleRun = useCallback(async () => {
     flushNow();
     if (!runtime) return;
+    // VG-21: Bridge 无源视频禁止回落单镜
+    if (videoGenMode === 'bridge') {
+      const source = sourceClipUrl || upstreamClips[0];
+      if (!source) {
+        updateNodeData(blockId, {
+          status: 'error',
+          error: 'Bridge 续拍需要源视频：请连接上游视频节点或上传源片',
+        });
+        appendLog('Bridge 续拍已阻断：缺少源视频');
+        return;
+      }
+      if (!sourceClipUrl && upstreamClips[0]) {
+        updateNodeData(blockId, { sourceClipUrl: upstreamClips[0] });
+      }
+    }
+    runAbortRef.current?.abort();
+    const controller = new AbortController();
+    runAbortRef.current = controller;
+    updateNodeData(blockId, { status: 'running', error: undefined });
     try {
-      if (hasUpstream && shotIds.length > 0) {
-        // F-004: 传入链镜表避免回退全局
-        await batchGenerateVideosFromShots(shotIds, false, blockId, shots as any);
+      // VG-07: Bridge 续拍走级联（上游视频抽尾帧），不进批量
+      if (hasUpstream && shotIds.length > 0 && videoGenMode !== 'bridge') {
+        await batchGenerateVideosFromShots(shotIds, false, blockId, shots as any, {
+          signal: controller.signal,
+        });
         appendLog(`上游镜头视频生成完成 · ${shotIds.length} 镜`);
         return;
       }
@@ -215,12 +248,37 @@ export function VideoWorkspace({ blockId, kind, onCollapse }: VideoWorkspaceProp
           }
         },
         updateNodeData: (id, patch) => runtime.updateNodeData(id, patch),
+        signal: {
+          get cancelled() {
+            return controller.signal.aborted;
+          },
+          abortSignal: controller.signal,
+        },
       });
       appendLog(`运行 · ${meta?.label ?? kind}`);
     } catch (e) {
-      appendLog(`运行失败: ${String(e)}`);
+      if (controller.signal.aborted) {
+        appendLog('已停止；已提交的任务可继续查询');
+      } else {
+        appendLog(`运行失败: ${String(e)}`);
+      }
+    } finally {
+      if (runAbortRef.current === controller) runAbortRef.current = null;
     }
-  }, [blockId, runtime, meta, kind, appendLog, flushNow, hasUpstream, shotIds]);
+  }, [
+    blockId, runtime, meta, kind, appendLog, flushNow, hasUpstream, shotIds, shots,
+    videoGenMode, sourceClipUrl, upstreamClips, updateNodeData,
+  ]);
+
+  const handleStop = useCallback(() => {
+    const controller = runAbortRef.current;
+    if (controller) {
+      controller.abort();
+      runAbortRef.current = null;
+    }
+    useExecutionQueue.getState().cancel();
+    appendLog('已停止生成');
+  }, [appendLog]);
 
   const retryShot = useCallback(async (shotId: string) => {
     setRetryingShotId(shotId);
@@ -230,7 +288,40 @@ export function VideoWorkspace({ blockId, kind, onCollapse }: VideoWorkspaceProp
     } finally {
       setRetryingShotId(null);
     }
-  }, [blockId]);
+  }, [blockId, shots]);
+
+  // VG-10: 恢复后台任务（批量 pendingVideoTasks + 单镜 taskId）
+  const pendingVideoTasks = (data.pendingVideoTasks ?? {}) as Record<string, PendingVideoTask>;
+  const pendingTaskCount = Object.keys(pendingVideoTasks).length;
+  const singleTaskId = data.taskId as string | undefined;
+  const hasSinglePending = Boolean(singleTaskId && !data.videoUrl);
+  const [resuming, setResuming] = useState(false);
+  const resumeTasks = useCallback(async () => {
+    setResuming(true);
+    try {
+      if (pendingTaskCount > 0) {
+        await resumePendingVideoTasks(blockId);
+      }
+      if (hasSinglePending && singleTaskId) {
+        const providerBaseUrl = data.providerBaseUrl as string | undefined;
+        const res = await api.pollVideo(singleTaskId, providerBaseUrl);
+        if (res.status === 'success' && res.url) {
+          updateNodeData(blockId, { status: 'success', videoUrl: res.url, error: undefined });
+          appendLog('视频任务已完成');
+        } else if (res.status === 'failed') {
+          updateNodeData(blockId, { status: 'error', error: res.message ?? '视频生成任务失败' });
+          appendLog('视频任务失败');
+        } else {
+          appendLog('视频仍在生成中，请稍后再查');
+        }
+      }
+    } catch (e) {
+      updateNodeData(blockId, { status: 'error', error: String(e) });
+      appendLog(`任务查询失败: ${String(e)}`);
+    } finally {
+      setResuming(false);
+    }
+  }, [blockId, pendingTaskCount, hasSinglePending, singleTaskId, data.providerBaseUrl, updateNodeData, appendLog]);
 
   const approveAllVideos = useCallback(() => {
     for (const shot of shots) {
@@ -257,9 +348,6 @@ export function VideoWorkspace({ blockId, kind, onCollapse }: VideoWorkspaceProp
     if (!patch) return;
     patchChainShotLocal(shotId, patch);
   }, [shots, patchChainShotLocal]);
-
-  const [rejectingShotId, setRejectingShotId] = useState<string | null>(null);
-  const [rejectReason, setRejectReason] = useState('');
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -340,7 +428,7 @@ export function VideoWorkspace({ blockId, kind, onCollapse }: VideoWorkspaceProp
               onChange={(e) => handlePatch({ concurrency: Number(e.target.value) })}
               className="rounded border border-line/40 px-1 py-0.5 text-[10px]"
             >
-              {[1, 2, 3, 4].map((n) => (
+              {[1, 2, 3, 4, 5, 6, 7, 8].map((n) => (
                 <option key={n} value={n}>{n}</option>
               ))}
             </select>
@@ -348,8 +436,11 @@ export function VideoWorkspace({ blockId, kind, onCollapse }: VideoWorkspaceProp
           <label className="flex items-center gap-1.5 text-[9px] text-ink/50">
             <span>重试</span>
             <select
-              value={String((data.maxRetry as number) ?? 1)}
-              onChange={(e) => handlePatch({ maxRetry: Number(e.target.value) })}
+              value={String((data.maxRetries as number) ?? (data.maxRetry as number) ?? 1)}
+              onChange={(e) =>
+                // VG-06: 单轨字段 maxRetries（清掉旧 maxRetry，避免双轨漂移）
+                handlePatch({ maxRetries: Number(e.target.value), maxRetry: undefined })
+              }
               className="rounded border border-line/40 px-1 py-0.5 text-[10px]"
             >
               {[0, 1, 2, 3].map((n) => (
@@ -421,11 +512,46 @@ export function VideoWorkspace({ blockId, kind, onCollapse }: VideoWorkspaceProp
       topSlot={
         <>
           {playbookTop}
+          {(pendingTaskCount > 0 || hasSinglePending) && (
+            <div
+              className="shrink-0 flex items-center gap-2 px-3 py-1.5 border-b border-line/25 nodrag nopan"
+              onMouseDown={stop}
+            >
+              <span className="text-[10px] text-warn/85">
+                {pendingTaskCount > 0
+                  ? `${pendingTaskCount} 个视频任务仍在后台生成`
+                  : '视频任务仍在后台生成'}
+              </span>
+              <button
+                type="button"
+                disabled={resuming}
+                onClick={() => void resumeTasks()}
+                className="ml-auto rounded-md border border-brand/30 bg-brand/8 px-2 py-0.5 text-[10px] text-brand hover:bg-brand/15 disabled:opacity-45"
+              >
+                {resuming ? '查询中…' : '继续查询'}
+              </button>
+            </div>
+          )}
+          {showSource && (
+            <VideoSourceStrip
+              sourceClipUrl={sourceClipUrl}
+              upstreamClips={upstreamClips}
+              onChange={(url) => handlePatch({ sourceClipUrl: url })}
+            />
+          )}
           {showFrames && (
             <VideoFrameStrip
               startFrameUrl={data.startFrameUrl as string | undefined}
               endFrameUrl={data.endFrameUrl as string | undefined}
               referenceFrameUrl={data.referenceFrameUrl as string | undefined}
+              slots={frameSlots}
+              hint={
+                videoGenMode === 'omni-ref'
+                  ? '上游图/视频会一并作为参考'
+                  : videoGenMode === 'image-ref'
+                    ? '参考图进入参考数组，不作为首帧'
+                    : undefined
+              }
               onStartChange={(url) => handlePatch({ startFrameUrl: url })}
               onEndChange={(url) => handlePatch({ endFrameUrl: url })}
               onReferenceChange={(url) => handlePatch({ referenceFrameUrl: url })}
@@ -467,169 +593,16 @@ export function VideoWorkspace({ blockId, kind, onCollapse }: VideoWorkspaceProp
             </div>
           )}
           {hasUpstream && shots.length > 0 && (
-            <div className="border-b border-line/25 px-3 py-2">
-              <div className="mb-1.5 flex items-center gap-2">
-                <p className="text-[10px] font-medium text-ink/65">
-                  上游 {shots.length} 镜 · 已生成 {shots.filter((shot) => shot.videoAssetId).length}
-                </p>
-                <span className="text-[9px] text-ink/28">有视频可拖出钉板</span>
-                <button
-                  type="button"
-                  disabled={shots.some((shot) => !shot.videoAssetId)}
-                  onClick={approveAllVideos}
-                  className="ml-auto rounded-md bg-ok/10 px-2 py-0.5 text-[9px] text-ok disabled:opacity-35"
-                >
-                  {/* F-008: 全部批准 */}
-                  全部批准
-                </button>
-              </div>
-              <div className="max-h-52 space-y-1 overflow-y-auto nx9-scroll">
-                {shots.map((shot) => {
-                  const versions = resolveStoryboardVideoVersions(shot);
-                  const defaultVersion = versions.find((version) => version.url === shot.videoAssetId) ?? versions.at(-1);
-                  const displayVersion = versions.find((version) => version.id === previewVersionIds[shot.id]) ?? defaultVersion;
-                  const badge = resolveVideoStatusBadge(shot.videoStatus);
-                  const badgeClass =
-                    badge.tone === 'approved'
-                      ? 'bg-ok/10 text-ok'
-                      : badge.tone === 'rejected'
-                        ? 'bg-error/10 text-error'
-                        : 'bg-ink/10 text-ink/50';
-                  const pinUrl = displayVersion?.url || shot.videoAssetId;
-                  return (
-                  <div key={shot.id} className="rounded-lg bg-surface/45 p-1.5">
-                    <div className="flex items-center gap-2">
-                    <div
-                      className={`h-9 w-14 shrink-0 overflow-hidden rounded bg-black/5${pinUrl ? ' cursor-grab active:cursor-grabbing' : ''}`}
-                      draggable={Boolean(pinUrl)}
-                      title={pinUrl ? '拖出钉到画布' : undefined}
-                      onDragStart={(e) => {
-                        if (!pinUrl) {
-                          e.preventDefault();
-                          return;
-                        }
-                        const el = e.currentTarget.querySelector('video,img');
-                        setMediaPinDragData(
-                          e.dataTransfer,
-                          {
-                            url: pinUrl,
-                            source: 'generated',
-                            label: `镜 ${shot.index + 1}`,
-                            pinKind: 'clip',
-                            sourceBlockId: blockId,
-                          },
-                          el as HTMLElement | null,
-                        );
-                      }}
-                    >
-                      {displayVersion?.url ? (
-                        <video src={displayVersion.url} muted playsInline preload="metadata" className="h-full w-full object-cover pointer-events-none" />
-                      ) : shot.firstFrameAssetId ? (
-                        <img src={shot.firstFrameAssetId} alt="" className="h-full w-full object-cover pointer-events-none" />
-                      ) : null}
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-[9px] text-ink/65">#{shot.index + 1} {shot.descriptionZh}</p>
-                      {/* F-008: pending 灰 / approved 绿 / rejected 红 */}
-                      <p className="text-[8px]">
-                        <span className={`inline-block px-1 py-0.5 rounded-full text-[7px] font-medium ${badgeClass}`}>
-                          {badge.label}
-                        </span>
-                        <span className="ml-1 text-ink/35">· {versions.length} 个版本</span>
-                      </p>
-                    </div>
-                    <button
-                      type="button"
-                      disabled={!shot.videoAssetId || shot.videoStatus === 'approved'}
-                      onClick={() => {
-                        if (displayVersion && displayVersion.url !== shot.videoAssetId) {
-                          adoptVersion(shot, displayVersion.id);
-                        } else {
-                          approveShot(shot);
-                        }
-                      }}
-                      className="rounded border border-ok/25 px-1 py-0.5 text-[8px] text-ok disabled:opacity-35"
-                    >
-                      批准
-                    </button>
-                    {/* F-008: 打回必填原因 */}
-                    {rejectingShotId === shot.id ? (
-                      <div className="flex items-center gap-1">
-                        <input
-                          type="text"
-                          value={rejectReason}
-                          onChange={(e) => setRejectReason(e.target.value)}
-                          placeholder="原因必填…"
-                          className="w-16 rounded border border-line px-1 py-0.5 text-[8px]"
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter' && rejectReason.trim()) {
-                              rejectShot(shot.id, rejectReason);
-                              setRejectingShotId(null);
-                              setRejectReason('');
-                            }
-                            if (e.key === 'Escape') {
-                              setRejectingShotId(null);
-                              setRejectReason('');
-                            }
-                          }}
-                        />
-                        <button
-                          type="button"
-                          disabled={!rejectReason.trim()}
-                          onClick={() => {
-                            if (!rejectReason.trim()) return;
-                            rejectShot(shot.id, rejectReason);
-                            setRejectingShotId(null);
-                            setRejectReason('');
-                          }}
-                          className="rounded border border-red/25 px-1 py-0.5 text-[8px] text-red disabled:opacity-35"
-                        >
-                          确认
-                        </button>
-                      </div>
-                    ) : (
-                      <button
-                        type="button"
-                        disabled={!shot.videoAssetId}
-                        onClick={() => setRejectingShotId(shot.id)}
-                        className="rounded border border-red/20 px-1 py-0.5 text-[8px] text-red/60 hover:text-red disabled:opacity-35"
-                      >
-                        打回
-                      </button>
-                    )}
-                    <button
-                      type="button"
-                      disabled={retryingShotId === shot.id || shot.keyframeStatus !== 'approved'}
-                      onClick={() => void retryShot(shot.id)}
-                      className="rounded border border-brand/20 px-1 py-0.5 text-[8px] text-brand disabled:opacity-35"
-                    >
-                      {retryingShotId === shot.id ? '生成中' : '重生成'}
-                    </button>
-                    </div>
-                    {versions.length > 0 && (
-                      <div className="mt-1 flex items-center gap-1 overflow-x-auto nx9-scroll">
-                        {versions.map((version, index) => (
-                          <button
-                            key={version.id}
-                            type="button"
-                            onClick={() => setPreviewVersionIds((current) => ({ ...current, [shot.id]: version.id }))}
-                            title={new Date(version.createdAt).getTime() > 0 ? new Date(version.createdAt).toLocaleString() : '历史版本'}
-                            className={`shrink-0 rounded px-1.5 py-0.5 text-[8px] ${
-                              displayVersion?.id === version.id
-                                ? 'bg-brand text-white'
-                                : version.status === 'adopted'
-                                  ? 'bg-ok/10 text-ok'
-                                  : 'bg-surface text-ink/45'
-                            }`}
-                          >V{index + 1}{version.status === 'adopted' ? ' ✓' : ''}</button>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                  );
-                })}
-              </div>
-            </div>
+            <VideoShotReviewGrid
+              blockId={blockId}
+              shots={shots}
+              retryingShotId={retryingShotId}
+              onApproveAll={approveAllVideos}
+              onApprove={approveShot}
+              onAdoptVersion={adoptVersion}
+              onReject={rejectShot}
+              onRetry={(shotId) => void retryShot(shotId)}
+            />
           )}
         </>
       }
@@ -639,9 +612,13 @@ export function VideoWorkspace({ blockId, kind, onCollapse }: VideoWorkspaceProp
       onApplyHistory={applyText}
       onAiAction={handleAiAction}
       onRun={() => void handleRun()}
+      onStop={handleStop}
       running={data.status === 'running'}
       runLabel={runLabel}
-      runDisabled={Boolean(playbookState && !playbookReady.ready)}
+      runDisabled={
+        Boolean(playbookState && !playbookReady.ready)
+        || (videoGenMode === 'bridge' && !sourceClipUrl && upstreamClips.length === 0)
+      }
       promptContainerRef={promptContainerRef}
     >
       <AssetMentionInput

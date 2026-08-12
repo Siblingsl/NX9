@@ -116,6 +116,104 @@ function sceneDraftChanged(a: ScreenplaySceneDraft, b: ScreenplaySceneDraft): bo
   return JSON.stringify(a) !== JSON.stringify(b);
 }
 
+export interface BibleFieldDiff {
+  field: string;
+  label: string;
+  before: string;
+  after: string;
+}
+
+const CHAR_DIFF_FIELDS: Array<{ key: keyof ScreenplayCharacterDraft; label: string }> = [
+  { key: 'identity', label: '身份' },
+  { key: 'appearance', label: '外貌' },
+  { key: 'personality', label: '性格' },
+  { key: 'relationships', label: '关系' },
+  { key: 'background', label: '背景' },
+  { key: 'goal', label: '目标' },
+  { key: 'voiceNotes', label: '声音' },
+  { key: 'fixedVisualKeywords', label: '视觉关键词' },
+];
+
+const SCENE_DIFF_FIELDS: Array<{ key: keyof ScreenplaySceneDraft; label: string }> = [
+  { key: 'code', label: '场景码' },
+  { key: 'summary', label: '摘要' },
+  { key: 'era', label: '时代' },
+  { key: 'location', label: '地点' },
+  { key: 'dramaticFunction', label: '戏剧功能' },
+  { key: 'sensoryNotes', label: '感官备注' },
+];
+
+function strField(v: unknown): string {
+  if (Array.isArray(v)) return v.join('、');
+  return typeof v === 'string' ? v.trim() : '';
+}
+
+/** OL-07：库 → Bible 覆盖前的字段级差异（仅展示会变的字段） */
+export function diffCharacterBiblePush(
+  pkg: ScreenplayPackage,
+  profile: CharacterProfile,
+): BibleFieldDiff[] {
+  const incoming = characterDraftFromProfile(profile);
+  const idx = matchCharacterIndex(pkg, profile);
+  if (idx < 0) {
+    return CHAR_DIFF_FIELDS
+      .map(({ key, label }) => ({
+        field: String(key),
+        label,
+        before: '',
+        after: strField(incoming[key]),
+      }))
+      .filter((d) => d.after);
+  }
+  const existing = pkg.bible.characters[idx];
+  const diffs: BibleFieldDiff[] = [];
+  for (const { key, label } of CHAR_DIFF_FIELDS) {
+    const before = strField(existing[key]);
+    const after = strField(incoming[key]);
+    if (before === after) continue;
+    diffs.push({ field: String(key), label, before, after });
+  }
+  const beforeAliases = (existing.aliases ?? []).join('、');
+  const afterAliases = uniqAliases(incoming.aliases, existing.aliases)?.join('、') ?? '';
+  if (beforeAliases !== (incoming.aliases ?? []).join('、')) {
+    diffs.push({
+      field: 'aliases',
+      label: '别名',
+      before: beforeAliases,
+      after: (incoming.aliases ?? []).join('、') || afterAliases,
+    });
+  }
+  return diffs;
+}
+
+export function diffSceneBiblePush(
+  pkg: ScreenplayPackage,
+  item: BacklotWorkspaceItem,
+): BibleFieldDiff[] {
+  if (item.kind !== 'scene') return [];
+  const incoming = sceneDraftFromWorkspaceItem(item);
+  const idx = matchSceneIndex(pkg, item);
+  if (idx < 0) {
+    return SCENE_DIFF_FIELDS
+      .map(({ key, label }) => ({
+        field: String(key),
+        label,
+        before: '',
+        after: strField(incoming[key]),
+      }))
+      .filter((d) => d.after);
+  }
+  const existing = pkg.bible.scenes[idx];
+  const diffs: BibleFieldDiff[] = [];
+  for (const { key, label } of SCENE_DIFF_FIELDS) {
+    const before = strField(existing[key]);
+    const after = strField(incoming[key]);
+    if (before === after) continue;
+    diffs.push({ field: String(key), label, before, after });
+  }
+  return diffs;
+}
+
 function matchCharacterIndex(pkg: ScreenplayPackage, profile: CharacterProfile): number {
   const keys = new Set(
     [profile.name, ...(profile.creative?.aliases ?? [])]
@@ -239,4 +337,63 @@ export function pushHookTextToBrief(
 /** Hook-01：从 brief.hooks 导入为钩子库建议标签 */
 export function hookLabelsFromBrief(pkg: ScreenplayPackage): string[] {
   return (pkg.brief.hooks ?? []).map((h) => h.trim()).filter(Boolean);
+}
+
+function normName(value: string): string {
+  return value.trim().toLowerCase();
+}
+
+/** 按 libraryCharacterId / 姓名 / 别名匹配库内角色（改名同步用） */
+export function findLibraryCharacterForRename(
+  characters: CharacterProfile[],
+  opts: { oldName: string; libraryCharacterId?: string },
+): CharacterProfile | undefined {
+  const id = opts.libraryCharacterId?.trim();
+  if (id) {
+    const byId = characters.find((c) => !c.deletedAt && c.id === id);
+    if (byId) return byId;
+  }
+  const key = normName(opts.oldName);
+  if (!key) return undefined;
+  return characters.find((c) => {
+    if (c.deletedAt) return false;
+    if (normName(c.name) === key) return true;
+    return (c.creative?.aliases ?? []).some((alias) => normName(alias) === key);
+  });
+}
+
+export function libraryCharacterRenameConflict(
+  characters: CharacterProfile[],
+  profileId: string,
+  newName: string,
+): CharacterProfile | undefined {
+  const key = normName(newName);
+  if (!key) return undefined;
+  return characters.find((c) => !c.deletedAt && c.id !== profileId && normName(c.name) === key);
+}
+
+/** 改库侧档案名，旧名写入 aliases，供失效重绑与 Mention 兜底 */
+export function renameLibraryCharacterProfile(
+  profile: CharacterProfile,
+  oldName: string,
+  newName: string,
+): CharacterProfile {
+  const nextName = newName.trim();
+  const prevName = oldName.trim();
+  const aliases = [...(profile.creative?.aliases ?? [])];
+  if (
+    prevName
+    && normName(prevName) !== normName(nextName)
+    && !aliases.some((alias) => normName(alias) === normName(prevName))
+  ) {
+    aliases.push(prevName);
+  }
+  return {
+    ...profile,
+    name: nextName,
+    creative: {
+      ...profile.creative,
+      aliases,
+    },
+  };
 }

@@ -3,6 +3,8 @@ import {
   buildChainStoryboardPayload,
   flattenScriptBreakdownShots,
   isScreenplayPackage,
+  mergeStoryboardShotFromBreakdown,
+  readChainStoryboard,
   screenplayFullText,
   storyboardShotsFromScriptBreakdown,
   type ChainStoryboardPayload,
@@ -47,6 +49,145 @@ export function packageSourceHash(pkg: ScreenplayPackage | undefined): string {
   if (!isScreenplayPackage(pkg)) return '';
   const body = pkg.screenplay.episodes.map((ep) => `${ep.id}:${ep.updatedAt}:${ep.bodyMd.length}`).join('|');
   return `${pkg.confirmedAt ?? ''}|${pkg.updatedAt}|${body}`;
+}
+
+/**
+ * SB-OL-03/SB-OL-07: 按镜头 id 移除关联的预览帧（删镜、清线稿共用）。
+ * 匹配口径与 isShotComposed 对齐：sourceShotId、frame.id 本身，以及
+ * 桌面写回使用的 `spf-` / `frame-` / `frame-line-` 前缀 id。
+ * 返回 null 表示没有帧需要移除。
+ */
+/**
+ * 分镜台构图只认线稿。导演关键帧 `firstFrameAssetId` 不得计入「已出图」。
+ */
+export function deskLineArtUrl(
+  shot: { lineArtUrl?: string | null } | null | undefined,
+): string | undefined {
+  const url = shot?.lineArtUrl?.trim();
+  return url || undefined;
+}
+
+/** 结构变更后被退役的镜头 id（合镜会换新 id，旧帧必须跟着清）。 */
+export function retiredShotIds(
+  before: ScriptBreakdownPayload,
+  after: ScriptBreakdownPayload,
+): string[] {
+  const afterIds = new Set(flattenScriptBreakdownShots(after).map((shot) => shot.id));
+  return flattenScriptBreakdownShots(before)
+    .map((shot) => shot.id)
+    .filter((id) => !afterIds.has(id));
+}
+
+/** 撤销快照：镜表 + 预览帧 + 确认态，重置/改字段也可悔。 */
+export interface DeskUndoSnapshot {
+  payload: ScriptBreakdownPayload;
+  storyboardPreview: StoryboardPreviewPayload | undefined;
+  confirmedEpisodeIds: string[];
+  contactSheetUrl: unknown;
+  gridConfirmed: unknown;
+  chainStoryboard: unknown;
+}
+
+export function captureDeskUndoSnapshot(
+  data: Record<string, unknown> | null | undefined,
+  payload: ScriptBreakdownPayload,
+): DeskUndoSnapshot {
+  const clone = <T,>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
+  const confirmed = Array.isArray(data?.confirmedEpisodeIds)
+    ? (data.confirmedEpisodeIds as unknown[]).filter((id): id is string => typeof id === 'string')
+    : [];
+  const preview = data?.storyboardPreview as StoryboardPreviewPayload | undefined;
+  return {
+    payload: clone(payload),
+    storyboardPreview: preview && typeof preview === 'object' ? clone(preview) : undefined,
+    confirmedEpisodeIds: [...confirmed],
+    contactSheetUrl: data?.contactSheetUrl,
+    gridConfirmed: data?.gridConfirmed,
+    chainStoryboard: data?.chainStoryboard && typeof data.chainStoryboard === 'object'
+      ? clone(data.chainStoryboard)
+      : undefined,
+  };
+}
+
+/** 会话草稿：兼容 v1（仅镜表）与 v2（镜表+预览+确认态）。 */
+export const DESK_SESSION_DRAFT_VERSION = 2 as const;
+
+export interface DeskSessionDraftV2 {
+  version: typeof DESK_SESSION_DRAFT_VERSION;
+  savedAt: string;
+  snapshot: DeskUndoSnapshot;
+}
+
+export function serializeDeskSessionDraft(
+  data: Record<string, unknown> | null | undefined,
+  payload: ScriptBreakdownPayload,
+  savedAt = new Date().toISOString(),
+): DeskSessionDraftV2 {
+  return {
+    version: DESK_SESSION_DRAFT_VERSION,
+    savedAt,
+    snapshot: captureDeskUndoSnapshot(data, payload),
+  };
+}
+
+export function parseDeskSessionDraft(raw: string): {
+  kind: 'v2';
+  draft: DeskSessionDraftV2;
+} | {
+  kind: 'v1';
+  payload: ScriptBreakdownPayload;
+} | null {
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!parsed || typeof parsed !== 'object') return null;
+    const obj = parsed as Record<string, unknown>;
+    if (obj.version === DESK_SESSION_DRAFT_VERSION && obj.snapshot && typeof obj.snapshot === 'object') {
+      const snapshot = obj.snapshot as DeskUndoSnapshot;
+      if (!snapshot.payload || typeof snapshot.payload !== 'object' || !Array.isArray(snapshot.payload.episodes)) {
+        return null;
+      }
+      return {
+        kind: 'v2',
+        draft: {
+          version: DESK_SESSION_DRAFT_VERSION,
+          savedAt: typeof obj.savedAt === 'string' ? obj.savedAt : '',
+          snapshot: {
+            ...snapshot,
+            confirmedEpisodeIds: Array.isArray(snapshot.confirmedEpisodeIds)
+              ? snapshot.confirmedEpisodeIds.filter((id): id is string => typeof id === 'string')
+              : [],
+          },
+        },
+      };
+    }
+    // v1：裸 ScriptBreakdownPayload
+    if (obj.version === 1 && Array.isArray(obj.episodes)) {
+      return { kind: 'v1', payload: obj as unknown as ScriptBreakdownPayload };
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+export function removeFramesForShotIds(
+  frames: StoryboardPreviewPayload['frames'],
+  shotIds: readonly string[],
+): StoryboardPreviewPayload['frames'] | null {
+  if (!frames?.length || !shotIds.length) return null;
+  const ids = new Set(shotIds);
+  const matches = (frame: StoryboardPreviewPayload['frames'][number]): boolean => {
+    if (frame.sourceShotId && ids.has(frame.sourceShotId)) return true;
+    if (ids.has(frame.id)) return true;
+    for (const sid of ids) {
+      if (frame.id === `spf-${sid}` || frame.id === `frame-${sid}` || frame.id === `frame-line-${sid}`) {
+        return true;
+      }
+    }
+    return false;
+  };
+  const next = frames.filter((frame) => !matches(frame));
+  return next.length === frames.length ? null : next;
 }
 
 export function isShotComposed(
@@ -188,24 +329,15 @@ export function filterShots(
 export function projectBreakdownToWorkspace(payload: ScriptBreakdownPayload) {
   const doc = useWorkspaceDocument.getState();
   const previousById = new Map(doc.storyboard.shots.map((shot) => [shot.id, shot]));
-  const raw = storyboardShotsFromScriptBreakdown(payload).map((base) => ({
-    ...base,
-    ...(previousById.get(base.id) ?? {}),
-    episodeId: base.episodeId,
-    episodeIndex: base.episodeIndex,
-    episodeTitle: base.episodeTitle,
-    index: base.index,
-    durationSec: base.durationSec,
-    descriptionZh: base.descriptionZh,
-    promptEn: base.promptEn,
-    videoPromptEn: base.videoPromptEn,
-    characterNames: base.characterNames,
-    sceneName: base.sceneName,
-  }));
+  const raw = storyboardShotsFromScriptBreakdown(payload)
+    .map((base) => mergeStoryboardShotFromBreakdown(base, previousById.get(base.id)));
   const storyboardShots = bindStoryboardShotAssets(
     raw,
     doc.characters.characters,
     doc.environments?.environments ?? [],
+    (doc.backlotWorkspace?.items ?? [])
+      .filter((i) => i.kind === 'scene')
+      .map((i) => ({ id: i.id, label: i.label })),
   );
   const episodeIds = new Set(storyboardShots.map((s) => s.episodeId).filter(Boolean));
   const nextActive =
@@ -223,9 +355,23 @@ export function applyDeskBreakdown(
 ) {
   applyScriptBreakdownPayload(blockId, payload, { syncAssets: false });
   const flat = flattenScriptBreakdownShots(payload);
-  // F-003: 构建链镜表并写入节点 data.chainStoryboard
-  const shots = storyboardShotsFromScriptBreakdown(payload);
-  const chainPayload: ChainStoryboardPayload = buildChainStoryboardPayload(undefined, {
+  const doc = useWorkspaceDocument.getState();
+  const previousChain = (extra.chainStoryboard as ChainStoryboardPayload | undefined)
+    ?? undefined;
+  // F-003: 构建链镜表；P0 绑定 id+名（勿留下空 characterIds）
+  const previousById = new Map(previousChain?.shots.map((shot) => [shot.id, shot]) ?? []);
+  const rawShots = storyboardShotsFromScriptBreakdown(payload)
+    .map((base) => mergeStoryboardShotFromBreakdown(base, previousById.get(base.id)));
+  const sceneAssets = (doc.backlotWorkspace?.items ?? [])
+    .filter((i) => i.kind === 'scene')
+    .map((i) => ({ id: i.id, label: i.label }));
+  const shots = bindStoryboardShotAssets(
+    rawShots,
+    doc.characters.characters,
+    doc.environments?.environments ?? [],
+    sceneAssets,
+  );
+  const chainPayload: ChainStoryboardPayload = buildChainStoryboardPayload(previousChain, {
     title: payload.title,
     episodes: payload.episodes.map((ep) => ({
       id: ep.id,
@@ -235,12 +381,22 @@ export function applyDeskBreakdown(
       logline: ep.logline,
     })),
     shots,
-    activeEpisodeId: payload.episodes[0]?.id ?? null,
+    activeEpisodeId:
+      previousChain?.activeEpisodeId
+      && payload.episodes.some((ep) => ep.id === previousChain.activeEpisodeId)
+        ? previousChain.activeEpisodeId
+        : payload.episodes[0]?.id ?? null,
+    ...(Array.isArray(extra.confirmedEpisodeIds)
+      ? { confirmedEpisodeIds: extra.confirmedEpisodeIds.filter((id): id is string => typeof id === 'string') }
+      : {}),
+    ...(typeof extra.gridConfirmed === 'boolean'
+      ? { gridConfirmed: extra.gridConfirmed }
+      : {}),
   });
+  const { chainStoryboard: _prevChainIgnored, ...restExtra } = extra;
   updateNodeData(blockId, {
     status: 'success',
     scriptBreakdown: payload,
-    chainStoryboard: chainPayload,
     content: `${payload.title} · ${payload.episodes.length} 集 · ${flat.length} 镜`,
     output: flat.map((s) => s.imagePrompt).filter(Boolean).join('\n\n'),
     meta: {
@@ -248,7 +404,9 @@ export function applyDeskBreakdown(
       episodeCount: payload.episodes.length,
       shotCount: flat.length,
     },
-    ...extra,
+    ...restExtra,
+    // 最后写入：禁止 extra 用旧 chain 覆盖刚绑定的 id+名
+    chainStoryboard: chainPayload,
   });
 }
 
@@ -424,13 +582,27 @@ export function suggestedTrialCap(episodeShotCount: number): number {
 export function stripEpisodeConfirmation(
   data: Record<string, unknown> | null | undefined,
   episodeId: string | null,
-): { gridConfirmed: boolean; confirmedEpisodeIds: string[] } {
+): {
+  gridConfirmed: boolean;
+  confirmedEpisodeIds: string[];
+  chainStoryboard?: ChainStoryboardPayload;
+} {
   const ids = Array.isArray((data as any)?.confirmedEpisodeIds)
     ? ((data as any).confirmedEpisodeIds as string[]).filter((id: string) => id !== episodeId)
     : [];
+  const chain = data ? readChainStoryboard(data) : undefined;
   return {
     gridConfirmed: false,
     confirmedEpisodeIds: ids,
+    ...(chain
+      ? {
+          chainStoryboard: {
+            ...chain,
+            gridConfirmed: false,
+            confirmedEpisodeIds: ids,
+          },
+        }
+      : {}),
   };
 }
 

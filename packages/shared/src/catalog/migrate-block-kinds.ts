@@ -66,7 +66,6 @@ export const BLOCK_KIND_MIGRATIONS: Record<string, string> = {
   'multi-view-3d': 'director-desk',
   'mesh-import': 'director-desk',
   'mesh-viewer': 'director-desk',
-  'director-3d': 'director-desk',
 
   // ── Prompt / 风格 → 生成或参考板 ──
   'prompt': 'picture-gen',
@@ -148,7 +147,6 @@ export const BLOCK_KIND_MIGRATION_PATCHES: Record<string, Record<string, unknown
   'panorama-flat': { directorMode: 'panorama', migrationNote: '已合并到统一导演台' },
   'mesh-import': { directorMode: 'import', migrationNote: '已合并到统一导演台' },
   'mesh-viewer': { directorMode: 'viewer', migrationNote: '已合并到统一导演台' },
-  'director-3d': { migrationNote: '3D 舞台已合并到统一导演台' },
 
   'cinema-prompt': { studioTab: 'cinema' },
   'camera-prompt': { studioTab: 'camera' },
@@ -201,6 +199,34 @@ export interface MigratableNode {
   data?: Record<string, unknown>;
 }
 
+/** 独立 3D 节点的数据身份版本；与 Director3dShotState.version 分开。 */
+export const DIRECTOR3D_NODE_SCHEMA_VERSION = 2;
+export const DIRECTOR3D_REVERSE_MIGRATION_VERSION = 1;
+
+export function hasPersistedDirector3dState(data: Record<string, unknown>): boolean {
+  const sceneByShot = data.sceneByShot;
+  return Boolean(
+    data.scene ||
+      data.standaloneProject ||
+      data.last3dCommit ||
+      data.sceneTemplates ||
+      (sceneByShot &&
+        typeof sceneByShot === 'object' &&
+        !Array.isArray(sceneByShot) &&
+        Object.keys(sceneByShot as Record<string, unknown>).length > 0),
+  );
+}
+
+export function hasDirectorDeskProductionState(data: Record<string, unknown>): boolean {
+  return Boolean(
+    data.batchSummary ||
+      data.lastResults ||
+      data.lastPushReceipt ||
+      data.batchStartedAt ||
+      data.directorKeyframeBatch,
+  );
+}
+
 export function getBlockKindMigrationTarget(kind: string): string | undefined {
   return BLOCK_KIND_MIGRATIONS[kind];
 }
@@ -238,6 +264,41 @@ export function migrateBlockKinds<T extends MigratableNode>(
   const nodesOut = nodes.map((node) => {
     const kind = String(node.type ?? '');
     const data = node.data ?? {};
+
+    // 恢复曾被 director-3d -> director-desk 迁移吞并的历史节点。
+    // 只自动恢复仍是纯 3D 数据的节点；已产生导演批出数据的节点保留身份并等待显式拆分。
+    if (
+      kind === 'director-desk' &&
+      data.migratedFrom === 'director-3d' &&
+      data.director3dReverseMigrationVersion !== DIRECTOR3D_REVERSE_MIGRATION_VERSION
+    ) {
+      migratedCount += 1;
+      const has3dState = hasPersistedDirector3dState(data);
+      const hasProductionState = hasDirectorDeskProductionState(data);
+      if (has3dState && !hasProductionState) {
+        const { migratedFrom: _from, migrationNote: _note, ...rest } = data;
+        return {
+          ...node,
+          type: 'director-3d',
+          data: {
+            ...rest,
+            schemaVersion: DIRECTOR3D_NODE_SCHEMA_VERSION,
+            director3dReverseMigrationVersion: DIRECTOR3D_REVERSE_MIGRATION_VERSION,
+            restoredFrom: 'director-3d-merge-v1',
+          },
+        } as T;
+      }
+      return {
+        ...node,
+        data: {
+          ...data,
+          director3dReverseMigrationVersion: DIRECTOR3D_REVERSE_MIGRATION_VERSION,
+          director3dMigrationDecision: hasProductionState
+            ? 'split-required'
+            : 'kept-director-desk-no-3d-state',
+        },
+      } as T;
+    }
 
     // 误把导演台迁到分镜台的旧会话：按标记还原
     if (

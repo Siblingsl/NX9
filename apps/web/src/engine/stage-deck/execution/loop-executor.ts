@@ -13,6 +13,32 @@ export interface LoopConfig {
   loopCount: number;
   loopVariants: string[];
   effectiveRounds: number;
+  /** 并行轮次并发上限，仅 loopMode=parallel 生效 */
+  loopConcurrency: number;
+}
+
+export { advanceIteratorIndex } from './iterator-index';
+
+/** TOOL-04: 有界并发跑 N 轮；serial 时 concurrency=1 */
+export async function runRoundsWithConcurrency(
+  rounds: number,
+  concurrency: number,
+  runRound: (round: number) => Promise<void>,
+  signal?: { cancelled?: boolean },
+): Promise<void> {
+  const total = Math.max(0, rounds);
+  const pool = Math.max(1, Math.min(8, Math.floor(concurrency) || 1));
+  let next = 0;
+  const workers = Array.from({ length: Math.min(pool, total) }, async () => {
+    for (;;) {
+      if (signal?.cancelled) return;
+      const round = next;
+      next += 1;
+      if (round >= total) return;
+      await runRound(round);
+    }
+  });
+  await Promise.all(workers);
 }
 
 export function parseLoopVariants(raw: unknown): string[] {
@@ -32,7 +58,11 @@ export function getLoopConfig(node: Node): LoopConfig {
   const loopCount = Math.max(1, Math.min(99, Number(d.loopCount) || 1));
   const loopVariants = parseLoopVariants(d.loopVariants);
   const effectiveRounds = Math.max(loopCount, loopVariants.length > 0 ? loopVariants.length : 1);
-  return { loopMode, loopCount, loopVariants, effectiveRounds };
+  const loopConcurrency = Math.max(
+    1,
+    Math.min(8, Number(d.loopConcurrency ?? d.concurrency ?? 3) || 3),
+  );
+  return { loopMode, loopCount, loopVariants, effectiveRounds, loopConcurrency };
 }
 
 /** Downstream nodes within scope, not including root */
@@ -159,7 +189,7 @@ export interface LoopCascadeOptions {
   setEdges: (edges: Edge[] | ((prev: Edge[]) => Edge[])) => void;
   updateNodeData: (id: string, data: Record<string, unknown>) => void;
   onProgress?: (p: RunProgress) => void;
-  signal?: { cancelled: boolean };
+  signal?: import('../../flow-runner').FlowRunSignal;
 }
 
 async function runPostLoopRound(
@@ -299,15 +329,9 @@ export async function runCascadeWithLoop(options: LoopCascadeOptions): Promise<v
     });
   };
 
-  if (config.loopMode === 'parallel' && config.effectiveRounds > 1) {
-    for (let round = 0; round < config.effectiveRounds; round++) {
-      if (signal?.cancelled) return;
-      await runRound(round);
-    }
-  } else {
-    for (let round = 0; round < config.effectiveRounds; round++) {
-      if (signal?.cancelled) return;
-      await runRound(round);
-    }
-  }
+  const concurrency =
+    config.loopMode === 'parallel' && config.effectiveRounds > 1
+      ? config.loopConcurrency
+      : 1;
+  await runRoundsWithConcurrency(config.effectiveRounds, concurrency, runRound, signal);
 }

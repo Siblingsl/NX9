@@ -17,6 +17,7 @@ import {
   Star,
   Clapperboard,
 } from 'lucide-react';
+import { VirtualizedCardGrid } from './VirtualizedCardGrid';
 
 export function resolveShotCardMedia(item: BacklotWorkspaceItem | undefined, fallback?: string): {
   gifUrl?: string;
@@ -84,8 +85,11 @@ export function ShotCardGrid({
   }
 
   return (
-    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-4">
-      {items.map((item) => {
+    <VirtualizedCardGrid
+      items={items}
+      getKey={(item) => item.id}
+      estimateCardHeight={(cardWidth) => cardWidth * (9 / 16) + 88}
+      renderItem={(item) => {
         const ws = workspaceById.get(item.id);
         const media = resolveShotCardMedia(ws, item.imageUrl);
         const ext = ws ? getShotCreative(ws) : getShotCreative({
@@ -114,8 +118,7 @@ export function ShotCardGrid({
 
         return (
           <article
-            key={item.id}
-            className="group relative flex flex-col overflow-hidden rounded-xl border border-line bg-surface transition-colors hover:border-brand/35"
+            className="group relative flex h-full flex-col overflow-hidden rounded-xl border border-line bg-surface transition-colors hover:border-brand/35"
           >
             <ShotCover
               gifUrl={media.gifUrl}
@@ -124,11 +127,17 @@ export function ShotCardGrid({
               favorite={favorite}
               locked={locked}
               allowFavorite={!isBuiltin}
+              onOpen={() => onEdit(item.id)}
               onToggleFavorite={() => onToggleFavorite(item.id)}
             />
 
             <div className="relative z-10 flex items-start gap-1 border-t border-line px-2.5 py-2">
-              <div className="min-w-0 flex-1">
+              <button
+                type="button"
+                className="min-w-0 flex-1 text-left hover:text-brand"
+                title="点击编辑 · 可用菜单复制 @"
+                onClick={() => onEdit(item.id)}
+              >
                 <p className="truncate text-xs font-medium text-ink">
                   {isBuiltin ? (
                     <span className="mr-1 text-[9px] font-normal text-ink/50">内置</span>
@@ -144,7 +153,7 @@ export function ShotCardGrid({
                 {chips ? (
                   <p className="mt-1 truncate text-[10px] text-ink/35">{chips}</p>
                 ) : null}
-              </div>
+              </button>
               <div className="relative shrink-0">
                 <button
                   type="button"
@@ -190,8 +199,8 @@ export function ShotCardGrid({
             </div>
           </article>
         );
-      })}
-    </div>
+      }}
+    />
   );
 }
 
@@ -202,6 +211,7 @@ function ShotCover({
   favorite,
   locked,
   allowFavorite,
+  onOpen,
   onToggleFavorite,
 }: {
   gifUrl?: string;
@@ -210,6 +220,7 @@ function ShotCover({
   favorite: boolean;
   locked: boolean;
   allowFavorite: boolean;
+  onOpen: () => void;
   onToggleFavorite: () => void;
 }) {
   const [hover, setHover] = useState(false);
@@ -218,9 +229,19 @@ function ShotCover({
 
   return (
     <div
-      className="relative aspect-[16/10] w-full overflow-hidden bg-black/20"
+      role="button"
+      tabIndex={0}
+      title="点击编辑"
+      className="relative aspect-[16/10] w-full cursor-pointer overflow-hidden bg-black/20"
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
+      onClick={onOpen}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          onOpen();
+        }
+      }}
     >
       {url ? (
         <img src={url} alt="" className="h-full w-full object-cover object-center" />

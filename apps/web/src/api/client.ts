@@ -165,14 +165,16 @@ export const api = {
     }),
   proxyImage: (body: Record<string, unknown>, options?: { signal?: AbortSignal }) =>
     request<unknown>('/api/gateway/image', { method: 'POST', body: JSON.stringify(body), signal: options?.signal }),
-  proxyVideo: (body: Record<string, unknown>) =>
+  proxyVideo: (body: Record<string, unknown>, options?: { signal?: AbortSignal }) =>
     request<{
       ok: boolean;
       url?: string;
       status: string;
       taskId?: string;
       message?: string;
-    }>('/api/gateway/video', { method: 'POST', body: JSON.stringify(body) }),
+      /** VG-30: 提交时实际使用的视频通道 Base URL */
+      providerBaseUrl?: string;
+    }>('/api/gateway/video', { method: 'POST', body: JSON.stringify(body), signal: options?.signal }),
   proxyTts: (body: {
     input: string;
     voice?: string;
@@ -189,6 +191,7 @@ export const api = {
     ref_duration?: number;
     luxTtsNoGpuFallback?: 'cpu' | 'cloud';
     fallbackVoice?: string;
+    instructions?: string;
   }) =>
     request<{
       ok: boolean;
@@ -341,7 +344,7 @@ export const api = {
       body: JSON.stringify(body),
     }),
 
-  pollVideo: (taskId: string, baseUrl?: string) =>
+  pollVideo: (taskId: string, baseUrl?: string, options?: { signal?: AbortSignal }) =>
     request<{
       ok: boolean;
       url?: string;
@@ -351,6 +354,7 @@ export const api = {
     }>('/api/gateway/video/poll', {
       method: 'POST',
       body: JSON.stringify({ taskId, baseUrl }),
+      signal: options?.signal,
     }),
 
   concatClips: (videoUrls: string[], title?: string, transition?: string) =>
@@ -455,6 +459,19 @@ export const api = {
 
   stripMetadata: (body: { sourceUrl: string }) =>
     request<{ ok: boolean; url: string }>('/api/image-ops/strip-metadata', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+
+  assessKeyframeColor: (body: { sourceUrl: string }) =>
+    request<{
+      verdict: 'color' | 'suspect-monochrome' | 'unknown';
+      chromaMean?: number;
+      chromaP95?: number;
+      noticeableRatio?: number;
+      sampleCount?: number;
+      sampledAt?: string;
+    }>('/api/image-ops/keyframe-color-check', {
       method: 'POST',
       body: JSON.stringify(body),
     }),
@@ -677,6 +694,56 @@ export const api = {
       signal: options?.signal,
     }),
 
+  scriptScreenplayStream: async (
+    body: { sourceText: string },
+    options?: { signal?: AbortSignal; onChunk?: (text: string) => void },
+  ): Promise<{ ok: boolean; screenplay: string }> => {
+    const res = await fetch('/api/agent/script/screenplay-stream', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...userHeaders(),
+      },
+      body: JSON.stringify(body),
+      signal: options?.signal,
+    });
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(readErrorMessage(text) || res.statusText);
+    }
+    const reader = res.body?.getReader();
+    if (!reader) throw new Error('剧本流式通道不可用');
+    const decoder = new TextDecoder();
+    let pending = '';
+    let full = '';
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      pending += decoder.decode(value, { stream: true });
+      const lines = pending.split('\n');
+      pending = lines.pop() ?? '';
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed.startsWith('data:')) continue;
+        const json = trimmed.slice(5).trim();
+        if (!json) continue;
+        let parsed: { text?: string; done?: boolean; error?: string };
+        try {
+          parsed = JSON.parse(json) as { text?: string; done?: boolean; error?: string };
+        } catch {
+          continue;
+        }
+        if (parsed.error) throw new Error(parsed.error);
+        if (parsed.text) {
+          full += parsed.text;
+          options?.onChunk?.(parsed.text);
+        }
+      }
+    }
+    if (!full.trim()) throw new Error('剧本生成未返回正文');
+    return { ok: true, screenplay: full };
+  },
+
   directorPlan: (body: { sourceText: string }) =>
     request<{ ok: boolean; plan: string }>('/api/agent/production/director-plan', {
       method: 'POST',
@@ -844,6 +911,9 @@ export const api = {
   getTaskStatus: (taskId: string) =>
     request<{ ok: boolean; status: string; url?: string; message?: string }>(`/api/montage/tasks/${taskId}`),
 
+  cancelMontageTask: (taskId: string) =>
+    request<{ ok: boolean; message?: string }>(`/api/montage/tasks/${taskId}`, { method: 'DELETE' }),
+
   renderRemotion: (body: { timeline: unknown; codec?: string }) =>
     request<{ ok: boolean; taskId: string; status: string; message: string }>('/api/montage/render-remotion', {
       method: 'POST',
@@ -851,7 +921,32 @@ export const api = {
     }),
 
   getRemotionTaskStatus: (taskId: string) =>
-    request<{ ok: boolean; status: string; progress: number; message?: string; url?: string }>(`/api/montage/remotion-tasks/${taskId}`),
+    request<{
+      ok: boolean;
+      status: string;
+      progress: number;
+      message?: string;
+      url?: string;
+      outputUrl?: string;
+      error?: string;
+    }>(`/api/montage/remotion-tasks/${taskId}`),
+
+  cancelRemotionTask: (taskId: string) =>
+    request<{ ok: boolean; message?: string }>(`/api/montage/remotion-tasks/${taskId}`, {
+      method: 'DELETE',
+    }),
+
+  /** P3: 视频级智能替换（Fal 队列长任务） */
+  videoEditSubmit: (body: { videoUrl: string; maskUrl?: string; prompt: string; providerId?: string }) =>
+    request<{ ok: boolean; taskId?: string; message?: string }>('/api/montage/video-edit', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+
+  videoEditStatus: (taskId: string) =>
+    request<{ ok: boolean; status: 'queued' | 'running' | 'done' | 'error'; progress?: number; url?: string; message?: string }>(
+      `/api/montage/video-edit-tasks/${taskId}`,
+    ),
 
   storageMode: () => request<{ mode: string }>('/api/admin/storage'),
   migrateToPrisma: (ownerId?: string) =>

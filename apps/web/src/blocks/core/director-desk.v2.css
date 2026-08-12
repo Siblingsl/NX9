@@ -1367,6 +1367,16 @@
   color: var(--desk-warn);
 }
 
+.dd2-color-check {
+  margin: 6px 10px 0;
+  padding: 7px 10px;
+  border: 1px solid var(--desk-warn);
+  border-radius: 7px;
+  font-size: 11px;
+  color: var(--desk-warn);
+  background: color-mix(in srgb, var(--desk-warn) 8%, transparent);
+}
+
 .dd2-reference-gaps button,
 .dd2-batch-summary button,
 .dd2-review-mode {

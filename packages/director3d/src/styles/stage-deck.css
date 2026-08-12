@@ -84,6 +84,31 @@
   font-weight: 600;
 }
 
+.nx9-stage-preset-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 16px;
+  border-bottom: 1px solid var(--stage-line);
+  background: var(--stage-panel);
+  min-height: 40px;
+}
+
+.nx9-stage-preset-bar__label {
+  flex-shrink: 0;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--stage-muted);
+}
+
+.nx9-stage-preset-bar__row {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  flex: 1;
+  min-width: 0;
+}
+
 .nx9-stage-cta {
   border: none;
   background: var(--stage-brand);
@@ -392,9 +417,12 @@
 }
 
 .nx9-stage-frame-thumb.is-latest { border-color: var(--stage-brand); }
-.nx9-stage-frame { border: 0; background: transparent; padding: 0; display: grid; gap: 2px; cursor: pointer; color: var(--stage-muted); font-size: 9px; }
+.nx9-stage-frame { border: 0; background: transparent; padding: 0; display: grid; gap: 2px; color: var(--stage-muted); font-size: 9px; min-width: 112px; }
 .nx9-stage-frame.is-selected { color: var(--stage-brand); font-weight: 700; }
 .nx9-stage-frame.is-selected .nx9-stage-frame-thumb { border-color: var(--stage-brand); }
+.nx9-stage-frame-preview { border: 0; background: transparent; padding: 0; cursor: pointer; }
+.nx9-stage-frame-name { width: 100%; border: 0; background: transparent; color: inherit; font: inherit; min-width: 0; }
+.nx9-stage-frame-actions { display: flex; flex-wrap: wrap; gap: 4px; }
 
 .nx9-stage-hint { font-size: 11px; color: var(--stage-muted); line-height: 1.45; }
 

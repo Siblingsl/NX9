@@ -398,15 +398,23 @@ describe('F-008 视频批准 / 审片', () => {
   });
 
   it('VideoWorkspace 源码接线：单镜批准/打回必填/徽章', () => {
-    const src = readFileSync(
+    // 审片格子已拆分为 VideoShotReviewGrid，批准/打回写回仍在 VideoWorkspace
+    const workspace = readFileSync(
       resolve(root, 'apps/web/src/engine/stage-deck/chrome/attached-workspace/generation/video/VideoWorkspace.tsx'),
       'utf8',
     );
-    expect(src.includes('approveStoryboardVideoShot')).toBe(true);
-    expect(src.includes('rejectStoryboardVideoShot')).toBe(true);
-    expect(src.includes('resolveVideoStatusBadge')).toBe(true);
-    expect(src.includes('全部批准')).toBe(true);
-    expect(src.includes('原因必填')).toBe(true);
-    expect(src.includes('patchChainShotLocal')).toBe(true);
+    const grid = readFileSync(
+      resolve(root, 'apps/web/src/engine/stage-deck/chrome/attached-workspace/generation/video/VideoShotReviewGrid.tsx'),
+      'utf8',
+    );
+    expect(workspace.includes('approveStoryboardVideoShot')).toBe(true);
+    expect(workspace.includes('rejectStoryboardVideoShot')).toBe(true);
+    expect(workspace.includes('patchChainShotLocal')).toBe(true);
+    expect(workspace.includes('VideoShotReviewGrid')).toBe(true);
+    expect(grid.includes('resolveVideoStatusBadge')).toBe(true);
+    expect(grid.includes('全部批准')).toBe(true);
+    expect(grid.includes('打回原因（必填）')).toBe(true);
+    // 空原因禁止提交
+    expect(grid).toMatch(/disabled=\{!rejectReason\.trim\(\)\}/);
   });
 });

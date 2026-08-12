@@ -27,6 +27,8 @@ export interface ComposerWorkspaceShellProps {
   onApplyHistory?: (text: string) => void;
   onAiAction?: (id: string) => void;
   onRun?: () => void;
+  /** PG-04: 运行中显示「停止」并触发取消 */
+  onStop?: () => void;
   running?: boolean;
   runLabel?: string;
   runDisabled?: boolean;
@@ -53,6 +55,7 @@ export function ComposerWorkspaceShell({
   onApplyHistory,
   onAiAction,
   onRun,
+  onStop,
   running,
   runLabel,
   runDisabled,
@@ -97,6 +100,7 @@ export function ComposerWorkspaceShell({
             onApplyHistory={onApplyHistory}
             onAiAction={onAiAction}
             onRun={onRun}
+            onStop={onStop}
             running={running}
             runLabel={runLabel}
             runDisabled={runDisabled}

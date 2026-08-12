@@ -3,6 +3,7 @@ import {
   buildChainStoryboardPayload,
   migrateGlobalToChainStoryboard,
   flattenScriptBreakdownShots,
+  mergeStoryboardShotFromBreakdown,
   normalizeScriptBreakdownConfig,
   normalizeScriptBreakdownPrompts,
   readChainStoryboard,
@@ -140,37 +141,15 @@ export function applyScriptBreakdownPayload(
   const sourceChain = previousChain ?? migratedChain;
   const previousById = new Map<string, (typeof doc.storyboard.shots)[number]>();
   for (const shot of sourceChain?.shots ?? []) previousById.set(shot.id, shot);
-  const rawShots = storyboardShotsFromScriptBreakdown(payload).map((base) => {
-    const prev = previousById.get(base.id);
-    return {
-      ...base,
-      ...(prev ?? {}),
-      episodeId: base.episodeId,
-      episodeIndex: base.episodeIndex,
-      episodeTitle: base.episodeTitle,
-      index: base.index,
-      durationSec: base.durationSec,
-      shotType: base.shotType,
-      descriptionZh: base.descriptionZh,
-      promptEn: base.promptEn,
-      videoPromptEn: base.videoPromptEn,
-      characterNames: base.characterNames,
-      sceneName: base.sceneName,
-      sceneId: base.sceneId,
-      sceneCode: base.sceneCode,
-      // 预览图优先；勿被旧 firstFrameAssetId:null 覆盖
-      firstFrameAssetId: base.firstFrameAssetId || prev?.firstFrameAssetId || null,
-      keyframeStatus: base.firstFrameAssetId
-        ? base.keyframeStatus
-        : (prev?.keyframeStatus ?? base.keyframeStatus),
-      status: base.firstFrameAssetId ? base.status : (prev?.status ?? base.status),
-      sketchPrompt: base.sketchPrompt ?? prev?.sketchPrompt ?? null,
-    };
-  });
+  const rawShots = storyboardShotsFromScriptBreakdown(payload)
+    .map((base) => mergeStoryboardShotFromBreakdown(base, previousById.get(base.id)));
   const shots = bindStoryboardShotAssets(
     rawShots,
     characterLibrary,
     environmentLibrary,
+    (doc.backlotWorkspace?.items ?? [])
+      .filter((i) => i.kind === 'scene')
+      .map((i) => ({ id: i.id, label: i.label })),
   );
   const episodeIds = new Set(shots.map((shot) => shot.episodeId).filter(Boolean));
   const activeEpisodeId = sourceChain?.activeEpisodeId && episodeIds.has(sourceChain.activeEpisodeId)

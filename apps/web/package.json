@@ -14,12 +14,14 @@
     "@nx9/director3d": "workspace:*",
     "@nx9/remotion-compositions": "workspace:*",
     "@nx9/shared": "workspace:*",
-    "@remotion/player": "^4.0.0",
+    "@remotion/player": "4.0.499",
     "@xyflow/react": "^12.10.0",
     "jszip": "^3.10.1",
     "lucide-react": "^0.468.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
+    "remotion": "4.0.499",
+    "three": "^0.172.0",
     "zustand": "^5.0.0"
   },
   "devDependencies": {
@@ -28,6 +30,7 @@
     "@testing-library/react": "^16.3.2",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
+    "@types/three": "^0.172.0",
     "@vitejs/plugin-react": "^4.3.0",
     "autoprefixer": "^10.4.0",
     "jsdom": "^30.0.1",

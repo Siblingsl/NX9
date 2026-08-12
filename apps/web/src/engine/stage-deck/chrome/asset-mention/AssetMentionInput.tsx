@@ -1,6 +1,11 @@
 import { useCallback, useMemo, useRef, useState } from 'react';
 import type { AssetLibraryKind } from '@nx9/shared';
+import { formatAssetMention } from '@nx9/shared';
 import { useAllAssetLibraryItems } from '../../../../hooks/use-asset-library-items';
+import {
+  hasNx9AssetDrag,
+  readNx9AssetDragData,
+} from '../../../asset-library-drag';
 import { AssetMentionPicker } from './AssetMentionPicker';
 import {
   parseLocalMediaMentions,
@@ -54,6 +59,7 @@ export function AssetMentionInput({
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const backdropRef = useRef<HTMLDivElement>(null);
   const [lightbox, setLightbox] = useState<string | null>(null);
+  const [dragOver, setDragOver] = useState(false);
   const { allItems } = useAllAssetLibraryItems();
 
   const bindRef = (el: HTMLInputElement | HTMLTextAreaElement | null) => {
@@ -102,6 +108,22 @@ export function AssetMentionInput({
     backdrop.scrollLeft = el.scrollLeft;
   }, [as]);
 
+  const handleAssetDrop = useCallback(
+    (e: React.DragEvent) => {
+      if (!enabled || !hasNx9AssetDrag(e.dataTransfer)) return;
+      e.preventDefault();
+      e.stopPropagation();
+      setDragOver(false);
+      const asset = readNx9AssetDragData(e.dataTransfer);
+      if (!asset) return;
+      if (kinds && !kinds.includes(asset.kind)) return;
+      const token = formatAssetMention(asset.kind, asset.label);
+      const next = value.trim() ? `${value.trim()} ${token} ` : `${token} `;
+      onChange(next);
+    },
+    [enabled, kinds, onChange, value],
+  );
+
   const segments = useMemo(
     () => (highlightMentions ? splitMentionSegments(value) : null),
     [highlightMentions, value],
@@ -138,11 +160,24 @@ export function AssetMentionInput({
       mention.syncFromInput(el.value, pos, el);
     },
     onScroll: syncScroll,
+    onDragOver: (e: React.DragEvent) => {
+      if (!enabled || !hasNx9AssetDrag(e.dataTransfer)) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'copy';
+      setDragOver(true);
+    },
+    onDragLeave: () => setDragOver(false),
+    onDrop: handleAssetDrop,
   };
 
-  const fieldClassName = highlightMentions
-    ? `${className ?? ''} relative z-[1] text-transparent caret-ink/85 selection:bg-brand/25`.trim()
-    : className;
+  const fieldClassName = [
+    highlightMentions
+      ? `${className ?? ''} relative z-[1] text-transparent caret-ink/85 selection:bg-brand/25`.trim()
+      : className,
+    dragOver ? 'ring-2 ring-brand/40' : '',
+  ]
+    .filter(Boolean)
+    .join(' ');
 
   const field =
     as === 'textarea' ? (

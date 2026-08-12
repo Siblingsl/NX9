@@ -2,8 +2,13 @@ import { Injectable } from '@nestjs/common';
 import { existsSync } from 'fs';
 import { join } from 'path';
 import sharp from 'sharp';
+import {
+  assessKeyframeColorFromRgb,
+  emptyKeyframeColorCheck,
+  type KeyframeColorCheck,
+} from '@nx9/shared';
 import { PATHS } from '../../config/app.config';
-import { resolveMediaUrl } from '../../common/media-path';
+import { materializeImageToLocal, materializeImagesToLocal } from '../../common/image-local';
 import { AssetsService } from '../assets/assets.service';
 
 type FitMode = 'cover' | 'contain' | 'fill' | 'inside' | 'outside';
@@ -18,8 +23,12 @@ export class ImageOpsService {
     height: number,
     fit: FitMode = 'cover',
   ) {
-    const local = resolveMediaUrl(sourceUrl);
-    if (!local) throw new Error(`无法解析图片路径: ${sourceUrl}`);
+    const local = await materializeImageToLocal(sourceUrl);
+    if (!local) {
+      throw new Error(
+        `无法读取图片（本地 /media 或外链下载失败）。请先上传到本机，或确认外链可访问: ${sourceUrl.slice(0, 120)}`,
+      );
+    }
 
     const w = Math.max(16, Math.min(4096, Math.round(width)));
     const h = Math.max(16, Math.min(4096, Math.round(height)));
@@ -39,8 +48,19 @@ export class ImageOpsService {
     direction: 'horizontal' | 'vertical' | 'grid' = 'horizontal',
     cols = 2,
   ) {
-    const paths = imageUrls.map((u) => resolveMediaUrl(u)).filter(Boolean) as string[];
-    if (paths.length === 0) throw new Error('无有效图片');
+    const { paths, failed } = await materializeImagesToLocal(imageUrls.filter(Boolean));
+    if (paths.length === 0) {
+      throw new Error(
+        failed.length
+          ? `无有效图片：外链下载失败或不是 /media 路径（${failed.length} 张）`
+          : '无有效图片',
+      );
+    }
+    if (failed.length > 0) {
+      throw new Error(
+        `拼贴缺图：${failed.length} 张无法读取（外链下载失败或路径无效）。请先上传到本机后再拼贴。`,
+      );
+    }
 
     const metas = await Promise.all(paths.map((p) => sharp(p).metadata()));
     const cellW = Math.max(...metas.map((m) => m.width ?? 256));
@@ -100,8 +120,12 @@ export class ImageOpsService {
   }
 
   async upscaleImage(sourceUrl: string, scale = 2) {
-    const local = resolveMediaUrl(sourceUrl);
-    if (!local) throw new Error(`无法解析图片路径: ${sourceUrl}`);
+    const local = await materializeImageToLocal(sourceUrl);
+    if (!local) {
+      throw new Error(
+        `无法读取图片（本地 /media 或外链下载失败）。请先上传到本机，或确认外链可访问: ${sourceUrl.slice(0, 120)}`,
+      );
+    }
 
     const factor = Math.max(1.25, Math.min(4, scale));
     const meta = await sharp(local).metadata();
@@ -116,7 +140,7 @@ export class ImageOpsService {
   }
 
   async stripMetadata(sourceUrl: string) {
-    const local = resolveMediaUrl(sourceUrl);
+    const local = await materializeImageToLocal(sourceUrl);
     if (!local) throw new Error(`无法解析媒体路径: ${sourceUrl}`);
 
     const ext = local.toLowerCase().endsWith('.png') ? 'png' : 'jpg';
@@ -138,7 +162,7 @@ export class ImageOpsService {
     title?: string,
     safeZone: string = '9:16',
   ): Promise<{ ok: boolean; url: string }> {
-    const local = resolveMediaUrl(imageUrl);
+    const local = await materializeImageToLocal(imageUrl);
     if (!local || !existsSync(local)) throw new Error('无法读取源图像');
     const stamp = Date.now();
     const name = `thumb-${stamp}.png`;
@@ -152,6 +176,25 @@ export class ImageOpsService {
     }
     await img.png().toFile(out);
     return { ok: true, url: this.assets.publicUrl('images', name) };
+  }
+
+  /**
+   * 导演台彩色质检：读图采样色度。读失败返回 unknown，绝不抛成生成失败。
+   */
+  async assessKeyframeColor(sourceUrl: string): Promise<KeyframeColorCheck> {
+    try {
+      const local = await materializeImageToLocal(sourceUrl);
+      if (!local || !existsSync(local)) return emptyKeyframeColorCheck('unknown');
+      const { data, info } = await sharp(local)
+        .resize(64, 64, { fit: 'inside', withoutEnlargement: true })
+        .removeAlpha()
+        .raw()
+        .toBuffer({ resolveWithObject: true });
+      const channels = info.channels === 4 ? 4 : 3;
+      return assessKeyframeColorFromRgb(data, channels);
+    } catch {
+      return emptyKeyframeColorCheck('unknown');
+    }
   }
 }
 

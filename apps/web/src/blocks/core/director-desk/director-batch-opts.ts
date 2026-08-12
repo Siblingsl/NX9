@@ -36,6 +36,7 @@ export function buildBatchOpts(params: BatchOptsParams) {
     }
   }
   return {
+    sourceDirectorDeskId: params.blockId,
     skipExisting: params.skipExisting,
     skipApproved: params.skipApproved,
     concurrency: params.concurrency,

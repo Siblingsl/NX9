@@ -18,6 +18,15 @@ export const VIDEO_SIZE_PRESETS: Record<string, Record<string, string>> = {
   '480': { landscape: '854x480', portrait: '480x854', square: '480x480' },
 };
 
+/** VG-24: 由画幅反推横竖屏，避免只写 aspect 时 size 仍走横屏默认 */
+export function orientationFromAspect(aspect?: string): 'landscape' | 'portrait' | 'square' | undefined {
+  const a = (aspect || '').trim().replace('/', ':');
+  if (a === '9:16') return 'portrait';
+  if (a === '1:1') return 'square';
+  if (a === '16:9' || a === '4:3' || a === '21:9') return 'landscape';
+  return undefined;
+}
+
 export function resolveVideoGenParams(data: {
   resolution?: string;
   orientation?: string;
@@ -25,7 +34,10 @@ export function resolveVideoGenParams(data: {
   durationSec?: number;
 }): { size: string; aspect: string; durationSec: number; resolution: string } {
   const res = data.resolution || '720';
-  const orient = data.orientation || 'landscape';
+  const orient =
+    orientationFromAspect(data.aspect) ||
+    (data.orientation as 'landscape' | 'portrait' | 'square' | undefined) ||
+    'landscape';
   const preset = VIDEO_SIZE_PRESETS[res]?.[orient] || '1280x720';
   const aspectMap: Record<string, string> = { landscape: '16:9', portrait: '9:16', square: '1:1' };
   return {

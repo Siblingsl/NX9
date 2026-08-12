@@ -57,3 +57,55 @@ export function buildEcomPackDescription(selectedSpecs: string[]): string {
     })
     .join(', ');
 }
+
+export interface EcomPackFilePlan {
+  specId: string;
+  name: string;
+  sourceUrl: string;
+  category: 'image' | 'video';
+}
+
+export interface EcomPackPlanResult {
+  files: EcomPackFilePlan[];
+  skipped: { specId: string; reason: string }[];
+}
+
+/**
+ * F-033: 按规格类别挑真实媒资。视频规格不得把图片 blob 写进 .mp4。
+ */
+export function planEcomPackFiles(opts: {
+  selectedSpecs: string[];
+  pictures: string[];
+  clips: string[];
+  prefix: string;
+}): EcomPackPlanResult {
+  const files: EcomPackFilePlan[] = [];
+  const skipped: { specId: string; reason: string }[] = [];
+  for (const specId of opts.selectedSpecs) {
+    const spec = lookupEcomSpec(specId);
+    if (!spec) {
+      skipped.push({ specId, reason: '未知规格' });
+      continue;
+    }
+    const sources = spec.category === 'video' ? opts.clips : opts.pictures;
+    if (sources.length === 0) {
+      skipped.push({
+        specId,
+        reason:
+          spec.category === 'video' ? '无上游视频，拒绝把图片写入 .mp4' : '无上游图片',
+      });
+      continue;
+    }
+    const ext = spec.category === 'video' ? 'mp4' : 'jpg';
+    const label = spec.label.replace(/[\\/:*?"<>|]/g, '_');
+    sources.forEach((url, idx) => {
+      files.push({
+        specId,
+        name: `${label}/${opts.prefix}-${String(idx + 1).padStart(2, '0')}.${ext}`,
+        sourceUrl: url,
+        category: spec.category,
+      });
+    });
+  }
+  return { files, skipped };
+}

@@ -151,7 +151,7 @@ export const CLIP_GEN_MODELS: ClipGenModelDef[] = [
   { id: 'grok-imagine-video', label: 'Grok Imagine', hint: 'xAI 官方 / GrokGo 测试通道' },
   { id: 'grok-imagine-video-1.5', label: 'Grok Imagine 1.5', hint: 'xAI 官方 / GrokGo 测试通道，图生视频更稳定' },
   { id: 'grok', label: 'Grok Video', hint: '兼容旧节点，自动映射到 Grok Imagine' },
-  { id: 'seedance', label: 'Seedance', hint: '分镜连续链请用 motion-story' },
+  { id: 'seedance', label: 'Seedance', hint: 'S 级参考通道：参考图≤9 张 / 参考视频≤3 段' },
 ];
 
 export const CLIP_GEN_ASPECTS = [
@@ -264,5 +264,68 @@ export function listConnectedPictureModels(
   // 当前连接优先
   for (const c of imageConns.filter((x) => x.isActive)) pushConn(c);
   for (const c of imageConns.filter((x) => !x.isActive)) pushConn(c);
+  return out;
+}
+
+export interface ConnectedLlmModelOption {
+  /** `${connectionId}::${model}`，避免跨连接同名模型冲突 */
+  id: string;
+  label: string;
+  connectionId: string;
+  connectionModel: string;
+  connectionLabel: string;
+}
+
+type LlmConnectionLike = {
+  id: string;
+  kind: string;
+  model?: string;
+  label?: string;
+  isActive?: boolean;
+  availableModels?: string[];
+};
+
+/**
+ * 从设置里的文字连接推导编剧台等可选 LLM：
+ * 优先展开连接上已获取的 availableModels；否则回退到默认 model。
+ */
+export function listConnectedLlmModels(
+  connections: LlmConnectionLike[] | undefined | null,
+): ConnectedLlmModelOption[] {
+  const llmConns = (connections ?? []).filter((c) => c.kind === 'llm');
+  const out: ConnectedLlmModelOption[] = [];
+  const seen = new Set<string>();
+
+  const pushModel = (c: LlmConnectionLike, rawModel: string) => {
+    const raw = rawModel.trim();
+    if (!raw) return;
+    const id = `${c.id}::${raw}`;
+    if (seen.has(id)) return;
+    seen.add(id);
+    const connLabel = (c.label ?? '').trim() || '文字连接';
+    out.push({
+      id,
+      label: `${connLabel} · ${raw}`,
+      connectionId: c.id,
+      connectionModel: raw,
+      connectionLabel: connLabel,
+    });
+  };
+
+  const pushConn = (c: LlmConnectionLike) => {
+    const cached = (c.availableModels ?? [])
+      .map((m) => m.trim())
+      .filter(Boolean);
+    if (cached.length > 0) {
+      for (const m of cached) pushModel(c, m);
+      const fallback = (c.model ?? '').trim();
+      if (fallback && !cached.includes(fallback)) pushModel(c, fallback);
+      return;
+    }
+    pushModel(c, c.model ?? '');
+  };
+
+  for (const c of llmConns.filter((x) => x.isActive)) pushConn(c);
+  for (const c of llmConns.filter((x) => !x.isActive)) pushConn(c);
   return out;
 }

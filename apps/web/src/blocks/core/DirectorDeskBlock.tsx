@@ -1,7 +1,7 @@
 import { memo, useCallback, useMemo, useRef, useState, useEffect } from 'react';
-import { type NodeProps, useEdges, useNodes, useReactFlow } from '@xyflow/react';
-import { activeEpisodeShots, activeChainEpisodeShots } from '@nx9/shared';
+import { type Edge, type NodeProps, useEdges, useNodes, useReactFlow } from '@xyflow/react';
 import { normalizeDirectorProject } from '@nx9/director3d';
+import { describeKeyframeColorCheck, type DirectorKeyframeBatch } from '@nx9/shared';
 import { BlockShell } from '../shared/BlockShell';
 import { ScreenModal } from '../../components/ui/ScreenModal';
 import { useActivityLog } from '../../stores/activity-log';
@@ -9,11 +9,9 @@ import { useWorkspaceDocument } from '../../stores/workspace-document';
 import { useStoryboardUi } from '../../stores/flow-runtime';
 import { checkAssetReadinessInEdges } from '../../engine/asset-readiness';
 import {
-  readUpstreamChainStoryboard,
   migrateUpstreamChainStoryboard,
+  persistUpstreamChainHygiene,
   resolveUpstreamChainDesk,
-  patchUpstreamShot,
-  validateDirectorHandoff,
 } from '../../engine/chain-storyboard-utils';
 import { askConfirm } from '../../stores/confirm-dialog';
 import {
@@ -35,23 +33,30 @@ import {
   summarizePendingKeyframeGate,
   resolveDirectorQueueShots,
   previewDirectorReferenceGaps,
+  resolveDirectorRunContext,
   syncStyleToPictureGen,
   type DirectorDeskQueueFilter,
   type DirectorDeskShotResult,
   type DirectorShotPhase,
 } from '../../engine/director-desk-runner';
+import {
+  applySplitMixedDirector3dGraph,
+  needsDirector3dSplit,
+  splitMixedDirector3dNode,
+} from '../../engine/director3d-split';
 import { Director3dStageEmbed } from './director-desk/director-3d-stage-embed';
 import { DIRECTOR_3D_ENABLED } from '../../engine/director3d-feature';
 import { DirectorFilmstrip } from './director-desk/director-filmstrip';
 import { DirectorMainPanel } from './director-desk/director-main-panel';
 import { DirectorDeliverTab } from './director-desk/director-deliver-tab';
 import { buildBatchOpts, buildDirectorBatchLabel } from './director-desk/director-batch-opts';
+import { describeDirectorKeyframeBatchStatus } from '../../engine/director-keyframe-batch-runner';
 import './director-desk.css';
 import './director-desk.v2.css';
 
 
 function DirectorDeskBlock(props: NodeProps) {
-  const { updateNodeData, fitView, getNodes } = useReactFlow();
+  const { updateNodeData, fitView, getNodes, setNodes, setEdges } = useReactFlow();
   const nodes = useNodes();
   const edges = useEdges();
   const appendLog = useActivityLog((s) => s.append);
@@ -86,12 +91,11 @@ function DirectorDeskBlock(props: NodeProps) {
       : Number(data.styleSeed);
   const scene = useMemo(() => normalizeDirectorProject(data.scene), [data.scene]);
   const filter = ((data.queueFilter as DirectorDeskQueueFilter) ?? 'missing') as DirectorDeskQueueFilter;
-
-  // D-01: 镜头源从上游链镜表读取
-  const chain = useMemo(
-    () => readUpstreamChainStoryboard(props.id, nodes as any, edges as any),
-    [props.id, nodes, edges],
+  const needs3dSplit = useMemo(
+    () => needsDirector3dSplit(props.type, data),
+    [props.type, data],
   );
+
   useEffect(() => {
     migrateUpstreamChainStoryboard(
       updateNodeData,
@@ -100,35 +104,41 @@ function DirectorDeskBlock(props: NodeProps) {
       edges as any,
       storyboard,
     );
+    persistUpstreamChainHygiene(
+      updateNodeData,
+      props.id,
+      nodes as any,
+      edges as any,
+    );
   }, [edges, nodes, props.id, storyboard, updateNodeData]);
-  const upstreamDeskId = useMemo(
-    () => resolveUpstreamChainDesk(props.id, nodes as any, edges as any),
-    [props.id, nodes, edges],
+
+  const runContext = useMemo(
+    () => resolveDirectorRunContext({
+      deskBlockId: props.id,
+      nodes,
+      edges,
+      blockData: data,
+      updateNodeData: (id, patch) => updateNodeData(id, patch),
+      getLatestNodes: getNodes,
+      updateNodeDataAtomically: (id, updater) => updateNodeData(id, updater as any),
+    }),
+    [props.id, nodes, edges, data, updateNodeData, getNodes],
   );
-  const upstreamDeskData = useMemo(() => {
-    if (!upstreamDeskId) return undefined;
-    return (nodes.find((node) => node.id === upstreamDeskId)?.data ?? {}) as Record<string, unknown>;
-  }, [nodes, upstreamDeskId]);
+  const chain = runContext.chain;
+  const upstreamDeskId = runContext.sourceDeskId;
+  const upstreamDeskData = runContext.sourceDeskData;
 
   // X-41: 从 lastHandoff 读取当前集
   const handoffEpisodeId = useMemo(
     () => (data.lastHandoff as Record<string, unknown> | undefined)?.episodeId as string | undefined,
     [data.lastHandoff],
   );
-  const episodeId = handoffEpisodeId || chain?.activeEpisodeId;
+  const episodeId = runContext.episodeId ?? handoffEpisodeId ?? chain?.activeEpisodeId;
   const episodeArtDirection = useMemo(
     () => chain?.episodes?.find((episode) => episode.id === episodeId)?.artDirection,
     [chain, episodeId],
   );
-  const handoffValidation = useMemo(() => {
-    const handoff = data.lastHandoff as Record<string, unknown> | undefined;
-    if (!handoff || !chain || !episodeId) return { valid: false, reason: '缺少交接数据' };
-    const currentScriptHash = (
-      (upstreamDeskData?.breakdownJob as Record<string, unknown> | undefined)?.sourcePackageHash
-      ?? (upstreamDeskData?.handoff as Record<string, unknown> | undefined)?.scriptHash
-    ) as string | undefined;
-    return validateDirectorHandoff({ handoff, chain, episodeId, scriptHash: currentScriptHash });
-  }, [chain, data.lastHandoff, episodeId, upstreamDeskData]);
+  const handoffValidation = runContext.handoffValidation;
   useEffect(() => {
     if (!data.lastHandoff || handoffValidation.valid || data.lastHandoffStatus === 'stale') return;
     updateNodeData(props.id, {
@@ -148,56 +158,13 @@ function DirectorDeskBlock(props: NodeProps) {
       || data.sourceDeskName as string | undefined;
   }, [upstreamDeskId, nodes, data.sourceDeskName]);
 
-  // D-01: activeShots = 链镜表本集镜（禁止全局回退批出）
-  const activeShots = useMemo(() => {
-    if (chain && chain.shots.length > 0) {
-      const byEpisode = episodeId
-        ? chain.shots.filter((s) => s.episodeId === episodeId)
-        : activeChainEpisodeShots(chain);
-      return byEpisode;
-    }
-    return [];
-  }, [chain, episodeId]);
-
-  // D-03/R-01: 线稿帧映射 shotId → url
-  const lineArtByShotId = useMemo(() => {
-    const map: Record<string, string> = {};
-    const scopedShotIds = new Set(
-      chain?.shots.filter((shot) => !episodeId || shot.episodeId === episodeId).map((shot) => shot.id) ?? [],
-    );
-    const handoff = data.lastHandoff as Record<string, unknown> | undefined;
-    const frames = handoff?.lineArtFrames as Array<{ shotId: string; imageUrl: string }> | undefined;
-    if (frames && frames.length > 0) {
-      for (const f of frames.filter((frame) => scopedShotIds.has(frame.shotId))) {
-        if (f.shotId && f.imageUrl) map[f.shotId] = f.imageUrl;
-      }
-    }
-    if (upstreamDeskId) {
-      const upstream = nodes.find((node) => node.id === upstreamDeskId);
-      const preview = (upstream?.data as Record<string, unknown> | undefined)?.storyboardPreview as
-        { frames?: Array<{ sourceShotId?: string; id?: string; imageUrl?: string; lineArtUrl?: string }> } | undefined;
-      for (const frame of preview?.frames ?? []) {
-        const shotId = frame.sourceShotId || frame.id;
-        const url = frame.lineArtUrl || frame.imageUrl;
-        if (shotId && scopedShotIds.has(shotId) && url && !map[shotId]) map[shotId] = url;
-      }
-    }
-    return map;
-  }, [chain, data.lastHandoff, episodeId, upstreamDeskId, nodes]);
-
-  // X-41/D-04: 本集是否已确认
-  const episodeConfirmed = useMemo(() => {
-    const handoff = data.lastHandoff as Record<string, unknown> | undefined;
-    if (!handoffValidation.valid) return false;
-    if (handoff?.confirmed === true) return true;
-    const confirmedIds = handoff?.confirmedEpisodeIds as string[] | undefined;
-    if (confirmedIds && episodeId && confirmedIds.includes(episodeId)) return true;
-    if (chain?.confirmedEpisodeIds && episodeId && chain.confirmedEpisodeIds.includes(episodeId)) return true;
-    return false;
-  }, [data.lastHandoff, episodeId, chain, handoffValidation.valid]);
+  const activeShots = runContext.shots;
+  const lineArtByShotId = runContext.lineArtByShotId;
+  const episodeConfirmed = runContext.episodeConfirmed;
 
   const lineArtCount = Object.keys(lineArtByShotId).length;
-  const episodeScopeInvalid = Boolean(chain && episodeId && activeShots.length === 0);
+  const episodeScopeInvalid = runContext.blockCode === 'missing-episode'
+    || runContext.blockCode === 'empty-episode';
 
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
   const [runningShotId, setRunningShotId] = useState<string | null>(null);
@@ -243,6 +210,13 @@ function DirectorDeskBlock(props: NodeProps) {
   const clipNode = useMemo(
     () => findDirectorClipGenNode(props.id, nodes, edges),
     [props.id, nodes, edges],
+  );
+  const clipBatchLabel = useMemo(
+    () => describeDirectorKeyframeBatchStatus(
+      (clipNode?.data as { directorKeyframeBatch?: DirectorKeyframeBatch } | undefined)
+        ?.directorKeyframeBatch,
+    ),
+    [clipNode],
   );
 
   const sortedShots = useMemo(
@@ -337,20 +311,11 @@ function DirectorDeskBlock(props: NodeProps) {
   // D-02: 写回上游链镜表
   const patchShot = useCallback(
     (shotId: string, patch: Partial<import('@nx9/shared').StoryboardShot>) => {
-      const ok = patchUpstreamShot(
-        updateNodeData,
-        props.id,
-        nodes as any,
-        edges as any,
-        shotId,
-        patch,
-        getNodes as any,
-        (id, updater) => updateNodeData(id, updater as any),
-      );
+      const ok = runContext.patchShot?.(shotId, patch) ?? false;
       if (!ok) appendLog('导演台：无法写回上游链镜表（未连接分镜台？）');
       return ok;
     },
-    [updateNodeData, props.id, nodes, edges, getNodes, appendLog],
+    [runContext.patchShot, appendLog],
   );
 
   const runBatch = useCallback(
@@ -367,17 +332,17 @@ function DirectorDeskBlock(props: NodeProps) {
         updateNodeData(props.id, { status: 'error', error: message, lastHandoffStatus: 'stale' });
         return;
       }
-      // O-14：门禁未放行时硬阻断（导演台锁参考）
-      if (!ready && (forceCharacterRef || forceSceneRef)) {
-        appendLog('导演台：上游设定未就绪，锁参考模式下禁止批出。请先在编剧台「设定就绪」标记放行。');
+      // O-14 / OL-21：门禁未放行时硬阻断（参考锁或 3D 可拍闸）
+      if (!ready && (forceCharacterRef || forceSceneRef || prefer3dRef)) {
+        appendLog('导演台：上游设定未就绪，锁参考/3D 可拍模式下禁止批出。请先在编剧台「设定就绪」标记放行。');
         updateNodeData(props.id, { status: 'error', error: '设定未就绪，锁参考禁止批出' });
         return;
       }
       const relevantReferenceGaps = mode === 'one'
         ? referenceGaps.filter((gap) => gap.shotId === oneId)
         : referenceGaps;
-      if (relevantReferenceGaps.length > 0 && (forceCharacterRef || forceSceneRef)) {
-        appendLog(`导演台：${relevantReferenceGaps.length} 镜参考缺失，已阻止批出`);
+      if (relevantReferenceGaps.length > 0 && (forceCharacterRef || forceSceneRef || prefer3dRef)) {
+        appendLog(`导演台：${relevantReferenceGaps.length} 镜不可拍（参考/定妆缺失），已阻止批出`);
         return;
       }
       const selectedShotsForWarning = mode === 'one' && oneId
@@ -584,6 +549,9 @@ function DirectorDeskBlock(props: NodeProps) {
             edges,
             updateNodeData: (id, patch) => updateNodeData(id, patch),
             succeededShotIds: succeededIds,
+            shots: activeShots,
+            episodeId,
+            sourceChainDeskId: resolveUpstreamChainDesk(props.id, nodes, edges) ?? undefined,
             openSession: true,
           });
           if (review.pendingIndices.length > 0) {
@@ -741,11 +709,20 @@ function DirectorDeskBlock(props: NodeProps) {
     patchShot(shotId, {
       firstFrameAssetId: shot.keyframePreviousUrl,
       keyframePreviousUrl: null,
+      keyframeRevision: Math.max(1, shot.keyframeRevision ?? 1) + 1,
+      keyframeProvenance: shot.keyframeProvenance ?? {
+        role: 'director-color-keyframe',
+        generator: 'picture-gen',
+        sourceDirectorDeskId: props.id,
+        sourceLineArtUrl: lineArtByShotId[shot.id] ?? shot.lineArtUrl ?? null,
+        sourceDirector3dCaptureId: shot.director3dGuide?.captureId ?? null,
+        generatedAt: new Date().toISOString(),
+      },
       status: 'review',
       keyframeStatus: 'review',
     });
     appendLog(`导演台 · 已恢复镜 #${shot.index} 上一版关键帧`);
-  }, [activeShots, patchShot, appendLog]);
+  }, [activeShots, patchShot, appendLog, lineArtByShotId, props.id]);
 
   const focusFirstMissing = useCallback(() => {
     const first = sortedShots.find((shot) => isShotMissingKeyframe(shot) || isShotKeyframeFailed(shot));
@@ -755,6 +732,51 @@ function DirectorDeskBlock(props: NodeProps) {
   const focusUpstream = useCallback(() => {
     if (upstreamDeskId) fitView({ nodes: [{ id: upstreamDeskId }], duration: 300 });
   }, [upstreamDeskId, fitView]);
+
+  const handleSplitDirector3d = useCallback(async () => {
+    if (!needs3dSplit) return;
+    const ok = await askConfirm({
+      title: '拆分混装的 3D 状态？',
+      description:
+        '此节点同时含导演台关键帧生产与历史 3D 场景。拆分后会生成/更新独立「3D 导演台」节点，导演台只保留彩色关键帧流程。',
+      confirmLabel: '拆分',
+    });
+    if (!ok) return;
+    const latestNodes = getNodes();
+    const result = splitMixedDirector3dNode({
+      directorDeskId: props.id,
+      nodes: latestNodes,
+      edges,
+    });
+    if (!result.ok) {
+      appendLog(`导演台 · 拆分失败：${result.reason ?? '未知原因'}`);
+      return;
+    }
+    const next = applySplitMixedDirector3dGraph({
+      nodes: latestNodes,
+      edges: edges as Edge[],
+      result,
+    });
+    setNodes(next.nodes);
+    setEdges(next.edges);
+    appendLog(
+      result.createdNode
+        ? `导演台 · 已拆出独立 3D 节点 ${result.director3dNodeId}`
+        : `导演台 · 已把 3D 状态迁入已连接节点 ${result.director3dNodeId}`,
+    );
+    if (result.director3dNodeId) {
+      fitView({ nodes: [{ id: result.director3dNodeId }], duration: 300 });
+    }
+  }, [
+    needs3dSplit,
+    getNodes,
+    props.id,
+    edges,
+    setNodes,
+    setEdges,
+    appendLog,
+    fitView,
+  ]);
 
   const handleRejectShot = useCallback(
     async (shotId: string, regenerate: boolean) => {
@@ -772,6 +794,7 @@ function DirectorDeskBlock(props: NodeProps) {
           nodes: nodes as any,
           patchShot,
           batchOptions: {
+            sourceDirectorDeskId: props.id,
             blockData: data,
             pictureNodeData: (pictureNode?.data ?? {}) as Record<string, unknown>,
             forceCharacterRef,
@@ -804,7 +827,7 @@ function DirectorDeskBlock(props: NodeProps) {
         setRejectBusyId(null);
       }
     },
-    [appendLog, rejectDrafts, patchShot, nodes, data, pictureNode?.data, forceCharacterRef, forceSceneRef, prefer3dRef, preferLineArtRef, lineArtByShotId, styleLock, stylePrompt, styleSeed],
+    [appendLog, rejectDrafts, patchShot, nodes, data, pictureNode?.data, forceCharacterRef, forceSceneRef, prefer3dRef, preferLineArtRef, lineArtByShotId, styleLock, stylePrompt, styleSeed, props.id],
   );
 
   const handlePushClipGen = useCallback(
@@ -832,15 +855,28 @@ function DirectorDeskBlock(props: NodeProps) {
         });
         if (!ok) return;
       }
-      pushKeyframesToClipGen({
+      const pushed = pushKeyframesToClipGen({
         deskBlockId: props.id,
         nodes,
         edges,
         updateNodeData,
         bypassKeyframeGate: force,
         shots: activeShots,
+        episodeId: episodeId ?? undefined,
       });
-      appendLog(force ? '导演台 · 已强制推送 clip-gen（未批完）' : '关键帧已推送 clip-gen');
+      if (!pushed.clipGenId) {
+        appendLog('导演台 · 未连接 clip-gen，无法推送关键帧批次');
+        return;
+      }
+      if (pushed.shotCount === 0) {
+        appendLog('导演台 · 没有可交付的视频关键帧');
+        return;
+      }
+      appendLog(
+        force
+          ? `导演台 · 已强制推送 clip-gen · ${pushed.shotCount} 镜`
+          : `关键帧批次已推送 clip-gen · ${pushed.shotCount} 镜`,
+      );
     },
     [
       keyframeGatePassed,
@@ -853,6 +889,7 @@ function DirectorDeskBlock(props: NodeProps) {
       edges,
       updateNodeData,
       appendLog,
+      episodeId,
     ],
   );
 
@@ -903,8 +940,8 @@ function DirectorDeskBlock(props: NodeProps) {
     ? '阻断：当前集不存在或交接已过期，请重新同步'
     : !chain || activeShots.length === 0
       ? '阻断：未连接分镜台或暂无链镜表'
-      : !ready && (forceCharacterRef || forceSceneRef)
-        ? '阻断：设定未就绪，参考锁未放行'
+      : !ready && (forceCharacterRef || forceSceneRef || prefer3dRef)
+        ? '阻断：设定未就绪，参考锁/3D 可拍未放行'
         : studioTab === 'deliver' && !keyframeGatePassed
           ? '阻断：关键帧门禁未放行'
           : lineArtCount === 0
@@ -1003,7 +1040,9 @@ function DirectorDeskBlock(props: NodeProps) {
                    : `${keyframeGatePassed ? '可交视频' : progressPct >= 100 ? '已出齐' : '已出'} ${stats.withFrame}/${stats.total}${stats.with3d > 0 ? ` · 3D ${stats.with3d}` : ''}`}
             </div>
             <div className="dd2-card__logline">
-              {batchError
+              {needs3dSplit
+                ? '混装历史 3D 状态 · 打开后可拆成独立 3D 节点'
+                : batchError
                 ? batchError
                 : stats.total > 0 && !ready
                   ? '上游设定未就绪 · 建议先完成资产入库'
@@ -1056,6 +1095,20 @@ function DirectorDeskBlock(props: NodeProps) {
               </span>
               <button type="button" className="dd2-btn dd2-btn--ghost" onClick={focusUpstream} disabled={!upstreamDeskId}>
                 聚焦上游分镜台
+              </button>
+            </div>
+          )}
+          {!immersed3d && needs3dSplit && (
+            <div className="dd2-episode-ctx dd2-episode-ctx--warn">
+              <span className="dd2-episode-ctx__info">
+                ⚠ 本节点混装了历史 3D 状态与关键帧生产，建议拆成导演台 + 独立 3D 节点
+              </span>
+              <button
+                type="button"
+                className="dd2-btn dd2-btn--ghost"
+                onClick={() => { void handleSplitDirector3d(); }}
+              >
+                立即拆分
               </button>
             </div>
           )}
@@ -1116,7 +1169,7 @@ function DirectorDeskBlock(props: NodeProps) {
               {studioTab === 'produce' && (
                   <DirectorMainPanel
                    director3dEnabled={DIRECTOR_3D_ENABLED}
-                  previewUrl={previewUrl}
+                  previewUrl={currentShot?.firstFrameAssetId ?? undefined}
                    guideUrl={guideUrl}
                    lineArtUrl={currentLineArtUrl}
                   currentShotIndex={currentShot?.index != null ? String(currentShot.index) : '—'}
@@ -1159,6 +1212,7 @@ function DirectorDeskBlock(props: NodeProps) {
                    batchSummary={batchSummary}
                    lastResults={lastResults}
                    focusShot={focusShot}
+                   colorCheckWarning={describeKeyframeColorCheck(currentShot?.keyframeProvenance?.colorCheck)}
                  />
               )}
                {studioTab === 'stage3d' && DIRECTOR_3D_ENABLED && (
@@ -1178,18 +1232,13 @@ function DirectorDeskBlock(props: NodeProps) {
                     blockId={props.id}
                     project={scene}
                     linkedShotId={data.linkedShotId as string | undefined}
-                    shots={sortedShots as never[]}
                     characters={characters}
-                    data={data}
                     updateNodeData={updateNodeData}
+                    getNodes={getNodes}
                     appendLog={appendLog}
                     focusShot={focusShot}
                     nodes={nodes}
                     edges={edges}
-                    sourceChainDeskId={upstreamDeskId ?? undefined}
-                    episodeLabel={episodeId ? `第${chain?.episodes?.find((episode) => episode.id === episodeId)?.index ?? '?'}集` : undefined}
-                    episodeConfirmed={episodeConfirmed}
-                    lineArtByShotId={lineArtByShotId}
                   />
                 </div>
               )}
@@ -1224,7 +1273,11 @@ function DirectorDeskBlock(props: NodeProps) {
                    handlePushClipGen={handlePushClipGen}
                    onGoToMissing={() => { setStudioTab('produce'); updateNodeData(props.id, { queueFilter: 'missing' }); focusFirstMissing(); }}
                    lastPushReceipt={data.lastPushReceipt as { at?: string; shotCount?: number; clipGenId?: string } | undefined}
+                   clipBatchLabel={clipBatchLabel}
                    reviewMode={reviewMode}
+                   episodeId={episodeId}
+                   sourceChainDeskId={resolveUpstreamChainDesk(props.id, nodes, edges) ?? undefined}
+                   reviewShots={activeShots}
                  />
               )}
             </div>

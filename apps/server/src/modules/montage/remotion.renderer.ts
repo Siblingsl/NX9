@@ -11,10 +11,18 @@ import { Injectable, Logger } from '@nestjs/common';
 import * as path from 'path';
 import * as fs from 'fs';
 import { PATHS } from '../../config/app.config';
+import { applyHyperframesTaskUpdate } from './hyperframes-task';
+import {
+  REMOTION_TASKS_FILE,
+  loadTaskRecords,
+  mapToRecords,
+  recordsToMap,
+  saveTaskRecords,
+} from './render-task-store';
 
 export interface RemotionRenderJob {
   taskId: string;
-  status: 'queued' | 'rendering' | 'done' | 'error';
+  status: 'queued' | 'rendering' | 'done' | 'error' | 'cancelled';
   progress: number;
   outputUrl?: string;
   error?: string;
@@ -31,16 +39,32 @@ const REMOTION_BUNDLE_DIR = path.resolve(
 @Injectable()
 export class RemotionRenderer {
   private readonly logger = new Logger(RemotionRenderer.name);
-  private jobs = new Map<string, RemotionRenderJob>();
+  private jobs: Map<string, RemotionRenderJob>;
   private counter = 0;
   /** 渲染输出目录 */
   private readonly outputDir = PATHS.remotion;
+  private persistFile = REMOTION_TASKS_FILE;
 
   constructor() {
-    // 确保输出目录存在
+    this.jobs = recordsToMap(loadTaskRecords<RemotionRenderJob>(this.persistFile));
     if (!fs.existsSync(this.outputDir)) {
       fs.mkdirSync(this.outputDir, { recursive: true });
     }
+  }
+
+  private persist(): void {
+    saveTaskRecords(this.persistFile, mapToRecords(this.jobs));
+  }
+
+  private commitJob(taskId: string, next: Partial<RemotionRenderJob> & { status: RemotionRenderJob['status'] }): boolean {
+    const current = this.jobs.get(taskId);
+    if (!current) return false;
+    const merged: RemotionRenderJob = { ...current, ...next, updatedAt: Date.now() };
+    const applied = applyHyperframesTaskUpdate(current, merged);
+    if (!applied) return false;
+    this.jobs.set(taskId, applied);
+    this.persist();
+    return true;
   }
 
   async submit(
@@ -57,16 +81,11 @@ export class RemotionRenderer {
       updatedAt: Date.now(),
     };
     this.jobs.set(taskId, job);
+    this.persist();
 
-    // 异步渲染
     this.processJob(taskId, timeline, codec, compositionId).catch((err) => {
-      const existing = this.jobs.get(taskId);
-      if (existing) {
-        existing.status = 'error';
-        existing.error = err.message;
-        existing.updatedAt = Date.now();
-        this.logger.error(`渲染失败 [${taskId}]: ${err.message}`);
-      }
+      if (!this.commitJob(taskId, { status: 'error', error: err.message })) return;
+      this.logger.error(`渲染失败 [${taskId}]: ${err.message}`);
     });
 
     return { taskId, status: 'queued' };
@@ -74,6 +93,16 @@ export class RemotionRenderer {
 
   getStatus(taskId: string): RemotionRenderJob | null {
     return this.jobs.get(taskId) ?? null;
+  }
+
+  /** F-046 / SRV-04: 取消；已结束任务不可再改 */
+  cancelTask(taskId: string): boolean {
+    const current = this.jobs.get(taskId);
+    if (!current) return false;
+    if (current.status === 'done' || current.status === 'error' || current.status === 'cancelled') {
+      return false;
+    }
+    return this.commitJob(taskId, { status: 'cancelled', error: '渲染已取消' });
   }
 
   private async processJob(
@@ -84,9 +113,7 @@ export class RemotionRenderer {
   ): Promise<void> {
     const job = this.jobs.get(taskId);
     if (!job) return;
-
-    job.status = 'rendering';
-    job.updatedAt = Date.now();
+    if (!this.commitJob(taskId, { status: 'rendering' })) return;
 
     try {
       // 验证时间线
@@ -130,8 +157,11 @@ export class RemotionRenderer {
 
       // 进度回调
       const onProgress = (progress: { progress: number }) => {
-        job.progress = Math.round(progress.progress * 100);
-        job.updatedAt = Date.now();
+        const live = this.jobs.get(taskId);
+        if (!live || live.status === 'cancelled') return;
+        live.progress = Math.round(progress.progress * 100);
+        live.updatedAt = Date.now();
+        this.persist();
       };
 
       // 渲染
@@ -155,17 +185,21 @@ export class RemotionRenderer {
         throw new Error('渲染产物为空文件');
       }
 
-      // 成功
-      job.status = 'done';
-      job.progress = 100;
-      job.outputUrl = `/media/${outputFilename}`;
-      job.updatedAt = Date.now();
+      if (!this.commitJob(taskId, {
+        status: 'done',
+        progress: 100,
+        outputUrl: `/media/${outputFilename}`,
+      })) {
+        this.logger.log(`Remotion ${taskId} finished after cancel, discarded`);
+        return;
+      }
 
       this.logger.log(`渲染完成: ${taskId} (${stats.size} bytes)`);
     } catch (err) {
-      job.status = 'error';
-      job.error = err instanceof Error ? err.message : '渲染失败';
-      job.updatedAt = Date.now();
+      this.commitJob(taskId, {
+        status: 'error',
+        error: err instanceof Error ? err.message : '渲染失败',
+      });
     }
   }
 }

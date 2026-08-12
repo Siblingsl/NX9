@@ -40,6 +40,7 @@ function payload(shotId = 'shot-1', commitId = 'commit-1'): Director3dCommitPayl
       id: 'candidate-1',
       shotId,
       stateVersion: 3,
+      imageUrl: 'https://cdn.example/persistent-frame.png',
       localDataUrl: 'data:image/png;base64,frame',
       camera: sceneState.camera,
       characterPlacements: [],
@@ -82,8 +83,27 @@ describe('director3d commit adapter', () => {
     });
     expect(commit(payload())).toMatchObject({ ok: true });
     const chain = h.nodes[0]?.data.chainStoryboard as { shots: Array<Record<string, unknown>> };
-    expect(chain.shots[0]?.director3dGuide).toMatchObject({ shotId: 'shot-1', commitId: 'commit-1' });
+    expect(chain.shots[0]?.director3dGuide).toMatchObject({
+      shotId: 'shot-1',
+      commitId: 'commit-1',
+      captureUrl: 'https://cdn.example/persistent-frame.png',
+    });
     expect(chain.shots[0]).not.toHaveProperty('firstFrameAssetId');
+    expect(chain.shots[0]?.sourceRevision).toBeUndefined();
+  });
+
+  it('is idempotent for consumed commit ids even after a later guide overwrite', () => {
+    const h = harness();
+    const commit = createDirector3dCommitAdapter({
+      blockId: 'director-1',
+      nodes: h.nodes,
+      edges: h.edges,
+      updateNodeData: h.updateNodeData,
+      currentSourceShotRevision: 7,
+      consumedCommitIds: ['commit-1'],
+    });
+    expect(commit(payload())).toMatchObject({ ok: true, idempotent: true });
+    expect(h.writes).toHaveLength(0);
   });
 
   it('rejects missing upstream, wrong revision, and wrong shot context', () => {
@@ -113,5 +133,33 @@ describe('director3d commit adapter', () => {
     const writesAfterFirst = h.writes.length;
     expect(commit(payload())).toMatchObject({ ok: true, idempotent: true });
     expect(h.writes.length).toBe(writesAfterFirst);
+  });
+
+  it('rejects data-url-only and failed candidates', () => {
+    const h = harness();
+    const commit = createDirector3dCommitAdapter({
+      blockId: 'director-1',
+      nodes: h.nodes,
+      edges: h.edges,
+      updateNodeData: h.updateNodeData,
+      currentSourceShotRevision: 7,
+    });
+    const dataOnly = payload();
+    dataOnly.candidate.imageUrl = undefined;
+    expect(commit(dataOnly)).toMatchObject({
+      ok: false,
+      error: '采用帧缺少持久化图片，禁止提交本地草稿',
+    });
+
+    const dataAsImage = payload('shot-1', 'commit-data');
+    dataAsImage.candidate.imageUrl = 'data:image/png;base64,abc';
+    expect(commit(dataAsImage)).toMatchObject({ ok: false });
+
+    const failed = payload('shot-1', 'commit-failed');
+    failed.candidate.status = 'failed';
+    expect(commit(failed)).toMatchObject({
+      ok: false,
+      error: '候选帧上传失败，请重试后再提交',
+    });
   });
 });

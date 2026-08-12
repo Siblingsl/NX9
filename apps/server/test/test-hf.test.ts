@@ -16,37 +16,22 @@ describe('TEST-HF — HyperFrames (pure function tests)', () => {
     expect(mockResponse.html).toContain('id="stage"');
   });
 
-  it('TEST-HF-003: @hyperframes/producer fallback to FFmpeg', async () => {
-    const mockProducer = { render: async () => ({ url: '/media/exports/episode.mp4' }) };
-    const mockFfmpeg = async () => '/media/exports/episode.mp4';
-
-    const renderWithProducer = async () => {
+  it('TEST-HF-003: producer 不可用必须失败，不得 FFmpeg 黑片假成功', async () => {
+    const failingProducer = {
+      render: async () => {
+        throw new Error('not available');
+      },
+    };
+    const renderHonestly = async () => {
       try {
-        const res = await mockProducer.render({ entry: '', out: '', fps: 24, width: 1080, height: 1920 });
-        return { ok: true, url: res.url, method: 'producer' as const };
-      } catch {
-        const url = await mockFfmpeg();
-        return { ok: true, url, method: 'ffmpeg' as const };
+        await failingProducer.render();
+        return { ok: true as const };
+      } catch (e) {
+        return { ok: false as const, message: (e as Error).message };
       }
     };
-
-    const result1 = await renderWithProducer();
-    expect(result1.ok).toBe(true);
-    expect(result1.method).toBe('producer');
-
-    const failingProducer = { render: async () => { throw new Error('not available'); } };
-    const renderWithFallback = async () => {
-      try {
-        const res = await failingProducer.render({ entry: '', out: '', fps: 24, width: 1080, height: 1920 });
-        return { ok: true, url: res.url, method: 'producer' as const };
-      } catch {
-        const url = await mockFfmpeg();
-        return { ok: true, url, method: 'ffmpeg' as const };
-      }
-    };
-
-    const result2 = await renderWithFallback();
-    expect(result2.ok).toBe(true);
-    expect(result2.method).toBe('ffmpeg');
+    const result = await renderHonestly();
+    expect(result.ok).toBe(false);
+    expect(result.message).toBe('not available');
   });
 });

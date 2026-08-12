@@ -9,7 +9,8 @@ import {
   getPropCreative,
   getSceneCreative,
 } from '@nx9/shared';
-import { MoreHorizontal, Pencil, Trash2, Lock, Unlock, AtSign, Copy, Download } from 'lucide-react';
+import { MoreHorizontal, Pencil, Trash2, Lock, Unlock, AtSign, Copy, Download, Check, Globe2 } from 'lucide-react';
+import { VirtualizedCardGrid } from './VirtualizedCardGrid';
 
 export type EntityCardKind = 'costume' | 'scene' | 'prop';
 
@@ -123,10 +124,15 @@ export interface EntityCardGridProps {
   emptyHint: string;
   /** 服装：未绑定任何角色的 id */
   unboundCostumeIds?: Set<string>;
+  /** P-18：多选 */
+  selectedIds?: Set<string>;
+  onToggleSelect?: (id: string) => void;
   onEdit: (id: string) => void;
   onDelete: (id: string) => void;
   onCopyPublic: (id: string) => void;
   onCloneBuiltin: (id: string) => void;
+  /** 私有 → 公共 */
+  onPublishToPublic?: (id: string) => void;
   onCopyMention: (label: string) => void;
   onToggleLock: (id: string) => void;
 }
@@ -139,10 +145,13 @@ export function EntityCardGrid({
   canDelete,
   emptyHint,
   unboundCostumeIds,
+  selectedIds,
+  onToggleSelect,
   onEdit,
   onDelete,
   onCopyPublic,
   onCloneBuiltin,
+  onPublishToPublic,
   onCopyMention,
   onToggleLock,
 }: EntityCardGridProps) {
@@ -156,9 +165,14 @@ export function EntityCardGrid({
     );
   }
 
+  const aspectRatio = kind === 'scene' ? 4 / 3 : kind === 'prop' ? 1 : 3 / 4;
+
   return (
-    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-4">
-      {items.map((item) => {
+    <VirtualizedCardGrid
+      items={items}
+      getKey={(item) => item.id}
+      estimateCardHeight={(cardWidth) => cardWidth / aspectRatio + (kind === 'scene' || kind === 'costume' ? 52 : 44)}
+      renderItem={(item) => {
         const ws = workspaceById.get(item.id);
         const imageUrl = resolveCover(kind, ws, item.imageUrl);
         const locked = isEntityLocked(kind, ws);
@@ -172,25 +186,54 @@ export function EntityCardGrid({
           && ws
           && (getSceneCreative(ws).props?.length ?? 0) > 0
           && (getSceneCreative(ws).propIds?.length ?? 0) === 0;
+        const selected = Boolean(selectedIds?.has(item.id));
+        const selectable = Boolean(onToggleSelect) && !item.builtin;
 
         return (
           <article
-            key={item.id}
-            className="group relative flex flex-col overflow-hidden rounded-xl border border-line bg-surface transition-colors hover:border-brand/35"
+            className={`group relative flex h-full flex-col overflow-hidden rounded-xl border bg-surface transition-colors hover:border-brand/35 ${
+              selected ? 'border-brand/50 ring-2 ring-brand/25' : 'border-line'
+            }`}
           >
-            <div className={`relative w-full overflow-hidden bg-black/25 ${aspectClass(kind)}`}>
+            {selectable ? (
+              <button
+                type="button"
+                aria-label={selected ? '取消选中' : '选中'}
+                aria-pressed={selected}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onToggleSelect?.(item.id);
+                }}
+                className={`absolute right-2 top-2 z-20 grid h-5 w-5 place-items-center rounded border shadow-sm ${
+                  selected
+                    ? 'border-brand bg-brand text-white'
+                    : 'border-white/50 bg-black/45 text-transparent hover:border-brand/60'
+                }`}
+              >
+                <Check size={12} strokeWidth={3} className={selected ? 'opacity-100' : 'opacity-0'} />
+              </button>
+            ) : null}
+            <button
+              type="button"
+              className={`relative w-full overflow-hidden bg-black/25 text-left ${aspectClass(kind)}`}
+              title="点击编辑"
+              onClick={() => onEdit(item.id)}
+            >
               {imageUrl ? (
                 <img
                   src={imageUrl}
                   alt=""
+                  loading="lazy"
+                  decoding="async"
                   className={`h-full w-full object-cover ${objectPosClass(kind)}`}
+                  draggable={false}
                 />
               ) : (
                 <span className="grid h-full w-full place-items-center px-3 text-center text-[12px] font-medium leading-relaxed text-ink/60">
                   {emptyCoverLabel(kind)}
                 </span>
               )}
-              <span className="absolute left-2 top-2 flex flex-wrap gap-1">
+              <span className="pointer-events-none absolute left-2 top-2 flex flex-wrap gap-1">
                 {!imageUrl ? (
                   <span className="rounded-md border border-warn/40 bg-warn/20 px-1.5 py-0.5 text-[9px] font-medium text-warn">
                     缺图
@@ -221,20 +264,29 @@ export function EntityCardGrid({
                   </span>
                 ) : null}
               </span>
-            </div>
+            </button>
 
             <div className="flex items-center gap-1 border-t border-line px-2.5 py-2">
-              <div className="min-w-0 flex-1">
+              <button
+                type="button"
+                className="min-w-0 flex-1 text-left hover:text-brand"
+                title="点击编辑 · 可用菜单复制 @"
+                onClick={() => onEdit(item.id)}
+              >
                 <p className="truncate text-xs font-medium text-ink">
                   {item.builtin ? (
                     <span className="mr-1 text-[9px] font-normal text-ink/50">内置</span>
+                  ) : null}
+                  {item.overridesBuiltin ? (
+                    <span className="mr-1 text-[9px] font-normal text-warn" title="自定义同名覆盖内置展示">覆盖中</span>
                   ) : null}
                   {item.label || unnamedLabel(kind)}
                 </p>
                 {subtitle ? (
                   <p className="truncate text-[10px] text-ink/40">{subtitle}</p>
                 ) : null}
-              </div>
+              </button>
+              {!selectable ? (
               <div className="relative shrink-0">
                 <button
                   type="button"
@@ -279,14 +331,23 @@ export function EntityCardGrid({
                       setMenuId(null);
                       onCloneBuiltin(item.id);
                     }}
+                    onPublishToPublic={
+                      onPublishToPublic
+                        ? () => {
+                            setMenuId(null);
+                            onPublishToPublic(item.id);
+                          }
+                        : undefined
+                    }
                   />
                 ) : null}
               </div>
+              ) : null}
             </div>
           </article>
         );
-      })}
-    </div>
+      }}
+    />
   );
 }
 
@@ -302,6 +363,7 @@ function CardMoreMenu({
   onDelete,
   onCopyPublic,
   onCloneBuiltin,
+  onPublishToPublic,
 }: {
   scope: AssetScope;
   builtin: boolean;
@@ -314,6 +376,7 @@ function CardMoreMenu({
   onDelete: () => void;
   onCopyPublic: () => void;
   onCloneBuiltin: () => void;
+  onPublishToPublic?: () => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -332,7 +395,7 @@ function CardMoreMenu({
     >
       <MenuItem icon={<Pencil size={12} />} label="编辑" onClick={onEdit} />
       <MenuItem icon={<AtSign size={12} />} label="复制 @提及" onClick={onCopyMention} />
-      {scope === 'private' && !builtin ? (
+      {!builtin ? (
         <MenuItem
           icon={locked ? <Unlock size={12} /> : <Lock size={12} />}
           label={locked ? '解锁' : '锁定'}
@@ -345,7 +408,10 @@ function CardMoreMenu({
       {scope === 'public' && !builtin ? (
         <MenuItem icon={<Copy size={12} />} label="复制到项目" onClick={onCopyPublic} />
       ) : null}
-      {scope === 'private' && !builtin ? (
+      {scope === 'private' && !builtin && onPublishToPublic ? (
+        <MenuItem icon={<Globe2 size={12} />} label="发布到公共" onClick={onPublishToPublic} />
+      ) : null}
+      {!builtin && canDelete ? (
         <MenuItem
           icon={<Trash2 size={12} />}
           label="删除"

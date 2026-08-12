@@ -38,6 +38,8 @@ const cases = [
   ['rate limit (429)', process.env.NX9_PROVIDER_CASE_429_URL, 429],
   ['authentication (401)', process.env.NX9_PROVIDER_CASE_401_URL, 401],
   ['server error (5xx)', process.env.NX9_PROVIDER_CASE_500_URL, 500],
+  ['picture generate (low-cost)', process.env.NX9_REAL_PICTURE_URL, 200],
+  ['video generate (low-cost)', process.env.NX9_REAL_VIDEO_URL, 200],
 ];
 
 let failed = false;

@@ -10,6 +10,8 @@ export interface ScreenplayBrief {
   pacing?: 'slow' | 'balanced' | 'fast';
   targetEpisodeDurationSec?: number;
   episodeCount?: number;
+  /** 单集字数目标（约数）；生成/续写/重写注入 prompt */
+  episodeWordTarget?: number;
   plotOutline?: string;
   hooks?: string[];
   notes?: string;

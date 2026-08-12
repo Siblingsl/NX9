@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react';
-import { IMAGE_ASPECT_OPTIONS, IMAGE_QUALITY_OPTIONS } from '@nx9/shared';
+import { IMAGE_ASPECT_OPTIONS, IMAGE_QUALITY_OPTIONS, resolvePictureModelForRequest } from '@nx9/shared';
 import { VideoPopover, PopoverItem } from '../video/VideoPopover';
 import { useAttachedNodeData } from '../use-attached-node-data';
 import { modeNeedsPrimaryRef, readPictureGenMode } from './picture-gen-modes';
@@ -91,10 +91,31 @@ export function PictureParamChips({ blockId, onPatch }: PictureParamChipsProps) 
   const imageStrength = (data.imageStrength as number) ?? 0.85;
   const resolution = (data.resolutionTier as string) ?? '2k';
   const mode = readPictureGenMode(data);
+  const modelDef = resolvePictureModelForRequest((data.model as string) || undefined);
+  // PG-06 / PG-32: 插值放大不走生成模型；强度仅 fal 生效
   const showStrength =
-    modeNeedsPrimaryRef(mode) ||
-    data.pictureGenMode === 'upscale-hd' ||
-    data.pictureProAction === 'image-to-image';
+    mode !== 'upscale-hd' &&
+    modelDef.provider === 'fal' &&
+    (modeNeedsPrimaryRef(mode) || data.pictureProAction === 'image-to-image');
+
+  // PG-20: 放大模式只保留倍率 2×/4×，比例/质量不参与插值
+  if (mode === 'upscale-hd') {
+    const scaleId = resolution === '4k' ? '4k' : '2k';
+    return (
+      <div className="flex items-center gap-0.5 flex-wrap nodrag nopan" onMouseDown={stop}>
+        <ParamChip
+          label={scaleId === '4k' ? '4×' : '2×'}
+          active={scaleId}
+          options={[
+            { id: '2k', label: '2×' },
+            { id: '4k', label: '4×' },
+          ]}
+          onSelect={(v) => onPatch({ resolutionTier: v })}
+          width={88}
+        />
+      </div>
+    );
+  }
 
   const qualityLabel =
     IMAGE_QUALITY_OPTIONS.find((o) => o.id === quality)?.label ??

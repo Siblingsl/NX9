@@ -1,4 +1,5 @@
 import type { TimelinePayload, TimelineClip } from './timeline';
+import type { TimelineOp } from '../utils/timeline-ops';
 
 export type SmartEditProfile = 'drama' | 'viral';
 export type SmartEditEngine = 'auto' | 'remotion' | 'hyperframes' | 'ffmpeg';
@@ -32,7 +33,10 @@ export interface SmartSuggestion {
   kind: 'transition' | 'subtitle' | 'trim' | 'ducking' | 'beat-cut' | 'template-patch';
   targetClipIds: string[];
   message: string;
+  /** @deprecated 遗留自由格式补丁；新建议一律走 ops */
   patch: Record<string, unknown>;
+  /** 结构化时间线操作（applyTimelineOps 执行，可撤销）；空数组 = 纯提示型建议 */
+  ops?: TimelineOp[];
   confidence: number;
 }
 

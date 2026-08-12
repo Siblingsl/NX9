@@ -6,8 +6,8 @@ import {
   resolveImageRequestSize,
   resolvePictureModelForRequest,
 } from '@nx9/shared';
-import { useReactFlow } from '@xyflow/react';
-import { ImagePlus, X } from 'lucide-react';
+import { useReactFlow, useNodes, useEdges } from '@xyflow/react';
+import { ImagePlus, Palette, X } from 'lucide-react';
 import { AssetMentionInput } from '../../../asset-mention/AssetMentionInput';
 import { ComposerModelSelect } from '../../composer/ComposerModelSelect';
 import {
@@ -24,6 +24,7 @@ import { useConnectedPictureModels } from '../../../../../../hooks/use-connected
 import { useWorkspaceDocument } from '../../../../../../stores/workspace-document';
 import { toastError, toastSuccess } from '../../../../../../stores/toast';
 import { useUpstreamMedia } from '../use-upstream-media';
+import { useUpstreamShots } from '../use-upstream-shots';
 import { useAttachedNodeData } from '../use-attached-node-data';
 import { useLocalNodePrompt } from '../use-local-node-prompt';
 import {
@@ -52,12 +53,20 @@ import {
 import {
   MAX_PICTURE_UPLOAD_REFS,
   patchPictureGenMode,
+  patchStyleImageUrl,
   readPictureGenMode,
   patchUploadedReferenceUrls,
   resolvePictureReferenceUrls,
   resolveRuntimePictureGenMode,
   resolveUploadedReferenceUrls,
 } from './picture-gen-modes';
+import {
+  readPictureGenerationHistory,
+  restorePictureGeneration,
+} from '../../../../../picture-gen-history';
+import { uniqueLibraryLabel } from '../../../../../picture-gen-refs';
+import { commitPicturePreviewUrls } from '../../../../../picture-gen-commit';
+import { resumePendingImageTasks, type PendingImageTask } from '../../../../../picture-gen-runner';
 
 const EMPTY_HISTORY: { id: string; blockId: string; text: string; savedAt: number }[] = [];
 const PICTURE_MENTION_KINDS: AssetLibraryKind[] = ['character', 'scene', 'costume', 'prop'];
@@ -79,10 +88,17 @@ export function PictureWorkspace({ blockId, kind, onCollapse }: PictureWorkspace
   const appendLog = useActivityLog((s) => s.append);
   const promptContainerRef = useRef<HTMLDivElement>(null);
   const refInputRef = useRef<HTMLInputElement>(null);
+  const styleInputRef = useRef<HTMLInputElement>(null);
+  /** PG-04: 当前运行的取消控制器 */
+  const runAbortRef = useRef<AbortController | null>(null);
   const promptEntries = usePromptHistory((s) => s.entries);
   const pushHistory = usePromptHistory((s) => s.push);
   const { updateNodeData } = useReactFlow();
+  const nodes = useNodes();
+  const edges = useEdges();
   const { pictures: upstreamPictures } = useUpstreamMedia(blockId);
+  const { hasUpstream, shotIds, shots } = useUpstreamShots(blockId);
+  const libraryCharacters = useWorkspaceDocument((s) => s.characters.characters);
   const handleAiAction = useWorkspaceAiLog();
   const [selectedResult, setSelectedResult] = useState(0);
   const [refBusy, setRefBusy] = useState(false);
@@ -99,6 +115,44 @@ export function PictureWorkspace({ blockId, kind, onCollapse }: PictureWorkspace
     (patch: Record<string, unknown>) => updateNodeData(blockId, patch),
     [blockId, updateNodeData],
   );
+
+  // PG-29: 对齐视频工作区——有上游链镜表时自动写入 linkedShotId(s)
+  useEffect(() => {
+    if (!hasUpstream) {
+      if (Array.isArray(data.linkedShotIds) && (data.linkedShotIds as string[]).length > 0) {
+        updateNodeData(blockId, { linkedShotIds: [] });
+      }
+      return;
+    }
+    const prev = Array.isArray(data.linkedShotIds) ? (data.linkedShotIds as string[]) : [];
+    const nextId = shotIds[0] ?? undefined;
+    const prevSingle = (data.linkedShotId as string | undefined) ?? undefined;
+    if (
+      prev.length === shotIds.length &&
+      prev.every((id, i) => id === shotIds[i]) &&
+      prevSingle === nextId
+    ) {
+      return;
+    }
+    updateNodeData(blockId, {
+      linkedShotIds: shotIds,
+      linkedShotId: nextId,
+      linkedShotLabel:
+        shots.length > 1
+          ? `写回第 1 / ${shots.length} 镜（#${(shots[0]?.index ?? 0) + 1}）`
+          : shots[0]
+            ? `写回镜头 #${(shots[0].index ?? 0) + 1}`
+            : undefined,
+    });
+  }, [
+    hasUpstream,
+    shotIds,
+    shots,
+    blockId,
+    updateNodeData,
+    data.linkedShotIds,
+    data.linkedShotId,
+  ]);
 
   const pushHistoryDebounced = useCallback(
     (text: string) => pushHistory(blockId, text),
@@ -151,6 +205,8 @@ export function PictureWorkspace({ blockId, kind, onCollapse }: PictureWorkspace
   }, [data.previewUrl, data.previewUrls]);
 
   const modelDef = resolvePictureModelForRequest(model);
+  /** PG-05: Seed 仅 fal 系模型真实生效 */
+  const seedSupported = modelDef.provider === 'fal';
   const resolvedSize = resolveImageRequestSize({
     quality,
     aspectRatio: aspectRatio === 'custom' ? undefined : aspectRatio,
@@ -237,6 +293,164 @@ export function PictureWorkspace({ blockId, kind, onCollapse }: PictureWorkspace
     [appendLog, blockId, handlePatch, previewUrls],
   );
 
+  /** PG-10/PG-23: 把选中生成图入库为场景 / 道具参考（封面 + 参考图带图入库，label 去重） */
+  const handleSaveToLibrary = useCallback(
+    (url: string, kindTarget: 'scene' | 'prop') => {
+      const promptText = ((data.content as string) || draft || '').trim();
+      const base =
+        promptText.split('\n')[0]?.slice(0, 20).trim() ||
+        `生成图 ${new Date().toLocaleDateString()}`;
+      const existing = useWorkspaceDocument.getState().backlotWorkspace.items.map((i) => i.label);
+      const label = uniqueLibraryLabel(base, existing);
+      const kindLabel = kindTarget === 'scene' ? '场景' : '道具';
+      useWorkspaceDocument.getState().upsertBacklotWorkspace({
+        id: `ws-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        kind: kindTarget,
+        label,
+        promptEn: promptText,
+        revision: 1,
+        creative: { coverUrl: url, referenceUrls: [url] },
+      });
+      appendLog(`已入库为${kindLabel}「${label}」`);
+      toastSuccess(`已入库为${kindLabel}「${label}」，可在素材库中完善设定`);
+    },
+    [appendLog, data, draft],
+  );
+
+  const handleSaveToCharacter = useCallback(
+    (url: string, characterId: string) => {
+      const doc = useWorkspaceDocument.getState();
+      const profile = doc.characters.characters.find((c) => c.id === characterId && !c.deletedAt);
+      if (!profile) {
+        toastError('角色不存在或已在回收站');
+        return;
+      }
+      const nextRevision = (profile.revision ?? 1) + 1;
+      const prevMain = profile.referenceImageUrl?.trim();
+      const prevList = Array.isArray(profile.creative?.referenceUrls)
+        ? profile.creative!.referenceUrls!.filter((u) => typeof u === 'string' && u.trim())
+        : [];
+      // PG-36: 旧主定妆进列表，新图置顶，不丢历史
+      const referenceUrls = [
+        url,
+        ...[prevMain, ...prevList].filter((u): u is string => Boolean(u) && u !== url),
+      ].slice(0, 12);
+      doc.upsertCharacter({
+        ...profile,
+        referenceImageUrl: url,
+        revision: nextRevision,
+        creative: {
+          ...profile.creative,
+          referenceUrls,
+          fullSheetUrl: profile.creative?.fullSheetUrl ?? url,
+        },
+      });
+      appendLog(`已写入角色定妆「${profile.name}」· revision ${nextRevision}`);
+      toastSuccess(`已写入「${profile.name}」定妆（revision ${nextRevision}）`);
+    },
+    [appendLog],
+  );
+
+  const handleRestoreHistory = useCallback(
+    (entryId: string) => {
+      const restored = restorePictureGeneration(
+        entryId,
+        previewUrls,
+        ((data.content as string) || draft || ''),
+        readPictureGenerationHistory(data),
+      );
+      if (!restored) return;
+      // PG-27: 恢复历史同步镜表 firstFrame + 归档当前
+      commitPicturePreviewUrls({
+        blockId,
+        data,
+        urls: restored.urls,
+        updateNodeData: (id, patch) => updateNodeData(id, patch),
+        nodes: nodes.map((n) => ({
+          id: n.id,
+          type: n.type,
+          data: (n.data ?? {}) as Record<string, unknown>,
+        })),
+        edges,
+        archiveCurrent: false,
+        extraPatch: {
+          generationHistory: restored.history,
+          status: 'success',
+        },
+      });
+      appendLog('已恢复上一轮生成结果');
+    },
+    [appendLog, blockId, data, draft, edges, nodes, previewUrls, updateNodeData],
+  );
+
+  const handleResumePending = useCallback(async () => {
+    const raw = data.pendingImageTasks as PendingImageTask[] | undefined;
+    const single = (data.pendingImageTaskId as string | undefined)?.trim();
+    const tasks: PendingImageTask[] =
+      Array.isArray(raw) && raw.length > 0
+        ? raw
+        : single
+          ? [{ taskId: single }]
+          : [];
+    if (tasks.length === 0) return;
+    const controller = new AbortController();
+    runAbortRef.current = controller;
+    handlePatch({ status: 'running' });
+    try {
+      const result = await resumePendingImageTasks(tasks, controller.signal);
+      const nextUrls = [...previewUrls, ...result.urls];
+      // PG-27: 继续查询写回预览 + 镜表 firstFrame + 历史归档
+      if (result.urls.length) {
+        commitPicturePreviewUrls({
+          blockId,
+          data,
+          urls: nextUrls,
+          updateNodeData: (id, patch) => updateNodeData(id, patch),
+          nodes: nodes.map((n) => ({
+            id: n.id,
+            type: n.type,
+            data: (n.data ?? {}) as Record<string, unknown>,
+          })),
+          edges,
+          archiveCurrent: true,
+          extraPatch: {
+            status: result.stillPending.length ? 'running' : 'success',
+            pendingImageTasks: result.stillPending.length ? result.stillPending : undefined,
+            pendingImageTaskId: result.stillPending[0]?.taskId,
+            message: result.stillPending.length
+              ? `${result.stillPending.length} 个任务仍在后台`
+              : undefined,
+            lastResult: {
+              count: nextUrls.length,
+              urls: nextUrls,
+            },
+          },
+        });
+        toastSuccess(`已取回 ${result.urls.length} 张后台图片`);
+        appendLog(`继续查询完成 · 取回 ${result.urls.length}`);
+      } else {
+        handlePatch({
+          status: result.stillPending.length ? 'running' : 'idle',
+          pendingImageTasks: result.stillPending.length ? result.stillPending : undefined,
+          pendingImageTaskId: result.stillPending[0]?.taskId,
+          message: result.stillPending.length
+            ? `${result.stillPending.length} 个任务仍在后台`
+            : undefined,
+        });
+        if (result.stillPending.length) {
+          appendLog('任务仍在生成，请稍后再查');
+        } else {
+          toastError('后台图片任务已失败或过期');
+        }
+      }
+    } catch (e) {
+      if (controller.signal.aborted) appendLog('已停止查询');
+      else toastError(String(e));
+    } finally {
+      if (runAbortRef.current === controller) runAbortRef.current = null;
+    }
+  }, [appendLog, blockId, data, edges, handlePatch, nodes, previewUrls, updateNodeData]);
+
   const handleUploadRef = useCallback(
     async (files: FileList | File[]) => {
       const list = Array.from(files).filter((f) => f.type.startsWith('image/') || !f.type);
@@ -276,17 +490,39 @@ export function PictureWorkspace({ blockId, kind, onCollapse }: PictureWorkspace
     [data, handlePatch, pictureGenMode, proActionId],
   );
 
-  /** 从红框移除本节点上传的参考图（不碰上游） */
+  /** PG-03: 上传风格参考图（单张，写 styleImageUrl 并锁定风格参考模式） */
+  const handleUploadStyle = useCallback(
+    async (files: FileList | File[]) => {
+      const file = Array.from(files).find((f) => f.type.startsWith('image/') || !f.type);
+      if (!file) return;
+      setRefBusy(true);
+      try {
+        const res = await api.uploadAsset(file);
+        const url = res.url?.trim();
+        if (!url) return;
+        handlePatch(patchStyleImageUrl(url, data));
+        appendLog('已设置风格参考图 · 风格参考模式');
+        toastSuccess('已设置风格参考图：主体写在提示词里，画风由风格图控制');
+      } finally {
+        setRefBusy(false);
+      }
+    },
+    [appendLog, data, handlePatch],
+  );
+
+  const styleImageUrl = ((data.styleImageUrl as string | undefined) ?? '').trim();
+
+  /** 从红框移除本节点上传的参考图 / 风格图（不碰上游） */
   const handleRemoveUploadRef = useCallback(
     (url: string) => {
-      const next = resolveUploadedReferenceUrls(data).filter((u) => u !== url);
-      const patch = patchUploadedReferenceUrls(next, pictureGenMode, proActionId);
-      if ((data.styleImageUrl as string | undefined)?.trim() === url) {
-        patch.styleImageUrl = undefined;
+      if (styleImageUrl && styleImageUrl === url) {
+        handlePatch(patchStyleImageUrl(undefined, data));
+        return;
       }
-      handlePatch(patch);
+      const next = resolveUploadedReferenceUrls(data).filter((u) => u !== url);
+      handlePatch(patchUploadedReferenceUrls(next, pictureGenMode, proActionId));
     },
-    [data, handlePatch, pictureGenMode, proActionId],
+    [data, handlePatch, pictureGenMode, proActionId, styleImageUrl],
   );
 
   /** 在提示词光标处插入 @上游/@生成 */
@@ -315,6 +551,13 @@ export function PictureWorkspace({ blockId, kind, onCollapse }: PictureWorkspace
   const handleRun = useCallback(async () => {
     flushNow();
     if (!runtime) return;
+
+    // PG-09: 未配置图片连接时前置拦截，不再发注定失败的请求
+    if (!hasPictureConnections) {
+      toastError('未配置图片模型连接：请先在「设置 → 连接」添加图片模型');
+      openConnectionsSettings();
+      return;
+    }
 
     // 基础路径：按「上传 + 上游参考」自动文生图 / 图生图 / 多参考，无需进专业工具点选
     const excluded = new Set(
@@ -355,6 +598,20 @@ export function PictureWorkspace({ blockId, kind, onCollapse }: PictureWorkspace
         prePatch.model = 'flux-dev';
       }
     }
+    // PG-15: 风格参考需要多图；fal 文生图端点吃不到参考 → 切 Gemini
+    if (
+      runtimeMode === 'style-ref' ||
+      runtimeMode === 'image-to-image' ||
+      runtimeMode === 'multi-ref'
+    ) {
+      const def = resolvePictureModelForRequest(
+        typeof prePatch.model === 'string' ? prePatch.model : model,
+      );
+      if (def.provider === 'fal' && (runtimeMode === 'style-ref' || !def.supportsReference)) {
+        prePatch.model = 'gemini-2.5-flash-image';
+        appendLog('当前模型无法完整使用风格/参考图，已切换为 Gemini');
+      }
+    }
     // 运行前把专业模板拼进 content（仅当有专业动作；多图模式按条处理）
     if (proAction?.promptSuffix && !isPictureMultiPromptAction(proActionId)) {
       const composed = composePictureProPrompt(draft, proAction);
@@ -363,6 +620,11 @@ export function PictureWorkspace({ blockId, kind, onCollapse }: PictureWorkspace
       }
     }
     updateNodeData(blockId, prePatch);
+
+    // PG-04: 每次运行持有可中断的控制器
+    runAbortRef.current?.abort();
+    const controller = new AbortController();
+    runAbortRef.current = controller;
 
     try {
       const { runCascadeFromBlock } = await import('../../../../execution/cascade-runner');
@@ -376,6 +638,12 @@ export function PictureWorkspace({ blockId, kind, onCollapse }: PictureWorkspace
           }
         },
         updateNodeData: (id, patch) => runtime.updateNodeData(id, patch),
+        signal: {
+          get cancelled() {
+            return controller.signal.aborted;
+          },
+          abortSignal: controller.signal,
+        },
       });
       const filledCount = isPictureMultiPromptAction(proActionId)
         ? filledMultiPrompts(data.multiPrompts).length
@@ -394,12 +662,27 @@ export function PictureWorkspace({ blockId, kind, onCollapse }: PictureWorkspace
           ? `运行 · ${modeLabel}`
           : `运行 · ${meta?.label ?? kind}`,
       );
+      const last = runtime.getNodes().find((n) => n.id === blockId)?.data as
+        | Record<string, unknown>
+        | undefined;
+      const truncated = (last?.lastResult as { truncatedRefs?: number } | undefined)?.truncatedRefs;
+      if (truncated && truncated > 0) {
+        toastError(`参考图已按模型上限裁掉 ${truncated} 张（风格图优先保留）`);
+      }
     } catch (e) {
-      appendLog(`运行失败: ${String(e)}`);
+      if (controller.signal.aborted) {
+        appendLog('已停止生成');
+      } else {
+        appendLog(`运行失败: ${String(e)}`);
+      }
+    } finally {
+      if (runAbortRef.current === controller) runAbortRef.current = null;
     }
   }, [
     flushNow,
     runtime,
+    hasPictureConnections,
+    openConnectionsSettings,
     proAction,
     proActionId,
     draft,
@@ -413,6 +696,16 @@ export function PictureWorkspace({ blockId, kind, onCollapse }: PictureWorkspace
     kind,
     imageCount,
   ]);
+
+  /** PG-04: 停止生成 — 中断在途请求并把节点状态收回 idle */
+  const handleStop = useCallback(() => {
+    const controller = runAbortRef.current;
+    if (!controller) return;
+    controller.abort();
+    runAbortRef.current = null;
+    updateNodeData(blockId, { status: 'idle', error: undefined });
+    appendLog('已停止生成');
+  }, [appendLog, blockId, updateNodeData]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -440,11 +733,16 @@ export function PictureWorkspace({ blockId, kind, onCollapse }: PictureWorkspace
   const refStripItems = useMemo((): PictureRefItem[] => {
     const items: PictureRefItem[] = [];
     const seen = new Set<string>();
-    // 展示：上传主体参考 + 风格图（若有且不重复）
+    // 展示：上传主体参考 + 风格图（带风格标记）
     allRefUrls.forEach((url, index) => {
       if (!url || seen.has(url)) return;
       seen.add(url);
-      items.push({ url, source: 'upload', index });
+      items.push({
+        url,
+        source: 'upload',
+        index,
+        ...(styleImageUrl && url === styleImageUrl ? { role: 'style' as const } : {}),
+      });
     });
     upstreamPictures.forEach((url, index) => {
       if (!url || seen.has(url)) return;
@@ -452,7 +750,17 @@ export function PictureWorkspace({ blockId, kind, onCollapse }: PictureWorkspace
       items.push({ url, source: 'upstream', index });
     });
     return items;
-  }, [allRefUrls, upstreamPictures]);
+  }, [allRefUrls, styleImageUrl, upstreamPictures]);
+
+  // PG-11: 上游断开后清掉残留的排除项，避免节点 data 无限增长。
+  // 仅在仍有上游图时清理，防止图迁移/断连瞬间把合法排除项误清空。
+  useEffect(() => {
+    if (excludedRefUrls.length === 0 || upstreamPictures.length === 0) return;
+    const alive = excludedRefUrls.filter((u) => upstreamPictures.includes(u));
+    if (alive.length !== excludedRefUrls.length) {
+      handlePatch({ excludedRefUrls: alive });
+    }
+  }, [excludedRefUrls, handlePatch, upstreamPictures]);
 
   // 参考图变化时自动同步基础模式（专业玩法锁定时不改）
   useEffect(() => {
@@ -498,7 +806,7 @@ export function PictureWorkspace({ blockId, kind, onCollapse }: PictureWorkspace
         : pictureGenMode === 'image-to-image'
           ? '描述想改成什么样… 输入 @ 或点击上游图插入引用'
           : pictureGenMode === 'upscale-hd'
-            ? '可选：补充增强方向…'
+            ? '放大不使用提示词，可留空'
             : '描述你想生成的图像… 输入 @ 引用角色/场景，或点击上游图插入';
 
   const toolbarLeft = (
@@ -527,10 +835,7 @@ export function PictureWorkspace({ blockId, kind, onCollapse }: PictureWorkspace
             tabIndex={0}
             onClick={(e) => {
               e.stopPropagation();
-              handlePatch({
-                ...patchUploadedReferenceUrls([], pictureGenMode, proActionId),
-                styleImageUrl: undefined,
-              });
+              handlePatch(patchUploadedReferenceUrls([], pictureGenMode, proActionId));
             }}
             className="ml-0.5 opacity-60 hover:opacity-100"
             title="清除全部上传参考"
@@ -548,6 +853,48 @@ export function PictureWorkspace({ blockId, kind, onCollapse }: PictureWorkspace
         onChange={(e) => {
           const files = e.target.files;
           if (files?.length) void handleUploadRef(files);
+          e.target.value = '';
+        }}
+      />
+
+      {/* PG-03: 风格参考图 — 写入 styleImageUrl 并锁定风格参考模式 */}
+      <button
+        type="button"
+        onMouseDown={stop}
+        disabled={refBusy}
+        onClick={() => styleInputRef.current?.click()}
+        className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] transition-colors ${
+          styleImageUrl
+            ? 'bg-violet-500/10 text-violet-700'
+            : 'text-ink/55 hover:text-ink hover:bg-surface/90'
+        }`}
+        title="上传风格参考图：画风由风格图控制，主体写在提示词里"
+      >
+        <Palette size={12} />
+        风格
+        {styleImageUrl ? (
+          <span
+            role="button"
+            tabIndex={0}
+            onClick={(e) => {
+              e.stopPropagation();
+              handlePatch(patchStyleImageUrl(undefined, data));
+            }}
+            className="ml-0.5 opacity-60 hover:opacity-100"
+            title="清除风格图"
+          >
+            <X size={10} />
+          </span>
+        ) : null}
+      </button>
+      <input
+        ref={styleInputRef}
+        type="file"
+        accept="image/*"
+        className="hidden"
+        onChange={(e) => {
+          const files = e.target.files;
+          if (files?.length) void handleUploadStyle(files);
           e.target.value = '';
         }}
       />
@@ -617,21 +964,44 @@ export function PictureWorkspace({ blockId, kind, onCollapse }: PictureWorkspace
       )}
 
       <label className="block space-y-1">
-        <span className="text-[10px] text-ink/45">Seed</span>
+        <span className="text-[10px] text-ink/45">
+          Seed
+          {!seedSupported && (
+            <span className="ml-1 text-[9px] text-amber-600/80">
+              当前模型不支持（仅 FLUX / fal 系生效）
+            </span>
+          )}
+        </span>
         <input
           type="text"
+          inputMode="numeric"
           value={data.seed != null ? String(data.seed) : ''}
-          onChange={(e) =>
-            handlePatch({ seed: e.target.value ? Number(e.target.value) : undefined })
-          }
+          onChange={(e) => {
+            // PG-11: 只接受数字，非法输入不静默变 NaN
+            const raw = e.target.value.trim();
+            if (raw === '') {
+              handlePatch({ seed: undefined });
+              return;
+            }
+            if (!/^\d+$/.test(raw)) return;
+            handlePatch({ seed: Number(raw) });
+          }}
           onMouseDown={stop}
-          placeholder="留空随机"
-          className="w-full rounded-lg border border-line/50 px-2 py-1 text-[11px] focus:outline-none focus:border-brand/40"
+          disabled={!seedSupported}
+          placeholder={seedSupported ? '留空随机' : '当前模型不生效'}
+          className="w-full rounded-lg border border-line/50 px-2 py-1 text-[11px] focus:outline-none focus:border-brand/40 disabled:opacity-50"
         />
       </label>
 
       <label className="block space-y-1">
-        <span className="text-[10px] text-ink/45">Negative Prompt</span>
+        <span className="text-[10px] text-ink/45">
+          Negative Prompt
+          <span className="ml-1 text-[9px] text-ink/35">
+            {modelDef.provider === 'fal'
+              ? 'FLUX 系走原生负面参数'
+              : '当前模型以提示词文本注入（弱约束）'}
+          </span>
+        </span>
         <textarea
           value={(data.negativePrompt as string) ?? ''}
           onChange={(e) => handlePatch({ negativePrompt: e.target.value })}
@@ -666,34 +1036,74 @@ export function PictureWorkspace({ blockId, kind, onCollapse }: PictureWorkspace
   );
 
   const hasGenerated = previewUrls.length > 0;
+  const batchFailures = Array.isArray(
+    (data.lastResult as { failures?: { index: number; error: string }[] } | undefined)?.failures,
+  )
+    ? ((data.lastResult as { failures: { index: number; error: string }[] }).failures)
+    : [];
+  const hasFailures = batchFailures.length > 0;
   const hasRefs =
     refStripItems.length > 0 || excludedRefUrls.length > 0;
-  const showMediaRow = hasGenerated || hasRefs;
+  const showMediaRow = hasGenerated || hasRefs || hasFailures;
+
+  const pendingImageTaskId = (data.pendingImageTaskId as string | undefined)?.trim();
+  const pendingImageTasks = Array.isArray(data.pendingImageTasks)
+    ? (data.pendingImageTasks as PendingImageTask[])
+    : [];
+  const hasPendingImage =
+    Boolean(pendingImageTaskId) || pendingImageTasks.length > 0;
+  const linkedShotLabel = (data.linkedShotLabel as string | undefined)?.trim();
 
   const topSlot = (
     <>
+      {linkedShotLabel && hasUpstream && (
+        <div className="mx-3 mt-2 text-[10px] text-ink/45">{linkedShotLabel}</div>
+      )}
+      {hasPendingImage && (
+        <div className="mx-3 mt-2 flex items-center gap-2 rounded-lg border border-amber-500/25 bg-amber-500/8 px-2.5 py-1.5">
+          <span className="text-[10px] text-amber-800 flex-1">
+            有图片任务仍在后台生成，超时后结果可取回
+          </span>
+          <button
+            type="button"
+            onMouseDown={stop}
+            onClick={() => void handleResumePending()}
+            className="text-[10px] font-medium text-amber-800 hover:text-brand"
+          >
+            继续查询
+          </button>
+        </div>
+      )}
       {/* 一排两列：左生成结果 · 右参考图（本节点上传 + 上游传入）；单侧有内容则全宽 */}
       {showMediaRow && (
         <div
           className="mx-3 mt-2 flex items-start gap-3 pb-2 border-b border-line/20"
           onMouseDown={stop}
         >
-          {hasGenerated && (
+          {(hasGenerated || hasFailures) && (
             <div className={hasRefs ? 'min-w-0 flex-1' : 'min-w-0 w-full'}>
               <PictureResultGallery
                 urls={previewUrls}
                 selectedIndex={Math.min(selectedResult, Math.max(0, previewUrls.length - 1))}
                 onSelect={setSelectedResult}
                 onDelete={handleDeleteGenerated}
+                onSaveToLibrary={handleSaveToLibrary}
+                onSaveToCharacter={handleSaveToCharacter}
+                characters={libraryCharacters
+                  .filter((c) => !c.deletedAt)
+                  .map((c) => ({ id: c.id, name: c.name }))}
+                history={readPictureGenerationHistory(data)}
+                onRestoreHistory={handleRestoreHistory}
+                failures={batchFailures}
                 sourceBlockId={blockId}
               />
             </div>
           )}
-          {hasGenerated && hasRefs && (
+          {(hasGenerated || hasFailures) && hasRefs && (
             <div className="w-px self-stretch bg-line/25 shrink-0" aria-hidden />
           )}
           {hasRefs && (
-            <div className={hasGenerated ? 'min-w-0 flex-1' : 'min-w-0 w-full'}>
+            <div className={hasGenerated || hasFailures ? 'min-w-0 flex-1' : 'min-w-0 w-full'}>
               <PictureUpstreamStrip
                 items={refStripItems}
                 mentionedUrls={mentionedUpstreamUrls}
@@ -761,7 +1171,7 @@ export function PictureWorkspace({ blockId, kind, onCollapse }: PictureWorkspace
             }}
             className="text-ink/55 hover:text-brand"
           >
-            图片高清
+            图片放大
           </button>
           <span className="text-ink/20">·</span>
           <button
@@ -792,14 +1202,17 @@ export function PictureWorkspace({ blockId, kind, onCollapse }: PictureWorkspace
     </>
   );
 
+  const batchProgress = data.batchProgress as { done?: number; total?: number } | undefined;
   const runLabel =
-    pictureGenMode === 'upscale-hd'
-      ? '高清放大'
-      : multiPromptMode
-        ? `生成 ×${Math.max(1, filledMultiPrompts(multiPrompts).length || multiPrompts.length)}`
-        : proAction
-          ? `生成 · ${proAction.label.slice(0, 6)}`
-          : '生成';
+    status === 'running' && batchProgress && (batchProgress.total ?? 0) > 1
+      ? `生成 ${batchProgress.done ?? 0}/${batchProgress.total}`
+      : pictureGenMode === 'upscale-hd'
+        ? '插值放大'
+        : multiPromptMode
+          ? `生成 ×${Math.max(1, filledMultiPrompts(multiPrompts).length || multiPrompts.length)}`
+          : proAction
+            ? `生成 · ${proAction.label.slice(0, 6)}`
+            : '生成';
 
   return (
     <ComposerWorkspaceShell
@@ -813,23 +1226,30 @@ export function PictureWorkspace({ blockId, kind, onCollapse }: PictureWorkspace
             onSelect={handleSelectProAction}
             variant="header"
           />
-          <ComposerModelSelect
-            value={model}
-            options={
-              pictureModelOptions.length > 0
-                ? pictureModelOptions
-                : [{ id: model, label: '未配置图片连接 · 点此去设置' }]
-            }
-            onChange={(v) => {
-              if (!hasPictureConnections) {
-                openConnectionsSettings();
-                return;
+          {pictureGenMode === 'upscale-hd' ? (
+            /* PG-06: 插值放大不走生成模型，隐藏模型选择避免误导 */
+            <span className="text-[10px] text-ink/40 px-2 py-0.5 rounded-md bg-surface/70">
+              本地插值放大 · 不使用生成模型
+            </span>
+          ) : (
+            <ComposerModelSelect
+              value={model}
+              options={
+                pictureModelOptions.length > 0
+                  ? pictureModelOptions
+                  : [{ id: model, label: '未配置图片连接 · 点此去设置' }]
               }
-              void selectPictureModel(v, (id) => handlePatch({ model: id }));
-            }}
-            width={260}
-            tone="desk"
-          />
+              onChange={(v) => {
+                if (!hasPictureConnections) {
+                  openConnectionsSettings();
+                  return;
+                }
+                void selectPictureModel(v, (id) => handlePatch({ model: id }));
+              }}
+              width={260}
+              tone="desk"
+            />
+          )}
         </div>
       }
       topSlot={topSlot}
@@ -839,6 +1259,7 @@ export function PictureWorkspace({ blockId, kind, onCollapse }: PictureWorkspace
       onApplyHistory={applyText}
       onAiAction={handleAiAction}
       onRun={() => void handleRun()}
+      onStop={handleStop}
       running={data.status === 'running'}
       runLabel={runLabel}
       promptContainerRef={promptContainerRef}

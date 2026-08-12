@@ -794,11 +794,8 @@ export class AgentService {
     return { ok: true, adaptation };
   }
 
-  async screenplay(
-    sourceText: string,
-    userId?: string,
-  ): Promise<{ ok: true; script: string }> {
-    const system = this.systemFrom(
+  private screenplaySystem(): string {
+    return this.systemFrom(
       resolveAgentSkillName('screenplay'),
       [
         '你是编剧。根据 brief/策略/原文写出分集剧本。',
@@ -810,15 +807,38 @@ export class AgentService {
         '续写须衔接上一集状态且体例不得漂移；重写不得与邻集矛盾。',
       ].join('\n'),
     );
+  }
+
+  async screenplay(
+    sourceText: string,
+    userId?: string,
+  ): Promise<{ ok: true; script: string }> {
     const res = (await this.gateway.proxyLlm({
       messages: [
-        { role: 'system', content: system },
+        { role: 'system', content: this.screenplaySystem() },
         { role: 'user', content: sourceText },
       ],
     }, userId)) as { choices?: { message?: { content?: string } }[] };
     const content = res.choices?.[0]?.message?.content ?? '';
     if (!content) throw new ServiceUnavailableException('LLM 未返回内容');
     return { ok: true, script: content };
+  }
+
+  async screenplayStream(
+    sourceText: string,
+    userId: string | undefined,
+    onChunk: (text: string) => void,
+  ): Promise<string> {
+    const full = await this.gateway.proxyLlmStream(
+      [
+        { role: 'system', content: this.screenplaySystem() },
+        { role: 'user', content: sourceText },
+      ],
+      userId,
+      onChunk,
+    );
+    if (!full.trim()) throw new ServiceUnavailableException('LLM 未返回内容');
+    return full;
   }
 
   async directorPlan(

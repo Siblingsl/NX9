@@ -13,6 +13,8 @@ export interface PictureRefItem {
   source: PictureRefSource;
   /** 同来源内 0-based 下标（用于标签 / @上游） */
   index: number;
+  /** PG-03: 风格参考图（styleImageUrl）标记 */
+  role?: 'style';
 }
 
 export interface PictureUpstreamStripProps {
@@ -82,7 +84,12 @@ export function PictureUpstreamStrip({
           {visible.map((item) => {
             const { url, source, index } = item;
             const active = mentionedUrls.includes(url);
-            const label = source === 'upload' ? `参考${index + 1}` : `上游${index + 1}`;
+            const label =
+              item.role === 'style'
+                ? '风格'
+                : source === 'upload'
+                  ? `参考${index + 1}`
+                  : `上游${index + 1}`;
             const canSelect = source === 'upstream' && onSelectUpstream;
             return (
               <div
@@ -125,14 +132,18 @@ export function PictureUpstreamStrip({
                 className={`group relative w-14 h-14 rounded-lg overflow-hidden border shrink-0 transition-all ${
                   canSelect ? 'cursor-grab active:cursor-grabbing' : 'cursor-default'
                 } ${
-                  active
-                    ? 'border-brand/50 ring-1 ring-brand/25'
-                    : 'border-line/40 hover:border-brand/30'
+                  item.role === 'style'
+                    ? 'border-violet-500/60 ring-1 ring-violet-500/25'
+                    : active
+                      ? 'border-brand/50 ring-1 ring-brand/25'
+                      : 'border-line/40 hover:border-brand/30'
                 }`}
                 title={
-                  source === 'upload'
-                    ? `${label} · 本节点上传 · 拖出钉到画布`
-                    : `点击插入 @上游:图${index + 1} · 拖出钉到画布`
+                  item.role === 'style'
+                    ? '风格参考图 · 控制画风，不作主体'
+                    : source === 'upload'
+                      ? `${label} · 本节点上传 · 拖出钉到画布`
+                      : `点击插入 @上游:图${index + 1} · 拖出钉到画布`
                 }
               >
                 <img src={url} alt="" className="w-full h-full object-cover pointer-events-none" />

@@ -81,12 +81,19 @@ interface WorkspaceDocumentState {
   scriptDeskDrafts: ScriptDeskFolderSnapshot[];
   /** 编剧台成稿回收站 */
   scriptDeskTrash: ScriptDeskFolderSnapshot[];
+  /** OL-14：素材 usage 轻量快照 */
+  assetUsageIndex: {
+    version: 1;
+    updatedAt: string;
+    entries: Record<string, { shotIds: string[]; nodeIds: string[] }>;
+  } | null;
   canvasAppearance: CanvasAppearance;
   scriptPlan: ScriptPlanPayload | null;
   environments: EnvironmentLibraryPayload | null;
   playbookSession: PlaybookSession | null;
   projectStatus: ProjectStatus;
   hydrated: boolean;
+  setAssetUsageIndex: (index: WorkspaceDocumentState['assetUsageIndex']) => void;
   hydrate: (workspaceId: string, payload: WorkspacePayload) => void;
   reset: () => void;
   /** @deprecated F-003: 使用 chainStoryboard 代替。仅用于迁移兼容。 */
@@ -230,12 +237,15 @@ export const useWorkspaceDocument = create<WorkspaceDocumentState>((set, get) =>
   mediaTrash: [],
   scriptDeskDrafts: [],
   scriptDeskTrash: [],
+  assetUsageIndex: null,
   canvasAppearance: DEFAULT_CANVAS_APPEARANCE,
   scriptPlan: null,
   environments: null,
   playbookSession: null,
   projectStatus: 'draft' as ProjectStatus,
   hydrated: false,
+
+  setAssetUsageIndex: (index) => set({ assetUsageIndex: index }),
 
   hydrate: (workspaceId, payload) => {
     // F-009: 同步当前 workspaceId 到 API 上下文（供用量标记）
@@ -300,6 +310,7 @@ export const useWorkspaceDocument = create<WorkspaceDocumentState>((set, get) =>
       mediaTrash: mediaPurged.items,
       scriptDeskDrafts: draftsRaw,
       scriptDeskTrash: trashPurged.items,
+      assetUsageIndex: (payload as { assetUsageIndex?: WorkspaceDocumentState['assetUsageIndex'] }).assetUsageIndex ?? null,
       canvasAppearance: (payload as any).canvasAppearance ?? DEFAULT_CANVAS_APPEARANCE,
       scriptPlan: (payload as any).scriptPlan ?? null,
       environments: (payload as any).environments
@@ -327,6 +338,7 @@ export const useWorkspaceDocument = create<WorkspaceDocumentState>((set, get) =>
       mediaTrash: [],
       scriptDeskDrafts: [],
       scriptDeskTrash: [],
+      assetUsageIndex: null,
       scriptPlan: null,
       environments: null,
       playbookSession: null,
@@ -1008,7 +1020,7 @@ export const useWorkspaceDocument = create<WorkspaceDocumentState>((set, get) =>
     const {
       storyboard, voice, characters, soundLibrary, styleLibrary, scriptPlan, environments,
       backlotCustom, backlotWorkspace, mediaTrash, scriptDeskDrafts, scriptDeskTrash,
-      canvasAppearance, playbookSession, projectStatus,
+      canvasAppearance, playbookSession, projectStatus, assetUsageIndex,
     } = get();
     return {
       storyboard, voice, characters, soundLibrary, styleLibrary,
@@ -1021,6 +1033,7 @@ export const useWorkspaceDocument = create<WorkspaceDocumentState>((set, get) =>
         ? syncSessionForStoryboard(playbookSession, storyboard)
         : undefined,
       projectStatus,
+      assetUsageIndex: assetUsageIndex ?? undefined,
     } as any;
   },
 }));

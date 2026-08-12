@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import {
   extractScreenplayExcerpts,
+  formatAssetMention,
   isScreenplayPackage,
   type BacklotWorkspaceItem,
   type CharacterProfile,
@@ -13,8 +14,11 @@ import { useFlowGraphMirror } from '../../stores/flow-graph-mirror';
 import { toastSuccess, toastError } from '../../stores/toast';
 import { persistScriptDeskPackage } from '../../engine/script-desk-runner';
 import {
+  diffCharacterBiblePush,
+  diffSceneBiblePush,
   pushCharacterToBiblePackage,
   pushSceneToBiblePackage,
+  type BibleFieldDiff,
   type BiblePushMode,
 } from '../../engine/bible-library-sync';
 
@@ -91,7 +95,28 @@ function applyPackageToAllDesks(nextPkg: ScreenplayPackage, preferId?: string) {
   return true;
 }
 
-/** 素材库详情：挂载编剧台 Bible + 成稿摘录；支持 C-02 推送回写 */
+function DiffList({ diffs }: { diffs: BibleFieldDiff[] }) {
+  if (diffs.length === 0) {
+    return <p className="text-[10px] text-ink/40">无字段差异，覆盖也不会改文案。</p>;
+  }
+  return (
+    <ul className="max-h-40 space-y-1.5 overflow-y-auto nx9-scroll rounded-lg border border-line bg-bg/60 p-2">
+      {diffs.map((d) => (
+        <li key={d.field} className="text-[10px] leading-relaxed">
+          <span className="font-medium text-ink/70">{d.label}</span>
+          <div className="mt-0.5 grid gap-0.5 text-ink/45">
+            <span className="line-through decoration-ink/25">
+              {d.before || '（空）'}
+            </span>
+            <span className="text-brand">{d.after || '（空）'}</span>
+          </div>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+/** 素材库详情：挂载编剧台 Bible + 成稿摘录；支持 C-02 推送回写 + OL-07 字段 diff */
 export function ScreenplaySupportPanel(props: {
   kind: 'character' | 'scene';
   name: string;
@@ -102,6 +127,7 @@ export function ScreenplaySupportPanel(props: {
   const runtime = useFlowRuntime((s) => s.runtime);
   const mirrorRev = useFlowGraphMirror((s) => s.revision);
   const [busy, setBusy] = useState(false);
+  const [diffOpen, setDiffOpen] = useState(false);
   const hit = useMemo(() => {
     void runtime;
     void mirrorRev;
@@ -115,6 +141,21 @@ export function ScreenplaySupportPanel(props: {
     void mirrorRev;
     return collectScriptDeskNodes().length > 0;
   }, [runtime, mirrorRev]);
+
+  const fieldDiffs = useMemo(() => {
+    void runtime;
+    void mirrorRev;
+    const packages = collectPackages();
+    const pkg = packages[0];
+    if (!pkg) return [] as BibleFieldDiff[];
+    if (props.kind === 'character' && props.character) {
+      return diffCharacterBiblePush(pkg, props.character);
+    }
+    if (props.kind === 'scene' && props.sceneItem) {
+      return diffSceneBiblePush(pkg, props.sceneItem);
+    }
+    return [];
+  }, [props.kind, props.character, props.sceneItem, runtime, mirrorRev]);
 
   const push = (mode: BiblePushMode) => {
     if (!hasDesk) {
@@ -138,6 +179,7 @@ export function ScreenplaySupportPanel(props: {
       }
       if (result.action === 'unchanged') {
         toastSuccess('Bible 已是最新，无需回写');
+        setDiffOpen(false);
         return;
       }
       applyPackageToAllDesks(result.package, first.id);
@@ -145,9 +187,10 @@ export function ScreenplaySupportPanel(props: {
         result.action === 'created'
           ? '已新建 Bible 草稿'
           : result.action === 'overwritten'
-            ? '已覆盖写入 Bible'
+            ? `已覆盖写入 Bible（${fieldDiffs.length} 字段）`
             : '已补全 Bible 空字段';
       toastSuccess(label);
+      setDiffOpen(false);
     } finally {
       setBusy(false);
     }
@@ -201,22 +244,36 @@ export function ScreenplaySupportPanel(props: {
             <button
               type="button"
               disabled={busy}
-              onClick={() => {
-                if (window.confirm('将用库内文案覆盖 Bible 对应字段，确认？')) {
-                  push('overwrite');
-                }
-              }}
+              onClick={() => setDiffOpen((v) => !v)}
               className="rounded-lg border border-line px-2 py-0.5 text-[10px] text-ink/45 hover:border-amber-400/50 disabled:opacity-45"
-              title="覆盖写入（会替换已有字段）"
+              title="先看字段差异再决定是否覆盖"
             >
-              对比后覆盖
+              {diffOpen ? '收起对比' : `对比后覆盖${fieldDiffs.length ? `（${fieldDiffs.length}）` : ''}`}
             </button>
           </div>
         )}
       </div>
+      {diffOpen ? (
+        <div className="mb-2 space-y-2">
+          <DiffList diffs={fieldDiffs} />
+          <button
+            type="button"
+            disabled={busy || fieldDiffs.length === 0}
+            onClick={() => push('overwrite')}
+            className="rounded-lg bg-amber-500/90 px-2.5 py-1 text-[10px] text-white hover:bg-amber-500 disabled:opacity-45"
+          >
+            确认覆盖写入 Bible
+          </button>
+        </div>
+      ) : null}
       {!hit ? (
         <p className="mb-2 text-ink/40">
           编剧台尚无同名 draft。可「推送到 Bible」新建草稿，避免库与剧本两套真相长期漂移。
+          {props.name ? (
+            <>
+              {' '}引用 {formatAssetMention(props.kind === 'character' ? 'character' : 'scene', props.name)}
+            </>
+          ) : null}
         </p>
       ) : narrative.length > 0 ? (
         <p className="mb-2 leading-relaxed">{narrative.join(' · ')}</p>

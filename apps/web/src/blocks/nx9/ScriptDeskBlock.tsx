@@ -1,25 +1,9 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from 'react';
 import {
-  Check,
-  ChevronRight,
-  ChevronUp,
-  FileText,
   FileUp,
-  FolderOpen,
-  Loader2,
-  MessageSquareText,
-  MoreHorizontal,
-  Plus,
-  RotateCcw,
-  RefreshCw,
-  Send,
-  Sparkles,
-  Stethoscope,
-  Trash2,
-  Wand2,
   X,
 } from 'lucide-react';
-import { type NodeProps, useReactFlow } from '@xyflow/react';
+import { type NodeProps, useReactFlow, useStore, type ReactFlowState } from '@xyflow/react';
 import {
   type ScreenplayPackage,
   type ScreenplayEpisode,
@@ -31,7 +15,6 @@ import {
   removeScreenplayEpisode,
   insertEmptyEpisodeAfter,
   lintScreenplayFormat,
-  findReplaceInEpisode,
   renameCharacterInPackage,
   screenplayFullText,
   screenplayWordCount,
@@ -39,12 +22,11 @@ import {
   unconfirmIfEdited,
   normalizeScreenplayBibleCharacters,
 } from '@nx9/shared';
-import { enrichPromptWithAssetMentions, summarizePackagePatch, resolveConnectedPictureGenId } from '@nx9/shared';
+import { enrichPromptWithAssetMentions, resolveConnectedPictureGenId } from '@nx9/shared';
 import { enrichBibleScenesFromPackage } from '@nx9/shared';
 import { api } from '../../api/client';
 import { useAllAssetLibraryItems } from '../../hooks/use-asset-library-items';
 import { askConfirm, askConfirmWithOption, confirmDelete } from '../../stores/confirm-dialog';
-import { isDevPromptEnabled } from '../../stores/dev-prompt-overrides';
 import { toastSuccess } from '../../stores/toast';
 import { useWorkspaceDocument } from '../../stores/workspace-document';
 import { BlockShell } from '../shared/BlockShell';
@@ -55,8 +37,11 @@ import { useFlowRuntime } from '../../stores/flow-runtime';
 import {
   appendAgentMessage,
   applyPendingMessagePatch,
+  compactAgentSession,
   confirmPackage,
+  discardPendingMessagePatch,
   extractBibleFromPackage,
+  formatScriptDeskError,
   ingestScreenplayText,
   packageSummaryLine,
   persistScriptDeskPackage,
@@ -67,81 +52,80 @@ import {
   runRewriteEpisodeSkill,
   runScriptDeskSkill,
 } from '../../engine/script-desk-runner';
+import {
+  findLibraryCharacterForRename,
+  libraryCharacterRenameConflict,
+  renameLibraryCharacterProfile,
+} from '../../engine/bible-library-sync';
 import { inspectBibleAssets, type AssetReadinessState } from '../../engine/asset-readiness';
 import { packageSourceHash } from '../../engine/storyboard-desk-runner';
 import { resolveConnectedStoryboardDeskId } from '../../engine/chain-storyboard-utils';
 import { AssetReadinessPanel } from '../../components/asset/AssetReadinessPanel';
 import { useAssetLibraryModalUi } from '../../stores/asset-library-modal-ui';
-import { ScriptDeskDevPackOverlay } from './script-desk/script-desk-dev-pack-overlay';
+import { useConnectedLlmModels } from '../../hooks/use-connected-llm-models';
+import { deriveStoryboardSyncStatus, storyboardSyncLabel } from './script-desk/storyboard-sync';
+import {
+  type EntryMode,
+  type RightTab,
+  SPLIT_DEFAULT,
+  SPLIT_MIN,
+  SPLIT_MAX,
+  SKILL_CHIPS,
+  clampSplitPct,
+  compact,
+  isBriefReadyForFirstGen,
+  isVisualStyleReady,
+  shouldPushUndo,
+  shouldShowUnconfirmBanner,
+  confirmedLatchForSnapshot,
+  countCharacterRenameHits,
+  initialOpenEpisodeIds,
+  resolveLibraryItemId,
+  textLooksLikeEpisodicScreenplay,
+  type UndoLatch,
+  type UndoMode,
+  type SavePkgFn,
+} from './script-desk/desk-helpers';
+import { ScreenplayPanel } from './script-desk/ScreenplayPanel';
+import { BiblePanel } from './script-desk/BiblePanel';
+import { DiagnosticsPanel } from './script-desk/DiagnosticsPanel';
+import { DraftsDrawer } from './script-desk/DraftsDrawer';
+import { DeskHeader } from './script-desk/DeskHeader';
+import { ChatStage } from './script-desk/ChatStage';
+import { ContinuePop } from './script-desk/ContinuePop';
 import './script-desk.css';
 import './script-desk.v2.css';
 
-type EntryMode = 'agent' | 'ingest';
-type RightTab = 'screenplay' | 'bible' | 'readiness' | 'diagnostics';
-
-/** 左侧对话区宽度占比（相对 sd2-body）；默认 60，可拖拽调整 */
-const SPLIT_DEFAULT = 60;
-const SPLIT_MIN = 32;
-const SPLIT_MAX = 72;
-
-const SCREENPLAY_VISUAL_STYLES = [
-  { value: '真人写实', label: '真人写实' },
-  { value: '写实 3D', label: '写实 3D' },
-  { value: '风格化 3D', label: '风格化 3D' },
-  { value: '二维动漫', label: '二维动漫' },
-  { value: '国漫水墨', label: '国漫水墨' },
-  { value: '定格动画', label: '定格动画' },
-] as const;
-
-function clampSplitPct(n: number): number {
-  return Math.min(SPLIT_MAX, Math.max(SPLIT_MIN, Math.round(n * 10) / 10));
-}
-
-const SKILL_CHIPS: Array<{ id: ScriptDeskSkillId; label: string; segment: 'brief' | 'draft' | 'qa' }> = [
-  { id: 'topic', label: '选题', segment: 'brief' },
-  { id: 'world', label: '世界观', segment: 'brief' },
-  { id: 'character', label: '人物', segment: 'brief' },
-  { id: 'plot', label: '剧情', segment: 'brief' },
-  { id: 'pacing', label: '节奏', segment: 'draft' },
-  { id: 'dialogue', label: '对白', segment: 'draft' },
-  { id: 'hooks', label: '爆点', segment: 'draft' },
-  { id: 'consistency', label: '一致性', segment: 'qa' },
-  { id: 'generate', label: '生成剧本', segment: 'draft' },
-];
-
-function compact(text: string, max = 48) {
-  const t = text.replace(/\s+/g, ' ').trim();
-  return t.length > max ? `${t.slice(0, max)}…` : t;
-}
-
-/** Brief 已可用：至少有剧名或 logline，才允许首次选集数生成分集 */
-function isBriefReadyForFirstGen(pkg: ScreenplayPackage): boolean {
-  return Boolean(pkg.brief.title?.trim() || pkg.brief.logline?.trim());
-}
-
-function isVisualStyleReady(pkg: ScreenplayPackage): boolean {
-  return Boolean(pkg.bible.world?.visualStyleNotes?.trim());
-}
-
-/** 列表标题：去掉与集号重复的「第N集」前缀；若标题仅有集号则返回空串 */
-function episodeDisplayTitle(index: number, title?: string): string {
-  const raw = (title ?? '').trim();
-  if (!raw) return '';
-  return raw
-    .replace(new RegExp(`^第\\s*${index}\\s*集\\s*[·\\-—:：]?\\s*`), '')
-    .trim();
-}
+// Q-01: 模块级常量与纯函数已迁至 ./script-desk/desk-helpers.ts
 
 function ScriptDeskBlock(props: NodeProps) {
   const { updateNodeData, getNodes, getEdges } = useReactFlow();
   const appendLog = useActivityLog((s) => s.append);
-  const openAssetAt = useAssetLibraryModalUi((s) => s.openAt);
+  const openAssetAtRaw = useAssetLibraryModalUi((s) => s.openAt);
+  const {
+    options: llmOptions,
+    activeOption: llmActiveOption,
+    llmModelLabel,
+    selectModel: selectLlmModel,
+    openConnectionsSettings: openLlmSettings,
+  } = useConnectedLlmModels();
   const nodeData = props.data as Record<string, unknown> | undefined;
   const pkg = useMemo(() => readScriptDeskPackage(nodeData), [nodeData]);
   const connectedPictureGenId = useMemo(
     () => resolveConnectedPictureGenId(props.id, getNodes(), getEdges()),
     [props.id, getNodes, getEdges],
   );
+  // H-02: 交接回程状态——比对相连分镜台已拆镜的成稿 hash（只读展示）
+  const scriptHash = useMemo(() => packageSourceHash(pkg), [pkg]);
+  const storyboardSync = useStore(
+    useCallback((s: ReactFlowState) => {
+      const deskId = resolveConnectedStoryboardDeskId(props.id, s.nodes, s.edges);
+      if (!deskId) return 'none' as const;
+      const desk = s.nodes.find((n) => n.id === deskId);
+      return deriveStoryboardSyncStatus(desk?.data as Record<string, unknown> | undefined, scriptHash);
+    }, [props.id, scriptHash]),
+  );
+  const storyboardSyncText = storyboardSyncLabel(storyboardSync);
   const session = (nodeData?.agentSession as ScriptDeskAgentSession | undefined) ?? {
     messages: [],
     updatedAt: new Date().toISOString(),
@@ -185,6 +169,8 @@ function ScriptDeskBlock(props: NodeProps) {
   const [draftsOpen, setDraftsOpen] = useState(false);
   const [handoffOpen, setHandoffOpen] = useState(false);
   const [editingBibleId, setEditingBibleId] = useState<string | null>(null);
+  const [renamingBibleCharId, setRenamingBibleCharId] = useState<string | null>(null);
+  const [renameCharText, setRenameCharText] = useState('');
   const [mergeSelection, setMergeSelection] = useState<string[]>([]);
   const [mergeType, setMergeType] = useState<'character' | 'scene' | null>(null);
   const [outlineView, setOutlineView] = useState(false);
@@ -192,7 +178,6 @@ function ScriptDeskBlock(props: NodeProps) {
   const [findOpen, setFindOpen] = useState(false);
   const [findText, setFindText] = useState('');
   const [replaceText, setReplaceText] = useState('');
-  const [findScope, setFindScope] = useState<'current' | 'all'>('all');
   const [ingestPreviewOpen, setIngestPreviewOpen] = useState(false);
   const [ingestPreviewEps, setIngestPreviewEps] = useState<ScreenplayEpisode[]>([]);
   const [pendingIngestSource, setPendingIngestSource] = useState<'pasted' | 'uploaded'>('pasted');
@@ -201,12 +186,22 @@ function ScriptDeskBlock(props: NodeProps) {
   const [failedEpisodeIndexes, setFailedEpisodeIndexes] = useState<number[]>([]);
   const [renamingDraftId, setRenamingDraftId] = useState<string | null>(null);
   const [renamingDraftText, setRenamingDraftText] = useState('');
+  const [openEpIds, setOpenEpIds] = useState<Set<string>>(() => new Set(initialOpenEpisodeIds(pkg)));
+  const [selectedEpIds, setSelectedEpIds] = useState<Set<string>>(() => new Set());
+  const [streamPreview, setStreamPreview] = useState('');
+  const [chatSearch, setChatSearch] = useState('');
+  const [collapsedMsgIds, setCollapsedMsgIds] = useState<Set<string>>(() => new Set());
   const tipClearRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const dirtyRef = useRef(false);
   const autoSaveTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const prevConfirmedRef = useRef(false);
   const lastOpenStudioRequestAtRef = useRef<string | null>(null);
+  const lastUndoRef = useRef<UndoLatch | null>(null);
+  const latestDraftRef = useRef({ pkg, session, entryMode, id: props.id });
+  latestDraftRef.current = { pkg, session, entryMode, id: props.id };
+  const pkgRef = useRef(pkg);
+  pkgRef.current = pkg;
 
   // 分镜台「打开上游编剧台」：写入 openStudioRequest 后自动展开本台
   useEffect(() => {
@@ -232,11 +227,21 @@ function ScriptDeskBlock(props: NodeProps) {
   const getScriptDeskDraft = useWorkspaceDocument((s) => s.getScriptDeskDraft);
   const upsertScriptDeskWorkingDraft = useWorkspaceDocument((s) => s.upsertScriptDeskWorkingDraft);
   const renameScriptDeskDraft = useWorkspaceDocument((s) => s.renameScriptDeskDraft);
+  const workspaceCharacters = useWorkspaceDocument((s) => s.characters.characters);
+  const upsertCharacter = useWorkspaceDocument((s) => s.upsertCharacter);
 
   const { privateItems, publicItems, allItems } = useAllAssetLibraryItems();
   const libChars = useMemo(() => allItems.filter((i) => i.kind === 'character'), [allItems]);
   const libScenes = useMemo(() => allItems.filter((i) => i.kind === 'scene'), [allItems]);
   const hasLibraryItems = libChars.length > 0 || libScenes.length > 0;
+  const openAssetAt = useCallback((target: { tab: 'character' | 'scene'; itemId: string }) => {
+    const pool = target.tab === 'character' ? libChars : libScenes;
+    const itemId = resolveLibraryItemId(
+      target.itemId,
+      pool.map((item) => ({ id: item.id, name: item.label, label: item.label })),
+    );
+    openAssetAtRaw({ ...target, itemId });
+  }, [libChars, libScenes, openAssetAtRaw]);
 
   const epCount = pkg.screenplay.episodes.length;
   const charCount = pkg.bible.characters.length;
@@ -265,16 +270,27 @@ function ScriptDeskBlock(props: NodeProps) {
     if (undoStackRef.current.length > 20) undoStackRef.current.shift();
   }, []);
 
-  const savePkg = useCallback((next: ScreenplayPackage, extra: Record<string, unknown> = {}) => {
-    pushUndo(pkg);
+  const savePkg: SavePkgFn = useCallback((nextOrFn, extra: Record<string, unknown> = {}, opts) => {
+    const current = pkgRef.current;
+    const next = typeof nextOrFn === 'function' ? nextOrFn(current) : nextOrFn;
+    if (next === current) return;
+    const mode: UndoMode = opts?.undo ?? 'struct';
+    const now = Date.now();
+    if (shouldPushUndo(mode, lastUndoRef.current, now)) {
+      pushUndo(current);
+    }
+    if (mode === 'struct' || mode === 'typing') {
+      lastUndoRef.current = { mode, at: now };
+    }
+    pkgRef.current = next;
     persistScriptDeskPackage(updateNodeData, props.id, next, extra);
-  }, [props.id, updateNodeData, pushUndo, pkg]);
+  }, [props.id, updateNodeData, pushUndo]);
 
-  // F-08: 跟踪确认状态；显示确认失效 banner
+  // F-08: 跟踪确认状态；显示确认失效 banner（换稿/重置必须复位 latch）
   useEffect(() => {
     if (pkg.status === 'confirmed') prevConfirmedRef.current = true;
   }, [pkg.status]);
-  const showUnconfirmBanner = pkg.status !== 'confirmed' && prevConfirmedRef.current && epCount > 0;
+  const showUnconfirmBanner = shouldShowUnconfirmBanner(pkg.status, prevConfirmedRef.current, epCount);
 
   // 修复历史脏数据：模型 JSON 被当成纯文本切开后，title 会吃进 "bodyMd"
   useEffect(() => {
@@ -285,7 +301,7 @@ function ScriptDeskBlock(props: NodeProps) {
     if (!dirty) return;
     savePkg(touchScreenplayPackage(pkg, {
       screenplay: { ...pkg.screenplay, episodes: fixed },
-    }));
+    }), {}, { undo: false });
   }, [pkg, savePkg]);
 
   const setEntryMode = useCallback((mode: EntryMode) => {
@@ -648,7 +664,7 @@ function ScriptDeskBlock(props: NodeProps) {
       appendLog(`编剧台 Agent · ${skillId}`);
     } catch (e) {
       const isAbort = e instanceof DOMException && e.name === 'AbortError';
-      const msg = e instanceof Error ? e.message : String(e);
+      const msg = formatScriptDeskError(e);
       if (isAbort) {
         setTip('已停止');
         appendLog(`编剧台 Agent 已停止 · ${skillId}`);
@@ -665,6 +681,7 @@ function ScriptDeskBlock(props: NodeProps) {
     } finally {
       if (abortRef.current === ac) abortRef.current = null;
       setBusy(false);
+      setStreamPreview('');
     }
   }, [activeSkills, appendLog, chatInput, openFirstGenFloat, pkg, props.id, session, updateNodeData, privateItems, publicItems]);
 
@@ -687,13 +704,10 @@ function ScriptDeskBlock(props: NodeProps) {
     }
   }, [appendLog, firstGenFloatDeferred, pkg, savePkg, session]);
 
-  // C-02: 丢弃 pending patch（标记 discarded，不修改 package）
+  // C-02: 丢弃 pending patch（标记 discarded，并去掉全文避免 node.data 膨胀）
   const handleDiscardMessage = useCallback((messageId: string) => {
-    const messages = session.messages.map((m) =>
-      m.id === messageId ? { ...m, discarded: true } : m,
-    );
     updateNodeData(props.id, {
-      agentSession: { ...session, messages, updatedAt: new Date().toISOString() },
+      agentSession: discardPendingMessagePatch(session, messageId),
     });
     setTip('已丢弃此步产出');
     appendLog('编剧台：已丢弃 Agent 产出');
@@ -789,11 +803,13 @@ function ScriptDeskBlock(props: NodeProps) {
       });
       updateNodeData(props.id, { agentSession: nextSession });
       setTip(`生成中 第 ${i + 1}/${resolvedCount} 集…`);
+      setStreamPreview('');
       try {
         const result = await runAppendEpisodeSkill(currentPkg, {
           nextEpisodeIndex: nextIndex,
           userInstruction: chatInput.trim() || undefined,
           signal: ac.signal,
+          onChunk: (chunk) => setStreamPreview((prev) => prev + chunk),
         });
         if (result.patch) {
           currentPkg = touchScreenplayPackage(currentPkg, result.patch);
@@ -817,7 +833,7 @@ function ScriptDeskBlock(props: NodeProps) {
         if (isAbort) { aborted = true; break; }
         failed.push(nextIndex);
         setSkeletonIndexes((prev) => prev.filter((idx) => idx !== nextIndex));
-        const errMsg = e instanceof Error ? e.message : String(e);
+        const errMsg = formatScriptDeskError(e);
         nextSession = appendAgentMessage(nextSession, {
           role: 'system',
           content: `生成失败 · 第 ${nextIndex} 集：${errMsg}（可单独重试）`,
@@ -828,6 +844,7 @@ function ScriptDeskBlock(props: NodeProps) {
       }
     }
 
+    setStreamPreview('');
     currentPkg = runAutoLint(currentPkg);
     savePkg(currentPkg);
 
@@ -969,11 +986,13 @@ function ScriptDeskBlock(props: NodeProps) {
       });
       updateNodeData(props.id, { agentSession: nextSession });
       setTip(`续写中 第 ${i + 1}/${count} 集（将写入第 ${nextIndex} 集）…`);
+      setStreamPreview('');
       try {
         const result = await runAppendEpisodeSkill(currentPkg, {
           nextEpisodeIndex: nextIndex,
           userInstruction: chatInput.trim() || undefined,
           signal: ac.signal,
+          onChunk: (chunk) => setStreamPreview((prev) => prev + chunk),
         });
         if (result.patch) {
           currentPkg = touchScreenplayPackage(currentPkg, result.patch);
@@ -997,7 +1016,7 @@ function ScriptDeskBlock(props: NodeProps) {
         const isAbort = e instanceof DOMException && e.name === 'AbortError';
         if (isAbort) { aborted = true; break; }
         failedIndexes.push(nextIndex);
-        const errMsg = e instanceof Error ? e.message : String(e);
+        const errMsg = formatScriptDeskError(e);
         nextSession = appendAgentMessage(nextSession, {
           role: 'system',
           content: `续写失败 · 第 ${nextIndex} 集：${errMsg}`,
@@ -1030,6 +1049,7 @@ function ScriptDeskBlock(props: NodeProps) {
       setTip(aborted ? '已停止' : '续写失败，未成功生成任何集');
     }
     if (abortRef.current === ac) abortRef.current = null;
+    setStreamPreview('');
     setSkeletonIndexes([]);
     setContinueBusy(false);
     updateNodeData(props.id, { status: 'success' });
@@ -1066,6 +1086,7 @@ function ScriptDeskBlock(props: NodeProps) {
     abortRef.current = ac;
     setRewritingEpIndex(episodeIndex);
     setBusy(true);
+    setStreamPreview('');
     updateNodeData(props.id, { status: 'running', entryMode: 'agent' });
 
     let nextSession = appendAgentMessage(session, {
@@ -1080,6 +1101,7 @@ function ScriptDeskBlock(props: NodeProps) {
         episodeIndex,
         userInstruction: chatInput.trim() || undefined,
         signal: ac.signal,
+        onChunk: (chunk) => setStreamPreview((prev) => prev + chunk),
       });
       // E-05: 不直接落盘，改为 pending patch，用户应用后才写入
       nextSession = appendAgentMessage(nextSession, {
@@ -1100,7 +1122,7 @@ function ScriptDeskBlock(props: NodeProps) {
       setRightDrawerOpen(true);
     } catch (e) {
       const isAbort = e instanceof DOMException && e.name === 'AbortError';
-      const errMsg = e instanceof Error ? e.message : String(e);
+      const errMsg = formatScriptDeskError(e);
       if (isAbort) {
         setTip(`已停止重写第 ${episodeIndex} 集`);
         appendLog(`重写第 ${episodeIndex} 集已停止`);
@@ -1117,8 +1139,9 @@ function ScriptDeskBlock(props: NodeProps) {
       if (abortRef.current === ac) abortRef.current = null;
       setRewritingEpIndex(null);
       setBusy(false);
+      setStreamPreview('');
     }
-  }, [appendLog, busy, chatInput, continueBusy, pkg, props.id, rewritingEpIndex, savePkg, session, updateNodeData]);
+  }, [appendLog, busy, chatInput, continueBusy, pkg, props.id, rewritingEpIndex, session, updateNodeData]);
 
   const handleExportPackage = useCallback(async () => {
     try {
@@ -1138,44 +1161,120 @@ function ScriptDeskBlock(props: NodeProps) {
 
   const patchBriefTitle = useCallback((value: string) => {
     dirtyRef.current = true;
-    let next = touchScreenplayPackage(pkg, { brief: { ...pkg.brief, title: value } });
-    if (pkg.status === 'confirmed') next = unconfirmIfEdited(next);
-    savePkg(next);
-  }, [pkg, savePkg]);
+    savePkg((current) => {
+      let next = touchScreenplayPackage(current, { brief: { ...current.brief, title: value } });
+      if (current.status === 'confirmed') next = unconfirmIfEdited(next);
+      return next;
+    }, {}, { undo: 'typing' });
+  }, [savePkg]);
 
   const patchEpisodeBody = useCallback((episodeId: string, bodyMd: string) => {
     dirtyRef.current = true;
-    const episodes = pkg.screenplay.episodes.map((ep) => (
-      ep.id === episodeId
-        ? { ...ep, bodyMd, updatedAt: new Date().toISOString() }
-        : ep
-    ));
-    let next = touchScreenplayPackage(pkg, {
-      screenplay: { ...pkg.screenplay, episodes },
-    });
-    if (pkg.status === 'confirmed') next = unconfirmIfEdited(next);
-    savePkg(next);
-  }, [pkg, savePkg]);
+    savePkg((current) => {
+      const episodes = current.screenplay.episodes.map((ep) => (
+        ep.id === episodeId
+          ? { ...ep, bodyMd, updatedAt: new Date().toISOString() }
+          : ep
+      ));
+      let next = touchScreenplayPackage(current, {
+        screenplay: { ...current.screenplay, episodes },
+      });
+      if (current.status === 'confirmed') next = unconfirmIfEdited(next);
+      return next;
+    }, {}, { undo: 'typing' });
+  }, [savePkg]);
 
   // B-01: 更新 Bible 人物卡片字段
   const patchBibleCharacter = useCallback((charId: string, field: string, value: string) => {
     dirtyRef.current = true;
-    const chars = pkg.bible.characters.map((c) => c.id === charId ? { ...c, [field]: value } : c);
-    savePkg(touchScreenplayPackage(pkg, { bible: { ...pkg.bible, characters: chars } }));
-  }, [pkg, savePkg]);
+    savePkg((current) => {
+      const chars = current.bible.characters.map((c) => c.id === charId ? { ...c, [field]: value } : c);
+      return touchScreenplayPackage(current, { bible: { ...current.bible, characters: chars } });
+    }, {}, { undo: 'typing' });
+  }, [savePkg]);
 
   // B-01: 更新 Bible 场景卡片字段
   const patchBibleScene = useCallback((sceneId: string, field: string, value: string) => {
     dirtyRef.current = true;
-    const scenes = pkg.bible.scenes.map((s) => s.id === sceneId ? { ...s, [field]: value } : s);
-    savePkg(touchScreenplayPackage(pkg, { bible: { ...pkg.bible, scenes } }));
-  }, [pkg, savePkg]);
+    savePkg((current) => {
+      const scenes = current.bible.scenes.map((s) => s.id === sceneId ? { ...s, [field]: value } : s);
+      return touchScreenplayPackage(current, { bible: { ...current.bible, scenes } });
+    }, {}, { undo: 'typing' });
+  }, [savePkg]);
 
   // B-04: 更新世界观字段
   const patchBibleWorld = useCallback((field: string, value: string) => {
     dirtyRef.current = true;
-    savePkg(touchScreenplayPackage(pkg, { bible: { ...pkg.bible, world: { ...pkg.bible.world, [field]: value } } }));
-  }, [pkg, savePkg]);
+    savePkg((current) => (
+      touchScreenplayPackage(current, {
+        bible: { ...current.bible, world: { ...current.bible.world, [field]: value } },
+      })
+    ), {}, { undo: 'typing' });
+  }, [savePkg]);
+
+  // B-08: 人物全局改名（正文 + 标题 + Bible + 素材库档案同步）
+  const handleRenameCharacter = useCallback(async (charId: string, newNameRaw: string) => {
+    const current = pkgRef.current;
+    const target = current.bible.characters.find((c) => c.id === charId);
+    if (!target) return;
+    const oldName = target.name.trim();
+    const newName = newNameRaw.trim();
+    if (!newName || newName === oldName) {
+      setRenamingBibleCharId(null);
+      return;
+    }
+    if (current.bible.characters.some((c) => c.id !== charId && c.name.trim() === newName)) {
+      setTip(`已存在同名人物「${newName}」，如需归并请用「合并」`);
+      return;
+    }
+    const libHit = findLibraryCharacterForRename(workspaceCharacters, {
+      oldName,
+      libraryCharacterId: target.libraryCharacterId,
+    });
+    if (libHit) {
+      const conflict = libraryCharacterRenameConflict(workspaceCharacters, libHit.id, newName);
+      if (conflict) {
+        setTip(`素材库已有同名角色「${conflict.name}」，请先在素材库处理冲突后再改名`);
+        return;
+      }
+    }
+    const { bodyHits, bibleHits } = countCharacterRenameHits(current, oldName);
+    const ok = await askConfirm({
+      title: `全局改名「${oldName}」→「${newName}」`,
+      description: `将替换成稿正文/集标题 ${bodyHits} 处、设定卡 ${bibleHits} 处${libHit ? '，并同步素材库角色档案名（旧名写入别名）' : ''}。${current.status === 'confirmed' ? '改名后成稿确认将失效，需重新确认。' : ''}`,
+      confirmLabel: '改名',
+    });
+    if (!ok) return;
+    dirtyRef.current = true;
+    savePkg((live) => {
+      let next = renameCharacterInPackage(live, oldName, newName);
+      if (live.status === 'confirmed') next = unconfirmIfEdited(next);
+      if (libHit) {
+        next = {
+          ...next,
+          bible: {
+            ...next.bible,
+            characters: next.bible.characters.map((c) => (
+              c.id === charId
+                ? { ...c, libraryCharacterId: libHit.id }
+                : c
+            )),
+          },
+        };
+      }
+      return next;
+    });
+    if (libHit) {
+      upsertCharacter(renameLibraryCharacterProfile(libHit, oldName, newName));
+    }
+    setRenamingBibleCharId(null);
+    setTip(
+      libHit
+        ? `已改名 ${oldName} → ${newName} · 正文 ${bodyHits} 处、设定卡 ${bibleHits} 处 · 素材库已同步`
+        : `已改名 ${oldName} → ${newName} · 正文 ${bodyHits} 处、设定卡 ${bibleHits} 处 · 素材库无匹配档案`,
+    );
+    appendLog(`编剧台：人物全局改名 ${oldName} → ${newName} · 正文 ${bodyHits} / 设定 ${bibleHits}${libHit ? ' · 库同步' : ''}`);
+  }, [appendLog, savePkg, upsertCharacter, workspaceCharacters]);
 
   // B-01: 删除 Bible 人物
   const removeBibleCharacter = useCallback(async (charId: string, name: string) => {
@@ -1286,21 +1385,100 @@ function ScriptDeskBlock(props: NodeProps) {
 
   // E-03: 滚动到指定集
   const scrollToEpisode = useCallback((epId: string) => {
+    setOpenEpIds((prev) => {
+      if (prev.has(epId)) return prev;
+      const next = new Set(prev);
+      next.add(epId);
+      return next;
+    });
     const el = document.getElementById(`sd2-ep-${epId}`);
     el?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }, []);
 
-  // X-03: Ctrl+Z listener（不在 textarea/input 中触发）
+  const onToggleSelectEpisode = useCallback((episodeId: string) => {
+    setSelectedEpIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(episodeId)) next.delete(episodeId);
+      else next.add(episodeId);
+      return next;
+    });
+  }, []);
+
+  const onClearSelectedEpisodes = useCallback(() => {
+    setSelectedEpIds(new Set());
+  }, []);
+
+  const handleBatchRewrite = useCallback(async () => {
+    if (busy || continueBusy || rewritingEpIndex != null) return;
+    const indexes = pkg.screenplay.episodes
+      .filter((ep) => selectedEpIds.has(ep.id))
+      .map((ep) => ep.index)
+      .sort((a, b) => a - b);
+    if (indexes.length === 0) return;
+    const ok = await askConfirm({
+      title: `批量重写 ${indexes.length} 集？`,
+      description: `将依次重写第 ${indexes.join('、')} 集，每集产出需单独应用。`,
+      confirmLabel: '开始重写',
+    });
+    if (!ok) return;
+    for (const idx of indexes) {
+      if (abortRef.current?.signal.aborted) break;
+      await handleRewriteEpisode(idx);
+    }
+    setSelectedEpIds(new Set());
+  }, [busy, continueBusy, handleRewriteEpisode, pkg.screenplay.episodes, rewritingEpIndex, selectedEpIds]);
+
+  const handlePasteFromClipboard = useCallback(async () => {
+    try {
+      const text = await navigator.clipboard.readText();
+      if (!text.trim()) {
+        setTip('剪贴板为空');
+        return;
+      }
+      if (!textLooksLikeEpisodicScreenplay(text)) {
+        setTip('剪贴板不像分集剧本（需含「第N集」）');
+        return;
+      }
+      setIngestText(text);
+      setEntryMode('ingest');
+      setTip('已从剪贴板填入，确认后写入成稿');
+    } catch {
+      setTip('无法读取剪贴板（需授予权限）');
+    }
+  }, [setEntryMode]);
+
+  const onToggleCollapseMessage = useCallback((id: string) => {
+    setCollapsedMsgIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+
+  const onCollapseApplied = useCallback(() => {
+    setCollapsedMsgIds((prev) => {
+      const next = new Set(prev);
+      for (const m of session.messages) {
+        if (m.applied) next.add(m.id);
+      }
+      return next;
+    });
+  }, [session.messages]);
+
+  // X-03: Ctrl+Z —— 输入框内仅拦截「结构性」撤销；键入级交给浏览器原生
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (!studioOpen) return;
       if (e.key !== 'z' || !e.ctrlKey || e.metaKey) return;
-      const tag = (e.target as HTMLElement)?.tagName;
-      if (tag === 'TEXTAREA' || tag === 'INPUT') return;
       if (undoStackRef.current.length === 0) return;
+      const tag = (e.target as HTMLElement)?.tagName;
+      const inField = tag === 'TEXTAREA' || tag === 'INPUT';
+      if (inField && lastUndoRef.current?.mode === 'typing') return;
       e.preventDefault();
       const prev = undoStackRef.current.pop()!;
-      savePkg(prev);
+      lastUndoRef.current = null;
+      savePkg(prev, {}, { undo: false });
       setTip('已撤销');
     };
     window.addEventListener('keydown', handler);
@@ -1323,15 +1501,16 @@ function ScriptDeskBlock(props: NodeProps) {
     }, ms);
   }, []);
 
-  // S-01: 自动工作草稿定时存储（每 60s）
+  // S-01: 自动工作草稿定时存储（每 60s）；interval 不依赖 pkg，避免键入重置
   useEffect(() => {
     if (!studioOpen || !hasDraftMemory) return;
     const id = setInterval(() => {
+      const cur = latestDraftRef.current;
       const { isNew } = upsertScriptDeskWorkingDraft({
-        package: pkg,
-        agentSession: session,
-        entryMode,
-        sourceBlockId: props.id,
+        package: cur.pkg,
+        agentSession: cur.session,
+        entryMode: cur.entryMode,
+        sourceBlockId: cur.id,
       });
       if (isNew) showTimedTip('已自动保存到草稿「工作中」');
       dirtyRef.current = false;
@@ -1341,10 +1520,11 @@ function ScriptDeskBlock(props: NodeProps) {
       clearInterval(id);
       autoSaveTimerRef.current = null;
     };
-  }, [studioOpen, hasDraftMemory, pkg, session, entryMode, props.id, upsertScriptDeskWorkingDraft, showTimedTip]);
+  }, [studioOpen, hasDraftMemory, upsertScriptDeskWorkingDraft, showTimedTip]);
 
-  // S-02: beforeunload 离开提示
+  // S-02: beforeunload 离开提示（仅台打开时注册）
   useEffect(() => {
+    if (!studioOpen) return;
     const handler = (e: BeforeUnloadEvent) => {
       if (dirtyRef.current) {
         e.preventDefault();
@@ -1353,25 +1533,38 @@ function ScriptDeskBlock(props: NodeProps) {
     };
     window.addEventListener('beforeunload', handler);
     return () => window.removeEventListener('beforeunload', handler);
-  }, []);
+  }, [studioOpen]);
 
   const applyDeskSnapshot = useCallback((folder: {
     package: ScreenplayPackage;
     agentSession: ScriptDeskAgentSession;
     entryMode?: EntryMode;
   }) => {
+    prevConfirmedRef.current = confirmedLatchForSnapshot(folder.package.status);
+    lastUndoRef.current = null;
+    undoStackRef.current = [];
+    pkgRef.current = folder.package;
     persistScriptDeskPackage(updateNodeData, props.id, folder.package, {
-      agentSession: folder.agentSession,
+      agentSession: compactAgentSession(folder.agentSession),
       entryMode: folder.entryMode ?? 'agent',
     });
     setEntryMode(folder.entryMode ?? 'agent');
     setIngestText(screenplayFullText(folder.package));
     setChatInput('');
     setRightTab('screenplay');
+    setOpenEpIds(new Set(initialOpenEpisodeIds(folder.package)));
+    setSelectedEpIds(new Set());
+    setStreamPreview('');
+    setChatSearch('');
+    setCollapsedMsgIds(new Set());
   }, [props.id, setEntryMode, updateNodeData]);
 
   const resetDeskToEmpty = useCallback(() => {
     const empty = emptyScreenplayPackage();
+    prevConfirmedRef.current = false;
+    lastUndoRef.current = null;
+    undoStackRef.current = [];
+    pkgRef.current = empty;
     persistScriptDeskPackage(updateNodeData, props.id, empty, {
       agentSession: { messages: [], updatedAt: new Date().toISOString() },
       entryMode: 'agent',
@@ -1385,6 +1578,11 @@ function ScriptDeskBlock(props: NodeProps) {
     setContinueOpen(false);
     setFirstGenFloatDeferred(false);
     setGenFloatExpanded(true);
+    setOpenEpIds(new Set());
+    setSelectedEpIds(new Set());
+    setStreamPreview('');
+    setChatSearch('');
+    setCollapsedMsgIds(new Set());
   }, [props.id, setEntryMode, updateNodeData]);
 
   const handleResetDesk = useCallback(async () => {
@@ -1439,14 +1637,15 @@ function ScriptDeskBlock(props: NodeProps) {
     }
 
     if (hasDraftMemory) {
-      const auto = saveScriptDeskDraft({
+      const { folder: auto, isNew } = upsertScriptDeskWorkingDraft({
         package: pkg,
         agentSession: session,
         entryMode,
         sourceBlockId: props.id,
       });
-      showTimedTip(`当前《${auto.title}》已自动存入草稿`);
-      toastSuccess(`当前《${auto.title}》已自动存入草稿`);
+      const label = auto.title || '工作中';
+      showTimedTip(isNew ? `当前《${label}》已自动存入草稿` : `当前《${label}》已更新到工作草稿`);
+      toastSuccess(isNew ? `当前《${label}》已自动存入草稿` : `当前《${label}》已更新到工作草稿`);
     }
 
     applyDeskSnapshot(folder);
@@ -1454,7 +1653,7 @@ function ScriptDeskBlock(props: NodeProps) {
     setRightDrawerOpen(true);
   }, [
     applyDeskSnapshot, entryMode, getScriptDeskDraft, hasDraftMemory,
-    pkg, props.id, saveScriptDeskDraft, session, showTimedTip,
+    pkg, props.id, session, showTimedTip, upsertScriptDeskWorkingDraft,
   ]);
 
   const handleDeleteDraftFolder = useCallback(async (draftId: string, draftTitle: string) => {
@@ -1522,7 +1721,7 @@ function ScriptDeskBlock(props: NodeProps) {
     setStudioOpen(false);
   }, [busy, continueBusy, rewritingEpIndex, hasDraftMemory, pkg, session, entryMode, props.id, upsertScriptDeskWorkingDraft, dirtyRef]);
 
-  const skillName = activeSkills[0] ? SKILL_CHIPS.find((s) => s.id === activeSkills[0])?.label : '';
+  const skillName = activeSkills[0] ? SKILL_CHIPS.find((s) => s.id === activeSkills[0])?.label ?? '' : '';
 
   return (
     <BlockShell {...props}>
@@ -1549,8 +1748,9 @@ function ScriptDeskBlock(props: NodeProps) {
           <div className="sd2-card__meta">
             {epCount} 集 · 设定 角 {charCount} · 场 {sceneCount}
             {connectedPictureGenId ? ' · 已连出图' : ''}
+            {storyboardSyncText ? ` · ${storyboardSyncText}` : ''}
           </div>
-          <div className="sd2-card__logline">{logline ? compact(logline, 72) : '点击打开编剧台 · Agent 共创或上传成稿'}</div>
+          <div className="sd2-card__logline">{logline ? compact(logline, 72) : '点击打开编剧台 · 共创或上传成稿'}</div>
           <div className="sd2-card__actions">
             <button type="button" className="sd2-btn sd2-btn--ghost" onClick={(e) => { e.stopPropagation(); setStudioOpen(true); }}>打开编剧台</button>
           </div>
@@ -1566,228 +1766,62 @@ function ScriptDeskBlock(props: NodeProps) {
         variant="default"
         className="sd2-modal"
         headerRight={(
-          <div className="sd2-header-right">
-            <div className="sd2-mode-seg" role="group" aria-label="创作入口">
-              <button
-                type="button"
-                className={`sd2-mode-seg__btn ${entryMode === 'agent' && activeSkills.includes('generate') ? 'is-on' : ''}`}
-                onClick={() => {
-                  setEntryMode('agent');
-                  toggleSkill('generate');
-                  if (pkg.screenplay.episodes.length === 0) {
-                    openFirstGenFloat(pkg);
-                  }
-                }}
-              >
-                <Wand2 size={13} strokeWidth={2} />
-                生成剧本
-              </button>
-              <button
-                type="button"
-                className={`sd2-mode-seg__btn ${entryMode === 'ingest' ? 'is-on' : ''}`}
-                disabled={busy || continueBusy || rewritingEpIndex != null}
-                onClick={() => setEntryMode('ingest')}
-              >
-                <FileUp size={13} strokeWidth={2} />
-                上传成稿
-              </button>
-            </div>
-
-            <div className="sd2-tool-strip" role="group" aria-label="工具">
-              <button
-                type="button"
-                className={`sd2-tool ${rightDrawerOpen && rightTab !== 'diagnostics' ? 'is-on' : ''}`}
-                onClick={() => setRightDrawerOpen((v) => !v)}
-                title="稿纸"
-                aria-label="稿纸"
-                aria-pressed={rightDrawerOpen}
-              >
-                <FileText size={15} strokeWidth={1.75} />
-              </button>
-              <button
-                type="button"
-                className={`sd2-tool ${rightDrawerOpen && rightTab === 'diagnostics' ? 'is-on' : ''} ${diagCount > 0 ? 'has-badge' : ''}`}
-                onClick={() => {
-                  setRightDrawerOpen(true);
-                  setRightTab('diagnostics');
-                }}
-                title={diagCount > 0 ? `诊断 · ${diagCount} 条` : '诊断'}
-                aria-label={diagCount > 0 ? `诊断，${diagCount} 条` : '诊断'}
-              >
-                <Stethoscope size={15} strokeWidth={1.75} />
-                {diagCount > 0 ? (
-                  <span className="sd2-tool__badge sd2-tool__badge--warn">{diagCount}</span>
-                ) : null}
-              </button>
-              <button
-                type="button"
-                className="sd2-tool"
-                disabled={busy || continueBusy || rewritingEpIndex != null}
-                onClick={() => void handleExtractBible()}
-                title="抽取设定"
-                aria-label="抽取设定"
-              >
-                <Sparkles size={15} strokeWidth={1.75} />
-              </button>
-              <button
-                type="button"
-                className={`sd2-tool ${draftsOpen ? 'is-on' : ''}`}
-                disabled={busy || continueBusy || rewritingEpIndex != null}
-                onClick={() => setDraftsOpen(true)}
-                title="草稿箱"
-                aria-label={`草稿箱${scriptDeskDrafts.length > 0 ? `，${scriptDeskDrafts.length} 份` : ''}`}
-              >
-                <FolderOpen size={15} strokeWidth={1.75} />
-                {scriptDeskDrafts.length > 0 ? (
-                  <span className="sd2-tool__badge">{scriptDeskDrafts.length}</span>
-                ) : null}
-              </button>
-              <button
-                type="button"
-                className="sd2-tool sd2-tool--danger"
-                disabled={busy || continueBusy || rewritingEpIndex != null}
-                onClick={() => void handleResetDesk()}
-                title="重置编剧台"
-                aria-label="重置编剧台"
-              >
-                <RotateCcw size={15} strokeWidth={1.75} />
-              </button>
-            </div>
-
-            {pkg.status === 'confirmed' ? (
-              <button type="button" className="sd2-btn sd2-btn--primary" disabled={busy} onClick={handleHandoffToStoryboard}>
-                <Send size={14} /> 送到分镜台
-              </button>
-            ) : (
-              <button
-                type="button"
-                className="sd2-btn sd2-btn--primary"
-                disabled={busy || !screenplayFullText(pkg).trim()}
-                onClick={handleConfirm}
-              >
-                <Check size={14} /> 确认成稿
-              </button>
-            )}
-
-            <div className="sd2-more-wrap">
-              <button type="button" className="sd2-tool" onClick={() => setShowMoreMenu((v) => !v)} aria-label="更多" title="更多">⋯</button>
-              {showMoreMenu && (
-                <div className="sd2-more-menu">
-                  <button type="button" onClick={() => { handleExportMd(); setShowMoreMenu(false); }}>导出 MD</button>
-                  <button type="button" onClick={() => { handleExportJson(); setShowMoreMenu(false); }}>导出 JSON</button>
-                  <button type="button" onClick={() => { void handleExportPackage(); setShowMoreMenu(false); }}>导出 ZIP</button>
-                  {!!legacyBreakdown && (
-                    <div className="sd2-more-menu__warn">检测到旧版分镜表</div>
-                  )}
-                  {isDevPromptEnabled() && (
-                    <div className="sd2-more-menu__dev">
-                      <ScriptDeskDevPackOverlay pkg={pkg} session={session} savePkg={savePkg} />
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-          </div>
+          <DeskHeader
+            entryMode={entryMode}
+            activeSkills={activeSkills}
+            pkg={pkg}
+            session={session}
+            busy={busy}
+            continueBusy={continueBusy}
+            rewritingEpIndex={rewritingEpIndex}
+            rightDrawerOpen={rightDrawerOpen}
+            rightTab={rightTab}
+            diagCount={diagCount}
+            draftsOpen={draftsOpen}
+            draftCount={scriptDeskDrafts.length}
+            showMoreMenu={showMoreMenu}
+            legacyBreakdown={legacyBreakdown}
+            savePkg={savePkg}
+            onToggleGenerate={() => {
+              setEntryMode('agent');
+              toggleSkill('generate');
+              if (pkg.screenplay.episodes.length === 0) {
+                openFirstGenFloat(pkg);
+              }
+            }}
+            onSetIngest={() => setEntryMode('ingest')}
+            onToggleDrawer={() => setRightDrawerOpen((v) => !v)}
+            onOpenDiagnostics={() => {
+              setRightDrawerOpen(true);
+              setRightTab('diagnostics');
+            }}
+            onExtractBible={() => void handleExtractBible()}
+            onOpenDrafts={() => setDraftsOpen(true)}
+            onResetDesk={() => void handleResetDesk()}
+            onHandoff={handleHandoffToStoryboard}
+            onConfirm={handleConfirm}
+            onToggleMore={() => setShowMoreMenu((v) => !v)}
+            onExportMd={() => { handleExportMd(); setShowMoreMenu(false); }}
+            onExportJson={() => { handleExportJson(); setShowMoreMenu(false); }}
+            onExportZip={() => { void handleExportPackage(); setShowMoreMenu(false); }}
+          />
         )}
       >
         {/* 首次生成选集数：对话区底浮层（由「应用」成功触发；顶栏/右侧亦可打开） */}
 
         {draftsOpen && (
-          <div className="sd2-overlay" onClick={() => setDraftsOpen(false)}>
-            <div className="sd2-popup sd2-popup--drafts" onClick={(e) => e.stopPropagation()} role="dialog" aria-label="编剧台草稿箱">
-              <h3 className="sd2-popup__title">草稿箱</h3>
-              <p className="sd2-popup__desc">每个剧本一个文件夹。打开会回显到编剧台；若当前有制作中内容，会先自动存入草稿。</p>
-              {scriptDeskDrafts.length === 0 ? (
-                <div className="sd2-drafts-empty">暂无草稿</div>
-              ) : (
-                <ul className="sd2-drafts-list">
-                  {scriptDeskDrafts.map((folder) => (
-                    <li key={folder.id} className="sd2-draft-folder">
-                      <div className="sd2-draft-folder__icon" aria-hidden>
-                        <FolderOpen size={18} />
-                      </div>
-                      <div className="sd2-draft-folder__meta">
-                        <div className="sd2-draft-folder__title">
-                          {renamingDraftId === folder.id ? (
-                            <input
-                              className="sd2-draft-folder__rename-input"
-                              value={renamingDraftText}
-                              onChange={(e) => setRenamingDraftText(e.target.value)}
-                              onBlur={() => {
-                                if (renamingDraftText.trim() && renamingDraftText !== folder.title) {
-                                  renameScriptDeskDraft(folder.id, renamingDraftText);
-                                }
-                                setRenamingDraftId(null);
-                              }}
-                              onKeyDown={(e) => {
-                                if (e.key === 'Enter') {
-                                  if (renamingDraftText.trim() && renamingDraftText !== folder.title) {
-                                    renameScriptDeskDraft(folder.id, renamingDraftText);
-                                  }
-                                  setRenamingDraftId(null);
-                                } else if (e.key === 'Escape') {
-                                  setRenamingDraftId(null);
-                                }
-                              }}
-                              autoFocus
-                            />
-                          ) : (
-                            <span
-                              className="sd2-draft-folder__title-text"
-                              title="双击改名"
-                              onDoubleClick={() => {
-                                setRenamingDraftId(folder.id);
-                                setRenamingDraftText(folder.title);
-                              }}
-                            >
-                              {folder.title}
-                            </span>
-                          )}
-                          {folder.kind === 'autosave' && (
-                            <span className="sd2-draft-folder__tag">自动</span>
-                          )}
-                          {folder.sourceBlockId && (
-                            <span className="sd2-draft-folder__tag" title={folder.sourceBlockId}>源：{compact(folder.sourceBlockId, 20)}</span>
-                          )}
-                        </div>
-                        <div className="sd2-draft-folder__sub">
-                          {folder.episodeCount} 集 · {folder.wordCount} 字 · {new Date(folder.savedAt).toLocaleString()}
-                          {folder.package.screenplay.episodes.length > 0 && (
-                            <span className="sd2-draft-folder__preview">
-                              {folder.package.screenplay.episodes.slice(0, 3).map((ep) => `第${ep.index}集 ${ep.title || '未命名'}`).join(' · ')}
-                              {folder.package.screenplay.episodes.length > 3 ? ` …共${folder.package.screenplay.episodes.length}集` : ''}
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                      <div className="sd2-draft-folder__acts">
-                        <button
-                          type="button"
-                          className="sd2-btn sd2-btn--primary"
-                          disabled={busy || continueBusy || rewritingEpIndex != null}
-                          onClick={() => handleOpenDraftFolder(folder.id)}
-                        >
-                          打开
-                        </button>
-                        <button
-                          type="button"
-                          className="sd2-btn sd2-btn--ghost"
-                          disabled={busy || continueBusy || rewritingEpIndex != null}
-                          title="删除到回收站"
-                          onClick={() => void handleDeleteDraftFolder(folder.id, folder.title)}
-                        >
-                          <Trash2 size={13} />
-                        </button>
-                      </div>
-                    </li>
-                  ))}
-                </ul>
-              )}
-              <div className="sd2-popup__acts">
-                <button type="button" className="sd2-btn sd2-btn--ghost" onClick={() => setDraftsOpen(false)}>关闭</button>
-              </div>
-            </div>
-          </div>
+          <DraftsDrawer
+            drafts={scriptDeskDrafts}
+            renamingDraftId={renamingDraftId}
+            setRenamingDraftId={setRenamingDraftId}
+            renamingDraftText={renamingDraftText}
+            setRenamingDraftText={setRenamingDraftText}
+            renameScriptDeskDraft={renameScriptDeskDraft}
+            locked={busy || continueBusy || rewritingEpIndex != null}
+            onOpenDraft={handleOpenDraftFolder}
+            onDeleteDraft={handleDeleteDraftFolder}
+            onClose={() => setDraftsOpen(false)}
+          />
         )}
 
         <div className="sd2-layout" onClick={() => { if (showMoreMenu) setShowMoreMenu(false); if (epMoreMenuId) setEpMoreMenuId(null); if (chatMenu) setChatMenu(null); }}>
@@ -1822,7 +1856,11 @@ function ScriptDeskBlock(props: NodeProps) {
           </div>
 
           <div className="sd2-skill-hint">
-            {entryMode === 'agent' && skillName ? `本轮技能 · ${skillName}` : '\u00a0'}
+            {entryMode === 'agent' && skillName
+              ? `本轮意图 · ${skillName} · 发送=请求 · 应用=写稿`
+              : entryMode === 'agent'
+                ? '先点技能定意图，再发送说明；产出需「应用」才写入稿纸'
+                : '\u00a0'}
           </div>
 
           <div
@@ -1851,236 +1889,53 @@ function ScriptDeskBlock(props: NodeProps) {
                   />
                   <div className="sd2-ingest__actions">
                     <button type="button" className="sd2-btn sd2-btn--primary" onClick={handleIngestSave}>写入成稿</button>
-                    <button type="button" className="sd2-btn sd2-btn--ghost" onClick={() => setEntryMode('agent')}>改用 Agent 共创</button>
+                    <button type="button" className="sd2-btn sd2-btn--ghost" onClick={() => void handlePasteFromClipboard()}>从剪贴板填入</button>
+                    <button type="button" className="sd2-btn sd2-btn--ghost" onClick={() => setEntryMode('agent')}>改回共创</button>
                   </div>
                 </div>
               ) : (
-                <>
-                  <div className={`sd2-stage-chat${showGenFloat ? ' has-gen-float' : ''}`}>
-                  <div className="sd2-messages" onContextMenu={onChatContextMenu}>
-                    {session.messages.length === 0 && !hasDraftMemory && (
-                      <div className="sd2-empty-hero">
-                        <p className="sd2-empty-hero__eyebrow">Agent 共创</p>
-                        <h3 className="sd2-empty-hero__title">从选题到成稿，一步一步写清楚</h3>
-                        <p className="sd2-empty-hero__desc">先点上方技能，再用自然语言说明本轮目标。产出需点「应用」才会写入稿纸。</p>
-                        <div className="sd2-empty-hero__entries">
-                          <button
-                            type="button"
-                            className="sd2-empty-hero__entry"
-                            onClick={() => { setEntryMode('agent'); toggleSkill('topic'); }}
-                          >
-                            <MessageSquareText size={18} strokeWidth={1.5} />
-                            <span>Agent 共创</span>
-                            <small>从选题、世界观、人物开始，AI 陪你写完</small>
-                          </button>
-                          <button
-                            type="button"
-                            className="sd2-empty-hero__entry"
-                            onClick={() => setEntryMode('ingest')}
-                          >
-                            <FileUp size={18} strokeWidth={1.5} />
-                            <span>上传成稿</span>
-                            <small>已有小说/剧本，导入后抽设定再确认交付</small>
-                          </button>
-                          <button
-                            type="button"
-                            className="sd2-empty-hero__entry"
-                            onClick={() => setDraftsOpen(true)}
-                          >
-                            <FolderOpen size={18} strokeWidth={1.5} />
-                            <span>打开草稿</span>
-                            <small>继续之前存下的剧本草稿</small>
-                          </button>
-                        </div>
-                        <div className="sd2-empty-hero__hints">
-                          {(['topic', 'character', 'plot'] as ScriptDeskSkillId[]).map((id) => {
-                            const label = SKILL_CHIPS.find((s) => s.id === id)?.label ?? id;
-                            return (
-                              <button
-                                key={id}
-                                type="button"
-                                className="sd2-empty-hero__chip"
-                                onClick={() => { setEntryMode('agent'); toggleSkill(id); }}
-                              >
-                                从「{label}」开始
-                              </button>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    )}
-                    {session.messages.length === 0 && hasDraftMemory && (
-                      <div className="sd2-chat-blank" aria-label="空白对话">
-                        <p className="sd2-chat-blank__hint">
-                          对话已清空 · 《{title}》成稿记忆仍在，可继续共创或续写
-                        </p>
-                      </div>
-                    )}
-                    {session.messages.map((m) => {
-                      const summaryLines = m.pendingPatch && !m.applied && !m.discarded
-                        ? summarizePackagePatch(pkg, m.pendingPatch)
-                        : null;
-                      return (
-                      <div key={m.id} className={`sd2-msg sd2-msg--${m.role}`}>
-                        <div className="sd2-msg__meta">
-                          {m.role === 'user' ? '你' : m.role === 'assistant' ? '编剧 Agent' : '系统'}
-                          {m.skillId ? ` · ${m.skillId}` : ''}
-                        </div>
-                        <div className="sd2-msg__body">{m.content}</div>
-                        {m.pendingPatch && !m.applied && !m.discarded && (
-                          <div className="sd2-msg__patch-sum">
-                            <div className="sd2-msg__patch-sum-title">将写入变更：</div>
-                            {summaryLines && summaryLines.map((line, i) => (
-                              <div key={i} className="sd2-msg__patch-sum-line">{line}</div>
-                            ))}
-                            <div className="sd2-msg__apply-row">
-                              <button type="button" className="sd2-btn sd2-btn--primary" onClick={() => handleApplyMessage(m.id)}>应用</button>
-                              <button type="button" className="sd2-btn sd2-btn--ghost" onClick={() => handleDiscardMessage(m.id)}>丢弃</button>
-                            </div>
-                          </div>
-                        )}
-                        {m.applied && <div className="sd2-msg__applied">已应用</div>}
-                        {m.discarded && <div className="sd2-msg__applied" style={{ color: 'var(--sd2-faint)' }}>已丢弃</div>}
-                      </div>
-                      );
-                    })}
-                  </div>
-                  {showGenFloat && (
-                    <div
-                      className={`sd2-gen-float${genFloatExpanded ? ' is-expanded' : ' is-collapsed'}`}
-                      role="dialog"
-                      aria-label="选择生成集数"
-                      aria-expanded={genFloatExpanded}
-                    >
-                      {/* 升旗：点弧朝上把手后，选集自下向上升起 */}
-                      <div className="sd2-gen-float__sail" aria-hidden={!genFloatExpanded}>
-                        <div className="sd2-gen-float__sail-inner">
-                          <div className="sd2-gen-float__panel">
-                            <div className="sd2-gen-float__body">
-                              <div className="sd2-gen-float__opts">
-                                {([1, 2, 3, 5, 10] as const).map((n) => (
-                                  <button
-                                    key={n}
-                                    type="button"
-                                    className={`sd2-gen-float__opt ${genEpisodeCount === n ? 'is-on' : ''}`}
-                                    onClick={() => setGenEpisodeCount(n)}
-                                    tabIndex={genFloatExpanded ? 0 : -1}
-                                  >
-                                    {n}
-                                  </button>
-                                ))}
-                                <button
-                                  type="button"
-                                  className={`sd2-gen-float__opt ${genEpisodeCount === 'all' ? 'is-on' : ''}`}
-                                  onClick={() => setGenEpisodeCount('all')}
-                                  tabIndex={genFloatExpanded ? 0 : -1}
-                                >
-                                  全部
-                                </button>
-                              </div>
-                              <div className="sd2-gen-float__acts">
-                                <button
-                                  type="button"
-                                  className="sd2-gen-float__later"
-                                  disabled={busy}
-                                  tabIndex={genFloatExpanded ? 0 : -1}
-                                  onClick={() => {
-                                    setFirstGenFloatDeferred(true);
-                                    setGenFloatExpanded(false);
-                                    setTip('已收起 · 点底边半圆或右侧「生成分集」可再开');
-                                  }}
-                                >
-                                  稍后
-                                </button>
-                                <button
-                                  type="button"
-                                  className="sd2-btn sd2-btn--primary sd2-gen-float__go"
-                                  disabled={busy}
-                                  tabIndex={genFloatExpanded ? 0 : -1}
-                                  onClick={() => void handleGenStart()}
-                                >
-                                  {busy ? '生成中…' : '开始'}
-                                </button>
-                              </div>
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                      <button
-                        type="button"
-                        className="sd2-gen-float__tab"
-                        onClick={() => setGenFloatExpanded(true)}
-                        aria-label="向上展开选集浮层"
-                        title="向上展开"
-                        tabIndex={genFloatExpanded ? -1 : 0}
-                        aria-hidden={genFloatExpanded}
-                      >
-                        <ChevronUp size={11} strokeWidth={2.75} aria-hidden />
-                      </button>
-                    </div>
-                  )}
-                  </div>
-                  <div className="sd2-input-bar">
-                    <div className="sd2-input-wrap">
-                      <textarea
-                        className="sd2-input"
-                        value={chatInput}
-                        onChange={(e) => {
-                          const val = e.target.value;
-                          setChatInput(val);
-                          const lastChar = val.slice(-1);
-                          const prevChar = val.length > 1 ? val.slice(-2, -1) : '';
-                          if (lastChar === '@' && prevChar !== '@') { setAtOpen(true); }
-                          else if (atOpen && (lastChar === ' ' || lastChar === '\n')) { setAtOpen(false); }
-                        }}
-                        placeholder={skillName ? `围绕「${skillName}」描述本轮目标…  Ctrl/⌘+Enter 发送` : '描述本轮目标… 可跳步，不必走完所有技能'}
-                        rows={2}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Escape') { setAtOpen(false); return; }
-                          if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); void handleAgentSend(); }
-                        }}
-                      />
-                      {atOpen && (pkg.bible.characters.length > 0 || pkg.bible.scenes.length > 0 || hasLibraryItems) && (
-                        <div className="sd2-at-dropdown">
-                          {(pkg.bible.characters.length > 0 || pkg.bible.scenes.length > 0) && (
-                            <div className="sd2-at-dropdown__group">设定草稿</div>
-                          )}
-                          {pkg.bible.characters.map((c) => (
-                            <button key={c.id} type="button" className="sd2-at-dropdown__item" onClick={() => { setChatInput((prev) => prev.replace(/@\s*$/, `@${c.name} `)); setAtOpen(false); }}>人物：{c.name}</button>
-                          ))}
-                          {pkg.bible.scenes.map((s) => (
-                            <button key={s.id} type="button" className="sd2-at-dropdown__item" onClick={() => { setChatInput((prev) => prev.replace(/@\s*$/, `@${s.name} `)); setAtOpen(false); }}>场景：{s.name}</button>
-                          ))}
-                          {hasLibraryItems && (
-                            <>
-                              <div className="sd2-at-dropdown__group">素材库</div>
-                              {libChars.map((item) => (
-                                <button key={item.id} type="button" className="sd2-at-dropdown__item" onClick={() => { setChatInput((prev) => prev.replace(/@\s*$/, `@角色:${item.label} `)); setAtOpen(false); }}>人物：{item.label}</button>
-                              ))}
-                              {libScenes.map((item) => (
-                                <button key={item.id} type="button" className="sd2-at-dropdown__item" onClick={() => { setChatInput((prev) => prev.replace(/@\s*$/, `@场景:${item.label} `)); setAtOpen(false); }}>场景：{item.label}</button>
-                              ))}
-                            </>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                    <button
-                      type="button"
-                      className="sd2-btn sd2-btn--primary"
-                      onClick={busy ? () => abortRef.current?.abort() : () => void handleAgentSend()}
-                    >
-                      {busy ? <Loader2 size={14} className="sd-spin" /> : <MessageSquareText size={14} />}
-                      {busy ? '停止' : '发送'}
-                    </button>
-                  </div>
-                  {(pkg.bible.characters.length > 0 || hasLibraryItems) && (
-                    <div className="sd2-ref-hint">
-                      @ 可引用 {[...pkg.bible.characters.map((c) => c.name), ...libChars.map((i) => i.label)].slice(0, 6).join('、')}
-                      {(pkg.bible.scenes.length > 0 || libScenes.length > 0) && ` · ${[...pkg.bible.scenes.map((s) => s.name), ...libScenes.map((i) => i.label)].slice(0, 4).join('、')}`}
-                    </div>
-                  )}
-                </>
+                <ChatStage
+                  pkg={pkg}
+                  session={session}
+                  title={title}
+                  hasDraftMemory={hasDraftMemory}
+                  skillName={skillName}
+                  busy={busy}
+                  llmModelLabel={llmModelLabel}
+                  llmOptions={llmOptions}
+                  llmOptionId={llmActiveOption?.id ?? ''}
+                  onSelectLlmModel={(id) => { void selectLlmModel(id); }}
+                  onOpenLlmSettings={openLlmSettings}
+                  chatInput={chatInput}
+                  setChatInput={setChatInput}
+                  atOpen={atOpen}
+                  setAtOpen={setAtOpen}
+                  showGenFloat={showGenFloat}
+                  genFloatExpanded={genFloatExpanded}
+                  setGenFloatExpanded={setGenFloatExpanded}
+                  genEpisodeCount={genEpisodeCount}
+                  setGenEpisodeCount={setGenEpisodeCount}
+                  setFirstGenFloatDeferred={setFirstGenFloatDeferred}
+                  setTip={setTip}
+                  libChars={libChars}
+                  libScenes={libScenes}
+                  hasLibraryItems={hasLibraryItems}
+                  streamPreview={streamPreview}
+                  chatSearch={chatSearch}
+                  setChatSearch={setChatSearch}
+                  collapsedMsgIds={collapsedMsgIds}
+                  onToggleCollapseMessage={onToggleCollapseMessage}
+                  onCollapseApplied={onCollapseApplied}
+                  onChatContextMenu={onChatContextMenu}
+                  onToggleSkill={toggleSkill}
+                  onSetEntryMode={setEntryMode}
+                  onOpenDrafts={() => setDraftsOpen(true)}
+                  onApplyMessage={handleApplyMessage}
+                  onDiscardMessage={handleDiscardMessage}
+                  onGenStart={() => void handleGenStart()}
+                  onAbort={() => abortRef.current?.abort()}
+                  onAgentSend={() => void handleAgentSend()}
+                />
               )}
             </div>
 
@@ -2117,555 +1972,69 @@ function ScriptDeskBlock(props: NodeProps) {
                 )}
                 <div className="sd2-drawer__body">
                   {rightTab === 'screenplay' && (
-                    <>
-                      <div className="sd2-drawer__head">
-                      <div className="sd2-meta">
-                        
-                        <div className="sd2-brief-row">
-                        <label className="sd2-field">
-                          <span className="sd2-field__label">剧名</span>
-                          <input value={pkg.brief.title ?? ''} onChange={(e) => patchBriefTitle(e.target.value)} placeholder="剧名" />
-                        </label>
-                        <label className="sd2-field">
-                          <span className="sd2-field__label">一句话故事</span>
-                          <input value={pkg.brief.logline ?? ''} onChange={(e) => { dirtyRef.current = true; let next = touchScreenplayPackage(pkg, { brief: { ...pkg.brief, logline: e.target.value } }); if (pkg.status === 'confirmed') next = unconfirmIfEdited(next); savePkg(next); }} placeholder="一句话故事" />
-                        </label>
-                        <label className="sd2-field sd2-field--count">
-                          <span className="sd2-field__label">目标集数</span>
-                          <input
-                            type="number"
-                            min={1}
-                            max={50}
-                            value={pkg.brief.episodeCount ?? ''}
-                            onChange={(e) => {
-                              dirtyRef.current = true;
-                              const v = e.target.valueAsNumber;
-                              let next = touchScreenplayPackage(pkg, { brief: { ...pkg.brief, episodeCount: Number.isFinite(v) && v >= 1 ? v : undefined } });
-                              if (pkg.status === 'confirmed') next = unconfirmIfEdited(next);
-                              savePkg(next);
-                            }}
-                            placeholder="—"
-                          />
-                        </label>
-                        </div>
-                      </div>
-                      <div className="sd2-rail">
-                        <div className="sd2-rail__head">
-                          <span className="sd2-rail__title">爆点</span>
-                          <span className="sd2-rail__meta">{(pkg.brief.hooks ?? []).length}</span>
-                          <button
-                            type="button"
-                            className="sd2-rail__add"
-                            title="添加爆点"
-                            aria-label="添加爆点"
-                            onClick={() => {
-                              dirtyRef.current = true;
-                              let next = touchScreenplayPackage(pkg, { brief: { ...pkg.brief, hooks: [...(pkg.brief.hooks ?? []), ''] } });
-                              if (pkg.status === 'confirmed') next = unconfirmIfEdited(next);
-                              savePkg(next);
-                            }}
-                          >
-                            <Plus size={12} strokeWidth={2} aria-hidden />
-                            添加
-                          </button>
-                        </div>
-                        <div className="sd2-rail__body">
-                          {(pkg.brief.hooks ?? []).length === 0 ? (
-                            <span className="sd2-rail__empty">暂无爆点，点击右上角添加</span>
-                          ) : (
-                            (pkg.brief.hooks ?? []).map((hook, i) => (
-                              <span key={i} className="sd2-hook-chip" title={hook || `爆点 ${i + 1}`}>
-                                <span className="sd2-hook-chip__idx" aria-hidden>{i + 1}</span>
-                                <input
-                                  value={hook}
-                                  onChange={(e) => {
-                                    dirtyRef.current = true;
-                                    const hooks = [...(pkg.brief.hooks ?? [])];
-                                    hooks[i] = e.target.value;
-                                    let next = touchScreenplayPackage(pkg, { brief: { ...pkg.brief, hooks } });
-                                    if (pkg.status === 'confirmed') next = unconfirmIfEdited(next);
-                                    savePkg(next);
-                                  }}
-                                  className="sd2-hook-chip__input"
-                                  placeholder={`爆点 ${i + 1}`}
-                                />
-                                <button
-                                  type="button"
-                                  className="sd2-hook-chip__del"
-                                  aria-label={`删除爆点 ${i + 1}`}
-                                  onClick={() => {
-                                    dirtyRef.current = true;
-                                    const hooks = [...(pkg.brief.hooks ?? [])];
-                                    hooks.splice(i, 1);
-                                    let next = touchScreenplayPackage(pkg, { brief: { ...pkg.brief, hooks } });
-                                    if (pkg.status === 'confirmed') next = unconfirmIfEdited(next);
-                                    savePkg(next);
-                                  }}
-                                >
-                                  <X size={11} strokeWidth={2} aria-hidden />
-                                </button>
-                              </span>
-                            ))
-                          )}
-                        </div>
-                      </div>
-                      {pkg.screenplay.episodes.length > 0 && (
-                        <div className="sd2-jump">
-                          <div className="sd2-jump__head">
-                            <span className="sd2-jump__title">跳转</span>
-                            <span className="sd2-jump__meta">{pkg.screenplay.episodes.length} 集</span>
-                            <div className="sd2-jump__tools">
-                              <button
-                                type="button"
-                                className={`sd2-tool ${outlineView ? 'is-on' : ''}`}
-                                onClick={() => setOutlineView((v) => !v)}
-                                title="大纲视图"
-                                aria-label={outlineView ? '退出大纲视图' : '大纲视图'}
-                              >
-                                <FileText size={14} strokeWidth={1.5} />
-                              </button>
-                              <button
-                                type="button"
-                                className={`sd2-tool ${findOpen ? 'is-on' : ''}`}
-                                onClick={() => setFindOpen((v) => !v)}
-                                title="查找替换"
-                                aria-label="查找替换"
-                              >
-                                <Wand2 size={14} strokeWidth={1.5} />
-                              </button>
-                              <button
-                                type="button"
-                                className="sd2-tool"
-                                disabled={busy || continueBusy || rewritingEpIndex != null}
-                                onClick={() => handleInsertEmptyEpisode(pkg.screenplay.episodes[pkg.screenplay.episodes.length - 1]?.id)}
-                                title="在末尾插入空集"
-                                aria-label="插入空集"
-                              >
-                                <Plus size={14} strokeWidth={1.75} aria-hidden />
-                              </button>
-                            </div>
-                          </div>
-                          <div className="sd2-jump__track" role="navigation" aria-label="分集跳转">
-                            {pkg.screenplay.episodes
-                              .slice()
-                              .sort((a, b) => a.index - b.index)
-                              .map((ep) => (
-                                <button
-                                  key={ep.id}
-                                  type="button"
-                                  className="sd2-jump__chip"
-                                  title={`第${ep.index}集 · ${ep.title || '无标题'}`}
-                                  onClick={() => scrollToEpisode(ep.id)}
-                                >
-                                  {ep.index}
-                                </button>
-                              ))}
-                          </div>
-                        </div>
-                      )}
-                      {findOpen && (
-                        <div className="sd2-find-bar">
-                          <input
-                            className="sd2-find-bar__input"
-                            value={findText}
-                            onChange={(e) => setFindText(e.target.value)}
-                            placeholder="查找…"
-                          />
-                          <input
-                            className="sd2-find-bar__input"
-                            value={replaceText}
-                            onChange={(e) => setReplaceText(e.target.value)}
-                            placeholder="替换为…"
-                          />
-                          <button
-                            type="button"
-                            className="sd2-btn sd2-btn--ghost"
-                            disabled={!findText || busy}
-                            onClick={() => {
-                              dirtyRef.current = true;
-                              let totalCount = 0;
-                              const eps = pkg.screenplay.episodes.map((ep) => {
-                                if (findScope === 'current' && ep.index !== pkg.screenplay.episodes[0]?.index) return ep;
-                                const { bodyMd, count } = findReplaceInEpisode(ep.bodyMd, findText, replaceText);
-                                totalCount += count;
-                                return { ...ep, bodyMd, updatedAt: new Date().toISOString() };
-                              });
-                              savePkg(touchScreenplayPackage(pkg, {
-                                screenplay: { ...pkg.screenplay, episodes: eps },
-                              }));
-                              setTip(`已替换 ${totalCount} 处`);
-                              if (totalCount === 0) setTip('未找到匹配内容');
-                            }}
-                          >
-                            替换
-                          </button>
-                        </div>
-                      )}
-                      {failedEpisodeIndexes.length > 0 && (
-                        <div className="sd2-merge-bar">
-                          <span>第 {failedEpisodeIndexes.join(', ')} 集生成失败，</span>
-                          <button type="button" className="sd2-btn sd2-btn--primary" disabled={busy} onClick={() => void handleRetryFailed(failedEpisodeIndexes)}>重试失败</button>
-                          <button type="button" className="sd2-btn sd2-btn--ghost" onClick={() => setFailedEpisodeIndexes([])}>忽略</button>
-                        </div>
-                      )}
-                      </div>
-                      <div className="sd2-ep-panel">
-                        <div className="sd2-ep-panel__head">
-                          <span className="sd2-ep-panel__title">剧集</span>
-                          <span className="sd2-ep-panel__meta">
-                            {pkg.screenplay.episodes.length + skeletonIndexes.length} 集
-                          </span>
-                        </div>
-                        <div className="sd2-ep-list" onScroll={() => { if (epMoreMenuId) setEpMoreMenuId(null); }}>
-                      {skeletonIndexes.map((idx) => (
-                        <div key={`skel-${idx}`} className="sd2-ep is-skeleton">
-                          <div className="sd2-ep__summary">
-                            <span className="sd2-ep__title">第{idx}集 · 生成中…</span>
-                          </div>
-                          <div className="sd2-ep__body sd2-ep__skeleton" />
-                        </div>
-                      ))}
-                      {pkg.screenplay.episodes.length === 0 && skeletonIndexes.length === 0 && <div className="sd2-empty">尚无分集成稿</div>}
-                      {normalizeScreenplayEpisodes(pkg.screenplay.episodes).map((ep) => {
-                        const isRewriting = rewritingEpIndex === ep.index;
-                        const titleLabel = episodeDisplayTitle(ep.index, ep.title);
-                        return (
-                          <details
-                            key={ep.id}
-                            className={`sd2-ep${skeletonIndexes.includes(ep.index) ? ' is-skeleton' : ''}${dragEpId === ep.id ? ' is-dragging' : ''}`}
-                            id={`sd2-ep-${ep.id}`}
-                             open={ep.index === 1}
-                          >
-                            <summary
-                              className="sd2-ep__summary"
-                              draggable="true"
-                              onDragStart={(e) => {
-                                setDragEpId(ep.id);
-                                (e.currentTarget as HTMLElement).closest('.sd2-ep')?.classList.add('is-dragging');
-                              }}
-                              onDragEnd={(e) => {
-                                setDragEpId(null);
-                                (e.currentTarget as HTMLElement).closest('.sd2-ep')?.classList.remove('is-dragging');
-                              }}
-                              onDragOver={(e) => {
-                                e.preventDefault();
-                                (e.currentTarget as HTMLElement).closest('.sd2-ep')?.classList.add('is-drop-target');
-                              }}
-                              onDragLeave={(e) => {
-                                (e.currentTarget as HTMLElement).closest('.sd2-ep')?.classList.remove('is-drop-target');
-                              }}
-                              onDrop={(e) => {
-                                e.preventDefault();
-                                (e.currentTarget as HTMLElement).closest('.sd2-ep')?.classList.remove('is-drop-target');
-                                const dragId = dragEpId;
-                                if (dragId && dragId !== ep.id) {
-                                  handleEpisodeReorder(dragId, ep.id);
-                                }
-                                setDragEpId(null);
-                              }}
-                            >
-                              <ChevronRight className="sd2-ep__chevron" size={14} aria-hidden />
-                              <span className="sd2-ep__title">
-                                {titleLabel ? `第${ep.index}集 · ${titleLabel}` : `第${ep.index}集`}
-                              </span>
-                              <span className="sd2-ep__stats">{ep.bodyMd.replace(/\s+/g, '').length} 字 · {(ep.bodyMd.match(/【场景/g) ?? []).length} 场</span>
-                              <span
-                                className="sd2-ep__acts"
-                                onClick={(e) => { e.preventDefault(); e.stopPropagation(); }}
-                                onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
-                              >
-                                {epMoreMenuId === ep.id && !isRewriting ? (
-                                  <span className="sd2-ep__more-bar" role="menu">
-                                    <button
-                                      type="button"
-                                      role="menuitem"
-                                      className="sd2-ep__rewrite"
-                                      disabled={busy || continueBusy || rewritingEpIndex != null}
-                                      title="在此集后插入"
-                                      aria-label={`在第${ep.index}集后插入`}
-                                      onClick={() => {
-                                        setEpMoreMenuId(null);
-                                        handleInsertEmptyEpisode(ep.id);
-                                      }}
-                                    >
-                                      <Plus size={13} aria-hidden />
-                                    </button>
-                                    <button
-                                      type="button"
-                                      role="menuitem"
-                                      className="sd2-ep__rewrite"
-                                      disabled={busy || continueBusy || rewritingEpIndex != null}
-                                      title="重写本集（衔接前后集）"
-                                      aria-label={`重写第${ep.index}集`}
-                                      onClick={() => {
-                                        setEpMoreMenuId(null);
-                                        void handleRewriteEpisode(ep.index);
-                                      }}
-                                    >
-                                      <RefreshCw size={13} aria-hidden />
-                                    </button>
-                                    <button
-                                      type="button"
-                                      role="menuitem"
-                                      className="sd2-ep__rewrite sd2-ep__delete"
-                                      disabled={busy || continueBusy || rewritingEpIndex != null}
-                                      title="删除本集"
-                                      aria-label={`删除第${ep.index}集`}
-                                      onClick={() => {
-                                        setEpMoreMenuId(null);
-                                        void handleRemoveEpisode(ep.id, ep.index);
-                                      }}
-                                    >
-                                      <Trash2 size={13} aria-hidden />
-                                    </button>
-                                    <button
-                                      type="button"
-                                      className="sd2-ep__rewrite"
-                                      title="收起"
-                                      aria-label="收起更多操作"
-                                      onClick={() => setEpMoreMenuId(null)}
-                                    >
-                                      <X size={13} aria-hidden />
-                                    </button>
-                                  </span>
-                                ) : (
-                                  <button
-                                    type="button"
-                                    className={`sd2-ep__rewrite${isRewriting ? ' is-busy' : ''}`}
-                                    disabled={isRewriting ? false : busy || continueBusy || rewritingEpIndex != null}
-                                    title={isRewriting ? '重写中…' : '更多操作'}
-                                    aria-label={isRewriting ? `第${ep.index}集重写中` : `第${ep.index}集更多操作`}
-                                    aria-expanded={epMoreMenuId === ep.id}
-                                    onClick={() => {
-                                      if (isRewriting) return;
-                                      setEpMoreMenuId((cur) => (cur === ep.id ? null : ep.id));
-                                    }}
-                                  >
-                                    {isRewriting ? (
-                                      <RefreshCw size={13} className="sd-spin" aria-hidden />
-                                    ) : (
-                                      <MoreHorizontal size={14} aria-hidden />
-                                    )}
-                                  </button>
-                                )}
-                              </span>
-                            </summary>
-                            <div className="sd2-ep__body">
-                              {outlineView ? (
-                                <div className="sd2-ep__outline" onClick={() => setOutlineView(false)}>
-                                  <div className="sd2-ep__outline-title">{ep.title || `第${ep.index}集`}</div>
-                                  <div className="sd2-ep__outline-preview">{ep.bodyMd.slice(0, 200)}{ep.bodyMd.length > 200 ? '…' : ''}</div>
-                                  <div className="sd2-ep__outline-hint">点击展开全文</div>
-                                </div>
-                              ) : (
-                                <textarea
-                                  value={ep.bodyMd}
-                                  onChange={(e) => patchEpisodeBody(ep.id, e.target.value)}
-                                  rows={8}
-                                  disabled={isRewriting}
-                                />
-                              )}
-                              <div className="sd2-ep__body-acts">
-                                <button type="button" className="sd2-btn sd2-btn--ghost" onClick={() => { void navigator.clipboard.writeText(`第${ep.index}集 · ${ep.title || '未命名'}\n\n${ep.bodyMd}`); setTip(`已复制 第${ep.index}集`); }}>
-                                  <FileText size={12} /> 复制本集
-                                </button>
-                              </div>
-                            </div>
-                          </details>
-                        );
-                      })}
-                        </div>
-                      </div>
-                    </>
+                    <ScreenplayPanel
+                      pkg={pkg}
+                      dirtyRef={dirtyRef}
+                      savePkg={savePkg}
+                      setTip={setTip}
+                      patchBriefTitle={patchBriefTitle}
+                      busy={busy}
+                      continueBusy={continueBusy}
+                      rewritingEpIndex={rewritingEpIndex}
+                      outlineView={outlineView}
+                      setOutlineView={setOutlineView}
+                      findOpen={findOpen}
+                      setFindOpen={setFindOpen}
+                      findText={findText}
+                      setFindText={setFindText}
+                      replaceText={replaceText}
+                      setReplaceText={setReplaceText}
+                      failedEpisodeIndexes={failedEpisodeIndexes}
+                      setFailedEpisodeIndexes={setFailedEpisodeIndexes}
+                      onRetryFailed={handleRetryFailed}
+                      skeletonIndexes={skeletonIndexes}
+                      epMoreMenuId={epMoreMenuId}
+                      setEpMoreMenuId={setEpMoreMenuId}
+                      dragEpId={dragEpId}
+                      setDragEpId={setDragEpId}
+                      onInsertEmptyEpisode={handleInsertEmptyEpisode}
+                      onEpisodeReorder={handleEpisodeReorder}
+                      onRewriteEpisode={handleRewriteEpisode}
+                      onRemoveEpisode={handleRemoveEpisode}
+                      patchEpisodeBody={patchEpisodeBody}
+                      scrollToEpisode={scrollToEpisode}
+                      openEpIds={openEpIds}
+                      setOpenEpIds={setOpenEpIds}
+                      selectedEpIds={selectedEpIds}
+                      onToggleSelectEpisode={onToggleSelectEpisode}
+                      onBatchRewrite={() => { void handleBatchRewrite(); }}
+                      onClearSelectedEpisodes={onClearSelectedEpisodes}
+                    />
                   )}
                   {rightTab === 'bible' && (
-                    <>
-                      {mergeSelection.length === 2 && (
-                        <div className="sd2-merge-bar">
-                          <span>已选 2 条{mergeType === 'character' ? '人物' : '场景'}，</span>
-                          <button type="button" className="sd2-btn sd2-btn--primary" onClick={() => void handleBibleMerge()}>确认合并</button>
-                          <button type="button" className="sd2-btn sd2-btn--ghost" onClick={() => { setMergeSelection([]); setMergeType(null); }}>取消</button>
-                        </div>
-                      )}
-                      {mergeSelection.length === 1 && (
-                        <div className="sd2-merge-bar">
-                          <span>请再选 1 条{mergeType === 'character' ? '人物' : '场景'}进行合并，</span>
-                          <button type="button" className="sd2-btn sd2-btn--ghost" onClick={() => { setMergeSelection([]); setMergeType(null); }}>取消</button>
-                        </div>
-                      )}
-                      <div className="sd2-section-label">人物草稿（叙事层 · 不入库）</div>
-                      {pkg.bible.characters.length === 0 && <div className="sd2-empty">暂无人物</div>}
-                      {pkg.bible.characters.map((c) => {
-                        const isEdit = editingBibleId === c.id;
-                        return (
-                          <div
-                            key={c.id}
-                            className={`sd2-bible-card${highlightedBibleId === c.name ? ' sd2-bible-card--highlight' : ''}${isEdit ? ' is-edit' : ''}`}
-                            onClick={() => setEditingBibleId(isEdit ? null : c.id)}
-                            role="button"
-                            tabIndex={0}
-                            onKeyDown={(e) => { if (e.key === 'Enter') setEditingBibleId(isEdit ? null : c.id); }}
-                          >
-                            <div className="sd2-bible-card__name">{c.name}</div>
-                            {!isEdit && (
-                              <div className="sd2-bible-card__meta">{c.identity || c.personality || c.appearance ? [c.identity, c.personality, c.appearance].filter(Boolean).join(' · ') : '—'}</div>
-                            )}
-                            {isEdit && (
-                              <div className="sd2-bible-card__fields" onClick={(e) => e.stopPropagation()}>
-                                <label className="sd2-field sd2-field--compact">
-                                  <span className="sd2-field__label">身份</span>
-                                  <input value={c.identity ?? ''} onChange={(e) => patchBibleCharacter(c.id, 'identity', e.target.value)} />
-                                </label>
-                                <label className="sd2-field sd2-field--compact">
-                                  <span className="sd2-field__label">性格</span>
-                                  <input value={c.personality ?? ''} onChange={(e) => patchBibleCharacter(c.id, 'personality', e.target.value)} />
-                                </label>
-                                <label className="sd2-field sd2-field--compact">
-                                  <span className="sd2-field__label">外貌</span>
-                                  <input value={c.appearance ?? ''} onChange={(e) => patchBibleCharacter(c.id, 'appearance', e.target.value)} />
-                                </label>
-                                <div className="sd2-bible-card__acts">
-                                  <button type="button" className="sd2-btn sd2-btn--ghost sd2-btn--danger" onClick={() => void removeBibleCharacter(c.id, c.name)}>
-                                    <Trash2 size={13} /> 删除
-                                  </button>
-                                  <button type="button" className="sd2-btn sd2-btn--ghost" onClick={() => openAssetAt({ tab: 'character', itemId: c.name })}>
-                                    素材库
-                                  </button>
-                                  <button
-                                    type="button"
-                                    className={`sd2-btn sd2-btn--ghost ${mergeSelection.includes(c.id) ? 'is-on' : ''}`}
-                                    onClick={() => toggleMergeSelect(c.id, 'character')}
-                                  >
-                                    合并
-                                  </button>
-                                  <button
-                                    type="button"
-                                    className="sd2-btn sd2-btn--primary"
-                                    onClick={() => setEditingBibleId(null)}
-                                  >
-                                    保存
-                                  </button>
-                                </div>
-                              </div>
-                            )}
-                          </div>
-                        );
-                      })}
-                      <div className="sd2-section-label">场景草稿</div>
-                      {pkg.bible.scenes.length === 0 && <div className="sd2-empty">暂无场景</div>}
-                      {pkg.bible.scenes.map((s) => {
-                        const isEdit = editingBibleId === s.id;
-                        return (
-                          <div
-                            key={s.id}
-                            className={`sd2-bible-card${(highlightedBibleId === s.name || highlightedBibleId === s.code) ? ' sd2-bible-card--highlight' : ''}${isEdit ? ' is-edit' : ''}`}
-                            onClick={() => setEditingBibleId(isEdit ? null : s.id)}
-                            role="button"
-                            tabIndex={0}
-                            onKeyDown={(e) => { if (e.key === 'Enter') setEditingBibleId(isEdit ? null : s.id); }}
-                          >
-                            <div className="sd2-bible-card__name">{s.name}</div>
-                            {!isEdit && (
-                              <div className="sd2-bible-card__meta">{s.location || s.summary ? [s.location, s.summary].filter(Boolean).join(' · ') : '—'}</div>
-                            )}
-                            {isEdit && (
-                              <div className="sd2-bible-card__fields" onClick={(e) => e.stopPropagation()}>
-                                <label className="sd2-field sd2-field--compact">
-                                  <span className="sd2-field__label">地点</span>
-                                  <input value={s.location ?? ''} onChange={(e) => patchBibleScene(s.id, 'location', e.target.value)} />
-                                </label>
-                                <label className="sd2-field sd2-field--compact">
-                                  <span className="sd2-field__label">摘要</span>
-                                  <input value={s.summary ?? ''} onChange={(e) => patchBibleScene(s.id, 'summary', e.target.value)} />
-                                </label>
-                                <label className="sd2-field sd2-field--compact">
-                                  <span className="sd2-field__label">时代</span>
-                                  <input value={s.era ?? ''} onChange={(e) => patchBibleScene(s.id, 'era', e.target.value)} />
-                                </label>
-                                <div className="sd2-bible-card__acts">
-                                  <button type="button" className="sd2-btn sd2-btn--ghost sd2-btn--danger" onClick={() => void removeBibleScene(s.id, s.name)}>
-                                    <Trash2 size={13} /> 删除
-                                  </button>
-                                  <button type="button" className="sd2-btn sd2-btn--ghost" onClick={() => openAssetAt({ tab: 'scene', itemId: s.name })}>
-                                    素材库
-                                  </button>
-                                  <button
-                                    type="button"
-                                    className={`sd2-btn sd2-btn--ghost ${mergeSelection.includes(s.id) ? 'is-on' : ''}`}
-                                    onClick={() => toggleMergeSelect(s.id, 'scene')}
-                                  >
-                                    合并
-                                  </button>
-                                  <button
-                                    type="button"
-                                    className="sd2-btn sd2-btn--primary"
-                                    onClick={() => setEditingBibleId(null)}
-                                  >
-                                    保存
-                                  </button>
-                                </div>
-                              </div>
-                            )}
-                          </div>
-                        );
-                      })}
-                      {pkg.bible.world && (() => {
-                        const isEdit = editingBibleId === 'world';
-                        return (
-                          <>
-                            <div className="sd2-section-label">世界观</div>
-                            <div
-                              className={`sd2-bible-card${isEdit ? ' is-edit' : ''}`}
-                              onClick={() => setEditingBibleId(isEdit ? null : 'world')}
-                              role="button"
-                              tabIndex={0}
-                              onKeyDown={(e) => { if (e.key === 'Enter') setEditingBibleId(isEdit ? null : 'world'); }}
-                            >
-                              {!isEdit && (
-                                <div className="sd2-bible-card__meta">{[pkg.bible.world.era, pkg.bible.world.location, pkg.bible.world.worldview].filter(Boolean).join(' · ') || '—'}</div>
-                              )}
-                              {isEdit && (
-                                <div className="sd2-bible-card__fields" onClick={(e) => e.stopPropagation()}>
-                                  <label className="sd2-field sd2-field--compact">
-                                    <span className="sd2-field__label">时代</span>
-                                    <input value={pkg.bible.world.era ?? ''} onChange={(e) => patchBibleWorld('era', e.target.value)} />
-                                  </label>
-                                  <label className="sd2-field sd2-field--compact">
-                                    <span className="sd2-field__label">地点</span>
-                                    <input value={pkg.bible.world.location ?? ''} onChange={(e) => patchBibleWorld('location', e.target.value)} />
-                                  </label>
-                                   <label className="sd2-field sd2-field--compact">
-                                     <span className="sd2-field__label">世界观</span>
-                                     <input value={pkg.bible.world.worldview ?? ''} onChange={(e) => patchBibleWorld('worldview', e.target.value)} />
-                                   </label>
-                                   <label className="sd2-field sd2-field--compact">
-                                     <span className="sd2-field__label">视觉风格（生成前必选）</span>
-                                     <select
-                                       value={pkg.bible.world.visualStyleNotes ?? ''}
-                                       onChange={(e) => patchBibleWorld('visualStyleNotes', e.target.value)}
-                                     >
-                                       <option value="">请选择人物与全片视觉风格</option>
-                                       {SCREENPLAY_VISUAL_STYLES.map((style) => (
-                                         <option key={style.value} value={style.value}>{style.label}</option>
-                                       ))}
-                                     </select>
-                                   </label>
-                                  <div className="sd2-bible-card__acts">
-                                    <button
-                                      type="button"
-                                      className="sd2-btn sd2-btn--primary"
-                                      onClick={() => setEditingBibleId(null)}
-                                    >
-                                      保存
-                                    </button>
-                                  </div>
-                                </div>
-                              )}
-                            </div>
-                          </>
-                        );
-                      })()}
-                    </>
+                    <BiblePanel
+                      pkg={pkg}
+                      editingBibleId={editingBibleId}
+                      setEditingBibleId={setEditingBibleId}
+                      renamingBibleCharId={renamingBibleCharId}
+                      setRenamingBibleCharId={setRenamingBibleCharId}
+                      renameCharText={renameCharText}
+                      setRenameCharText={setRenameCharText}
+                      onRenameCharacter={handleRenameCharacter}
+                      patchBibleCharacter={patchBibleCharacter}
+                      patchBibleScene={patchBibleScene}
+                      patchBibleWorld={patchBibleWorld}
+                      removeBibleCharacter={removeBibleCharacter}
+                      removeBibleScene={removeBibleScene}
+                      mergeSelection={mergeSelection}
+                      mergeType={mergeType}
+                      setMergeSelection={setMergeSelection}
+                      setMergeType={setMergeType}
+                      toggleMergeSelect={toggleMergeSelect}
+                      onBibleMerge={handleBibleMerge}
+                      highlightedBibleId={highlightedBibleId}
+                      openAssetAt={openAssetAt}
+                    />
                   )}
                   {rightTab === 'readiness' && (
                     <AssetReadinessPanel
@@ -2677,32 +2046,13 @@ function ScriptDeskBlock(props: NodeProps) {
                     />
                   )}
                   {rightTab === 'diagnostics' && (
-                    <>
-                      <div className="sd2-diag-actions">
-                        <button type="button" className="sd2-btn sd2-btn--ghost" disabled={busy} onClick={handleManualConsistencyCheck}>
-                          运行手动一致性检查
-                        </button>
-                        {(pkg.diagnostics ?? []).length > 0 && (
-                          <button type="button" className="sd2-btn sd2-btn--ghost" onClick={handleAutoFix}>
-                            一键修复缺失字段
-                          </button>
-                        )}
-                      </div>
-                      {(pkg.diagnostics ?? []).length === 0 && <div className="sd2-empty">暂无诊断</div>}
-                       {(pkg.diagnostics ?? []).map((d, i) => (
-                        <div
-                          key={`${d.code}-${i}`}
-                          className={`sd2-diag sd2-diag--${d.level}${(d.entityId || d.episodeId) ? ' sd2-diag--clickable' : ''}`}
-                          title={d.episodeId ? `点击定位到「第${pkg.screenplay.episodes.find((e) => e.id === d.episodeId)?.index ?? '?'}集」` : (d.entityId ? `点击定位到设定「${d.entityId}」` : undefined)}
-                          onClick={() => handleDiagClick(d)}
-                          role={(d.entityId || d.episodeId) ? 'button' : undefined}
-                          tabIndex={(d.entityId || d.episodeId) ? 0 : undefined}
-                          onKeyDown={(d.entityId || d.episodeId) ? (e) => { if (e.key === 'Enter') handleDiagClick(d); } : undefined}
-                        >
-                          <b>{d.level}</b> {d.message}
-                        </div>
-                      ))}
-                    </>
+                    <DiagnosticsPanel
+                      pkg={pkg}
+                      busy={busy}
+                      onManualCheck={handleManualConsistencyCheck}
+                      onAutoFix={handleAutoFix}
+                      onDiagClick={handleDiagClick}
+                    />
                   )}
                 </div>
                 {rightTab === 'screenplay' && (
@@ -2736,52 +2086,14 @@ function ScriptDeskBlock(props: NodeProps) {
                             {continueBusy ? '停止续写' : '续写'}
                           </button>
                           {continueOpen && (
-                            <div className="sd2-continue-pop" role="dialog" onClick={(e) => e.stopPropagation()}>
-                              <div className="sd2-continue-pop__title">续写集数</div>
-                              <div className="sd2-continue-pop__preview">
-                                预览：当前 {pkg.screenplay.episodes.length} 集
-                                {continueCount === 'all'
-                                  ? ` → 将新增 ${
-                                      (() => {
-                                        const current = pkg.screenplay.episodes.length;
-                                        const target = pkg.brief.episodeCount;
-                                        if (typeof target === 'number' && target > current) return target - current;
-                                        return 10;
-                                      })()
-                                    } 集（全部）`
-                                  : continueCount > 0
-                                    ? ` → 将新增 ${continueCount} 集`
-                                    : ''}
-                              </div>
-                              <div className="sd2-continue-pop__opts">
-                                {([1, 2, 3, 5, 10] as const).map((n) => (
-                                  <button
-                                    key={n}
-                                    type="button"
-                                    className={`sd2-continue-pop__opt ${continueCount === n ? 'is-on' : ''}`}
-                                    onClick={() => setContinueCount(n)}
-                                  >
-                                    {n}
-                                  </button>
-                                ))}
-                                <button
-                                  type="button"
-                                  className={`sd2-continue-pop__opt ${continueCount === 'all' ? 'is-on' : ''}`}
-                                  onClick={() => setContinueCount('all')}
-                                >
-                                  全部
-                                </button>
-                              </div>
-                              <div className="sd2-continue-pop__all-desc">
-                                全部 = 补齐大纲目标集数；无目标则续写 10 集
-                              </div>
-                              <div className="sd2-continue-pop__acts">
-                                <button type="button" className="sd2-btn sd2-btn--ghost" onClick={() => setContinueOpen(false)}>取消</button>
-                                <button type="button" className="sd2-btn sd2-btn--primary" disabled={continueBusy} onClick={() => void handleContinueStart()}>
-                                  {continueBusy ? '续写中…' : '开始续写'}
-                                </button>
-                              </div>
-                            </div>
+                            <ContinuePop
+                              pkg={pkg}
+                              continueCount={continueCount}
+                              continueBusy={continueBusy}
+                              onChangeCount={setContinueCount}
+                              onCancel={() => setContinueOpen(false)}
+                              onStart={() => void handleContinueStart()}
+                            />
                           )}
                         </>
                       )}
@@ -2837,6 +2149,9 @@ function ScriptDeskBlock(props: NodeProps) {
                   } else {
                     items.push('设定已就绪');
                   }
+                  if (storyboardSync === 'synced') items.push('分镜已同步（本次送出后请回分镜台核对）');
+                  else if (storyboardSync === 'stale') items.push('分镜落后于成稿：送出后请在拆镜页「同步最新成稿」');
+                  else if (storyboardSync === 'unbroken') items.push('分镜台尚未拆镜：送出后请点「从成稿拆镜」');
                   return items.join(' · ');
                 })()}
               </div>

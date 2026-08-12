@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react';
-import { MoreHorizontal, Play, Settings, Sparkles } from 'lucide-react';
+import { MoreHorizontal, Play, Settings, Sparkles, Square } from 'lucide-react';
 import type { PromptHistoryEntry } from '../../../stores/prompt-history';
 import { ComposerPopover, PopoverItem } from './ComposerPopover';
 
@@ -23,6 +23,8 @@ export interface ComposerWorkspaceToolbarProps {
   onApplyHistory?: (text: string) => void;
   onAiAction?: (id: string) => void;
   onRun?: () => void;
+  /** PG-04: 运行中显示「停止」并触发取消 */
+  onStop?: () => void;
   running?: boolean;
   runLabel?: string;
   runDisabled?: boolean;
@@ -39,6 +41,7 @@ export function ComposerWorkspaceToolbar({
   onApplyHistory,
   onAiAction,
   onRun,
+  onStop,
   running,
   runLabel = '运行',
   runDisabled,
@@ -166,7 +169,17 @@ export function ComposerWorkspaceToolbar({
         </>
       )}
 
-      {showRun && onRun && (
+      {showRun && running && onStop ? (
+        <button
+          type="button"
+          onClick={onStop}
+          className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-rose-600 text-white text-[11px] font-medium hover:bg-rose-500 ml-0.5"
+          title="停止生成（中断在途请求）"
+        >
+          <Square size={10} fill="currentColor" />
+          停止
+        </button>
+      ) : showRun && onRun ? (
         <button
           type="button"
           onClick={onRun}
@@ -176,7 +189,7 @@ export function ComposerWorkspaceToolbar({
           <Play size={11} fill="currentColor" />
           {runLabel}
         </button>
-      )}
+      ) : null}
     </div>
   );
 }

@@ -249,13 +249,16 @@ describe('F-020 Remotion 服务端真渲', () => {
     expect(src).toContain('fps={30}');
   });
 
-  it('Nx9Episode.tsx 处理 video/audio/subtitle tracks', () => {
+  it('Nx9Episode.tsx 按 kind 遍历 video/overlay/subtitle/audio 轨（v3，勿按固定 ID 找轨）', () => {
     const src = readFile(resolve(root, 'packages/remotion-compositions/src/Nx9Episode.tsx'));
 
-    expect(src).toContain('video-1');
-    expect(src).toContain('video-2');
-    expect(src).toContain('audio-1');
-    expect(src).toContain('subtitle-1');
+    expect(src).toContain("byKind('video')");
+    expect(src).toContain("byKind('overlay')");
+    expect(src).toContain("byKind('subtitle')");
+    expect(src).toContain("byKind('audio')");
+    // 禁止回退到固定轨道 ID 查找（会静默丢轨）
+    expect(src).not.toContain("'video-1'");
+    expect(src).not.toContain('"video-1"');
     expect(src).toContain('Sequence');
     expect(src).toContain('clip.startSec');
     expect(src).toContain('clip.durationSec');

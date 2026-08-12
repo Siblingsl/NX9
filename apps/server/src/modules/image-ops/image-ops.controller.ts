@@ -49,4 +49,9 @@ export class ImageOpsController {
   thumbnailCompose(@Body() body: { imageUrl: string; title?: string; safeZone?: string }) {
     return this.imageOps.thumbnailCompose(body.imageUrl, body.title, body.safeZone);
   }
+
+  @Post('keyframe-color-check')
+  keyframeColorCheck(@Body() body: { sourceUrl: string }) {
+    return this.imageOps.assessKeyframeColor(body.sourceUrl);
+  }
 }

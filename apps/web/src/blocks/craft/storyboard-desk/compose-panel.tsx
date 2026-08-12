@@ -39,7 +39,7 @@ interface ComposePanelProps {
 }
 
 const COMPOSE_HINT =
-  '线稿确认构图为主路径；「故事板大图」将本集线稿拼成专业分镜总览板（含镜号/运镜注/对白）。整集工业级关键帧在导演台批出。';
+  '批量出线稿以本 Tab 为准（缺图优先 / 宫格 / 故事板大图）。镜表卡片 ✨ 是单镜快捷入口，结果写入同一份线稿。整集工业级关键帧在导演台批出。';
 
 const ComposePanel: React.FC<ComposePanelProps> = ({
   blockId,
@@ -115,7 +115,7 @@ const ComposePanel: React.FC<ComposePanelProps> = ({
               </button>
             </div>
 
-            <span className="sg3-compose-chrome__status" title="主路径：推荐在此批量出线稿；卡片线稿为快捷入口">
+            <span className="sg3-compose-chrome__status" title="主路径：在此批量出线稿；镜表卡片 ✨ 为单镜快捷入口，结果同一份">
               {statusText}
             </span>
 

@@ -11,10 +11,13 @@ import { useActivityLog } from '../stores/activity-log';
 import { getAllChainShots, findDeskIdForShot } from './chain-storyboard-aggregate';
 import { getMirroredFlowGraph, useFlowGraphMirror } from '../stores/flow-graph-mirror';
 import { api } from '../api/client';
-import { runPictureGenJob } from './picture-gen-runner';
 import { runExportPack } from './export-pack-runner';
-import { pollClipTask } from './picture-gen-runner';
-import { resolvePictureGenSettings } from './storyboard-preview-runner';
+import { awaitProxyVideo, VideoPollTimeoutError } from './poll-task';
+import { buildClipGenVideoRequest, collectClipGenUpstream, resolveClipGenPromptMentions } from './clip-gen-request';
+import { collectClipUsedAssets } from './clip-used-assets';
+import { getGenPack } from './gen-skill-runtime';
+import { runPictureGenExecutor } from './executors';
+import type { ExecutorGraphEdge, ExecutorGraphNode } from './executors/types';
 import {
   activeEpisodeShots,
   appendStoryboardVideoVersion,
@@ -25,8 +28,8 @@ import {
   resolveActiveEpisodeId,
   filterStoryboardGuideOverlay,
   resolveStoryboardGuideOverlay,
+  resolveStoryboardVideoVersions,
   buildCharacterContext,
-  resolveVideoGenParams,
   readChainStoryboard,
   type StoryboardPreviewPayload,
   type StoryboardShot,
@@ -85,25 +88,63 @@ export function syncPreviewFromStoryboard(): void {
   }
 }
 
+/** PG-12: 解析镜头应使用的 picture-gen 节点（绑定 → 下游连接 → 显式 id → 画布第一个） */
+export function resolvePictureGenNodeForShot(
+  shot: StoryboardShot,
+  nodes: Array<{ id: string; type?: string | null; data?: Record<string, unknown> | unknown }>,
+  edges: Array<{ source: string; target: string }>,
+  preferredId?: string,
+): { id: string; data: Record<string, unknown> } | undefined {
+  const pics = nodes.filter((n) => n.type === 'picture-gen');
+  if (pics.length === 0) return undefined;
+  const asRecord = (node: (typeof pics)[number]) => ({
+    id: node.id,
+    data: ((node.data ?? {}) as Record<string, unknown>),
+  });
+  if (preferredId) {
+    const hit = pics.find((n) => n.id === preferredId);
+    if (hit) return asRecord(hit);
+  }
+  const bound = pics.find((n) => (n.data as Record<string, unknown> | undefined)?.linkedShotId === shot.id);
+  if (bound) return asRecord(bound);
+  const deskId = findDeskIdForShot(shot.id, nodes as never);
+  if (deskId) {
+    const outgoing = new Set(edges.filter((e) => e.source === deskId).map((e) => e.target));
+    const connected = pics.find((n) => outgoing.has(n.id));
+    if (connected) return asRecord(connected);
+  }
+  return asRecord(pics[0]);
+}
+
 /**
  * 为缺失关键帧的镜头逐镜出图，写回 firstFrameAssetId。
- * 优先使用 shot.promptEn / descriptionZh。
+ * PG-12: 走 picture-gen 唯一 executor（约束 / 记账 / 链镜表 / AbortSignal）。
  */
 export async function batchGenerateKeyframesFromShots(
   shotIds?: string[],
   force = false,
+  pictureGenBlockId?: string,
 ): Promise<{ ok: number; fail: number }> {
   const doc = useWorkspaceDocument.getState();
-  const shots = activeEpisodeShots(doc.storyboard);
-  if (shots.length === 0) {
-    log('分镜列表为空，请先生成分镜表并写入故事板');
+  ensureCorePipelineNodes();
+
+  const runtime = useFlowRuntime.getState().runtime;
+  const mirrored = getMirroredFlowGraph();
+  const graphNodes = runtime?.getNodes()?.length ? runtime.getNodes() : mirrored.nodes;
+  const graphEdges = runtime?.getEdges()?.length ? runtime.getEdges() : mirrored.edges;
+
+  const chainShots = getAllChainShots(graphNodes);
+  if (chainShots.length === 0) {
+    log('无上游链镜表，已禁止回退全局批出关键帧（F-003）。请连接分镜台后再试');
     return { ok: 0, fail: 0 };
   }
 
-  ensureCorePipelineNodes();
+  const episodeId = resolveActiveEpisodeId(doc.storyboard);
+  const scoped = episodeId
+    ? chainShots.filter((s) => !s.episodeId || s.episodeId === episodeId)
+    : chainShots;
+  const shots = scoped.length > 0 ? scoped : chainShots;
 
-  let ok = 0;
-  let fail = 0;
   const requested = shotIds?.length ? new Set(shotIds) : null;
   const targets = shots.filter(
     (shot) => (!requested || requested.has(shot.id)) && (force || !shot.firstFrameAssetId),
@@ -115,110 +156,135 @@ export async function batchGenerateKeyframesFromShots(
 
   log(`开始批量出图 · ${targets.length}/${shots.length} 镜待生成`);
 
-  const runtime = useFlowRuntime.getState().runtime;
-  const pictureData = (runtime?.getNodes().find((node) => node.type === 'picture-gen')?.data ?? {}) as Record<string, unknown>;
-  const pictureSettings = resolvePictureGenSettings(pictureData);
+  const abort = new AbortController();
+  const unsub = useExecutionQueue.subscribe((state) => {
+    if (state.phase === 'cancelled') abort.abort();
+  });
+
   const queue = useExecutionQueue.getState();
   queue.startBatch(targets.map((shot) => shot.id), 'core-keyframes');
 
-  for (let index = 0; index < targets.length; index++) {
-    if (useExecutionQueue.getState().phase === 'cancelled') {
-      log('批量出图已停止');
-      break;
-    }
-    const shot = targets[index];
-    queue.reportProgress({
-      done: index,
-      total: targets.length,
-      currentBlockId: shot.id,
-      currentLabel: `分镜图 #${shot.index + 1}`,
-    });
-    const basePrompt =
-      (shot.promptEn || '').trim() ||
-      (shot.descriptionZh || '').trim() ||
-      `cinematic storyboard frame, shot ${shot.index + 1}`;
-    const characterContext = buildCharacterContext(
-      {},
-      shot,
-      doc.characters.characters,
-    );
-    const environment = doc.environments?.environments.find(
-      (item) => item.id === shot.sceneAssetId,
-    );
-    const scenePrompt = environment
-      ? `Scene consistency: ${environment.consistencyPrompt || environment.descriptionZh}`
-      : '';
-    const reviewPrompt = shot.keyframeReviewNote?.trim()
-      ? `Revision request from storyboard review: ${shot.keyframeReviewNote.trim()}`
-      : '';
-    const cameraPrompt = shot.director3dGuide?.cameraPrompt
-      ? `3D camera direction: ${shot.director3dGuide.cameraPrompt}`
-      : '';
-    const placementPrompt = buildDirectorCharacterPlacementPrompt(shot.director3dGuide);
-    const prompt = [basePrompt, characterContext.promptSuffix, scenePrompt, cameraPrompt, placementPrompt, reviewPrompt]
-      .filter(Boolean)
-      .join('\n\n');
-    const referenceImageUrl =
-      characterContext.referenceImageUrl ??
-      environment?.referenceUrls?.[0] ??
-      environment?.referenceImageUrl ??
-      undefined;
-    try {
-      doc.updateShot(shot.id, { status: 'generating', keyframeStatus: 'draft' });
-      const urls = await runPictureGenJob({
-        prompt,
-        modelId: pictureSettings.modelId,
-        size: pictureSettings.size,
-        referenceImageUrl,
-        n: 1,
-      });
-      const url = urls[0];
-      if (!url) throw new Error('无图片 URL');
-      doc.updateShot(shot.id, {
-        firstFrameAssetId: url,
-        status: 'review',
-        keyframeStatus: 'review',
-      });
-      const previewNode = runtime?.getNodes().find((node) => node.type === 'storyboard-preview');
-      const rawPreview = previewNode?.data?.storyboardPreview as StoryboardPreviewPayload | undefined;
-      if (previewNode && rawPreview?.version === 1 && Array.isArray(rawPreview.frames)) {
-        runtime?.updateNodeData(previewNode.id, {
-          storyboardPreview: {
-            ...rawPreview,
-            confirmed: false,
-            confirmedAt: null,
-            frames: rawPreview.frames.map((frame) => frame.sourceShotId === shot.id
-              ? {
-                  ...frame,
-                  imageUrl: url,
-                  reviewNote: shot.keyframeReviewNote ?? null,
-                  status: 'success' as const,
-                  locked: false,
-                  errorMessage: null,
-                }
-              : frame),
-          },
-        });
+  const updateFn = (id: string, data: Record<string, unknown>) => {
+    if (runtime?.updateNodeData) runtime.updateNodeData(id, data);
+    else useFlowGraphMirror.getState().updateNodeData(id, data);
+  };
+
+  let ok = 0;
+  let fail = 0;
+  try {
+    for (let index = 0; index < targets.length; index++) {
+      if (useExecutionQueue.getState().phase === 'cancelled' || abort.signal.aborted) {
+        log('批量出图已停止');
+        break;
       }
-      ok++;
-      log(`分镜图完成 · #${shot.index + 1}`);
-    } catch (e) {
-      fail++;
-      doc.updateShot(shot.id, { status: 'failed', keyframeStatus: 'failed' });
-      log(`分镜图失败 · #${shot.index + 1}: ${String(e)}`);
+      const shot = targets[index];
+      queue.reportProgress({
+        done: index,
+        total: targets.length,
+        currentBlockId: shot.id,
+        currentLabel: `分镜图 #${shot.index + 1}`,
+      });
+      const latestNodes = runtime?.getNodes()?.length ? runtime.getNodes() : graphNodes;
+      const pictureNode = resolvePictureGenNodeForShot(
+        shot,
+        latestNodes,
+        graphEdges,
+        pictureGenBlockId,
+      );
+      if (!pictureNode) {
+        fail++;
+        log(`分镜图失败 · #${shot.index + 1}: 画布上没有图像生成节点`);
+        continue;
+      }
+      const basePrompt =
+        (shot.promptEn || '').trim() ||
+        (shot.descriptionZh || '').trim() ||
+        `cinematic storyboard frame, shot ${shot.index + 1}`;
+      patchShotOnChainGraph(shot.id, { status: 'generating', keyframeStatus: 'draft' }, latestNodes);
+      try {
+        await runPictureGenExecutor({
+          block: {
+            id: pictureNode.id,
+            type: 'picture-gen',
+            position: { x: 0, y: 0 },
+            data: {
+              ...pictureNode.data,
+              linkedShotId: shot.id,
+              // PG-25: 批量关键帧用 prompt 入参，不覆盖节点 content
+              imageCount: 1,
+            },
+          },
+          prompt: basePrompt,
+          upstream: {
+            pictures: [],
+            clips: [],
+          },
+          updateNodeData: updateFn,
+          nodes: latestNodes as unknown as ExecutorGraphNode[],
+          edges: graphEdges as ExecutorGraphEdge[],
+          abortSignal: abort.signal,
+        });
+        const afterNodes = runtime?.getNodes()?.length ? runtime.getNodes() : latestNodes;
+        const latestShot = getAllChainShots(afterNodes).find((s) => s.id === shot.id);
+        const url = latestShot?.firstFrameAssetId;
+        const gotNewFrame = Boolean(url) && url !== shot.firstFrameAssetId;
+        if (!gotNewFrame) {
+          fail++;
+          log(`分镜图未写回 · #${shot.index + 1}（可能仍在后台，请在图像节点继续查询）`);
+          continue;
+        }
+        const previewNode = afterNodes.find((node) => node.type === 'storyboard-preview');
+        const rawPreview = previewNode?.data?.storyboardPreview as StoryboardPreviewPayload | undefined;
+        if (previewNode && rawPreview?.version === 1 && Array.isArray(rawPreview.frames) && url) {
+          updateFn(previewNode.id, {
+            storyboardPreview: {
+              ...rawPreview,
+              confirmed: false,
+              confirmedAt: null,
+              frames: rawPreview.frames.map((frame) =>
+                frame.sourceShotId === shot.id
+                  ? {
+                      ...frame,
+                      imageUrl: url,
+                      reviewNote: shot.keyframeReviewNote ?? null,
+                      status: 'success' as const,
+                      locked: false,
+                      errorMessage: null,
+                    }
+                  : frame,
+              ),
+            },
+          });
+        }
+        ok++;
+        log(`分镜图完成 · #${shot.index + 1}`);
+      } catch (e) {
+        if (abort.signal.aborted) {
+          log('批量出图已停止');
+          break;
+        }
+        fail++;
+        patchShotOnChainGraph(shot.id, { status: 'failed', keyframeStatus: 'failed' }, latestNodes);
+        log(`分镜图失败 · #${shot.index + 1}: ${String(e)}`);
+      }
     }
+  } finally {
+    unsub();
   }
 
-  const keyframeCancelled = useExecutionQueue.getState().phase === 'cancelled';
+  const keyframeCancelled = useExecutionQueue.getState().phase === 'cancelled' || abort.signal.aborted;
   queue.reportProgress({ done: ok + fail, total: targets.length, currentBlockId: null });
   queue.finish();
-  const pictureNode = runtime?.getNodes().find((node) => node.type === 'picture-gen');
+  const resultNodes = runtime?.getNodes()?.length ? runtime.getNodes() : graphNodes;
+  const pictureNode = pictureGenBlockId
+    ? resultNodes.find((node) => node.id === pictureGenBlockId)
+    : resultNodes.find((node) => node.type === 'picture-gen');
   if (pictureNode) {
-    const completed = activeEpisodeShots(useWorkspaceDocument.getState().storyboard)
+    const completed = getAllChainShots(resultNodes)
       .map((shot) => shot.firstFrameAssetId)
       .filter((url): url is string => Boolean(url));
-    runtime?.updateNodeData(pictureNode.id, {
-      status: keyframeCancelled ? 'idle' : fail > 0 ? 'error' : 'success',
+    updateFn(pictureNode.id, {
+      status: keyframeCancelled ? 'idle' : fail > 0 && ok === 0 ? 'error' : 'success',
       previewUrls: completed,
       previewUrl: completed[0],
       batchCount: completed.length,
@@ -254,12 +320,125 @@ export function approveAllKeyframes(): number {
   return n;
 }
 
-async function pollVideoUntilDone(taskId: string): Promise<string | undefined> {
-  try {
-    return await pollClipTask(taskId);
-  } catch {
-    return undefined;
+/** VG-10: 写回链镜表（画布挂载走 runtime，未挂载走镜像） */
+function patchShotOnChainGraph(
+  shotId: string,
+  patch: Partial<StoryboardShot>,
+  graphNodes: Array<{ id: string; type?: string; data?: Record<string, unknown> | unknown }>,
+): void {
+  const runtime = useFlowRuntime.getState().runtime;
+  const deskId = findDeskIdForShot(shotId, graphNodes as never);
+  if (!deskId) return;
+  const applyPatch = (
+    desk: { data?: unknown } | undefined,
+    update: (id: string, data: Record<string, unknown>) => void,
+  ): boolean => {
+    const chain = desk
+      ? readChainStoryboard((desk.data ?? {}) as Record<string, unknown>)
+      : undefined;
+    if (!chain) return false;
+    const newShots = chain.shots.map((s) => (s.id === shotId ? { ...s, ...patch } : s));
+    update(deskId, { chainStoryboard: { ...chain, shots: newShots } });
+    return true;
+  };
+  if (runtime?.updateNodeData) {
+    const desk = graphNodes.find((n) => n.id === deskId);
+    if (applyPatch(desk as { data?: unknown }, runtime.updateNodeData)) return;
   }
+  const mirrorDesk = useFlowGraphMirror.getState().nodes.find((n) => n.id === deskId);
+  applyPatch(mirrorDesk, useFlowGraphMirror.getState().updateNodeData);
+}
+
+/** VG-10: 批量出片超时任务的待恢复表（存 clip-gen 节点 data.pendingVideoTasks） */
+export interface PendingVideoTask {
+  taskId: string;
+  prompt?: string;
+  model?: string;
+  /** VG-30: 提交时的视频通道 Base URL */
+  providerBaseUrl?: string;
+  /** VG-34: 记入 pending 的时间，用于判断恢复时是否已有更新成片 */
+  submittedAt?: string;
+}
+
+/**
+ * VG-10: 恢复批量出片中轮询超时的任务。
+ * 对每个待恢复 taskId 查询一次：成功 → 追加镜头视频版本并清除；失败 → 标 failed 并清除；
+ * 仍在生成 → 保留待下次查询。
+ */
+export async function resumePendingVideoTasks(
+  clipGenBlockId: string,
+): Promise<{ done: number; failed: number; pending: number }> {
+  const runtime = useFlowRuntime.getState().runtime;
+  const graphNodes = runtime?.getNodes()?.length
+    ? runtime.getNodes()
+    : getMirroredFlowGraph().nodes;
+  const clipNode = graphNodes.find((n) => n.id === clipGenBlockId);
+  const pendingMap = {
+    ...(((clipNode?.data as Record<string, unknown>)?.pendingVideoTasks ?? {}) as Record<
+      string,
+      PendingVideoTask
+    >),
+  };
+  const entries = Object.entries(pendingMap);
+  if (!entries.length) {
+    log('没有待恢复的视频任务');
+    return { done: 0, failed: 0, pending: 0 };
+  }
+  const allShots = getAllChainShots(graphNodes);
+  let done = 0;
+  let failed = 0;
+  for (const [shotId, task] of entries) {
+    try {
+      const res = await api.pollVideo(task.taskId, task.providerBaseUrl);
+      if (res.status === 'success' && res.url) {
+        const shot = allShots.find((s) => s.id === shotId);
+        if (shot) {
+          const version = {
+            id: `video-${shotId}-${Date.now()}`,
+            url: res.url,
+            createdAt: new Date().toISOString(),
+            prompt: task.prompt ?? '',
+            model: task.model ?? 'veo',
+            status: 'candidate' as const,
+          };
+          // VG-34: 若 pending 之后用户已重试出更新成片，只归档 candidate，不自动 adopt
+          const versions = resolveStoryboardVideoVersions(shot);
+          const hasNewer =
+            Boolean(task.submittedAt)
+            && versions.some((v) => v.createdAt > (task.submittedAt as string) && Boolean(v.url));
+          const alreadyHasFresh =
+            !task.submittedAt
+            && Boolean(shot.videoAssetId)
+            && shot.videoAssetId !== res.url
+            && (shot.videoStatus === 'review' || shot.videoStatus === 'approved');
+          if (hasNewer || alreadyHasFresh) {
+            const existing = versions.filter((item) => item.id !== version.id);
+            patchShotOnChainGraph(shotId, {
+              videoVersions: [...existing, version],
+            }, graphNodes);
+            log(`视频任务归档为候选 · ${shotId}（镜上已有更新成片，未覆盖）`);
+          } else {
+            patchShotOnChainGraph(shotId, appendStoryboardVideoVersion(shot, version), graphNodes);
+          }
+        }
+        delete pendingMap[shotId];
+        done++;
+      } else if (res.status === 'failed') {
+        patchShotOnChainGraph(shotId, { videoStatus: 'failed', status: 'failed' }, graphNodes);
+        delete pendingMap[shotId];
+        failed++;
+      }
+    } catch (e) {
+      log(`任务查询失败 · ${task.taskId}: ${String(e)}`);
+    }
+  }
+  const stillPending = Object.keys(pendingMap).length;
+  const updateFn = runtime?.updateNodeData
+    ? runtime.updateNodeData
+    : useFlowGraphMirror.getState().updateNodeData;
+  updateFn(clipGenBlockId, { pendingVideoTasks: pendingMap });
+  log(`视频任务恢复 · 完成 ${done} · 失败 ${failed} · 仍在生成 ${stillPending}`);
+  return { done, failed, pending: stillPending };
 }
 
 /**
@@ -277,6 +456,7 @@ export async function batchGenerateVideosFromShots(
   force = false,
   clipGenBlockId?: string,
   chainShots?: StoryboardShot[],
+  opts?: { signal?: AbortSignal },
 ): Promise<{ ok: number; fail: number }> {
   const doc = useWorkspaceDocument.getState();
   const runtime = useFlowRuntime.getState().runtime;
@@ -373,28 +553,80 @@ export async function batchGenerateVideosFromShots(
       : undefined) ??
     nodes.find((node) => node.type === 'storyboard-desk' || node.type === 'storyboard-preview');
   const previewPayload = (previewNode?.data?.storyboardPreview ?? null) as StoryboardPreviewPayload | null;
-  const videoParams = resolveVideoGenParams({
-    resolution: clipData.resolution as string | undefined,
-    orientation: clipData.orientation as string | undefined,
-    aspect: clipData.aspect as string | undefined,
-    durationSec: clipData.durationSec as number | undefined,
+  const updateFn = (id: string, data: Record<string, unknown>) => {
+    if (runtime?.updateNodeData) runtime.updateNodeData(id, data);
+    else useFlowGraphMirror.getState().updateNodeData(id, data);
+  };
+
+  // VG-16: 批量与级联同口径收集上游参考板 / 图 / 视频
+  const collectedUpstream = clipNode
+    ? collectClipGenUpstream(
+        clipNode.id,
+        nodes as { id: string; type?: string; data?: Record<string, unknown> }[],
+        edges as { source: string; target: string }[],
+        clipData,
+      )
+    : { pack: null, pictures: [] as string[], clips: [] as string[] };
+  const shotFrameUrls = new Set(
+    targets.map((s) => s.firstFrameAssetId).filter((u): u is string => Boolean(u)),
+  );
+  const upstreamPictures = collectedUpstream.pictures.filter((u) => !shotFrameUrls.has(u));
+  const upstreamClips = collectedUpstream.clips;
+  const upstreamReferencePack = collectedUpstream.pack;
+
+  // VG-01 预检：玩法 enforce / 模式前置不就绪 → 整批阻断，不空跑
+  const preflight = await buildClipGenVideoRequest({
+    data: clipData,
+    prompt: 'preflight',
+    imageUrl: targets[0].firstFrameAssetId ?? undefined,
+    lastFrameUrl: targets[0].lastFrameAssetId ?? undefined,
+    keyframeSource: 'shot',
+    upstreamPictures,
+    upstreamClips,
+    upstreamReferencePack,
+    resolveGenPack: getGenPack,
   });
+  if (preflight.blocked) {
+    if (clipNode) updateFn(clipNode.id, { status: 'error', error: preflight.blocked });
+    log(`批量视频已阻断 · ${preflight.blocked}`);
+    return { ok: 0, fail: 0 };
+  }
+
+  // VG-06: 并发/重试单轨（兼容旧 maxRetry 字段名）
+  const concurrency = Math.max(1, Math.min(8, Number(clipData.concurrency ?? 2) || 2));
+  const maxRetries = Math.max(
+    0,
+    Math.min(5, Number(clipData.maxRetries ?? clipData.maxRetry ?? 1) || 0),
+  );
+  const modelId = (clipData.model as string | undefined) || 'veo';
+  // VG-11: 工作台输入的补句作为全局附加句拼入每镜
+  const userExtra = ((clipData.content as string) ?? '').trim();
+  // VG-10: 轮询超时任务待恢复表（保留既有未恢复项）
+  const pendingTasks: Record<string, PendingVideoTask> = {
+    ...(((clipNode?.data as Record<string, unknown>)?.pendingVideoTasks ?? {}) as Record<
+      string,
+      PendingVideoTask
+    >),
+  };
+
+  // VG-22: 队列取消 + 外部 signal 中断在途 proxyVideo/轮询
+  const abort = new AbortController();
+  const unsubQueue = useExecutionQueue.subscribe((state) => {
+    if (state.phase === 'cancelled') abort.abort();
+  });
+  if (opts?.signal) {
+    if (opts.signal.aborted) abort.abort();
+    else opts.signal.addEventListener('abort', () => abort.abort(), { once: true });
+  }
+  if (clipNode) updateFn(clipNode.id, { status: 'running', error: undefined });
+
   const queue = useExecutionQueue.getState();
   queue.startBatch(targets.map((shot) => shot.id), 'core-videos');
 
-  for (let index = 0; index < targets.length; index++) {
-    if (useExecutionQueue.getState().phase === 'cancelled') {
-      log('批量视频已停止');
-      break;
-    }
-    const shot = targets[index];
-    queue.reportProgress({
-      done: index,
-      total: targets.length,
-      currentBlockId: shot.id,
-      currentLabel: `视频 #${shot.index + 1}`,
-    });
+  /** 单镜出片；轮询超时 → 记待恢复表并返回 pending */
+  const runShot = async (shot: StoryboardShot): Promise<'ok' | 'pending'> => {
     const basePrompt =
+      (shot.videoPromptPro || '').trim() ||
       (shot.videoPromptEn || '').trim() ||
       (shot.promptEn || '').trim() ||
       (shot.descriptionZh || '').trim() ||
@@ -419,8 +651,9 @@ export async function batchGenerateVideosFromShots(
     const guideSuffix = guidePrefs.useForVideo
       ? buildVideoGuidePromptSuffix(guideOverlay)
       : '';
-    const prompt = [
+    const rawPrompt = [
       basePrompt,
+      userExtra,
       cameraPrompt,
       placementPrompt,
       characterContext.promptSuffix,
@@ -429,67 +662,143 @@ export async function batchGenerateVideosFromShots(
     ]
       .filter(Boolean)
       .join('\n\n');
-    try {
-      const modelId = (clipData.model as string | undefined) || 'veo';
-      if (modelId.startsWith('grok-imagine-video') && !shot.firstFrameAssetId) {
-        throw new Error('Grok Imagine 当前需要首图，请先在分镜预览生成首图');
+    // VG-26: 与级联同口径解析 @角色/@场景 及上游媒体 mention
+    const prompt = resolveClipGenPromptMentions(rawPrompt, {
+      pictures: upstreamPictures,
+      clips: upstreamClips,
+      characters: [
+        ...characterContext.characters,
+        ...doc.characters.characters,
+      ],
+      environments: doc.environments?.environments ?? [],
+    });
+    patchShotOnChain(shot.id, { videoStatus: 'draft' });
+    // 出片参考用「带箭头引导图」加强意图；提示词强制成片不画出箭头
+    let guideImageUrl = shot.firstFrameAssetId ?? undefined;
+    if (
+      guidePrefs.useForVideo
+      && shot.firstFrameAssetId
+      && (guideOverlay.arrows.length || guideOverlay.marks.length)
+    ) {
+      try {
+        const composed = await composeStoryboardGuideFrameDataUrl(
+          shot.firstFrameAssetId,
+          guideOverlay,
+        );
+        if (composed) guideImageUrl = composed;
+      } catch {
+        /* 合成失败则回退干净首帧 + 文案引导 */
       }
-      patchShotOnChain(shot.id, { videoStatus: 'draft' });
-      // 出片参考用「带箭头引导图」加强意图；提示词强制成片不画出箭头
-      let guideImageUrl = shot.firstFrameAssetId ?? undefined;
-      if (
-        guidePrefs.useForVideo
-        && shot.firstFrameAssetId
-        && (guideOverlay.arrows.length || guideOverlay.marks.length)
-      ) {
+    }
+    // VG-01/02/03/15/16: 统一经组装器；批量按镜首帧 + 上游参考
+    const req = await buildClipGenVideoRequest({
+      data: clipData,
+      prompt,
+      imageUrl: guideImageUrl,
+      lastFrameUrl: shot.lastFrameAssetId ?? undefined,
+      keyframeSource: 'shot',
+      durationSec: shot.durationSec || (clipData.durationSec as number) || 5,
+      upstreamPictures,
+      upstreamClips,
+      upstreamReferencePack,
+      resolveGenPack: getGenPack,
+    });
+    if (req.blocked) throw new Error(req.blocked);
+    let videoUrl: string | undefined;
+    try {
+      const awaited = await awaitProxyVideo(req.body, { signal: abort.signal });
+      videoUrl = awaited.url;
+    } catch (e) {
+      if (e instanceof VideoPollTimeoutError) {
+        pendingTasks[shot.id] = {
+          taskId: e.taskId,
+          prompt: req.prompt,
+          model: modelId,
+          providerBaseUrl: e.providerBaseUrl,
+          submittedAt: new Date().toISOString(),
+        };
+        patchShotOnChain(shot.id, { videoStatus: 'draft' });
+        return 'pending';
+      }
+      throw e;
+    }
+    if (!videoUrl) throw new Error('视频生成失败');
+
+    // 本轮出片成功：清掉该镜历史待恢复任务，避免旧任务结果日后覆盖新版本
+    delete pendingTasks[shot.id];
+    const version = {
+      id: `video-${shot.id}-${Date.now()}`,
+      url: videoUrl,
+      createdAt: new Date().toISOString(),
+      prompt: req.prompt,
+      model: modelId,
+      status: 'candidate' as const,
+    };
+    // VG-09: 批量路径与级联路径同口径回流 usedAssetIds + revision pin
+    const usage = collectClipUsedAssets(req.prompt, characterContext, shot);
+    patchShotOnChain(shot.id, {
+      ...appendStoryboardVideoVersion(shot as StoryboardShot, version),
+      ...usage,
+    });
+    return 'ok';
+  };
+
+  // VG-06: 并发池 + 重试
+  let pendingCount = 0;
+  let nextIndex = 0;
+  let doneCount = 0;
+  const workerCount = Math.max(1, Math.min(concurrency, targets.length));
+  log(`批量视频配置 · 并发 ${workerCount} · 重试 ${maxRetries}`);
+  const workers = Array.from({ length: workerCount }, async () => {
+    for (;;) {
+      if (useExecutionQueue.getState().phase === 'cancelled' || abort.signal.aborted) return;
+      const index = nextIndex;
+      nextIndex += 1;
+      if (index >= targets.length) return;
+      const shot = targets[index];
+      queue.reportProgress({
+        done: doneCount,
+        total: targets.length,
+        currentBlockId: shot.id,
+        currentLabel: `视频 #${shot.index + 1}`,
+      });
+      let attempt = 0;
+      for (;;) {
         try {
-          const composed = await composeStoryboardGuideFrameDataUrl(
-            shot.firstFrameAssetId,
-            guideOverlay,
-          );
-          if (composed) guideImageUrl = composed;
-        } catch {
-          /* 合成失败则回退干净首帧 + 文案引导 */
+          const outcome = await runShot(shot);
+          if (outcome === 'pending') {
+            pendingCount++;
+            log(`视频任务转后台 · #${shot.index + 1}（可在工作台继续查询）`);
+          } else {
+            ok++;
+            log(`视频完成 · #${shot.index + 1}`);
+          }
+          break;
+        } catch (e) {
+          if (attempt < maxRetries && useExecutionQueue.getState().phase !== 'cancelled') {
+            attempt++;
+            log(`视频重试 ${attempt}/${maxRetries} · #${shot.index + 1}: ${String(e)}`);
+            continue;
+          }
+          fail++;
+          delete pendingTasks[shot.id];
+          patchShotOnChain(shot.id, { videoStatus: 'failed', status: 'failed' });
+          log(`视频失败 · #${shot.index + 1}: ${String(e)}`);
+          break;
         }
       }
-      const res = (await api.proxyVideo({
-        prompt,
-        model: modelId,
-        imageUrl: guideImageUrl,
-        duration: Math.min(8, Math.max(4, shot.durationSec || videoParams.durationSec)),
-        aspect_ratio: videoParams.aspect,
-        size: videoParams.size,
-        resolution: videoParams.resolution,
-      })) as { ok?: boolean; url?: string; status?: string; taskId?: string; message?: string };
-
-      let videoUrl = res.url;
-      if (!videoUrl && res.taskId && (res.status === 'processing' || res.status === 'queued')) {
-        videoUrl = await pollVideoUntilDone(res.taskId);
-      }
-      if (!videoUrl) throw new Error(res.message ?? '视频生成失败');
-
-      const version = {
-        id: `video-${shot.id}-${Date.now()}`,
-        url: videoUrl,
-        createdAt: new Date().toISOString(),
-        prompt,
-        model: (clipData.model as string | undefined) || 'veo',
-        status: 'candidate' as const,
-      };
-      patchShotOnChain(shot.id, {
-        ...appendStoryboardVideoVersion(shot as StoryboardShot, version),
-      });
-      ok++;
-      log(`视频完成 · #${shot.index + 1}`);
-    } catch (e) {
-      fail++;
-      patchShotOnChain(shot.id, { videoStatus: 'failed', status: 'failed' });
-      log(`视频失败 · #${shot.index + 1}: ${String(e)}`);
+      doneCount++;
+      queue.reportProgress({ done: doneCount, total: targets.length, currentBlockId: null });
     }
+  });
+  await Promise.all(workers);
+  unsubQueue();
+  if (useExecutionQueue.getState().phase === 'cancelled' || abort.signal.aborted) {
+    log('批量视频已停止');
   }
 
-  const videoCancelled = useExecutionQueue.getState().phase === 'cancelled';
-  queue.reportProgress({ done: ok + fail, total: targets.length, currentBlockId: null });
+  const videoCancelled = useExecutionQueue.getState().phase === 'cancelled' || abort.signal.aborted;
+  queue.reportProgress({ done: doneCount, total: targets.length, currentBlockId: null });
   queue.finish();
   const resultClipNode = clipGenBlockId
     ? (runtime?.getNodes() ?? graphNodes).find((node) => node.id === clipGenBlockId)
@@ -503,19 +812,25 @@ export async function batchGenerateVideosFromShots(
     const completed = scoped
       .map((shot) => shot.videoAssetId)
       .filter((url): url is string => Boolean(url));
-    const updateFn = (id: string, data: Record<string, unknown>) => {
-      if (runtime?.updateNodeData) runtime.updateNodeData(id, data);
-      else useFlowGraphMirror.getState().updateNodeData(id, data);
-    };
     updateFn(resultClipNode.id, {
-      status: videoCancelled ? 'idle' : fail > 0 ? 'error' : 'success',
+      status: pendingCount > 0
+        ? 'running'
+        : videoCancelled
+          ? 'idle'
+          : fail > 0
+            ? 'error'
+            : 'success',
       videoUrls: completed,
       videoUrl: completed[0],
       batchCount: completed.length,
+      pendingVideoTasks: pendingTasks,
+      ...(pendingCount > 0
+        ? { message: `${pendingCount} 个任务仍在后台生成，可在工作台继续查询` }
+        : { message: undefined }),
     });
   }
   doc.setProjectStatus('draft');
-  log(`批量视频结束 · 成功 ${ok} · 失败 ${fail}`);
+  log(`批量视频结束 · 成功 ${ok} · 失败 ${fail}${pendingCount ? ` · 后台 ${pendingCount}` : ''}`);
   return { ok, fail };
 }
 

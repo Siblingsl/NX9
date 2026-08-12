@@ -101,13 +101,13 @@ export const PICTURE_PRO_ACTIONS: PictureProActionDef[] = [
   {
     id: 'upscale-hd',
     category: 'quick',
-    label: '图片高清',
-    hint: '放大并增强清晰度',
+    label: '图片放大',
+    hint: '插值放大 2×/4×（清晰度档位选 4K 即 4 倍；不新增细节）',
     needsReference: true,
     pictureGenMode: 'upscale-hd',
     imageCount: 1,
     promptSuffix: '',
-    defaultPromptHint: '可选：补充增强方向（皮肤 / 纹理 / 锐度）…',
+    defaultPromptHint: '放大不使用提示词，可留空',
     quickOnEmpty: true,
   },
   {

@@ -37,3 +37,22 @@ The command requires exact HTTP statuses for 429, 401, and 500. The timeout endp
 - `502`: provider 5xx or other upstream HTTP failure.
 
 The contract is covered without network access by `apps/server/test/gateway-upstream-error.test.ts`. The real smoke command is the evidence required for a specific provider/account; skipped URLs are reported explicitly and do not count as validated.
+
+## Director desk / clip-gen live path (opt-in)
+
+Default `pnpm test` never calls a vendor. To prove a real picture then a real video against NX9's gateway:
+
+```powershell
+$env:NX9_REAL_PROVIDER_TEST='1'
+$env:NX9_PROVIDER_HEALTHCHECK_URL='https://provider.example/v1/models'
+$env:NX9_REAL_PICTURE_URL='http://127.0.0.1:PORT/api/gateway/picture'
+$env:NX9_REAL_VIDEO_URL='http://127.0.0.1:PORT/api/gateway/video'
+pnpm --filter @nx9/server test:real-provider
+```
+
+Acceptance on a live account (not automated here):
+
+1. 导演台批出 1 镜 → `firstFrameAssetId` 为新 URL，且 `keyframeProvenance.role === director-color-keyframe`。
+2. 若像素质检为 `suspect-monochrome`：关键帧仍保留、状态为 `review`，不得 `failed`。
+3. 批准后推送 `directorKeyframeBatch`，clip-gen 逐镜消费，请求 `imageUrl` 与批准关键帧一致。
+4. 未配置的 URL 记 SKIP，不记为已验收。

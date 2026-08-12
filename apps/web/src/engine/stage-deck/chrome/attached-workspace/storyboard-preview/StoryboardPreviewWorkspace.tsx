@@ -14,8 +14,8 @@ import { useReactFlow } from '@xyflow/react';
 import { normalizeDirectorProject } from '@nx9/director3d';
 import { useDeckUi } from '../../../stores/deck-ui';
 import { useActivityLog } from '../../../../../stores/activity-log';
-import { useDirector3dUi } from '../../../../../stores/director3d-ui';
 import { DIRECTOR_3D_ENABLED } from '../../../../director3d-feature';
+import { openDirector3dStage } from '../../../../director3d-open';
 import { useStoryboardGuidePrefs } from '../../../../../stores/storyboard-guide-prefs';
 import {
   buildContactSheetSignature,
@@ -28,8 +28,6 @@ import { StoryboardPreviewFrameEditor } from './StoryboardPreviewFrameEditor';
 import { StoryboardPreviewGenSettings } from './StoryboardPreviewGenSettings';
 import { StoryboardPreviewDirector3dPanel } from './StoryboardPreviewDirector3dPanel';
 import { VideoPopover } from '../generation/video/VideoPopover';
-import { useWorkspaceDocument } from '../../../../../stores/workspace-document';
-import { prepareDirectorProjectForShot } from '../../../../director3d-character-sync';
 import '../../../../../styles/storyboard-board.css';
 import '../../../../../styles/keyframe-preview.css';
 
@@ -73,9 +71,7 @@ export function StoryboardPreviewWorkspace({
 }: StoryboardPreviewWorkspaceProps) {
   const collapsePromptBar = useDeckUi((s) => s.collapsePromptBar);
   const appendLog = useActivityLog((s) => s.append);
-  const { getNode, updateNodeData } = useReactFlow();
-  const openDirector3d = useDirector3dUi((state) => state.openForBlock);
-  const setDirector3dHostBridge = useDirector3dUi((state) => state.setHostBridge);
+  const { getNode, getNodes, getEdges, updateNodeData } = useReactFlow();
   const guideShowOverlay = useStoryboardGuidePrefs((s) => s.showOverlay);
   const guideUseForVideo = useStoryboardGuidePrefs((s) => s.useForVideo);
   const guideKindsMap = useStoryboardGuidePrefs((s) => s.kinds);
@@ -83,7 +79,6 @@ export function StoryboardPreviewWorkspace({
   const setGuideUseForVideo = useStoryboardGuidePrefs((s) => s.setUseForVideo);
   const toggleGuideKind = useStoryboardGuidePrefs((s) => s.toggleKind);
   const actions = useStoryboardPreviewState(blockId);
-  const characters = useWorkspaceDocument((state) => state.characters.characters);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [batchStyle, setBatchStyle] = useState('');
   const [generating, setGenerating] = useState(false);
@@ -276,44 +271,14 @@ export function StoryboardPreviewWorkspace({
 
   const handleOpenDirector3d = useCallback(() => {
     if (!director3dNode) return;
-    const directorData = (director3dNode.data ?? {}) as Record<string, unknown>;
-    const project = normalizeDirectorProject(directorData.scene);
-    const referenceUrl = selectedFrame?.imageUrl ?? selectedFrame?.referenceImageUrl ?? undefined;
-    const panoramaUrl = payload.panorama720?.imageUrl;
-    const environmentProject = panoramaUrl
-      ? { ...project, panorama: { url: panoramaUrl, yaw: 0, exposure: 1 } }
-      : referenceUrl && !project.panorama
-        ? { ...project, panorama: { url: referenceUrl, yaw: 0, exposure: 1 } }
-        : project;
-    const nextProject = prepareDirectorProjectForShot(
-      environmentProject,
-      selectedFrame?.characterIds,
-      characters,
-      selectedFrame?.director3dGuide?.characterPlacements,
-      selectedFrame?.characterNames,
-    );
-    updateNodeData(director3dNode.id, {
-      linkedStoryboardPreviewId: blockId,
-      linkedStoryboardPreviewFrameId: selectedFrame?.id ?? null,
-      linkedShotId: selectedFrame?.sourceShotId ?? null,
+    openDirector3dStage({
+      blockId: director3dNode.id,
+      nodes: getNodes(),
+      edges: getEdges(),
+      updateNodeData,
+      frameIdOverride: selectedFrame?.id ?? null,
     });
-    openDirector3d(
-      director3dNode.id,
-      nextProject,
-      selectedFrame?.sourceShotId,
-      selectedFrame ? { previewBlockId: blockId, frameId: selectedFrame.id } : undefined,
-    );
-    setDirector3dHostBridge(panoramaUrl ?? referenceUrl ?? null);
-  }, [
-    blockId,
-    characters,
-    director3dNode,
-    openDirector3d,
-    payload.panorama720?.imageUrl,
-    selectedFrame,
-    setDirector3dHostBridge,
-    updateNodeData,
-  ]);
+  }, [director3dNode, getEdges, getNodes, selectedFrame?.id, updateNodeData]);
 
   const shotById = useMemo(
     () => new Map(actions.shots.map((shot) => [shot.id, shot])),

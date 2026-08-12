@@ -1,9 +1,16 @@
 import React from 'react';
 import { emptyStoryboardPreview } from '@nx9/shared';
 import { applyDeskBreakdown, addShotToBreakdown, splitShotInBreakdown, mergeShotsInBreakdown, reorderShotsInBreakdown, stripEpisodeConfirmation } from '../../../engine/storyboard-desk-runner';
+import {
+  applyAssetDragToShot,
+  hasNx9AssetDrag,
+  readNx9AssetDragData,
+  type Nx9AssetDragPayload,
+} from '../../../engine/asset-library-drag';
 import { askConfirm } from '../../../stores/confirm-dialog';
-import { useToast } from '../../../stores/toast';
+import { toastError, toastSuccess } from '../../../stores/toast';
 import { ShotStoryCell } from './shot-story-cell';
+import { patchShotInPayload } from './helpers';
 
 interface GridPanelProps {
   blockId: string;
@@ -15,7 +22,8 @@ interface GridPanelProps {
   selectedId: string | null;
   setSelectedId: React.Dispatch<React.SetStateAction<string | null>>;
   editingShotId: string | null;
-  undoStackRef: React.MutableRefObject<any[]>;
+  /** SB-OL-13: 撤销栈深度用 state 跟踪，按钮禁用态可随渲染刷新 */
+  canUndo: boolean;
   undo: () => void;
   selectedShotIds: Set<string>;
   setSelectedShotIds: React.Dispatch<React.SetStateAction<Set<string>>>;
@@ -35,6 +43,8 @@ interface GridPanelProps {
   handleCopyShot: (shotId: string) => void;
   handleCopySelected: () => void;
   handleDeleteSelected: () => Promise<void>;
+  /** 合镜会换新 id，必须清掉被合并镜的预览帧 */
+  cleanupFramesForShots: (shotIds: string[]) => void;
 }
 
 const GridPanel: React.FC<GridPanelProps> = ({
@@ -47,7 +57,7 @@ const GridPanel: React.FC<GridPanelProps> = ({
   selectedId,
   setSelectedId,
   editingShotId,
-  undoStackRef,
+  canUndo,
   undo,
   selectedShotIds,
   setSelectedShotIds,
@@ -67,6 +77,7 @@ const GridPanel: React.FC<GridPanelProps> = ({
   handleCopyShot,
   handleCopySelected,
   handleDeleteSelected,
+  cleanupFramesForShots,
 }) => {
   const handleReset = async () => {
     const ok = await askConfirm({
@@ -76,6 +87,7 @@ const GridPanel: React.FC<GridPanelProps> = ({
       tone: 'danger',
     });
     if (!ok) return;
+    if (payload) pushUndo(payload);
     applyDeskBreakdown(blockId, { version: 1, title: '', sourceText: '', generatedAt: new Date().toISOString(), episodes: [] }, updateNodeData, {
       gridConfirmed: false,
       confirmedEpisodeIds: [],
@@ -109,20 +121,57 @@ const GridPanel: React.FC<GridPanelProps> = ({
     if (!payload || !selectedId) return;
     const idx = visibleShots.findIndex((s) => s.id === selectedId);
     if (idx < 1) {
-      useToast.getState().push({ message: '请选择非首镜与前镜合并', variant: 'error' });
+      toastError('请选择非首镜与前镜合并');
       return;
     }
     const ids = [visibleShots[idx - 1].id, selectedId];
-    pushUndo(payload);
     const next = mergeShotsInBreakdown(payload, ids);
+    if (next === payload) return;
+    pushUndo(payload);
     applyDeskBreakdown(blockId, next, updateNodeData, {
       ...stripEpisodeConfirmation(blockData, currentEpisodeId),
     });
+    cleanupFramesForShots(ids);
+    const merged = next.episodes
+      .flatMap((ep: { shots: Array<{ id: string }> }) => ep.shots)
+      .find((s: { id: string }) => s.id.startsWith('shot-merged-'));
+    setSelectedId(merged?.id ?? null);
     appendLog('已合并镜');
   };
 
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();
+
+    // OL-16：库卡拖入镜格 → 按类型薄绑定
+    if (hasNx9AssetDrag(e.dataTransfer) && payload) {
+      const asset = readNx9AssetDragData(e.dataTransfer);
+      const target = (e.target as HTMLElement).closest('.sg-story-cell');
+      const toId = target?.getAttribute('data-shot-id');
+      if (asset && toId) {
+        const shot = visibleShots.find((s: { id: string }) => s.id === toId);
+        if (shot) {
+          const applied = applyAssetDragToShot(shot, asset as Nx9AssetDragPayload);
+          if (!applied) {
+            if (asset.kind === 'costume' && !(shot.characters?.length > 0)) {
+              toastError('请先为本镜绑定角色，再拖入服装');
+            } else {
+              toastError('该素材已绑定或无法应用到本镜');
+            }
+            return;
+          }
+          pushUndo(payload);
+          const next = patchShotInPayload(payload, toId, applied.shot);
+          applyDeskBreakdown(blockId, next, updateNodeData, {
+            ...stripEpisodeConfirmation(blockData, currentEpisodeId),
+          });
+          setSelectedId(toId);
+          appendLog(applied.message);
+          toastSuccess(applied.message);
+          return;
+        }
+      }
+    }
+
     const fromId = e.dataTransfer.getData('text/shot-id');
     if (!fromId || !payload || !currentEpisodeId) return;
     const episode = payload.episodes.find((ep: any) => ep.id === currentEpisodeId);
@@ -176,8 +225,8 @@ const GridPanel: React.FC<GridPanelProps> = ({
               <button
                 type="button"
                 className="sg3-btn sg3-btn--ghost"
-                disabled={undoStackRef.current.length === 0 || deskBusy}
-                title="撤销最近一次结构变更"
+                disabled={!canUndo || deskBusy}
+                title="撤销最近一次变更（镜表结构、字段编辑、重置本台）"
                 onClick={() => undo()}
               >
                 撤销
@@ -186,7 +235,7 @@ const GridPanel: React.FC<GridPanelProps> = ({
                 type="button"
                 className="sg3-btn sg3-btn--ghost"
                 disabled={deskBusy || !payload}
-                title="清除本台镜表/预览/确认态"
+                title="清除本台镜表/预览/确认态（可撤销）"
                 onClick={handleReset}
               >
                 重置本台
@@ -220,6 +269,9 @@ const GridPanel: React.FC<GridPanelProps> = ({
               </button>
             </div>
           </div>
+          <p className="sg3-hint">
+            镜表管结构与字段；批量出线稿以「构图」Tab 为准，卡片 ✨ 仅为单镜快捷入口。
+          </p>
           {selectedShotIds.size > 0 ? (
             <div className="sg3-toolbar" style={{ marginTop: 4 }}>
               <div className="sg3-toolbar__meta">
@@ -257,7 +309,10 @@ const GridPanel: React.FC<GridPanelProps> = ({
           <p className="sg3-hint">点画面可上传 · 卡片底栏：线稿 / 编辑 · 彩色关键帧请到导演台批出</p>
           <div
             className="sg3-board sg-story-grid"
-            onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; }}
+            onDragOver={(e) => {
+              e.preventDefault();
+              e.dataTransfer.dropEffect = hasNx9AssetDrag(e.dataTransfer) ? 'copy' : 'move';
+            }}
             onDrop={handleDrop}
           >
             {visibleShots.map((shot) => (

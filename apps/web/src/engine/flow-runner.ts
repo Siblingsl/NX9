@@ -1,21 +1,15 @@
 import type { Node, Edge } from '@xyflow/react';
 import {
-  emptyClipChain,
   gatherUpstream,
   mergeUpstreamPrompt,
-  shotsToClipChain,
   splitText,
   topologicalLayers,
   enrichPromptWithCharacters,
-  parseMentionsFromPrompt,
   buildCharacterContext,
   mergePromptBatchItems,
   promptItemsToBatch,
-  resolvePromptBatch,
   buildLightRigPrompt,
-  resolveVideoGenParams,
   resolveAssetImportItems,
-  type ClipChainState,
   type FlowBlock,
   type FlowLink,
   type TextSplitMode,
@@ -27,25 +21,39 @@ import {
   buildStoryboardPreviewFrames,
   emptyStoryboardPreview,
   resolveStoryboardPreviewPictureSettings,
-  activeEpisodeShots,
+  activeChainEpisodeShots,
   migrateBlockKind,
+  resolveVoiceCastLines,
+  resolveEngine,
+  resolveUpstreamShotsFromGraph,
+  parseTimelineDraft,
+  migrateTimelinePayload,
   filterStoryboardGuideOverlay,
   resolveStoryboardGuideOverlay,
   buildVideoGuidePromptSuffix,
-  resolveMentionsForPrompt,
-  type MentionRef,
+  readChainStoryboard,
+  type DirectorKeyframeBatch,
 } from '@nx9/shared';
 import { buildCameraPrompt, normalizeDirectorProject } from '@nx9/director3d';
 import { api } from '../api/client';
-import { runClipChain } from './clip-chain-runner';
-import { pollVideoUntilDone } from './poll-task';
+import { awaitProxyVideo, VideoPollTimeoutError } from './poll-task';
+import { buildClipGenVideoRequest, findUpstreamReferencePack } from './clip-gen-request';
+import { collectClipUsedAssets } from './clip-used-assets';
+import { getGenPack } from './gen-skill-runtime';
 import { useWorkspaceDocument } from '../stores/workspace-document';
-import { patchUpstreamShot } from './chain-storyboard-utils';
+import {
+  patchUpstreamShot,
+  readUpstreamChainStoryboard,
+  resolveShotsForBlock,
+} from './chain-storyboard-utils';
+import { pollMontageTaskUntilDone, renderClipEditorTimeline } from './clip-editor-render';
+import { runSoundGenBgm, runSoundGenCast, synthesizeTts } from './sound-gen-runner';
 import {
   enabledGuideKinds,
   readStoryboardGuidePrefs,
 } from '../stores/storyboard-guide-prefs';
 import { composeStoryboardGuideFrameDataUrl } from './storyboard-guide-compose';
+import { advanceIteratorIndex } from './stage-deck/execution/iterator-index';
 
 /** F-003/F-004: 双写——先写上游链，再写全局 store */
 function patchFlowShot(
@@ -60,27 +68,6 @@ function patchFlowShot(
   if (updateNodeData && nodes && edges) {
     patchUpstreamShot(updateNodeData, blockId, nodes, edges, shotId, patch);
   }
-}
-
-/**
- * F-017: 查找上游分镜台是否开启了构图强约束。
- */
-function upstreamDeskEnforcesComposition(
-  blockId: string,
-  nodes?: import('@xyflow/react').Node[],
-  edges?: Array<{ source: string; target: string }>,
-): boolean {
-  if (!nodes || !edges) return false;
-  const incoming = edges.filter((e) => e.target === blockId);
-  for (const edge of incoming) {
-    const src = nodes.find((n) => n.id === edge.source);
-    if (!src) continue;
-    const data = src.data as Record<string, unknown>;
-    if (data?.enforceComposition === true) return true;
-    // 递归上游（分镜台可能隔着其他节点）
-    if (upstreamDeskEnforcesComposition(src.id, nodes, edges)) return true;
-  }
-  return false;
 }
 
 function linkedShotForBlock(blockId: string, data: Record<string, unknown>, nodes?: import('@xyflow/react').Node[], edges?: Array<{ source: string; target: string }>): StoryboardShot | undefined {
@@ -110,6 +97,8 @@ function characterContextForBlock(
   const library = useWorkspaceDocument.getState().characters.characters;
   return buildCharacterContext(d, shot, library, upstreamPictures);
 }
+
+// OL-01 / OL-03 / VG-09：collectClipUsedAssets 移至 clip-used-assets.ts 与批量路径共用
 
 export const RUNNABLE_BLOCKS = new Set([
   'prompt',
@@ -216,11 +205,18 @@ export class ReviewGateBlockedError extends Error {
   }
 }
 
+export class DirectorRunBlockedError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'DirectorRunBlockedError';
+  }
+}
+
 async function executeBlock(
   block: FlowBlock,
   upstream: ReturnType<typeof gatherUpstream>,
   updateNodeData: (id: string, data: Record<string, unknown>) => void,
-  ctx?: { nodes: Node[]; edges: Edge[] },
+  ctx?: { nodes: Node[]; edges: Edge[]; abortSignal?: AbortSignal },
 ): Promise<void> {
   /** 旧 kind 在未迁移工作区中仍可按合并目标执行 */
   const kind = migrateBlockKind(block.type);
@@ -333,322 +329,63 @@ async function executeBlock(
   }
 
   if (kind === 'picture-gen') {
-    const characters = useWorkspaceDocument.getState().characters.characters;
-    const environments = useWorkspaceDocument.getState().environments;
-    const scriptPlan = useWorkspaceDocument.getState().scriptPlan;
-    const charCtx = characterContextForBlock(block, upstream.pictures);
-    const mentionedChars = parseMentionsFromPrompt(prompt || (d.content as string), characters);
-    const allChars = [...charCtx.characters];
-    for (const mc of mentionedChars) {
-      if (!allChars.some((c) => c.id === mc.id)) allChars.push(mc);
-    }
-    const enhancedCtx = { ...charCtx, characters: allChars, promptSuffix: enrichPromptWithCharacters('', allChars) };
-
-    const linkedShotId = d.linkedShotId as string | undefined;
-    let envPromptSuffix = '';
-    let envRefUrl: string | undefined;
-    if (linkedShotId && environments?.environments) {
-      // F-003: 链优先读取上游镜表
-      const shot = linkedShotForBlock(block.id, d, ctx?.nodes, ctx?.edges);
-      if (shot?.sceneCode) {
-        const env = environments.environments.find((e) => e.sceneCode === shot.sceneCode);
-        if (env) {
-          const { enrichPromptWithEnvironment } = require('@nx9/shared') as typeof import('@nx9/shared');
-          envPromptSuffix = enrichPromptWithEnvironment('', env);
-          envRefUrl = (env.referenceUrls ?? [])[0] ?? env.referenceImageUrl ?? undefined;
-        }
-      }
-    }
-
-    // F-024: 解析 @block-id 引用
-    const mentionRefs: MentionRef[] = [];
-    upstream.pictures.forEach((url, i) => mentionRefs.push({ id: `pic-${i}`, kind: 'picture', url, label: `图 ${i+1}` }));
-    upstream.clips.forEach((url, i) => mentionRefs.push({ id: `clip-${i}`, kind: 'clip', url, label: `视频 ${i+1}` }));
-    upstream.sounds.forEach((url, i) => mentionRefs.push({ id: `sound-${i}`, kind: 'sound', url, label: `音频 ${i+1}` }));
-
-    const jobs = resolvePromptBatch(
-      upstream.prompts,
-      upstream.pictures,
-      upstream.promptBatch,
+    // PG-01: 唯一实现收敛到 executors/picture-gen-executor（含 F-017/F-024/F-032、
+    // 环境注入、usedAssetIds 回流、全景守卫、AbortSignal）
+    const { runPictureGenExecutor } = await import('./executors');
+    await runPictureGenExecutor({
+      block,
       prompt,
-      upstream.promptDispatch,
-    );
-    for (const job of jobs) {
-      const resolved = resolveMentionsForPrompt(job.prompt, mentionRefs);
-      job.prompt = resolved.resolved;
-    }
-    let finalJobs = jobs.length > 0 ? jobs : [{ prompt: prompt || 'a scenic landscape' }];
-    const { isPictureMultiPromptAction, filledMultiPrompts } = await import(
-      './stage-deck/chrome/attached-workspace/generation/picture/picture-pro-actions'
-    );
-    if (isPictureMultiPromptAction(d.pictureProAction as string | undefined)) {
-      const filled = filledMultiPrompts(d.multiPrompts);
-      if (filled.length === 0) {
-        throw new Error('请至少填写一条多图提示词');
-      }
-      finalJobs = filled.map((p) => ({ prompt: p }));
-    }
-    const composeAction = upstream.promptDispatch?.composeAction ?? 'generate';
-    const multiPromptRun = isPictureMultiPromptAction(d.pictureProAction as string | undefined);
-    let modelId = (d.model as string) || 'gemini-2.5-flash-image';
-    const { resolveImageRequestSize, extractReferenceConstraints } = await import('@nx9/shared');
-    // F-017/F-032: 从上游 reference-board 提取约束
-    const referenceConstraint = (() => {
-      if (!ctx?.nodes || !ctx?.edges) return extractReferenceConstraints(d);
-      const incoming = ctx.edges.filter((e) => e.target === block.id);
-      for (const edge of incoming) {
-        const src = ctx.nodes.find((n) => n.id === edge.source && n.type === 'reference-board');
-        if (!src) continue;
-        const c = extractReferenceConstraints((src.data ?? {}) as Record<string, unknown>);
-        if (c) return c;
-      }
-      return extractReferenceConstraints(d);
-    })();
-    const quality = (d.quality as string) || 'auto';
-    const aspectRatio = (d.aspectRatio as string) || '1:1';
-    const imageCount = (d.imageCount as number) || 1;
-    const customW = (d.width as number) || 1024;
-    const customH = (d.height as number) || 1024;
-    const snapToStep = (d.snapToStep as boolean) ?? true;
-    const imageStrength = (d.imageStrength as number) || 0.85;
-    const styleImageUrl = (d.styleImageUrl as string | undefined)?.trim();
-    const multiRefs = Array.isArray(d.referenceImageUrls)
-      ? (d.referenceImageUrls as string[]).filter((u) => typeof u === 'string' && u.trim())
-      : [];
-    const excludedRefs = new Set(
-      Array.isArray(d.excludedRefUrls) ? (d.excludedRefUrls as string[]) : [],
-    );
-    const upstreamPics = (upstream.pictures ?? []).filter((u) => !excludedRefs.has(u));
-    const nodeRefEarly = (d.referenceImageUrl as string | undefined)?.trim();
-    const { resolveRuntimePictureGenMode } = await import(
-      './stage-deck/chrome/attached-workspace/generation/picture/picture-gen-modes'
-    );
-    const pictureGenMode = resolveRuntimePictureGenMode(d, [
-      nodeRefEarly,
-      ...multiRefs,
-      styleImageUrl,
-      ...upstreamPics,
-    ].filter((u): u is string => Boolean(u)));
-    if (pictureGenMode === 'text-to-image' || pictureGenMode === 'panorama-720') {
-      const { resolvePictureModelForRequest } = await import('@nx9/shared');
-      const def = resolvePictureModelForRequest(modelId);
-      if (def.provider === 'fal' && def.supportsReference) {
-        modelId = 'flux-dev';
-      }
-    }
-    const resolvedSize = resolveImageRequestSize({
-      quality,
-      aspectRatio: aspectRatio === 'custom' ? undefined : aspectRatio,
-      width: aspectRatio === 'custom' ? customW : undefined,
-      height: aspectRatio === 'custom' ? customH : undefined,
-      snapToStep,
-    });
-    const size = resolvedSize.size;
-    // F-003: 链优先读取上游镜表
-    const linkedShot = linkedShotForBlock(block.id, d, ctx?.nodes, ctx?.edges);
-    const shotRef = linkedShot?.firstFrameAssetId;
-    const nodeRef = nodeRefEarly;
-    const existingGenerated = Array.isArray(d.previewUrls)
-      ? (d.previewUrls as string[]).filter((u) => typeof u === 'string' && u.trim())
-      : d.previewUrl
-        ? [String(d.previewUrl)]
-        : [];
-    const { resolveLocalMediaMentionUrls, rewriteLocalMediaMentionsForApi } = await import(
-      './stage-deck/chrome/asset-mention/local-media-mention'
-    );
-    const mentionedMediaUrls = resolveLocalMediaMentionUrls(prompt, existingGenerated, upstreamPics);
-    const charRef =
-      enhancedCtx.referenceImageUrl ?? upstreamPics[0] ?? envRefUrl ?? shotRef;
-    const needsRef =
-      pictureGenMode === 'image-to-image' ||
-      pictureGenMode === 'multi-ref' ||
-      pictureGenMode === 'style-ref' ||
-      pictureGenMode === 'upscale-hd' ||
-      mentionedMediaUrls.length > 0;
-
-    const { composePictureProPrompt, lookupPictureProAction } = await import(
-      './stage-deck/chrome/attached-workspace/generation/picture/picture-pro-actions'
-    );
-    const proAction = lookupPictureProAction(d.pictureProAction as string | undefined);
-
-    // F-017/F-032: 约束注入 + enforce 检查
-    if (referenceConstraint) {
-      const { buildConstrainedPrompt } = await import('@nx9/shared');
-      for (let i = 0; i < finalJobs.length; i++) {
-        const job = finalJobs[i];
-        const checked = buildConstrainedPrompt(job.prompt, referenceConstraint, undefined);
-        if (checked.blocked) {
-          throw new Error(`参考板约束阻塞：${checked.reason ?? '未通过约束检查'}`);
-        }
-        // 注入约束文本到 prompt
-        if (checked.prompt !== job.prompt) {
-          finalJobs[i] = { ...job, prompt: checked.prompt };
-        }
-      }
-    }
-
-    const urls: string[] = [];
-    let lastPrompt = '';
-
-    const { BUILTIN_COMPOSITION_TEMPLATES, resolveCompositionTemplate } = await import('@nx9/shared');
-    const compositionTemplate = linkedShot ? resolveCompositionTemplate(linkedShot, BUILTIN_COMPOSITION_TEMPLATES) : undefined;
-
-    // F-017: 强约束检查 — 上游分镜台开启 enforceComposition 且无模板时阻断
-    if (upstreamDeskEnforcesComposition(block.id, ctx?.nodes, ctx?.edges) && !compositionTemplate) {
-      throw new Error('构图强约束：上游分镜台已开启强约束，但未指定构图模板，出图被阻断。请在分镜台为当前镜头选择构图模板。');
-    }
-
-    const { runPictureGenJob } = await import('./picture-gen-runner');
-
-    if (pictureGenMode === 'upscale-hd') {
-      const refImage =
-        mentionedMediaUrls[0] || nodeRef || charRef || multiRefs[0] || upstreamPics[0];
-      if (!refImage) throw new Error('图片高清需要参考图：请上传或连接上游');
-      const batchUrls = await runPictureGenJob({
-        prompt: 'upscale',
-        referenceImageUrl: refImage,
-        mode: 'upscale-hd',
-        upscaleScale: (d.resolutionTier as string) === '4k' ? 4 : 2,
-      });
-      urls.push(...batchUrls);
-      lastPrompt = '图片高清';
-    } else {
-      for (const job of finalJobs) {
-        let finalPrompt = enrichPromptWithCharacters(job.prompt, enhancedCtx.characters);
-        if (envPromptSuffix) finalPrompt = `${finalPrompt}\n${envPromptSuffix}`;
-        // F-017: 构图模板注入
-        if (compositionTemplate) {
-          finalPrompt = `${finalPrompt}\n\n[Composition: ${compositionTemplate.name}]\n${compositionTemplate.promptSuffix}`;
-        }
-        finalPrompt = composePictureProPrompt(finalPrompt, proAction);
-        const neg = (d.negativePrompt as string | undefined)?.trim();
-        if (neg) finalPrompt = `${finalPrompt}\n\nNegative: ${neg}`;
-        lastPrompt = finalPrompt;
-
-        const jobMentioned = resolveLocalMediaMentionUrls(
-          job.prompt,
-          existingGenerated,
-          upstreamPics,
-        );
-        const mentionRefs =
-          jobMentioned.length > 0 ? jobMentioned : mentionedMediaUrls;
-
-        let refImage =
-          job.imageUrls?.[0] ||
-          mentionRefs[0] ||
-          nodeRef ||
-          charRef ||
-          multiRefs[0] ||
-          styleImageUrl;
-
-        const effectiveMultiRefs = [
-          ...multiRefs,
-          ...mentionRefs.filter((u) => u !== refImage && !multiRefs.includes(u)),
-        ];
-
-        if (job.imageUrls && job.imageUrls.length >= 2) {
-          if (composeAction === 'merge' || composeAction === 'merge-then-generate') {
-            const merged = await api.mergeImages({
-              imageUrls: job.imageUrls,
-              direction: 'horizontal',
-            });
-            if (composeAction === 'merge') {
-              urls.push(merged.url);
-              continue;
-            }
-            refImage = merged.url;
-            finalPrompt = `${finalPrompt}\n\n[Reference collage attached]`;
-          }
-        }
-
-        if (
-          !job.imageUrls?.length &&
-          pictureGenMode === 'multi-ref' &&
-          effectiveMultiRefs.length + (nodeRef || mentionRefs[0] ? 1 : 0) >= 2
-        ) {
-          const collageSrc = [nodeRef || mentionRefs[0], ...effectiveMultiRefs].filter(
-            Boolean,
-          ) as string[];
-          try {
-            const merged = await api.mergeImages({
-              imageUrls: collageSrc.slice(0, 4),
-              direction: 'horizontal',
-            });
-            refImage = merged.url;
-            finalPrompt = `${finalPrompt}\n\n[Multi-reference collage: ${collageSrc.length} images]`;
-          } catch {
-            /* keep single ref */
-          }
-        }
-
-        if (needsRef && !refImage) {
-          throw new Error('当前模式需要参考图：请上传主体参考，或连接上游图片，或 @生成/@上游 图片');
-        }
-
-        if (mentionRefs.length > 0) {
-          finalPrompt = rewriteLocalMediaMentionsForApi(finalPrompt);
-          finalPrompt = `${finalPrompt}\n\n（已附上 ${mentionRefs.length} 张参考图，请按参考图编辑）`;
-        }
-
-        const batchUrls = await runPictureGenJob({
-          prompt: finalPrompt,
-          modelId,
-          size,
-          referenceImageUrl: refImage,
-          referenceImageUrls: effectiveMultiRefs,
-          styleImageUrl,
-          strength: imageStrength,
-          n: multiPromptRun ? 1 : imageCount,
-          resolutionTier: (d.resolutionTier as string) || undefined,
-          mode: pictureGenMode === 'panorama-720' ? 'panorama-720' : 'standard',
-          negativePrompt: d.negativePrompt as string | undefined,
-          seed: d.seed as number | undefined,
-        });
-        urls.push(...batchUrls);
-      }
-    }
-    if (urls.length === 0) throw new Error('图像生成失败');
-
-    const linkedPicShot = linkedShotForBlock(block.id, d);
-    if (linkedPicShot && urls[0]) {
-      patchFlowShot(block.id, linkedPicShot.id, {
-        firstFrameAssetId: urls[0],
-        keyframeStatus: 'review',
-        status: 'review',
-      }, updateNodeData, ctx?.nodes, ctx?.edges);
-    }
-
-    updateNodeData(block.id, {
-      status: 'success',
-      previewUrls: urls,
-      previewUrl: urls[0],
-      content: lastPrompt,
-      batchCount: urls.length,
-      characterInjected: enhancedCtx.characters.map((c) => c.id),
-      lastResult: { count: urls.length, urls },
-      ...(pictureGenMode === 'panorama-720'
-        ? {
-            panoramaUrl: urls[0],
-            panoramaProjection: 'equirectangular',
-            aspectRatio: '2:1',
-          }
-        : {}),
+      upstream: {
+        prompts: upstream.prompts,
+        pictures: upstream.pictures,
+        clips: upstream.clips,
+        sounds: upstream.sounds,
+        promptBatch: upstream.promptBatch,
+        promptDispatch: upstream.promptDispatch,
+      },
+      updateNodeData,
+      nodes: ctx?.nodes as unknown as import('./executors/types').ExecutorGraphNode[],
+      edges: ctx?.edges,
+      abortSignal: ctx?.abortSignal,
     });
     return;
   }
 
   if (kind === 'clip-gen') {
     const videoMode = (d.videoMode as string) ?? 'single';
+    const directorBatch = d.directorKeyframeBatch as DirectorKeyframeBatch | undefined;
+    const hasDirectorBatch = directorBatch?.version === 1 && Array.isArray(directorBatch.shots);
     // 仅当导演台写入参考 / 显式要求门禁时拦截；独立图生视频不受影响
     const fromDirector =
-      (Array.isArray(d.directorDeskRefs) && d.directorDeskRefs.length > 0) ||
-      d.requireKeyframeGate === true;
+      !hasDirectorBatch
+      && (
+        (Array.isArray(d.directorDeskRefs) && d.directorDeskRefs.length > 0)
+        || d.requireKeyframeGate === true
+      );
     if (d.bypassKeyframeGate !== true && fromDirector) {
+      if (!ctx?.nodes || !ctx.edges) {
+        updateNodeData(block.id, {
+          status: 'blocked',
+          error: '关键帧门禁缺少画布上下文，拒绝回退全局镜表',
+          meta: { gate: 'keyframe', from: 'director-desk' },
+        });
+        throw new ReviewGateBlockedError([]);
+      }
       const linkedIds = (d.linkedShotIds as string[] | undefined) ?? [];
       const singleId = d.linkedShotId as string | undefined;
       const scopeIds =
         linkedIds.length > 0 ? linkedIds : singleId ? [singleId] : null;
-      const episodeShots = activeEpisodeShots(useWorkspaceDocument.getState().storyboard);
+      // DD-R-01: 按连接链投影，禁止读全局 storyboard。无链则不放行、不回退。
+      const chain = readUpstreamChainStoryboard(block.id, ctx.nodes, ctx.edges);
+      if (!chain) {
+        updateNodeData(block.id, {
+          status: 'blocked',
+          error: '关键帧门禁未找到上游链镜表',
+          meta: { gate: 'keyframe', from: 'director-desk' },
+        });
+        throw new ReviewGateBlockedError([]);
+      }
+      const episodeShots = activeChainEpisodeShots(chain);
       const shots = scopeIds
         ? episodeShots.filter((s) => scopeIds.includes(s.id))
         : episodeShots;
@@ -672,10 +409,218 @@ async function executeBlock(
     const breakdownShots = flattenScriptBreakdownShots(breakdown);
     const confirmedPreview =
       (d.storyboardPreview as import('@nx9/shared').StoryboardPreviewPayload | undefined)?.confirmed;
+    // VG-01: 上游参考板引用包（无本地玩法时兜底）
+    const upstreamRefPack =
+      ctx?.nodes && ctx?.edges
+        ? findUpstreamReferencePack(
+            block.id,
+            ctx.nodes as unknown as import('./clip-gen-request').ClipGenGraphNode[],
+            ctx.edges,
+          )
+        : null;
+    /** VG-01: 组装失败即阻断（enforce 未就绪 / 模式缺前置） */
+    const blockClipRun = (reason: string): never => {
+      updateNodeData(block.id, { status: 'error', error: reason });
+      throw new Error(reason);
+    };
 
-    // Bridge 续拍：抽尾帧再作为图生视频参考
-    if (videoMode === 'bridge' && (upstream.clips?.[0] || (d.sourceClipUrl as string))) {
-      const clipUrl = (upstream.clips?.[0] || (d.sourceClipUrl as string)) as string;
+    if (hasDirectorBatch && directorBatch) {
+      if (!ctx?.nodes || !ctx.edges) {
+        updateNodeData(block.id, { status: 'blocked', error: '导演关键帧批次缺少画布上下文' });
+        throw new DirectorRunBlockedError('导演关键帧批次缺少画布上下文');
+      }
+      const sourceChainNode = ctx.nodes.find((node) => node.id === directorBatch.sourceChainDeskId);
+      const sourceChain = sourceChainNode
+        ? readChainStoryboard(sourceChainNode.data as Record<string, unknown>)
+        : undefined;
+      if (!sourceChain) {
+        updateNodeData(block.id, {
+          status: 'blocked',
+          error: '导演关键帧批次的 source chain 已断开',
+        });
+        throw new DirectorRunBlockedError('导演关键帧批次的 source chain 已断开');
+      }
+
+      const {
+        consumeDirectorKeyframeBatch,
+        validateDirectorKeyframeBatch,
+      } = await import('./director-keyframe-batch-runner');
+      if (directorBatch.status !== 'consumed') {
+        const validation = validateDirectorKeyframeBatch(directorBatch, sourceChain);
+        if (!validation.valid) {
+          const consumedAt = new Date().toISOString();
+          const staleReceipt = {
+            batchId: directorBatch.batchId,
+            status: 'stale' as const,
+            consumedAt,
+            succeededShotIds: directorBatch.receipt?.succeededShotIds ?? [],
+            failed: validation.issues.map((issue) => ({
+              shotId: issue.shotId,
+              index: issue.index,
+              error: issue.reason,
+            })),
+            videoUrlsByShotId: directorBatch.receipt?.videoUrlsByShotId ?? {},
+          };
+          const staleBatch: DirectorKeyframeBatch = {
+            ...directorBatch,
+            status: 'stale',
+            receipt: staleReceipt,
+          };
+          const pending = [...new Set(validation.issues.map((issue) => issue.index))]
+            .sort((a, b) => a - b);
+          updateNodeData(block.id, {
+            status: 'blocked',
+            error: validation.issues.map((issue) => `#${issue.index} ${issue.reason}`).join('；'),
+            pendingShots: pending,
+            directorKeyframeBatch: staleBatch,
+            directorBatchReceipt: staleReceipt,
+          });
+          throw new ReviewGateBlockedError(pending);
+        }
+      }
+
+      updateNodeData(block.id, {
+        directorKeyframeBatch: {
+          ...directorBatch,
+          status: 'consuming',
+        },
+        status: 'running',
+        error: undefined,
+      });
+      const batchImageUrls = new Set(directorBatch.shots.map((item) => item.imageUrl));
+      const externalPictures = upstream.pictures.filter((url) => !batchImageUrls.has(url));
+      const directorPendingTasks: Record<string, {
+        taskId: string;
+        prompt?: string;
+        model?: string;
+        providerBaseUrl?: string;
+        submittedAt?: string;
+      }> = {
+        ...(((d.pendingVideoTasks ?? {}) as Record<string, {
+          taskId: string;
+          prompt?: string;
+          model?: string;
+          providerBaseUrl?: string;
+          submittedAt?: string;
+        }>) ?? {}),
+      };
+      const modelId = (d.model as string) || 'veo';
+      const result = await consumeDirectorKeyframeBatch({
+        batch: directorBatch,
+        chain: sourceChain,
+        generateVideo: async (item, currentShot) => {
+          const shotCharacterContext = buildCharacterContext(
+            d,
+            currentShot,
+            useWorkspaceDocument.getState().characters.characters,
+            [item.imageUrl, ...externalPictures],
+          );
+          const mentionRefs: import('@nx9/shared').MentionRef[] = [
+            { id: `keyframe-${item.shotId}`, kind: 'picture', url: item.imageUrl, label: `镜头 #${item.index} 关键帧` },
+          ];
+          externalPictures.forEach((url, index) => {
+            mentionRefs.push({ id: `pic-${index}`, kind: 'picture', url, label: `参考图 ${index + 1}` });
+          });
+          upstream.clips.forEach((url, index) => {
+            mentionRefs.push({ id: `clip-${index}`, kind: 'clip', url, label: `参考视频 ${index + 1}` });
+          });
+          const resolved = (await import('@nx9/shared')).resolveMentionsForPrompt(
+            item.prompt || 'cinematic scene',
+            mentionRefs,
+          );
+          let finalPrompt = enrichPromptWithCharacters(
+            resolved.resolved,
+            shotCharacterContext.characters,
+          );
+          let imageUrl = item.imageUrl;
+          const guidePrefs = readStoryboardGuidePrefs();
+          if (guidePrefs.useForVideo) {
+            const guide = filterStoryboardGuideOverlay(
+              resolveStoryboardGuideOverlay(currentShot),
+              { enabled: true, kinds: enabledGuideKinds(guidePrefs) },
+            );
+            finalPrompt = `${finalPrompt}\n\n${buildVideoGuidePromptSuffix(guide)}`.trim();
+            if (guide.arrows.length || guide.marks.length) {
+              try {
+                const composed = await composeStoryboardGuideFrameDataUrl(imageUrl, guide);
+                if (composed) imageUrl = composed;
+              } catch {
+                /* 保持干净关键帧 */
+              }
+            }
+          }
+          const request = await buildClipGenVideoRequest({
+            data: d,
+            prompt: finalPrompt,
+            imageUrl,
+            durationSec: item.durationSec,
+            keyframeSource: 'shot',
+            upstreamPictures: externalPictures,
+            upstreamClips: upstream.clips,
+            upstreamReferencePack: upstreamRefPack,
+            resolveGenPack: getGenPack,
+          });
+          if (request.blocked) throw new Error(request.blocked);
+          try {
+            // VG-22/25: 透传取消信号；超时进恢复表而非硬失败
+            const awaited = await awaitProxyVideo(request.body, { signal: ctx?.abortSignal });
+            delete directorPendingTasks[item.shotId];
+            const usage = collectClipUsedAssets(finalPrompt, shotCharacterContext, currentShot);
+            return { videoUrl: awaited.url, shotPatch: usage };
+          } catch (error) {
+            if (error instanceof VideoPollTimeoutError) {
+              directorPendingTasks[item.shotId] = {
+                taskId: error.taskId,
+                prompt: finalPrompt,
+                model: modelId,
+                providerBaseUrl: error.providerBaseUrl,
+                submittedAt: new Date().toISOString(),
+              };
+            }
+            throw error;
+          }
+        },
+      });
+
+      updateNodeData(directorBatch.sourceChainDeskId, {
+        chainStoryboard: result.chain,
+      });
+      const videoUrls = result.batch.shots
+        .map((item) => result.receipt.videoUrlsByShotId[item.shotId])
+        .filter((url): url is string => Boolean(url));
+      const pendingShotIds = new Set(Object.keys(directorPendingTasks));
+      const hardFailed = result.receipt.failed.filter((f) => !pendingShotIds.has(f.shotId));
+      const pendingCount = pendingShotIds.size;
+      updateNodeData(block.id, {
+        status: hardFailed.length > 0 ? 'error' : pendingCount > 0 ? 'running' : 'success',
+        error: hardFailed.length > 0 ? `${hardFailed.length} 镜视频生成失败` : undefined,
+        message: pendingCount > 0
+          ? `${pendingCount} 个任务仍在后台生成，可继续查询`
+          : undefined,
+        pendingVideoTasks: directorPendingTasks,
+        videoUrl: videoUrls[0],
+        videoUrls,
+        batchCount: videoUrls.length,
+        directorKeyframeBatch: result.batch,
+        directorBatchReceipt: result.receipt,
+        content: `导演关键帧批次 ${result.receipt.succeededShotIds.length}/${result.batch.shots.length}`,
+        lastResult: result.receipt,
+      });
+      updateNodeData(directorBatch.sourceDirectorDeskId, {
+        lastVideoConsumptionReceipt: result.receipt,
+      });
+      if (hardFailed.length > 0) {
+        throw new Error(`${hardFailed.length} 镜视频生成失败，已保留批次回执供重试`);
+      }
+      return;
+    }
+
+    // VG-21: Bridge 无源视频禁止静默回落单镜
+    if (videoMode === 'bridge') {
+      const clipUrl = (upstream.clips?.[0] || (d.sourceClipUrl as string) || '').trim();
+      if (!clipUrl) {
+        blockClipRun('Bridge 续拍需要源视频：请连接上游视频节点或上传源片');
+      }
       const framesRes = await api.extractFrames(clipUrl, 1);
       const endFrameUrl = framesRes.frames?.[0];
       const nextPrompt = prompt || (d.content as string) || '';
@@ -691,60 +636,88 @@ async function executeBlock(
           content: continuationPrompt,
           pictures: [endFrameUrl],
         });
-        // 继续走单镜出片，以尾帧为 imageUrl
+        // 继续走单镜出片，以尾帧为 imageUrl（Bridge 自带首帧语义，跳过模式分发）
         const finalPrompt = enrichPromptWithCharacters(continuationPrompt, charCtx.characters);
-        const modelId = (d.model as string) || 'veo';
-        const videoParams = resolveVideoGenParams({
-          resolution: d.resolution as string | undefined,
-          orientation: d.orientation as string | undefined,
-          aspect: d.aspect as string | undefined,
-          durationSec: d.durationSec as number | undefined,
-        });
-        const res = (await api.proxyVideo({
+        const bridgeReq = await buildClipGenVideoRequest({
+          data: d,
           prompt: finalPrompt,
-          model: modelId,
           imageUrl: endFrameUrl,
-          duration: videoParams.durationSec,
-          aspect_ratio: videoParams.aspect,
-          size: videoParams.size,
-          resolution: videoParams.resolution,
-          generateAudio: (d.generateAudio as boolean | undefined) ?? false,
-        })) as { ok?: boolean; url?: string; status?: string; taskId?: string; message?: string };
-        let videoUrl = res.url;
-        if (!videoUrl && res.taskId && (res.status === 'processing' || res.status === 'queued')) {
-          videoUrl = await pollVideoUntilDone(res.taskId);
-        }
-        updateNodeData(block.id, {
-          status: videoUrl ? 'success' : 'error',
-          videoUrl,
-          endFrameUrl,
-          continuationPrompt,
-          content: finalPrompt,
-          error: videoUrl ? undefined : (res.message ?? 'Bridge 续拍失败'),
+          resolveGenPack: getGenPack,
+          applyModeDispatch: false,
         });
+        if (bridgeReq.blocked) blockClipRun(bridgeReq.blocked);
+        try {
+          const awaited = await awaitProxyVideo(bridgeReq.body, { signal: ctx?.abortSignal });
+          updateNodeData(block.id, {
+            status: 'success',
+            videoUrl: awaited.url,
+            taskId: awaited.taskId,
+            providerBaseUrl: awaited.providerBaseUrl,
+            endFrameUrl,
+            continuationPrompt,
+            content: finalPrompt,
+            error: undefined,
+            message: undefined,
+          });
+        } catch (error) {
+          if (error instanceof VideoPollTimeoutError) {
+            updateNodeData(block.id, {
+              status: 'running',
+              taskId: error.taskId,
+              providerBaseUrl: error.providerBaseUrl,
+              endFrameUrl,
+              continuationPrompt,
+              content: finalPrompt,
+              error: undefined,
+              message: error.message,
+            });
+            return;
+          }
+          throw error;
+        }
         return;
       }
+      blockClipRun('Bridge 续拍抽尾帧失败：请检查源视频是否可访问');
     }
 
     // chain/motion 已下线假批出：旧节点回退为单镜逻辑（下方）
 
     // 多镜 + 多参考图：按镜批量图生视频（真实出片）
     if (breakdownShots.length > 1 && upstream.pictures.length > 1) {
-      const videoParams = resolveVideoGenParams({
-        resolution: d.resolution as string | undefined,
-        orientation: d.orientation as string | undefined,
-        aspect: d.aspect as string | undefined,
-        durationSec: d.durationSec as number | undefined,
-      });
       const clips: string[] = [];
+      const multiPendingTasks: Record<string, {
+        taskId: string;
+        prompt?: string;
+        model?: string;
+        providerBaseUrl?: string;
+        submittedAt?: string;
+      }> = {
+        ...(((d.pendingVideoTasks ?? {}) as Record<string, {
+          taskId: string;
+          prompt?: string;
+          model?: string;
+          providerBaseUrl?: string;
+          submittedAt?: string;
+        }>) ?? {}),
+      };
+      const modelId = (d.model as string) || 'veo';
       const count = Math.min(breakdownShots.length, upstream.pictures.length);
       for (let i = 0; i < count; i++) {
+        if (ctx?.abortSignal?.aborted) {
+          updateNodeData(block.id, {
+            status: 'running',
+            pendingVideoTasks: multiPendingTasks,
+            message: Object.keys(multiPendingTasks).length > 0
+              ? '已停止；已提交的任务可继续查询'
+              : '已停止',
+            videoUrl: clips[0],
+            videoUrls: clips,
+            batchCount: clips.length,
+          });
+          return;
+        }
         const shot = breakdownShots[i];
         let imageUrl = upstream.pictures[i];
-        const modelId = (d.model as string) || 'veo';
-        if (modelId.startsWith('grok-imagine-video') && !imageUrl) {
-          throw new Error('Grok Imagine 当前需要首图，请先连接图像生成节点或使用分镜预览生成首图');
-        }
         // F-003: 链优先读取上游镜表
         const chainShots = ctx?.nodes && ctx?.edges
           ? (() => {
@@ -794,39 +767,67 @@ async function executeBlock(
             }
           }
         }
-        const res = (await api.proxyVideo({
+        // VG-01/02/03: 统一经组装器（玩法装配 / 参考数组 / 模式分发 / 高级参数）
+        const shotReq = await buildClipGenVideoRequest({
+          data: d,
           prompt: finalPrompt,
-          model: modelId,
           imageUrl,
-          duration: shot.durationSec || videoParams.durationSec,
-          aspect_ratio: videoParams.aspect,
-          size: videoParams.size,
-          resolution: videoParams.resolution,
-          generateAudio: (d.generateAudio as boolean | undefined) ?? false,
-        })) as { ok?: boolean; url?: string; status?: string; taskId?: string; message?: string };
-        let videoUrl = res.url;
-        if (!videoUrl && res.taskId && (res.status === 'processing' || res.status === 'queued')) {
-          videoUrl = await pollVideoUntilDone(res.taskId);
-        }
-        if (!videoUrl) throw new Error(res.message ?? `镜头 ${i + 1} 视频生成失败`);
-        clips.push(videoUrl);
-        // 写回故事板 SSOT
-        if (boardShot) {
-          patchFlowShot(block.id, boardShot.id, {
-            videoAssetId: videoUrl,
-            videoStatus: 'review',
-            status: 'review',
-          }, updateNodeData, ctx?.nodes, ctx?.edges);
+          durationSec: shot.durationSec || undefined,
+          keyframeSource: 'shot',
+          upstreamPictures: upstream.pictures,
+          upstreamClips: upstream.clips,
+          upstreamReferencePack: upstreamRefPack,
+          resolveGenPack: getGenPack,
+        });
+        if (shotReq.blocked) blockClipRun(shotReq.blocked);
+        const pendingKey = boardShot?.id ?? shot.id ?? `idx-${i}`;
+        try {
+          const awaited = await awaitProxyVideo(shotReq.body, { signal: ctx?.abortSignal });
+          delete multiPendingTasks[pendingKey];
+          clips.push(awaited.url);
+          // 写回故事板 SSOT + usedAssetIds
+          if (boardShot) {
+            const usage = collectClipUsedAssets(shotReq.prompt, charCtx, boardShot);
+            patchFlowShot(block.id, boardShot.id, {
+              videoAssetId: awaited.url,
+              videoStatus: 'review',
+              status: 'review',
+              ...usage,
+            }, updateNodeData, ctx?.nodes, ctx?.edges);
+          }
+        } catch (error) {
+          if (error instanceof VideoPollTimeoutError) {
+            multiPendingTasks[pendingKey] = {
+              taskId: error.taskId,
+              prompt: shotReq.prompt,
+              model: modelId,
+              providerBaseUrl: error.providerBaseUrl,
+              submittedAt: new Date().toISOString(),
+            };
+            continue;
+          }
+          throw error;
         }
       }
+      const pendingCount = Object.keys(multiPendingTasks).length;
+      const batchUsage = collectClipUsedAssets(
+        breakdown?.title ?? prompt,
+        charCtx,
+        undefined,
+      );
       updateNodeData(block.id, {
-        status: 'success',
+        status: pendingCount > 0 ? 'running' : 'success',
         videoUrl: clips[0],
         videoUrls: clips,
         batchCount: clips.length,
         content: breakdown?.title ?? prompt,
         characterInjected: charCtx.characters.map((c) => c.id),
-        lastResult: { count: clips.length, urls: clips, confirmedPreview },
+        usedAssetIds: batchUsage.usedAssetIds,
+        pendingVideoTasks: multiPendingTasks,
+        message: pendingCount > 0
+          ? `${pendingCount} 个任务仍在后台生成，可继续查询`
+          : undefined,
+        lastResult: { count: clips.length, urls: clips, confirmedPreview, usedAssetIds: batchUsage.usedAssetIds },
       });
       return;
     }
@@ -842,48 +843,57 @@ async function executeBlock(
       charCtx.characters,
     );
     const imageUrl = upstream.pictures[0] ?? charCtx.referenceImageUrl;
-    const modelId = (d.model as string) || 'veo';
-    if (modelId.startsWith('grok-imagine-video') && !imageUrl) {
-      throw new Error('Grok Imagine 当前需要首图，请先连接图像生成节点或上传参考图');
-    }
-    const videoParams = resolveVideoGenParams({
-      resolution: d.resolution as string | undefined,
-      orientation: d.orientation as string | undefined,
-      aspect: d.aspect as string | undefined,
-      durationSec: d.durationSec as number | undefined,
-    });
-    const res = (await api.proxyVideo({
+    // VG-01/02/03: 统一经组装器（玩法装配 / 参考数组 / 模式分发 / 高级参数）
+    const singleReq = await buildClipGenVideoRequest({
+      data: d,
       prompt: finalPrompt,
-      model: modelId,
       imageUrl,
-      duration: videoParams.durationSec,
-      aspect_ratio: videoParams.aspect,
-      size: videoParams.size,
-      resolution: videoParams.resolution,
-      generateAudio: (d.generateAudio as boolean | undefined) ?? false,
-    })) as { ok?: boolean; url?: string; status?: string; taskId?: string; message?: string };
-    let videoUrl = res.url;
-    if (!videoUrl && res.taskId && (res.status === 'processing' || res.status === 'queued')) {
-      videoUrl = await pollVideoUntilDone(res.taskId);
-    }
-    updateNodeData(block.id, {
-      status: videoUrl ? 'success' : 'error',
-      videoUrl,
-      taskId: res.taskId,
-      content: finalPrompt,
-      characterInjected: charCtx.characters.map((c) => c.id),
-      lastResult: res,
-      error: videoUrl ? undefined : res.message ?? '视频生成未完成或失败',
+      upstreamPictures: upstream.pictures,
+      upstreamClips: upstream.clips,
+      upstreamReferencePack: upstreamRefPack,
+      resolveGenPack: getGenPack,
     });
-    if (!videoUrl) throw new Error(res.message ?? '视频生成失败');
-    // 单镜绑定写回
-    const linkedClipShot = linkedShotForBlock(block.id, d);
-    if (linkedClipShot) {
-      patchFlowShot(block.id, linkedClipShot.id, {
-        videoAssetId: videoUrl,
-        videoStatus: 'review',
-        status: 'review',
-      }, updateNodeData, ctx?.nodes, ctx?.edges);
+    if (singleReq.blocked) blockClipRun(singleReq.blocked);
+    try {
+      const awaited = await awaitProxyVideo(singleReq.body, { signal: ctx?.abortSignal });
+      const linkedClipShot = linkedShotForBlock(block.id, d);
+      const singleUsage = collectClipUsedAssets(singleReq.prompt, charCtx, linkedClipShot);
+      updateNodeData(block.id, {
+        status: 'success',
+        videoUrl: awaited.url,
+        taskId: awaited.taskId,
+        providerBaseUrl: awaited.providerBaseUrl,
+        content: singleReq.prompt,
+        referencePackUsed: singleReq.playbookId,
+        characterInjected: charCtx.characters.map((c) => c.id),
+        usedAssetIds: singleUsage.usedAssetIds,
+        lastResult: { url: awaited.url, taskId: awaited.taskId, usedAssetIds: singleUsage.usedAssetIds },
+        error: undefined,
+        message: undefined,
+      });
+      // 单镜绑定写回
+      if (linkedClipShot) {
+        patchFlowShot(block.id, linkedClipShot.id, {
+          videoAssetId: awaited.url,
+          videoStatus: 'review',
+          status: 'review',
+          ...singleUsage,
+        }, updateNodeData, ctx?.nodes, ctx?.edges);
+      }
+    } catch (error) {
+      if (error instanceof VideoPollTimeoutError) {
+        updateNodeData(block.id, {
+          status: 'running',
+          taskId: error.taskId,
+          providerBaseUrl: error.providerBaseUrl,
+          content: singleReq.prompt,
+          referencePackUsed: singleReq.playbookId,
+          error: undefined,
+          message: error.message,
+        });
+        return;
+      }
+      throw error;
     }
     return;
   }
@@ -917,19 +927,49 @@ async function executeBlock(
   }
 
   if (kind === 'sound-gen') {
-    const text = prompt || (d.content as string) || '';
+    const soundMode = (d.soundMode as string) || 'tts';
+    if (soundMode === 'music') {
+      const bgmPrompt = (d.content as string) || prompt || '';
+      const url = await runSoundGenBgm(bgmPrompt, 30);
+      updateNodeData(block.id, { status: 'success', audioUrl: url, content: bgmPrompt });
+      return;
+    }
+    if (soundMode === 'cast') {
+      const { lines, source } = resolveVoiceCastLines(
+        d.lines as { speaker: string; text: string; emotion?: string }[] | undefined,
+        upstream.lines,
+      );
+      const profileMap = (d.profileMap as Record<string, string>) ?? {};
+      if (lines.length === 0) {
+        throw new Error('无可解析的对白（请连接编剧台或已拆镜的分镜台）');
+      }
+      const { results, audioUrls } = await runSoundGenCast(lines, profileMap);
+      updateNodeData(block.id, {
+        status: audioUrls.length > 0 ? 'success' : 'error',
+        results,
+        sounds: audioUrls,
+        audioUrl: audioUrls[0],
+        lines,
+        lineSource: source,
+        profileMap,
+        meta: { total: results.length, failed: results.filter((r) => r.error).length, lineSource: source },
+      });
+      if (audioUrls.length === 0) throw new Error('多角色配音全部失败');
+      return;
+    }
+    const text = prompt || (d.content as string) || (d.text as string) || '';
     if (!text.trim()) throw new Error('配音文本为空');
     const provider = (d.provider as string) || 'cloud';
     const referenceAudioUrl = (d.referenceAudioUrl as string) || '';
-    const res = await api.proxyTts({
+    const res = await synthesizeTts({
       input: text,
-      voice:
-        provider === 'luxtts' && referenceAudioUrl
-          ? `luxtts:${referenceAudioUrl}`
-          : (d.voice as string) || 'alloy',
-      useLuxTts: provider === 'luxtts',
-      referenceAudioUrl: provider === 'luxtts' ? referenceAudioUrl : undefined,
-      luxTtsProfileId: (d.characterId as string) || undefined,
+      voice: (d.voice as string) || 'alloy',
+      provider,
+      referenceAudioUrl,
+      characterId: (d.characterId as string) || undefined,
+      audioFormat: (d.audioFormat as string) || undefined,
+      speechRate: typeof d.speechRate === 'number' ? d.speechRate : undefined,
+      instructions: (d.instructions as string) || undefined,
     });
     updateNodeData(block.id, {
       status: 'success',
@@ -944,14 +984,46 @@ async function executeBlock(
     const {
       runDirectorDeskBatch,
       findDirectorPictureGenNode,
+      resolveDirectorRunContext,
       syncStyleToPictureGen,
       openReviewAfterDirectorBatch,
     } = await import('./director-desk-runner');
+    const directorContext = ctx
+      ? resolveDirectorRunContext({
+          deskBlockId: block.id,
+          nodes: ctx.nodes,
+          edges: ctx.edges,
+          blockData: d as Record<string, unknown>,
+          updateNodeData,
+        })
+      : undefined;
+    if (!directorContext || directorContext.status !== 'ready' || !directorContext.patchShot) {
+      const reason = directorContext?.reason ?? '画布运行缺少节点图上下文';
+      updateNodeData(block.id, {
+        status: 'blocked',
+        error: reason,
+        content: `导演台已阻断：${reason}`,
+        ...(directorContext?.blockCode === 'stale-handoff'
+          ? {
+              lastHandoffStatus: 'stale',
+              lastHandoffInvalidReason: reason,
+            }
+          : {}),
+      });
+      throw new DirectorRunBlockedError(reason);
+    }
     const pictureNode =
       ctx?.nodes && ctx?.edges
         ? findDirectorPictureGenNode(block.id, ctx.nodes, ctx.edges)
         : undefined;
-    const filter = (d.queueFilter as 'missing' | 'failed' | 'selected' | 'all') ?? 'missing';
+    const filter = (d.queueFilter as 'missing' | 'failed' | 'selected' | '3donly' | 'all') ?? 'missing';
+    const selectedShotIds = (Array.isArray(d.selectedShotIds) ? d.selectedShotIds : [])
+      .filter((id): id is string => typeof id === 'string');
+    if (filter === 'selected' && selectedShotIds.length === 0) {
+      const reason = '导演台筛选为“选中镜头”，但没有选中任何镜头';
+      updateNodeData(block.id, { status: 'blocked', error: reason, content: `导演台已阻断：${reason}` });
+      throw new DirectorRunBlockedError(reason);
+    }
     const styleSeedRaw = d.styleSeed;
     const styleSeed =
       styleSeedRaw === null || styleSeedRaw === undefined || styleSeedRaw === ''
@@ -975,7 +1047,9 @@ async function executeBlock(
       ...(styleSeed != null && Number.isFinite(styleSeed) ? { seed: styleSeed } : {}),
     };
     const summary = await runDirectorDeskBatch({
+      sourceDirectorDeskId: block.id,
       filter,
+      shotIds: filter === 'selected' ? selectedShotIds : undefined,
       skipExisting: (d.skipExisting as boolean | undefined) ?? true,
       skipApproved: (d.skipApproved as boolean | undefined) ?? true,
       concurrency: (d.concurrency as number | undefined) ?? 2,
@@ -989,6 +1063,17 @@ async function executeBlock(
       pictureNodeData: pictureData,
       upstreamPictures: upstream.pictures,
       blockData: d as Record<string, unknown>,
+      shots: directorContext.shots,
+      patchShot: directorContext.patchShot,
+      lineArtByShotId: directorContext.lineArtByShotId,
+      preferLineArtRef: (d.preferLineArtRef as boolean | undefined) ?? true,
+      reviewMode: (d.reviewMode as 'manual' | 'auto' | undefined) ?? 'manual',
+      globalArtDirection: useWorkspaceDocument.getState().storyboard.globalArtDirection,
+      episodeArtDirection: directorContext.chain?.episodes
+        ?.find((episode) => episode.id === directorContext.episodeId)
+        ?.artDirection,
+      characters: useWorkspaceDocument.getState().characters.characters,
+      environments: useWorkspaceDocument.getState().environments?.environments ?? [],
     });
     if (summary.total === 0) {
       updateNodeData(block.id, {
@@ -1024,12 +1109,16 @@ async function executeBlock(
     });
     const autoOpenReview = (d.autoOpenReview as boolean | undefined) ?? true;
     if (autoOpenReview && summary.done > 0 && ctx?.nodes && ctx?.edges) {
+      const { resolveUpstreamChainDesk } = await import('./chain-storyboard-utils');
       openReviewAfterDirectorBatch({
         deskBlockId: block.id,
         nodes: ctx.nodes,
         edges: ctx.edges,
         updateNodeData,
         succeededShotIds: summary.results.filter((r) => r.ok).map((r) => r.shotId),
+        shots: directorContext.shots,
+        episodeId: directorContext.episodeId,
+        sourceChainDeskId: resolveUpstreamChainDesk(block.id, ctx.nodes, ctx.edges) ?? undefined,
         openSession: true,
       });
     }
@@ -1101,7 +1190,8 @@ async function executeBlock(
     const next = pool.length ? pool[idx] : '';
     updateNodeData(block.id, {
       status: 'success',
-      currentIndex: idx,
+      currentIndex: advanceIteratorIndex(idx, pool.length),
+      lastEmittedIndex: idx,
       iterItems: pool,
       content: next,
       output: next,
@@ -1134,23 +1224,24 @@ async function executeBlock(
 
   if (kind === 'clip-editor') {
     const editorMode = (d.editorMode as string) ?? '';
-    // Legacy audio/grade paths - only used if explicitly set
+    // SE-04: audio/grade 为显式工具模式（无新剪辑台 UI 入口）；仅当节点数据显式设置 editorMode 时进入。
+    // 智能剪辑主路径走下方 timeline + renderClipEditorTimeline，勿与此混用。
     if (editorMode === 'audio') {
       const tracks = upstream.sounds ?? [];
-      if (tracks.length < 2) throw new Error('至少需要 2 条音频');
+      if (tracks.length < 2) throw new Error('至少需要 2 条音频（editorMode=audio 混音工具）');
       const mixRes = await api.mixAudio(tracks, (d.normalize as boolean | undefined) ?? true);
       if (!mixRes.ok || !mixRes.url) throw new Error(mixRes.message ?? '混音失败');
       updateNodeData(block.id, {
         status: 'success',
         outputSound: mixRes.url,
         sounds: [mixRes.url],
-        meta: { trackCount: mixRes.trackCount },
+        meta: { trackCount: mixRes.trackCount, legacyTool: 'audio-mix' },
       });
       return;
     }
     if (editorMode === 'grade') {
       const source = upstream.clips?.[0] ?? upstream.pictures?.[0];
-      if (!source) throw new Error('需要上游图像或视频');
+      if (!source) throw new Error('需要上游图像或视频（editorMode=grade 调色工具）');
       const gradeRes = await api.colorGrade({
         sourceUrl: source,
         brightness: (d.brightness as number) ?? 0,
@@ -1163,40 +1254,34 @@ async function executeBlock(
         outputUrl: gradeRes.url,
         previewUrl: gradeRes.url,
         videoUrl: upstream.clips?.[0] ? gradeRes.url : undefined,
+        meta: { legacyTool: 'color-grade' },
       });
       return;
     }
-    // Smart edit path: node-local timeline only (no global workspace draft)
-    const readLocalTimeline = (): import('@nx9/shared').TimelinePayload | null => {
-      const raw = d.timelineDraft;
-      if (!raw) return null;
-      if (typeof raw === 'string') {
-        try {
-          return JSON.parse(raw) as import('@nx9/shared').TimelinePayload;
-        } catch {
-          return null;
-        }
-      }
-      if (typeof raw === 'object') return raw as import('@nx9/shared').TimelinePayload;
-      return null;
-    };
-    let timelineDraft = readLocalTimeline();
+    // Smart edit: 节点本地时间线 + 连接链镜表，禁止读全局 storyboard
+    const parsed = parseTimelineDraft(d.timelineDraft as import('@nx9/shared').TimelineDraftRaw);
+    let timelineDraft = parsed ? migrateTimelinePayload(parsed) : null;
+    const profile = ((d.profile as string) ?? 'drama') as import('@nx9/shared').SmartEditProfile;
     if (!timelineDraft) {
       const { orchestrateDramaTimeline, orchestrateViralTimeline } = await import('./smart-edit-orchestrator');
-      const profile = (d.profile as string) ?? 'drama';
       if (profile === 'drama') {
+        if (!ctx) throw new Error('智能剪辑缺少画布上下文');
         const linkedIds = (d.linkedShotIds as string[] | undefined) ?? [];
-        const sb = useWorkspaceDocument.getState().storyboard;
+        const upstreamShots = resolveUpstreamShotsFromGraph(block.id, ctx.nodes, ctx.edges);
         const shots =
           linkedIds.length > 0
-            ? sb.shots.filter((s) => linkedIds.includes(s.id))
-            : [];
+            ? upstreamShots.shots.filter((s) => linkedIds.includes(s.id))
+            : upstreamShots.shots;
         if (shots.length === 0) {
           throw new Error('智能剪辑未连接镜头上游，无法漫剧编排');
         }
-        const result = await orchestrateDramaTimeline({ approvedOnly: true, shots });
+        const result = await orchestrateDramaTimeline({
+          approvedOnly: true,
+          shots,
+          bgmUrl: upstream.sounds[0],
+        });
         if (result.timeline) {
-          timelineDraft = result.timeline;
+          timelineDraft = migrateTimelinePayload(result.timeline);
           updateNodeData(block.id, {
             timelineDraft: result.timeline,
             suggestions: result.suggestions,
@@ -1204,9 +1289,12 @@ async function executeBlock(
           });
         }
       } else if (upstream.clips.length > 0) {
-        const result = await orchestrateViralTimeline({ clips: upstream.clips });
+        const result = await orchestrateViralTimeline({
+          clips: upstream.clips,
+          bgmUrl: upstream.sounds[0],
+        });
         if (result.timeline) {
-          timelineDraft = result.timeline;
+          timelineDraft = migrateTimelinePayload(result.timeline);
           updateNodeData(block.id, {
             timelineDraft: result.timeline,
             suggestions: result.suggestions,
@@ -1217,23 +1305,23 @@ async function executeBlock(
     }
     const freshTimeline = timelineDraft;
     if (!freshTimeline) throw new Error('编排未生成时间线');
-    const engine = (d.engine as string) ?? 'auto';
-    const resolvedEngine = engine === 'auto'
-      ? ((d.profile as string) === 'viral' ? 'hyperframes' as const : 'remotion' as const)
-      : engine as 'ffmpeg' | 'remotion' | 'hyperframes';
-    if (resolvedEngine === 'ffmpeg') {
-      const clips = [...upstream.clips].filter(Boolean);
-      if (clips.length === 0) throw new Error('缺少视频片段');
-      const res = await api.concatClips(clips, (d.title as string) || '智能剪辑', undefined);
-      if (!res.ok || !res.url) throw new Error(res.message ?? 'FFmpeg 剪辑失败');
-      updateNodeData(block.id, { status: 'success', videoUrl: res.url, outputUrl: res.url });
-    } else if (resolvedEngine === 'hyperframes') {
-      const res = await api.renderHyperframes({ timeline: freshTimeline, templateId: 'nx9-vertical-episode' });
-      updateNodeData(block.id, { status: 'running', taskId: res.taskId, outputUrl: undefined });
-    } else {
-      // Remotion: client-side bundle
-      updateNodeData(block.id, { status: 'success', outputUrl: undefined, message: 'Remotion 渲染请打开工作室' });
-    }
+    const engine = resolveEngine(
+      profile,
+      ((d.engine as string) ?? 'auto') as import('@nx9/shared').SmartEditEngine,
+    );
+    updateNodeData(block.id, { status: 'running' });
+    const rendered = await renderClipEditorTimeline(freshTimeline, engine, {
+      profile,
+      title: (d.title as string) || '智能剪辑',
+      templateId: (d.templateId as string) || 'nx9-vertical-episode',
+    });
+    updateNodeData(block.id, {
+      status: 'success',
+      videoUrl: rendered.url,
+      outputUrl: rendered.url,
+      renderTaskId: rendered.taskId,
+      renderBackend: rendered.engine,
+    });
     return;
   }
 
@@ -1437,23 +1525,31 @@ async function executeBlock(
     const img = upstream.pictures?.[0] || (d.imageUrl as string);
     const mask = (d.maskUrl as string) || '';
     const inpaintPrompt = prompt || (d.content as string) || '';
-    if (!img) throw new Error('局部重绘：需要上游图片');
-    if (!inpaintPrompt.trim()) throw new Error('局部重绘：请输入 prompt');
-    const res = (await api.proxyFal({
-      model: 'fal-ai/fast-sdxl/inpainting',
-      input: { image_url: img, mask_url: mask || undefined, prompt: inpaintPrompt.trim() },
-    })) as { ok?: boolean; url?: string };
-    if (!res.url) throw new Error('重绘失败');
-    // F-036: 写回 shot 状态
-    const linkedShotId = d.linkedShotId as string | undefined;
-    if (linkedShotId && ctx?.nodes && ctx?.edges) {
-      patchUpstreamShot(updateNodeData, block.id, ctx.nodes, ctx.edges, linkedShotId, {
-        firstFrameAssetId: res.url,
-        keyframeStatus: 'review',
-        status: 'review',
+    const { runInpaintEdit, resolveInpaintModel, writeBackInpaintShot } = await import(
+      './inpaint-edit-runner'
+    );
+    const rendered = await runInpaintEdit({
+      imageUrl: img as string,
+      maskUrl: mask,
+      prompt: inpaintPrompt,
+      model: resolveInpaintModel(d),
+    });
+    if (ctx?.nodes && ctx?.edges) {
+      writeBackInpaintShot({
+        updateNodeData,
+        nodeId: block.id,
+        nodes: ctx.nodes,
+        edges: ctx.edges,
+        linkedShotId: d.linkedShotId as string | undefined,
+        imageUrl: rendered.url,
       });
     }
-    updateNodeData(block.id, { status: 'success', previewUrl: res.url, output: res.url });
+    updateNodeData(block.id, {
+      status: 'success',
+      previewUrl: rendered.url,
+      output: rendered.url,
+      inpaintModel: rendered.model,
+    });
     return;
   }
 
@@ -1472,38 +1568,7 @@ async function executeBlock(
     return;
   }
 
-  if (kind === 'seedance-chain') {
-    const linkedIds = (d.linkedShotIds as string[]) ?? [];
-    // F-003: 链优先
-    const chainShots = ctx?.nodes && ctx?.edges
-      ? (() => {
-          const inc = ctx!.edges.filter((e) => e.target === block.id);
-          for (const e of inc) {
-            const src = ctx!.nodes.find((n) => n.id === e.source);
-            if (!src) continue;
-            const ch = (src.data as Record<string, unknown>)?.chainStoryboard as { shots?: any[] } | undefined;
-            if (ch?.shots) return ch.shots;
-          }
-          return undefined;
-        })()
-      : undefined;
-    // F-003: 仅使用链镜表，禁止回退全局
-    const allShots = chainShots ?? [];
-    const targetShots = linkedIds.length > 0
-      ? allShots.filter((s) => linkedIds.includes(s.id)).sort((a, b) => a.index - b.index)
-      : allShots.filter((s) => s.videoPromptEn).sort((a, b) => a.index - b.index);
-    if (targetShots.length === 0) throw new Error('Seedance Chain：无可处理的镜头（无上游链镜表）');
-    const projectGoal = (d.projectGoal as string) || '';
-    const chain = shotsToClipChain(targetShots, projectGoal);
-    updateNodeData(block.id, {
-      status: 'success',
-      clipChain: chain,
-      clipCount: chain.items.length,
-      content: chain.items.map((it: { label?: string; prompt?: string }) => `${it.label}: ${it.prompt}`).join('\n'),
-      output: chain.items.map((it: { label?: string; prompt?: string }) => `${it.label}: ${it.prompt}`).join('\n'),
-    });
-    return;
-  }
+  // VG-19/31: seedance-chain / motion-story 已由 migrateBlockKind → clip-gen，无独立执行分支
 
   if (kind === 'caption-asr') {
     const captionMode = (d.captionMode as string) ?? 'asr';
@@ -1581,27 +1646,28 @@ async function executeBlock(
   }
 
   if (kind === 'voice-cast') {
-    const lines = (d.lines as { speaker: string; text: string; emotion?: string }[]) ?? [];
+    const { lines, source } = resolveVoiceCastLines(d.lines, upstream.lines);
     const profileMap = (d.profileMap as Record<string, string>) ?? {};
-    const results: { speaker: string; text: string; audioUrl?: string; error?: string }[] = [];
-    for (const line of lines) {
-      try {
-        const voiceId = profileMap[line.speaker] ?? 'alloy';
-        const res = (await api.proxyTts({ input: line.text, voice: voiceId })) as {
-          ok?: boolean; url?: string;
-        };
-        results.push({ speaker: line.speaker, text: line.text, audioUrl: res.url });
-      } catch (e) {
-        results.push({ speaker: line.speaker, text: line.text, error: String(e) });
-      }
+    if (lines.length === 0) {
+      updateNodeData(block.id, {
+        status: 'error',
+        error: '无可解析的对白（请连接编剧台或已拆镜的分镜台）',
+        lineSource: source,
+        meta: { total: 0, failed: 0, lineSource: source },
+      });
+      throw new Error('无可解析的对白（请连接编剧台或已拆镜的分镜台）');
     }
-    const audioUrls = results.map((r) => r.audioUrl).filter(Boolean) as string[];
+    const { results, audioUrls } = await runSoundGenCast(lines, profileMap);
     updateNodeData(block.id, {
       status: audioUrls.length > 0 ? 'success' : 'error',
       results,
       sounds: audioUrls,
-      meta: { total: results.length, failed: results.filter((r) => r.error).length },
+      audioUrl: audioUrls[0],
+      lines,
+      lineSource: source,
+      meta: { total: results.length, failed: results.filter((r) => r.error).length, lineSource: source },
     });
+    if (audioUrls.length === 0) throw new Error('多角色配音全部失败');
     return;
   }
 
@@ -1609,35 +1675,43 @@ async function executeBlock(
     const images = upstream.pictures ?? [];
     if (images.length < 2) throw new Error('至少需要 2 张上游图像');
 
-    // F-036: 从上游获取目标 shotIds
+    const {
+      CONTINUITY_SYSTEM_PROMPT,
+      buildContinuityUserText,
+      resolveContinuityModel,
+      sliceContinuityImages,
+    } = await import('./continuity-check-runner');
+    const sliced = sliceContinuityImages(images);
     const targetShotIds = (upstream.shotIds ?? []) as string[];
-    const res = await api.proxyLlm({
-      model: 'gpt-4o-mini',
+    const llmBody: Record<string, unknown> = {
       messages: [
-        {
-          role: 'system',
-          content:
-            '你是分镜 continuity supervisor。对比多张镜头静帧，列出服装、光影、轴线不一致之处。输出 JSON: {"summary":"...","issues":["..."]}',
-        },
+        { role: 'system', content: CONTINUITY_SYSTEM_PROMPT },
         {
           role: 'user',
           content: [
-            { type: 'text', text: `检查 ${images.length} 个镜头` },
-            ...images.slice(0, 4).map((url) => ({ type: 'image_url', image_url: { url } })),
+            {
+              type: 'text',
+              text: buildContinuityUserText({
+                imageCount: images.length,
+                omitted: sliced.omitted,
+              }),
+            },
+            ...sliced.sent.map((url) => ({ type: 'image_url', image_url: { url } })),
           ],
         },
       ],
-    });
+    };
+    const continuityModel = resolveContinuityModel(d);
+    if (continuityModel) llmBody.model = continuityModel;
+    const res = await api.proxyLlm(llmBody);
     const raw = (res as { content?: string }).content ?? JSON.stringify(res);
     
-    // F-036: 将连续性检查结果写回 shot 状态
+    // F-036: 将连续性检查结果写回 shot 状态（链隔离 patch，不用全局 applyShotReviewFromReport）
     if (targetShotIds.length > 0 && ctx?.nodes && ctx?.edges) {
       try {
         const parsed = JSON.parse(typeof raw === 'string' ? raw : JSON.stringify(raw));
         const issues = Array.isArray(parsed.issues) ? parsed.issues : [];
         if (issues.length > 0) {
-          const { applyShotReviewFromReport } = await import('@nx9/shared');
-          // 找上游 chain 的 shots 并 patch
           for (const shotId of targetShotIds) {
             patchUpstreamShot(updateNodeData, block.id, ctx.nodes, ctx.edges, shotId, {
               keyframeStatus: 'failed',
@@ -1656,19 +1730,21 @@ async function executeBlock(
       continuityReport: raw,
       content: raw,
       continuityIssues: targetShotIds.length > 0 ? targetShotIds : undefined,
+      imagesChecked: images.length,
+      imagesOmitted: sliced.omitted,
+      ...(sliced.note ? { continuityCapNote: sliced.note } : { continuityCapNote: undefined }),
     });
     return;
   }
 
   if (kind === 'export-pack') {
     if (!ctx) throw new Error('export-pack 缺少画布上下文');
-    const shots = activeEpisodeShots(useWorkspaceDocument.getState().storyboard);
+    const shots = resolveShotsForBlock(block.id, ctx.nodes, ctx.edges, false);
     const { runExportPack } = await import('./export-pack-runner');
-    const { hasEffectiveTimeline, parseTimelineDraft } = await import('@nx9/shared');
+    const { hasEffectiveTimeline } = await import('@nx9/shared');
     const mode = (d.exportMode as string) || 'zip';
     const prefix = (d.exportPrefix as string) || 'nx9-shot';
     const audioUrl = (d.episodeAudioUrl as string) || '';
-    // F-011: 解析本节点或上游智能剪辑时间线；失败不得标 success
     let timeline = parseTimelineDraft(d.timelineDraft as import('@nx9/shared').TimelineDraftRaw);
     if (!hasEffectiveTimeline(timeline)) {
       const incoming = ctx.edges.filter((e) => e.target === block.id);
@@ -1686,7 +1762,7 @@ async function executeBlock(
     }
     try {
       const res = await runExportPack({
-        mode: mode as 'zip' | 'ffmpeg-episode' | 'hyperframes-episode' | 'remotion-bundle',
+        mode: mode as 'zip' | 'ffmpeg-episode' | 'hyperframes-episode' | 'remotion-bundle' | 'ecom-pack',
         prefix,
         audioUrl,
         pictures: upstream.pictures ?? [],
@@ -1695,6 +1771,7 @@ async function executeBlock(
         prompts: upstream.prompts ?? [],
         shots,
         timeline,
+        selectedSpecs: (d.selectedSpecs as string[] | undefined) ?? [],
       });
       if (!res.ok) {
         updateNodeData(block.id, {
@@ -1705,9 +1782,26 @@ async function executeBlock(
         });
         throw new Error(res.message ?? '导出未通过');
       }
+      if (res.taskId && !res.exportReady) {
+        updateNodeData(block.id, {
+          status: 'running',
+          exportReady: false,
+          hfTaskId: res.taskId,
+          message: res.message ?? 'submitted',
+        });
+        const url = await pollMontageTaskUntilDone(res.taskId, 'hyperframes');
+        updateNodeData(block.id, {
+          status: 'success',
+          exportReady: true,
+          episodeUrl: url,
+          hfTaskId: res.taskId,
+          exportCount: 1,
+        });
+        return;
+      }
       updateNodeData(block.id, {
         status: 'success',
-        exportReady: true,
+        exportReady: res.exportReady === true,
         episodeUrl: res.url,
         exportCount: res.exportCount ?? 0,
         message: res.message,
@@ -2100,54 +2194,7 @@ async function executeBlock(
     return;
   }
 
-  if (kind === 'motion-story') {
-    let chain = (d.clipChain as ClipChainState) ?? emptyClipChain();
-    const projectGoal =
-      (d.projectGoal as string) || useWorkspaceDocument.getState().storyboard.title || '';
-    if (chain.items.length === 0) {
-      // F-003: 链优先
-      const chainShots = ctx?.nodes && ctx?.edges
-        ? (() => {
-            const inc = ctx!.edges.filter((e) => e.target === block.id);
-            for (const e of inc) {
-              const src = ctx!.nodes.find((n) => n.id === e.source);
-              if (!src) continue;
-              const ch = (src.data as Record<string, unknown>)?.chainStoryboard as { shots?: any[] } | undefined;
-              if (ch?.shots) return ch.shots;
-            }
-            return undefined;
-          })()
-        : undefined;
-      // F-003: 仅使用链镜表，禁止回退全局
-      const allShots = chainShots ?? [];
-      if (allShots.length === 0) throw new Error('故事板无镜头（无上游链镜表）');
-      const linkedShotId = d.linkedShotId as string | undefined;
-      const shots = linkedShotId ? allShots.filter((s) => s.id === linkedShotId) : allShots;
-      if (shots.length === 0) throw new Error('未找到绑定的镜头');
-      chain = shotsToClipChain(shots, projectGoal);
-    }
-    const finalChain = await runClipChain(
-      chain,
-      projectGoal,
-      (next) => updateNodeData(block.id, { clipChain: next, projectGoal }),
-      (item, url) => {
-        if (item.shotId) {
-          patchFlowShot(block.id, item.shotId, {
-            videoAssetId: url,
-            videoStatus: 'review',
-          }, updateNodeData, ctx?.nodes, ctx?.edges);
-        }
-      },
-      () => {},
-    );
-    const lastVideo = [...finalChain.items].reverse().find((i) => i.videoUrl)?.videoUrl;
-    updateNodeData(block.id, {
-      status: 'success',
-      clipChain: finalChain,
-      videoUrl: lastVideo,
-    });
-    return;
-  }
+  // VG-19: motion-story 已迁移为 clip-gen（见 migrateBlockKind），勿再旁路组装器
 
   if (kind === 'topaz-picture') {
     const sourceUrl = upstream.pictures[0];
@@ -2198,12 +2245,18 @@ async function executeBlock(
     return;
   }
 
+  // NODE-02: 遗留 kind 明示不可用；迁移表已将 music-gen→sound-gen、lipsync-pass→clip-gen，
+  // 此处仅兜底未迁移的旧图，禁止假成功。
   if (kind === 'music-gen') {
-    throw new Error('BGM 功能开发中，需接入 Suno/Udio 等专用音乐 API 后可用');
+    throw new Error(
+      'music-gen 已弃用：请改用「声音生成」节点并将模式设为 BGM（soundMode=music）。旧画布打开时应自动迁移。',
+    );
   }
 
   if (kind === 'lipsync-pass') {
-    throw new Error('口型同步功能已弃用，需部署 Wav2Lip / LivePortrait 等模型后方可用');
+    throw new Error(
+      'lipsync-pass 已弃用：口型同步未接真实模型，请改用「视频生成」节点。旧画布打开时应自动迁移为 clip-gen。',
+    );
   }
 
   if (kind === 'reference-analyze') {
@@ -2220,10 +2273,13 @@ async function executeBlock(
 
 const PARALLEL_LIMIT = 3;
 
+/** PG-04: 取消信号 — cancelled 为块间检查；abortSignal 透传到在途请求 */
+export type FlowRunSignal = { cancelled: boolean; abortSignal?: AbortSignal };
+
 async function runLayerConcurrent(
   ids: string[],
   runOne: (id: string) => Promise<void>,
-  signal?: { cancelled: boolean },
+  signal?: FlowRunSignal,
 ): Promise<void> {
   let cursor = 0;
   const workers = Array.from({ length: Math.min(PARALLEL_LIMIT, ids.length) }, async () => {
@@ -2241,7 +2297,7 @@ export async function runFlowBatch(
   edges: Edge[],
   updateNodeData: (id: string, data: Record<string, unknown>) => void,
   onProgress: (p: RunProgress) => void,
-  signal?: { cancelled: boolean },
+  signal?: FlowRunSignal,
   onlyBlockIds?: Set<string>,
   skipBlockIds: Set<string> = new Set(),
 ): Promise<void> {
@@ -2295,14 +2351,14 @@ export async function runFlowBatch(
               if (b) b.data = { ...b.data, ...data };
               updateNodeData(nodeId, data);
             },
-            { nodes, edges },
+            { nodes, edges, abortSignal: signal?.abortSignal },
           );
           completedIds.add(id);
         } catch (e) {
           errors.push({
             id,
             error: e,
-            blocked: e instanceof ReviewGateBlockedError,
+            blocked: e instanceof ReviewGateBlockedError || e instanceof DirectorRunBlockedError,
           });
         }
       },
@@ -2311,14 +2367,22 @@ export async function runFlowBatch(
 
     if (errors.length > 0) {
       const first = errors[0];
-      if (first.blocked && first.error instanceof ReviewGateBlockedError) {
+      // PG-04: 用户主动取消 — 不落 error 态，收回 idle
+      if (signal?.cancelled || signal?.abortSignal?.aborted) {
+        updateNodeData(first.id, { status: 'idle', error: undefined });
+        onProgress({ phase: 'paused', current: completed, total, completedIds: [...completedIds] });
+        return;
+      }
+      if (first.blocked && first.error instanceof Error) {
         onProgress({
           phase: 'blocked',
           current: completed + 1,
           total,
           currentId: first.id,
           error: first.error.message,
-          pendingShots: first.error.pending,
+          ...(first.error instanceof ReviewGateBlockedError
+            ? { pendingShots: first.error.pending }
+            : {}),
         });
       } else {
         updateNodeData(first.id, { status: 'error', error: String(first.error) });

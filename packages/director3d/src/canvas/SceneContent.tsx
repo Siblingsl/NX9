@@ -15,27 +15,35 @@ import { useDirectorStore } from '../store/directorStore';
 import { StageActor } from '../runtime/StageActor';
 import { ImportedMesh } from '../runtime/ImportedMesh';
 import { PanoramaBackground } from '../runtime/PanoramaBackground';
+import { clearAssetLoaderCache } from '../loaders/clearAssetLoader';
 
 class AssetLoadBoundary extends React.Component<
-  { label: string; children: React.ReactNode },
-  { failed: boolean }
+  { label: string; url: string; children: React.ReactNode },
+  { failed: boolean; nonce: number }
 > {
-  state = { failed: false };
+  state = { failed: false, nonce: 0 };
 
   static getDerivedStateFromError() {
     return { failed: true };
   }
 
+  retry = () => {
+    clearAssetLoaderCache(this.props.url);
+    this.setState((current) => ({ failed: false, nonce: current.nonce + 1 }));
+  };
+
   render() {
-    if (!this.state.failed) return this.props.children;
-    return (
-      <Html center>
-        <div style={{ padding: 10, borderRadius: 8, background: 'rgba(20, 20, 24, .9)', color: '#fff', fontSize: 11, whiteSpace: 'nowrap' }}>
-          {this.props.label}加载失败
-          <button type="button" style={{ marginLeft: 8 }} onClick={() => this.setState({ failed: false })}>重试</button>
-        </div>
-      </Html>
-    );
+    if (this.state.failed) {
+      return (
+        <Html center>
+          <div style={{ padding: 10, borderRadius: 8, background: 'rgba(20, 20, 24, .9)', color: '#fff', fontSize: 11, whiteSpace: 'nowrap' }}>
+            {this.props.label}加载失败
+            <button type="button" style={{ marginLeft: 8 }} onClick={this.retry}>重试</button>
+          </div>
+        </Html>
+      );
+    }
+    return <React.Fragment key={this.state.nonce}>{this.props.children}</React.Fragment>;
   }
 }
 
@@ -144,7 +152,7 @@ function SceneObject({
             posePresetId={object.posePresetId}
           />
         ) : object.kind === 'mesh' && object.meshUrl ? (
-          <AssetLoadBoundary label={object.name}><ImportedMesh url={object.meshUrl} /></AssetLoadBoundary>
+          <AssetLoadBoundary label={object.name} url={object.meshUrl}><ImportedMesh url={object.meshUrl} /></AssetLoadBoundary>
         ) : (
           <PropMesh type={object.geometryType ?? 'box'} color={object.color ?? '#888'} />
         )}
@@ -248,7 +256,7 @@ export function SceneContent({
   return (
     <>
       {project.panorama?.url && (
-        <AssetLoadBoundary label="全景图"><PanoramaBackground url={project.panorama.url} yaw={project.panorama.yaw} /></AssetLoadBoundary>
+        <AssetLoadBoundary label="全景图" url={project.panorama.url}><PanoramaBackground url={project.panorama.url} yaw={project.panorama.yaw} /></AssetLoadBoundary>
       )}
       <ambientLight intensity={project.panorama ? 0.35 : 0.55} />
       <directionalLight position={[5, 10, 4]} intensity={0.9} castShadow />

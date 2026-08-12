@@ -9,6 +9,9 @@ import {
   MAX_ENV_REFERENCE_IMAGES,
   SCENE_SHEET_PROMPT_TEMPLATE,
   COSTUME_SHEET_PROMPT_TEMPLATE,
+  DEFAULT_SCENE_VARIANTS,
+  DEFAULT_PROP_VARIANTS,
+  CAC_COSTUME_VARIANT_PRESETS,
   SHOT_MOVE_FAMILIES,
   SHOT_LEXICON_SYSTEMS,
   STYLE_AESTHETIC_FAMILIES,
@@ -30,9 +33,10 @@ import {
   type SoundAssetKind,
 } from '@nx9/shared';
 import { X, ZoomIn } from 'lucide-react';
-import { DetailSection, Field, TextInput, TextArea, PromptPanel, MediaSlot, ChipList, VariantGrid } from './detail-primitives';
+import { DetailSection, DetailSectionNav, Field, TextInput, TextArea, PromptPanel, MediaSlot, ChipList, VariantGrid } from './detail-primitives';
 import { ImageLightbox, type ImageLightboxItem } from '../../components/ui/ImageLightbox';
 import { ScreenplaySupportPanel } from './ScreenplaySupportPanel';
+import { CharacterFaceRigSection } from './CharacterFaceRigSection';
 import { ImageEditModal } from '../../blocks/shared/ImageEditModal';
 
 type UploadHandler = (file: File) => void | Promise<void>;
@@ -59,8 +63,12 @@ export interface CharacterDetailFieldsProps {
   masterSheetProgress?: string | null;
   /** 出图参数（模型/清晰度/质量/比例） */
   genSettingsSlot?: ReactNode;
+  /** 顶栏已接管主生成时，详情内降为再次生成 */
+  chromeOwnsPrimaryGen?: boolean;
   /** 发布角色参考音到声音库 */
   onPublishAudioToSound?: () => void;
+  /** P1：另存新版本（revision +1，刷新锁快照） */
+  onBumpRevision?: () => void;
   /** 从表情格发布到情绪库 — 已弃用（情绪库降级） */
   onPublishExpressionsToEmotion?: () => void;
 }
@@ -77,7 +85,9 @@ export function CharacterDetailFields({
   generatingMasterSheet = false,
   masterSheetProgress = null,
   genSettingsSlot,
+  chromeOwnsPrimaryGen = false,
   onPublishAudioToSound,
+  onBumpRevision,
 }: CharacterDetailFieldsProps) {
   const ext = getCharacterCreative(c);
   const bible = c.bible ?? {};
@@ -176,7 +186,7 @@ export function CharacterDetailFields({
         {url ? (
           <button
             type="button"
-            className="group relative block w-full overflow-hidden rounded-md border border-line bg-white"
+            className="group relative block w-full overflow-hidden rounded-md border border-line bg-surface"
             title={`放大查看：完整分类原图 · ${label}`}
             onClick={() => setCategoryLightboxIndex(galleryIndex >= 0 ? galleryIndex : 0)}
           >
@@ -205,17 +215,39 @@ export function CharacterDetailFields({
         <div className="min-h-0 flex-1 space-y-4 overflow-y-auto nx9-scroll p-4">
         <ScreenplaySupportPanel kind="character" name={c.name} character={c} />
 
+        <DetailSectionNav
+          sections={[
+            { id: 'char-identity', label: '身份' },
+            { id: 'char-face', label: '捏脸' },
+            { id: 'char-voice', label: '声音服装' },
+            { id: 'char-visual', label: '设定板' },
+          ]}
+        />
+
         <div className="flex flex-wrap items-center gap-1.5">
           <span className={`rounded-full px-2 py-0.5 text-[10px] ${anchorCount >= 4 ? 'bg-ok/10 text-ok' : 'bg-warn/10 text-warn'}`}>
             健康度 {anchorCount}/4
           </span>
           <span className="rounded-full bg-surface px-2 py-0.5 text-[10px] text-ink/45">Prompt v{promptVersion}</span>
+          <span className="rounded-full bg-brand/10 px-2 py-0.5 text-[10px] text-brand" title="轻量资产版本">
+            资产 v{c.revision ?? 1}
+          </span>
+          {onBumpRevision ? (
+            <button
+              type="button"
+              className="rounded-full border border-line px-2 py-0.5 text-[10px] text-ink/55 hover:border-brand/40 hover:text-brand"
+              onClick={onBumpRevision}
+              title="另存新版本：revision+1，并刷新锁定 Prompt 快照"
+            >
+              新建版本
+            </button>
+          ) : null}
           <span className="text-[10px] text-ink/40">
             引用 <code className="rounded bg-surface px-1 text-ink/55">@角色:{c.name || '未命名'}</code>
           </span>
         </div>
 
-        <DetailSection title="身份与一致性">
+        <DetailSection id="char-identity" title="身份与一致性">
           <div className="grid grid-cols-2 gap-2">
             <Field label="角色名 / @引用名">
               <TextInput value={c.name} onChange={(v) => patch({ name: v })} placeholder="角色名" />
@@ -261,13 +293,30 @@ export function CharacterDetailFields({
           <div className="space-y-1">
             <div className="flex items-center justify-between gap-2">
               <span className="text-[10px] text-ink/45">一致性 Prompt</span>
-              <button
-                type="button"
-                className="rounded-md border border-line px-2 py-0.5 text-[10px] text-ink/60 hover:border-brand/40"
-                onClick={onRefreshPrompts}
-              >
-                刷新
-              </button>
+              <div className="flex items-center gap-1">
+                {ext.consistency?.lockedPromptSnapshot?.trim()
+                  && (c.consistencyPrompt ?? '').trim() !== ext.consistency.lockedPromptSnapshot.trim() ? (
+                  <button
+                    type="button"
+                    className="rounded-md border border-warn/40 px-2 py-0.5 text-[10px] text-warn hover:bg-warn/10"
+                    title="OL-12：将当前 Prompt 恢复为锁定时快照"
+                    onClick={() =>
+                      patch({
+                        consistencyPrompt: ext.consistency!.lockedPromptSnapshot,
+                      })
+                    }
+                  >
+                    恢复锁定快照
+                  </button>
+                ) : null}
+                <button
+                  type="button"
+                  className="rounded-md border border-line px-2 py-0.5 text-[10px] text-ink/60 hover:border-brand/40"
+                  onClick={onRefreshPrompts}
+                >
+                  刷新
+                </button>
+              </div>
             </div>
             <TextArea
               value={c.consistencyPrompt ?? ext.consistency?.consistencyPrompt ?? ''}
@@ -309,7 +358,8 @@ export function CharacterDetailFields({
             </div>
           ) : null}
         </DetailSection>
-        <DetailSection title="声音与服装">
+        <CharacterFaceRigSection character={c} onChange={onChange} />
+        <DetailSection id="char-voice" title="声音与服装">
           <div className="space-y-3">
             <div className="space-y-2">
               <MediaSlot
@@ -384,12 +434,13 @@ export function CharacterDetailFields({
       {/* 右栏：设定板与参考格 — 独立滚动 */}
       <main className="flex min-h-0 min-w-0 flex-1 flex-col">
         <div className="min-h-0 flex-1 space-y-4 overflow-y-auto nx9-scroll p-4">
-        <DetailSection title="视觉 · 设定板与参考">
+        <DetailSection id="char-visual" title="视觉 · 设定板与参考">
           <p className="text-[10px] text-ink/45">
             两步：先生成角色完整设定板 → 确认后再生成五类原图并裁切回填
             {generatingMasterSheet ? ` · ${masterSheetProgress || '生成中…'}` : ''}
+            {chromeOwnsPrimaryGen ? ' · 主动作在顶栏「主生成」' : ''}
           </p>
-          {genSettingsSlot ? <div className="mb-1">{genSettingsSlot}</div> : null}
+          {!chromeOwnsPrimaryGen && genSettingsSlot ? <div className="mb-1">{genSettingsSlot}</div> : null}
 
           <div className="space-y-2">
             <div className="flex flex-wrap items-center gap-2">
@@ -398,11 +449,17 @@ export function CharacterDetailFields({
                   type="button"
                   disabled={generatingMasterSheet}
                   onClick={() => onGenerateMasterSheet()}
-                  className="inline-flex items-center gap-1 rounded-lg border border-brand/30 bg-brand/5 px-2.5 py-1 text-[11px] text-brand disabled:opacity-45"
+                  className={
+                    chromeOwnsPrimaryGen
+                      ? 'inline-flex items-center gap-1 rounded-lg border border-line px-2.5 py-1 text-[11px] text-ink/55 hover:border-brand/40 disabled:opacity-45'
+                      : 'inline-flex items-center gap-1 rounded-lg border border-brand/30 bg-brand/5 px-2.5 py-1 text-[11px] text-brand disabled:opacity-45'
+                  }
                 >
                   {generatingMasterSheet && !masterSheetProgress?.includes('分类')
                     ? (masterSheetProgress || '完整设定板生成中…')
-                    : '主生成·设定板'}
+                    : chromeOwnsPrimaryGen
+                      ? '再次生成·设定板'
+                      : '主生成·设定板'}
                 </button>
               ) : null}
               {onGenerateCategorySheets ? (
@@ -415,7 +472,9 @@ export function CharacterDetailFields({
                 >
                   {generatingMasterSheet && masterSheetProgress?.includes('分类')
                     ? (masterSheetProgress || '五类原图生成中…')
-                    : '生成五类原图'}
+                    : chromeOwnsPrimaryGen
+                      ? '再次生成·五类原图'
+                      : '生成五类原图'}
                 </button>
               ) : null}
               {!hasFullSheet && onGenerateCategorySheets ? (
@@ -431,7 +490,7 @@ export function CharacterDetailFields({
               {ext.fullSheetUrl?.trim() ? (
                 <button
                   type="button"
-                  className="group relative block w-full overflow-hidden rounded-md border border-line bg-white"
+                  className="group relative block w-full overflow-hidden rounded-md border border-line bg-surface"
                   title="放大查看：角色完整设定板"
                   onClick={() => setMasterLightboxOpen(true)}
                 >
@@ -653,6 +712,9 @@ export function SceneDetailFields({
   onSuggestCreateProps,
   onCropCoverFromSheet,
   croppingCover = false,
+  onUploadVariant,
+  onBumpRevision,
+  chromeOwnsPrimaryGen = false,
 }: {
   item: BacklotWorkspaceItem;
   onChange: (next: BacklotWorkspaceItem) => void;
@@ -675,12 +737,18 @@ export function SceneDetailFields({
   onSuggestCreateProps?: (names: string[]) => void;
   onCropCoverFromSheet?: () => void;
   croppingCover?: boolean;
+  onUploadVariant?: (variantId: string, file: File) => void;
+  /** OL-02 */
+  onBumpRevision?: () => void;
+  /** 顶栏已接管主生成 */
+  chromeOwnsPrimaryGen?: boolean;
 }) {
   const ext = getSceneCreative(item);
   const patch = (p: Partial<BacklotWorkspaceItem>) => onChange({ ...item, ...p });
   const patchExt = (p: Partial<typeof ext>) => onChange({ ...item, creative: { ...ext, ...p } });
   const promptVersion = ext.prompts?.scene?.version ?? 1;
   const locked = Boolean(ext.locked);
+  const sceneVariants = ext.variants ?? DEFAULT_SCENE_VARIANTS;
   const refs = ext.referenceUrls ?? [];
   const [masterOpen, setMasterOpen] = useState(false);
   const [legacyPropsOpen, setLegacyPropsOpen] = useState(
@@ -707,6 +775,14 @@ export function SceneDetailFields({
         <div className="min-h-0 flex-1 space-y-4 overflow-y-auto nx9-scroll p-4">
           <ScreenplaySupportPanel kind="scene" name={item.label} sceneItem={item} />
 
+          <DetailSectionNav
+            sections={[
+              { id: 'scene-space', label: '空间' },
+              { id: 'scene-props', label: '道具' },
+              { id: 'scene-prompt', label: 'Prompt' },
+            ]}
+          />
+
           <div className="flex flex-wrap items-center gap-1.5">
             <span className={`rounded-full px-2 py-0.5 text-[10px] ${health >= 4 ? 'bg-ok/10 text-ok' : 'bg-warn/10 text-warn'}`}>
               健康度 {health}/4
@@ -716,12 +792,25 @@ export function SceneDetailFields({
             </span>
             <span className="rounded-full bg-surface px-2 py-0.5 text-[10px] text-ink/45">参考 {refs.length}/{MAX_ENV_REFERENCE_IMAGES}</span>
             <span className="rounded-full bg-surface px-2 py-0.5 text-[10px] text-ink/45">Prompt v{promptVersion}</span>
+            <span className="rounded-full bg-brand/10 px-2 py-0.5 text-[10px] text-brand" title="轻量资产版本">
+              资产 v{item.revision ?? 1}
+            </span>
+            {onBumpRevision ? (
+              <button
+                type="button"
+                className="rounded-full border border-line px-2 py-0.5 text-[10px] text-ink/55 hover:border-brand/40 hover:text-brand"
+                onClick={onBumpRevision}
+                title="另存新版本：revision+1，并刷新锁定 Prompt 快照"
+              >
+                新建版本
+              </button>
+            ) : null}
             <span className="text-[10px] text-ink/40">
               引用 <code className="rounded bg-surface px-1 text-ink/55">{formatAssetMention('scene', item.label)}</code>
             </span>
           </div>
 
-          <DetailSection title="空间与一致性">
+          <DetailSection id="scene-space" title="空间与一致性">
             <div className="grid grid-cols-2 gap-2">
               <Field label="场景名 / @引用名">
                 <TextInput value={item.label} onChange={(v) => patch({ label: v })} placeholder="场景名" />
@@ -758,7 +847,7 @@ export function SceneDetailFields({
             </div>
           </DetailSection>
 
-          <DetailSection title="固定道具（实体）">
+          <DetailSection id="scene-props" title="固定道具（实体）">
             {propOptions && propOptions.length > 0 ? (
               <Field label="道具库引用（propIds）">
                 <div className="flex flex-wrap gap-1">
@@ -846,10 +935,20 @@ export function SceneDetailFields({
             ) : null}
           </DetailSection>
 
-          <DetailSection title="Prompt">
+          <DetailSection id="scene-prompt" title="Prompt">
             <Field label="场景 Prompt（注入图像/视频生成）">
               <TextArea value={item.promptEn || ext.prompts?.scene?.text || ''} onChange={(v) => patch({ promptEn: v })} rows={4} mono />
             </Field>
+            {ext.lockedPromptSnapshot?.trim()
+              && (item.promptEn || ext.prompts?.scene?.text || '').trim() !== ext.lockedPromptSnapshot.trim() ? (
+              <button
+                type="button"
+                className="rounded-lg border border-warn/40 px-2.5 py-1 text-[11px] text-warn hover:bg-warn/10"
+                onClick={() => patch({ promptEn: ext.lockedPromptSnapshot })}
+              >
+                恢复锁定快照
+              </button>
+            ) : null}
             <Field label="Negative / 禁改项（防场景漂移）">
               <TextArea
                 value={ext.prompts?.negative?.text ?? ext.forbiddenDrift ?? ''}
@@ -881,12 +980,12 @@ export function SceneDetailFields({
             className="text-[10px] text-ink/50 hover:text-brand"
             onClick={() => setRecsOpen((v) => !v)}
           >
-            {recsOpen ? '收起创作推荐' : '创作推荐（可点选写入分镜编辑）'}
+            {recsOpen ? '收起创作推荐' : '创作推荐（分镜台编辑本场景时点选写入）'}
           </button>
           {recsOpen ? (
             <DetailSection title="创作推荐">
               <p className="text-[10px] text-ink/45">
-                在分镜台编辑本场景镜头时，会展示这些推荐芯片，点选即可写入景别/目的/角色。
+                下游已接通：分镜台编辑本场景镜头时展示芯片，点选写入景别/目的/角色。音乐与音效暂作文案备忘。
               </p>
               {(
                 [
@@ -921,15 +1020,23 @@ export function SceneDetailFields({
                 <p className="text-[10px] text-ink/45">固定版式主参考 · 点击放大 · 简体中文标签</p>
               </div>
               <div className="flex flex-wrap items-center gap-2">
-                {genSettingsSlot ? <div>{genSettingsSlot}</div> : null}
+                {!chromeOwnsPrimaryGen && genSettingsSlot ? <div>{genSettingsSlot}</div> : null}
                 {onGenerateSheet ? (
                   <button
                     type="button"
                     disabled={generatingSheet}
                     onClick={() => void onGenerateSheet()}
-                    className="rounded-lg bg-brand px-2.5 py-1 text-[11px] text-white disabled:opacity-50"
+                    className={
+                      chromeOwnsPrimaryGen
+                        ? 'rounded-lg border border-line px-2.5 py-1 text-[11px] text-ink/55 hover:border-brand/40 disabled:opacity-50'
+                        : 'rounded-lg bg-brand px-2.5 py-1 text-[11px] text-white disabled:opacity-50'
+                    }
                   >
-                    {generatingSheet ? '生成中…' : '主生成·场景设定板'}
+                    {generatingSheet
+                      ? '生成中…'
+                      : chromeOwnsPrimaryGen
+                        ? '再次生成·设定板'
+                        : '主生成·场景设定板'}
                   </button>
                 ) : null}
               </div>
@@ -972,6 +1079,19 @@ export function SceneDetailFields({
                 {croppingCover ? '裁切封面中…' : '从设定板裁切封面'}
               </button>
             ) : null}
+            <div className="mt-3">
+              <VariantGrid
+                title="场景变体（昼夜/天气，最多 4 · 同一空间锚点）"
+                items={sceneVariants}
+                columns={4}
+                onChangeItem={(id, itemPatch) => {
+                  const base = ext.variants?.length ? ext.variants : DEFAULT_SCENE_VARIANTS;
+                  const next = base.map((v) => (v.id === id ? { ...v, ...itemPatch } : v));
+                  patchExt({ variants: next });
+                }}
+                onUploadItem={onUploadVariant}
+              />
+            </div>
           </div>
 
           <DetailSection title={`多参考图（最多 ${MAX_ENV_REFERENCE_IMAGES} 张）`}>
@@ -1284,25 +1404,45 @@ export function EmotionDetailFields({
   onChange,
   onRefreshPrompts,
   onUploadImage,
+  readOnly = false,
 }: {
   item: BacklotWorkspaceItem;
   onChange: (next: BacklotWorkspaceItem) => void;
   onRefreshPrompts: () => void;
   onUploadImage: UploadHandler;
+  /** UX-P08：情绪库已降级，深链仅只读 */
+  readOnly?: boolean;
 }) {
   const ext = getEmotionCreative(item);
-  const patch = (p: Partial<BacklotWorkspaceItem>) => onChange({ ...item, ...p });
-  const patchExt = (p: Partial<typeof ext>) => onChange({ ...item, creative: { ...ext, ...p } });
+  const patch = (p: Partial<BacklotWorkspaceItem>) => {
+    if (readOnly) return;
+    onChange({ ...item, ...p });
+  };
+  const patchExt = (p: Partial<typeof ext>) => {
+    if (readOnly) return;
+    onChange({ ...item, creative: { ...ext, ...p } });
+  };
 
   return (
-    <div className="space-y-1 max-w-2xl">
+    <div className={`max-w-2xl space-y-1 ${readOnly ? 'pointer-events-none opacity-90' : ''}`}>
+      {readOnly ? (
+        <p className="pointer-events-auto rounded-lg border border-amber-200/70 bg-amber-50/50 px-2.5 py-1.5 text-[10px] text-ink/60">
+          遗留情绪条目 · 只读。新氛围请用镜头「推荐情绪」；微表情请用角色表情格。
+        </p>
+      ) : null}
       <input
         value={item.label}
+        readOnly={readOnly}
         onChange={(e) => patch({ label: e.target.value })}
-        className="w-full font-semibold text-sm border-b border-line pb-1 focus:outline-none"
+        className="w-full border-b border-line pb-1 text-sm font-semibold focus:outline-none"
       />
       <DetailSection title="情绪状态">
-        <MediaSlot label="参考图" url={ext.imageUrl} accept="image/*" onUpload={onUploadImage} />
+        <MediaSlot
+          label="参考图"
+          url={ext.imageUrl}
+          accept="image/*"
+          onUpload={readOnly ? async () => undefined : onUploadImage}
+        />
         <Field label="人物描述">
           <TextArea value={ext.characterDescription ?? ''} onChange={(v) => patchExt({ characterDescription: v })} rows={2} />
         </Field>
@@ -1318,43 +1458,50 @@ export function EmotionDetailFields({
         <Field label="英文 Prompt">
           <TextArea value={item.promptEn} onChange={(v) => patch({ promptEn: v })} rows={3} mono />
         </Field>
-        <label className="flex items-center gap-2 text-[10px] text-ink/50">
-          <input type="checkbox" checked={!!ext.favorite} onChange={(e) => patchExt({ favorite: e.target.checked })} />
-          收藏
-        </label>
-        <label className="flex items-center gap-2 text-[10px] text-ink/50">
-          <input
-            type="checkbox"
-            checked={!!ext.locked}
-            onChange={(e) => {
-              const locked = e.target.checked;
-              const prompt =
-                item.promptEn?.trim()
-                || ext.prompts?.emotion?.text?.trim()
-                || '';
-              patchExt({
-                locked,
-                lockedPromptSnapshot: locked ? prompt : ext.lockedPromptSnapshot,
-                lockedAt: locked ? new Date().toISOString() : ext.lockedAt,
-              });
-            }}
-          />
-          锁定情绪（防 Prompt 漂移）
-        </label>
+        {!readOnly ? (
+          <>
+            <label className="flex items-center gap-2 text-[10px] text-ink/50">
+              <input type="checkbox" checked={!!ext.favorite} onChange={(e) => patchExt({ favorite: e.target.checked })} />
+              收藏
+            </label>
+            <label className="flex items-center gap-2 text-[10px] text-ink/50">
+              <input
+                type="checkbox"
+                checked={!!ext.locked}
+                onChange={(e) => {
+                  const locked = e.target.checked;
+                  const prompt =
+                    item.promptEn?.trim()
+                    || ext.prompts?.emotion?.text?.trim()
+                    || '';
+                  patchExt({
+                    locked,
+                    lockedPromptSnapshot: locked ? prompt : ext.lockedPromptSnapshot,
+                    lockedAt: locked ? new Date().toISOString() : ext.lockedAt,
+                  });
+                }}
+              />
+              锁定情绪（防 Prompt 漂移）
+            </label>
+          </>
+        ) : null}
       </DetailSection>
       <DetailSection title="Emotion Prompt">
         <PromptPanel
           label="结构化 Emotion Prompt"
           value={ext.prompts?.emotion?.text ?? ''}
-          onChange={(v) =>
-            patchExt({ prompts: { emotion: { version: 1, text: v, updatedAt: Date.now() } } })
+          onChange={
+            readOnly
+              ? () => undefined
+              : (v) =>
+                  patchExt({ prompts: { emotion: { version: 1, text: v, updatedAt: Date.now() } } })
           }
-          onRegenerate={onRefreshPrompts}
+          onRegenerate={readOnly ? undefined : onRefreshPrompts}
           onCopy={() => copyText(ext.prompts?.emotion?.text ?? '')}
         />
       </DetailSection>
-      <p className="text-[10px] text-brand/70">
-        引用 <code className="bg-surface px-1 rounded">{formatAssetMention('emotion', item.label)}</code>
+      <p className="pointer-events-auto text-[10px] text-brand/70">
+        引用 <code className="rounded bg-surface px-1">{formatAssetMention('emotion', item.label)}</code>
       </p>
     </div>
   );
@@ -1478,6 +1625,8 @@ export function CostumeDetailFields({
   generateSheetLockedReason,
   boundCharacterNames = [],
   onOpenCharacter,
+  onBumpRevision,
+  chromeOwnsPrimaryGen = false,
 }: {
   item: BacklotWorkspaceItem;
   onChange: (next: BacklotWorkspaceItem) => void;
@@ -1498,6 +1647,8 @@ export function CostumeDetailFields({
   /** Cos-05：被哪些角色绑定 */
   boundCharacterNames?: string[];
   onOpenCharacter?: (name: string) => void;
+  onBumpRevision?: () => void;
+  chromeOwnsPrimaryGen?: boolean;
 }) {
   const ext = getCostumeCreative(item);
   const [masterOpen, setMasterOpen] = useState(false);
@@ -1518,7 +1669,7 @@ export function CostumeDetailFields({
     ...(ext.frontFlatUrl ? [{ url: ext.frontFlatUrl, label: '正面全身衣封面' }] : []),
     ...((ext.referenceUrls ?? []).map((url, i) => ({ url, label: `参考 ${i + 1}` }))),
   ];
-  const variantItems = ext.variants ?? [];
+  const variantItems = ext.variants?.length ? ext.variants : CAC_COSTUME_VARIANT_PRESETS;
 
   return (
     <div className="flex h-full min-h-0 w-full">
@@ -1532,12 +1683,31 @@ export function CostumeDetailFields({
               {locked ? '已锁定' : '未锁定'}
             </span>
             <span className="rounded-full bg-surface px-2 py-0.5 text-[10px] text-ink/45">Prompt v{promptVersion}</span>
+            <span className="rounded-full bg-brand/10 px-2 py-0.5 text-[10px] text-brand">资产 v{item.revision ?? 1}</span>
+            {onBumpRevision ? (
+              <button
+                type="button"
+                className="rounded-full border border-line px-2 py-0.5 text-[10px] text-ink/55 hover:border-brand/40 hover:text-brand"
+                onClick={onBumpRevision}
+              >
+                新建版本
+              </button>
+            ) : null}
             <span className="text-[10px] text-ink/40">
               引用 <code className="rounded bg-surface px-1 text-ink/55">{formatAssetMention('costume', item.label)}</code>
             </span>
           </div>
 
-          <DetailSection title="核心造型">
+          <DetailSectionNav
+            sections={[
+              { id: 'costume-core', label: '造型' },
+              { id: 'costume-prompt', label: 'Prompt' },
+              { id: 'costume-usage', label: '关系' },
+              { id: 'costume-collab', label: '协作' },
+            ]}
+          />
+
+          <DetailSection id="costume-core" title="核心造型">
             <Field label="服装名 / @引用名">
               <TextInput value={item.label} onChange={(v) => patch({ label: v })} placeholder="服装名" />
             </Field>
@@ -1611,7 +1781,7 @@ export function CostumeDetailFields({
             ) : null}
           </DetailSection>
 
-          <DetailSection title="Prompt">
+          <DetailSection id="costume-prompt" title="Prompt">
             <Field label="服装 Prompt（英文优先，注入出图）">
               <TextArea
                 value={item.promptEn || ext.prompts?.image?.text || ext.prompts?.costume?.text || ''}
@@ -1636,6 +1806,16 @@ export function CostumeDetailFields({
               />
             </Field>
             <div className="flex flex-wrap gap-2">
+              {ext.lockedPromptSnapshot?.trim()
+                && (item.promptEn || ext.prompts?.costume?.text || '').trim() !== ext.lockedPromptSnapshot.trim() ? (
+                <button
+                  type="button"
+                  className="rounded-lg border border-warn/40 px-2.5 py-1 text-[11px] text-warn hover:bg-warn/10"
+                  onClick={() => patch({ promptEn: ext.lockedPromptSnapshot })}
+                >
+                  恢复锁定快照
+                </button>
+              ) : null}
               <button type="button" className="rounded-lg border border-line px-2.5 py-1 text-[11px] text-ink/70 hover:border-brand/40" onClick={onRefreshPrompts}>
                 刷新专业 Prompt
               </button>
@@ -1649,7 +1829,7 @@ export function CostumeDetailFields({
             </div>
           </DetailSection>
 
-          <DetailSection title="被哪些角色使用">
+          <DetailSection id="costume-usage" title="被哪些角色使用">
             {boundCharacterNames.length === 0 ? (
               <p className="text-[10px] text-ink/40">尚无角色绑定此服装</p>
             ) : (
@@ -1667,6 +1847,12 @@ export function CostumeDetailFields({
               </div>
             )}
           </DetailSection>
+
+          <DetailSection id="costume-collab" title="协作说明">
+            <p className="text-[10px] leading-relaxed text-ink/50">
+              服装以素材库为权威（SSOT），不回写编剧 Bible；角色/场景才推送 Bible。
+            </p>
+          </DetailSection>
         </div>
       </aside>
 
@@ -1679,11 +1865,15 @@ export function CostumeDetailFields({
                 <p className="text-[10px] text-ink/45">主媒体 · 点击放大 · 生成后写入此位</p>
               </div>
               <div className="flex flex-wrap items-center gap-2">
-                {genSettingsSlot ? <div>{genSettingsSlot}</div> : null}
+                {!chromeOwnsPrimaryGen && genSettingsSlot ? <div>{genSettingsSlot}</div> : null}
                 {onGenerateSheet || generateSheetLockedReason ? (
                   <button
                     type="button"
-                    className="rounded-lg bg-brand px-2.5 py-1 text-[11px] text-white disabled:opacity-45"
+                    className={
+                      chromeOwnsPrimaryGen
+                        ? 'rounded-lg border border-line px-2.5 py-1 text-[11px] text-ink/55 hover:border-brand/40 disabled:opacity-45'
+                        : 'rounded-lg bg-brand px-2.5 py-1 text-[11px] text-white disabled:opacity-45'
+                    }
                     disabled={!onGenerateSheet || generatingSheet}
                     onClick={onGenerateSheet}
                     title={generateSheetLockedReason || '主生成·服装设定板'}
@@ -1691,7 +1881,7 @@ export function CostumeDetailFields({
                     {generatingSheet
                       ? '设定板生成中…'
                       : onGenerateSheet
-                        ? '主生成·服装设定板'
+                        ? (chromeOwnsPrimaryGen ? '再次生成·设定板' : '主生成·服装设定板')
                         : '当前项目不可生成'}
                   </button>
                 ) : null}
@@ -1737,11 +1927,12 @@ export function CostumeDetailFields({
             ) : null}
             <div className="mt-3">
               <VariantGrid
-                title="状态变体（可选，最多 4）"
+                title="状态变体（破损/湿衣等，最多 4）"
                 items={variantItems}
                 columns={4}
                 onChangeItem={(id, itemPatch) => {
-                  const next = variantItems.map((v) => (v.id === id ? { ...v, ...itemPatch } : v));
+                  const base = ext.variants?.length ? ext.variants : CAC_COSTUME_VARIANT_PRESETS;
+                  const next = base.map((v) => (v.id === id ? { ...v, ...itemPatch } : v));
                   patchExt({ variants: next });
                 }}
                 onUploadItem={onUploadVariant}
@@ -1768,6 +1959,7 @@ export function PropDetailFields({
   onUploadRef,
   onUploadSheet,
   onUploadCover,
+  onUploadVariant,
   boundSceneItems = [],
   onOpenScene,
   sceneOptions = [],
@@ -1777,6 +1969,8 @@ export function PropDetailFields({
   genSettingsSlot,
   onCropCoverFromSheet,
   croppingCover = false,
+  onBumpRevision,
+  chromeOwnsPrimaryGen = false,
 }: {
   item: BacklotWorkspaceItem;
   onChange: (next: BacklotWorkspaceItem) => void;
@@ -1784,6 +1978,7 @@ export function PropDetailFields({
   onUploadRef: UploadHandler;
   onUploadSheet: UploadHandler;
   onUploadCover?: UploadHandler;
+  onUploadVariant?: (variantId: string, file: File) => void;
   /** 反查：哪些场景挂了此道具 */
   boundSceneItems?: Array<{ id: string; label: string }>;
   onOpenScene?: (sceneId: string) => void;
@@ -1795,8 +1990,11 @@ export function PropDetailFields({
   genSettingsSlot?: ReactNode;
   onCropCoverFromSheet?: () => void;
   croppingCover?: boolean;
+  onBumpRevision?: () => void;
+  chromeOwnsPrimaryGen?: boolean;
 }) {
   const ext = getPropCreative(item);
+  const propVariants = ext.variants ?? DEFAULT_PROP_VARIANTS;
   const [masterOpen, setMasterOpen] = useState(false);
   const patch = (p: Partial<BacklotWorkspaceItem>) => onChange({ ...item, ...p });
   const patchExt = (p: Partial<typeof ext>) => onChange({ ...item, creative: { ...ext, ...p } });
@@ -1831,12 +2029,31 @@ export function PropDetailFields({
               {locked ? '已锁定' : '未锁定'}
             </span>
             <span className="rounded-full bg-surface px-2 py-0.5 text-[10px] text-ink/45">Prompt v{promptVersion}</span>
+            <span className="rounded-full bg-brand/10 px-2 py-0.5 text-[10px] text-brand">资产 v{item.revision ?? 1}</span>
+            {onBumpRevision ? (
+              <button
+                type="button"
+                className="rounded-full border border-line px-2 py-0.5 text-[10px] text-ink/55 hover:border-brand/40 hover:text-brand"
+                onClick={onBumpRevision}
+              >
+                新建版本
+              </button>
+            ) : null}
             <span className="text-[10px] text-ink/40">
               引用 <code className="rounded bg-surface px-1 text-ink/55">{formatAssetMention('prop', item.label)}</code>
             </span>
           </div>
 
-          <DetailSection title="档案">
+          <DetailSectionNav
+            sections={[
+              { id: 'prop-archive', label: '档案' },
+              { id: 'prop-scenes', label: '场景' },
+              { id: 'prop-prompt', label: 'Prompt' },
+              { id: 'prop-collab', label: '协作' },
+            ]}
+          />
+
+          <DetailSection id="prop-archive" title="档案">
             <Field label="道具名 / @引用名">
               <TextInput value={item.label} onChange={(v) => patch({ label: v })} placeholder="道具名" />
             </Field>
@@ -1904,7 +2121,7 @@ export function PropDetailFields({
             </Field>
           </DetailSection>
 
-          <DetailSection title="被哪些场景挂接">
+          <DetailSection id="prop-scenes" title="被哪些场景挂接">
             {boundSceneItems.length === 0 ? (
               <p className="text-[10px] text-ink/40">尚无场景通过 propIds 挂接此道具</p>
             ) : (
@@ -1923,7 +2140,7 @@ export function PropDetailFields({
             )}
           </DetailSection>
 
-          <DetailSection title="Prompt">
+          <DetailSection id="prop-prompt" title="Prompt">
             <Field label="道具 Prompt（英文优先，注入出图）">
               <TextArea
                 value={item.promptEn || ext.prompts?.image?.text || ext.prompts?.prop?.text || ''}
@@ -1933,6 +2150,16 @@ export function PropDetailFields({
                 placeholder="antique brass pocket watch, scratched lid, locked landmark details..."
               />
             </Field>
+            {ext.lockedPromptSnapshot?.trim()
+              && (item.promptEn || ext.prompts?.prop?.text || '').trim() !== ext.lockedPromptSnapshot.trim() ? (
+              <button
+                type="button"
+                className="mb-2 rounded-lg border border-warn/40 px-2.5 py-1 text-[11px] text-warn hover:bg-warn/10"
+                onClick={() => patch({ promptEn: ext.lockedPromptSnapshot })}
+              >
+                恢复锁定快照
+              </button>
+            ) : null}
             {ext.prompts?.prop?.text ? (
               <Field label="道具 Bible（结构化）">
                 <TextArea
@@ -1983,6 +2210,12 @@ export function PropDetailFields({
               </button>
             </div>
           </DetailSection>
+
+          <DetailSection id="prop-collab" title="协作说明">
+            <p className="text-[10px] leading-relaxed text-ink/50">
+              道具以素材库为权威（SSOT），不回写编剧 Bible；场景挂接在库内维护。
+            </p>
+          </DetailSection>
         </div>
       </aside>
 
@@ -1995,15 +2228,23 @@ export function PropDetailFields({
                 <p className="text-[10px] text-ink/45">主媒体 · 点击放大 · 可选生成轻量三视图</p>
               </div>
               <div className="flex flex-wrap items-center gap-2">
-                {genSettingsSlot ? <div>{genSettingsSlot}</div> : null}
+                {!chromeOwnsPrimaryGen && genSettingsSlot ? <div>{genSettingsSlot}</div> : null}
                 {onGenerateSheet ? (
                   <button
                     type="button"
                     disabled={generatingSheet}
                     onClick={() => void onGenerateSheet()}
-                    className="rounded-lg bg-brand px-2.5 py-1 text-[11px] text-white disabled:opacity-50"
+                    className={
+                      chromeOwnsPrimaryGen
+                        ? 'rounded-lg border border-line px-2.5 py-1 text-[11px] text-ink/55 hover:border-brand/40 disabled:opacity-50'
+                        : 'rounded-lg bg-brand px-2.5 py-1 text-[11px] text-white disabled:opacity-50'
+                    }
                   >
-                    {generatingSheet ? '生成中…' : '主生成·三视图板'}
+                    {generatingSheet
+                      ? '生成中…'
+                      : chromeOwnsPrimaryGen
+                        ? '再次生成·三视图'
+                        : '主生成·三视图板'}
                   </button>
                 ) : null}
               </div>
@@ -2046,6 +2287,19 @@ export function PropDetailFields({
                 {croppingCover ? '裁切封面中…' : '从设定板裁切封面'}
               </button>
             ) : null}
+            <div className="mt-3">
+              <VariantGrid
+                title="状态变体（拔出/损坏等，最多 4 · 同一道具锚点）"
+                items={propVariants}
+                columns={4}
+                onChangeItem={(id, itemPatch) => {
+                  const base = ext.variants?.length ? ext.variants : DEFAULT_PROP_VARIANTS;
+                  const next = base.map((v) => (v.id === id ? { ...v, ...itemPatch } : v));
+                  patchExt({ variants: next });
+                }}
+                onUploadItem={onUploadVariant}
+              />
+            </div>
           </div>
         </div>
       </div>
@@ -2065,6 +2319,7 @@ export function VoiceDetailFields({
   onRefreshPrompts,
   onUploadAudio,
   onSetAsCharacterReference,
+  characterOptions = [],
   readOnly = false,
 }: {
   sound: SoundAssetProfile;
@@ -2072,12 +2327,14 @@ export function VoiceDetailFields({
   onRefreshPrompts: () => void;
   onUploadAudio?: UploadHandler;
   /** Snd-02：从声音库设为某角色参考音 */
-  onSetAsCharacterReference?: () => void;
+  onSetAsCharacterReference?: (characterId: string) => void;
+  characterOptions?: Array<{ id: string; name: string }>;
   readOnly?: boolean;
 }) {
   const ext = getVoiceCreative(sound);
   const locked = readOnly || Boolean(sound.builtinKey) || sound.id.startsWith('builtin-sound-');
   const kind = inferSoundAssetKind(sound);
+  const [bindCharacterId, setBindCharacterId] = useState(characterOptions[0]?.id ?? '');
   const patch = (p: Partial<SoundAssetProfile>) => {
     if (locked) return;
     onChange({ ...sound, ...p });
@@ -2243,13 +2500,32 @@ export function VoiceDetailFields({
               hint={locked ? '内置/只读' : '上传音频'}
             />
             {onSetAsCharacterReference && sound.audioUrl && !locked ? (
-              <button
-                type="button"
-                className="mt-2 rounded-lg border border-line px-2.5 py-1 text-[11px] text-ink/70 hover:border-brand/40"
-                onClick={onSetAsCharacterReference}
-              >
-                设为当前项目某角色参考音…
-              </button>
+              <div className="mt-2 space-y-1.5">
+                <p className="text-[10px] text-ink/45">
+                  角色参考音 = TTS 克隆源；本库条目仍可被 @声音 复用。声线档案（VoiceCast）是引擎侧音色配置。
+                </p>
+                <select
+                  className="w-full rounded-lg border border-line bg-surface px-2 py-1.5 text-[11px]"
+                  value={bindCharacterId}
+                  onChange={(e) => setBindCharacterId(e.target.value)}
+                >
+                  <option value="">选择角色…</option>
+                  {characterOptions.map((c) => (
+                    <option key={c.id} value={c.id}>{c.name}</option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  disabled={!bindCharacterId}
+                  className="w-full rounded-lg border border-line px-2.5 py-1 text-[11px] text-ink/70 hover:border-brand/40 disabled:opacity-40"
+                  onClick={() => {
+                    if (!bindCharacterId) return;
+                    onSetAsCharacterReference(bindCharacterId);
+                  }}
+                >
+                  设为该角色参考音
+                </button>
+              </div>
             ) : null}
           </div>
         </div>

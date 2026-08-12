@@ -3,6 +3,7 @@ import type {
   Director3dCommitPayload,
   Director3dShotState,
 } from '@nx9/director3d';
+import { quarantineDirector3dShotStates } from '@nx9/director3d';
 import type { StoryboardShot } from '@nx9/shared';
 import {
   patchUpstreamShot,
@@ -11,11 +12,21 @@ import {
 } from './chain-storyboard-utils';
 
 export interface Director3dCommitAdapterOptions {
+  /** 保存 3D 草稿的节点；旧调用同时把它作为 chain 解析起点。 */
   blockId: string;
+  /** chain 解析起点；外部 3D 节点嵌入导演台时应为导演台节点。 */
+  sourceBlockId?: string;
+  /** 写入 director3dGuide.sourceBlockId 的真实 3D 存储节点。 */
+  guideSourceBlockId?: string;
   nodes: Node[];
   edges: Array<{ source: string; target: string }>;
   updateNodeData: (id: string, patch: Record<string, unknown>) => void;
+  getLatestNodes?: () => Node[];
   currentSourceShotRevision?: number;
+  /** 节点已消费的 commitId；命中则幂等成功且不再写 chain。 */
+  consumedCommitIds?: string[];
+  /** 内嵌模式用此回调写入 director3d 命名空间。 */
+  persistCommit?: (payload: Director3dCommitPayload) => void;
   onCommitted?: (payload: Director3dCommitPayload) => void;
 }
 
@@ -25,12 +36,22 @@ export interface Director3dCommitResult {
   error?: string;
 }
 
-function guideFromCommit(payload: Director3dCommitPayload): NonNullable<StoryboardShot['director3dGuide']> {
+function isPersistentImageUrl(url: string | null | undefined): boolean {
+  const value = url?.trim();
+  if (!value) return false;
+  if (value.startsWith('data:')) return false;
+  return true;
+}
+
+function guideFromCommit(
+  payload: Director3dCommitPayload,
+  sourceBlockId: string,
+): NonNullable<StoryboardShot['director3dGuide']> {
   const { candidate, sceneState } = payload;
   return {
-    sourceBlockId: payload.blockId ?? 'director-3d',
+    sourceBlockId,
     captureId: candidate.id,
-    captureUrl: candidate.imageUrl ?? candidate.localDataUrl ?? '',
+    captureUrl: candidate.imageUrl ?? '',
     commitId: payload.commitId,
     shotId: payload.shotId,
     episodeId: payload.episodeId,
@@ -58,50 +79,70 @@ export function createDirector3dCommitAdapter(options: Director3dCommitAdapterOp
     if (payload.sceneState.shotId !== payload.shotId) {
       return { ok: false, error: '提交场景不是当前镜头状态' };
     }
-    if (!payload.candidate.imageUrl && !payload.candidate.localDataUrl) {
-      return { ok: false, error: '采用帧没有可用图片' };
+    if (payload.candidate.status === 'failed') {
+      return { ok: false, error: '候选帧上传失败，请重试后再提交' };
     }
     if (payload.candidate.status !== 'ready' && payload.candidate.status !== 'committed') {
       return { ok: false, error: '候选帧尚未完成上传' };
     }
+    if (!isPersistentImageUrl(payload.candidate.imageUrl)) {
+      return { ok: false, error: '采用帧缺少持久化图片，禁止提交本地草稿' };
+    }
 
-    const upstreamDeskId = resolveUpstreamChainDesk(options.blockId, options.nodes, options.edges);
-    const chain = readUpstreamChainStoryboard(options.blockId, options.nodes, options.edges);
+    const nodes = options.getLatestNodes?.() ?? options.nodes;
+    const sourceBlockId = options.sourceBlockId ?? options.blockId;
+    const upstreamDeskId = resolveUpstreamChainDesk(sourceBlockId, nodes, options.edges);
+    const chain = readUpstreamChainStoryboard(sourceBlockId, nodes, options.edges);
     if (!upstreamDeskId || !chain) return { ok: false, error: '未连接上游分镜台链镜表，不能提交' };
     const shot = chain.shots.find((item) => item.id === payload.shotId);
     if (!shot) return { ok: false, error: '当前镜头不属于上游链镜表' };
 
+    const liveSourceRevision =
+      options.currentSourceShotRevision ?? shot.sourceRevision;
     if (
-      options.currentSourceShotRevision !== undefined &&
-      payload.sourceShotRevision !== options.currentSourceShotRevision
+      liveSourceRevision !== undefined &&
+      payload.sourceShotRevision !== liveSourceRevision
     ) {
       return { ok: false, error: '上游镜头版本已变化，请重新载入当前镜头' };
     }
 
-    if (shot.director3dGuide?.commitId === payload.commitId) {
+    if (
+      shot.director3dGuide?.commitId === payload.commitId
+      || options.consumedCommitIds?.includes(payload.commitId)
+    ) {
       return { ok: true, idempotent: true };
     }
 
-    const patch: Partial<StoryboardShot> = { director3dGuide: guideFromCommit(payload) };
+    const patch: Partial<StoryboardShot> = {
+      director3dGuide: guideFromCommit(
+        payload,
+        options.guideSourceBlockId ?? payload.blockId ?? options.blockId,
+      ),
+    };
     const patched = patchUpstreamShot(
       options.updateNodeData,
-      options.blockId,
-      options.nodes,
+      sourceBlockId,
+      nodes,
       options.edges,
       payload.shotId,
       patch,
+      options.getLatestNodes,
     );
     if (!patched) return { ok: false, error: '上游链镜表写回失败' };
 
-    options.updateNodeData(options.blockId, {
-      sceneByShot: {
-        ...((options.nodes.find((node) => node.id === options.blockId)?.data as Record<string, unknown> | undefined)
-          ?.sceneByShot as Record<string, unknown> | undefined),
-        [payload.shotId]: payload.sceneState,
-      },
-      last3dCommit: payload,
-      last3dCommitMessage: '3D 构图已提交，可进入彩色关键帧批出',
-    });
+    if (options.persistCommit) {
+      options.persistCommit(payload);
+    } else {
+      options.updateNodeData(options.blockId, {
+        sceneByShot: {
+          ...((nodes.find((node) => node.id === options.blockId)?.data as Record<string, unknown> | undefined)
+            ?.sceneByShot as Record<string, unknown> | undefined),
+          [payload.shotId]: payload.sceneState,
+        },
+        last3dCommit: payload,
+        last3dCommitMessage: '3D 构图已提交，可进入彩色关键帧批出',
+      });
+    }
     options.onCommitted?.(payload);
     return { ok: true };
   };
@@ -110,5 +151,5 @@ export function createDirector3dCommitAdapter(options: Director3dCommitAdapterOp
 export function sceneByShotFromNodeData(data: Record<string, unknown>): Record<string, Director3dShotState> {
   const raw = data.sceneByShot;
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
-  return raw as Record<string, Director3dShotState>;
+  return quarantineDirector3dShotStates(raw as Record<string, Director3dShotState>).states;
 }

@@ -1,5 +1,5 @@
 import JSZip from 'jszip';
-import { hasEffectiveTimeline, type TimelinePayload } from '@nx9/shared';
+import { hasEffectiveTimeline, planEcomPackFiles, type TimelinePayload } from '@nx9/shared';
 import { api } from '../api/client';
 import type { StoryboardShot } from '@nx9/shared';
 
@@ -24,6 +24,8 @@ export interface ExportPackResult {
   taskId?: string;
   message?: string;
   exportCount?: number;
+  /** 仅当已有可取货产物时为 true；提交即走的任务必须为 false */
+  exportReady?: boolean;
 }
 
 const NO_TIMELINE_MSG = '无有效时间线（请先在智能剪辑编排并同步，clips≥1）';
@@ -40,37 +42,46 @@ async function fetchBlob(url: string): Promise<Blob> {
   return res.blob();
 }
 
+function triggerDownload(blob: Blob, filename: string): void {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
 export async function runExportPack(input: ExportPackInput): Promise<ExportPackResult> {
   if (input.mode === 'ffmpeg-episode') {
-    if (input.shots.length === 0) return { ok: false, message: '故事板无镜头' };
+    if (input.shots.length === 0) {
+      return { ok: false, message: '无连接链镜表，无法导出成片', exportReady: false };
+    }
     const res = await api.concatEpisode({
       shots: input.shots,
       requireApproved: true,
       title: input.multiEpisode ? `${input.prefix}-multi-ep` : input.prefix,
       audioUrl: input.audioUrl?.trim() || undefined,
     });
-    if (!res.ok) return { ok: false, message: res.message ?? res.status, url: undefined };
-    return { ok: true, url: res.url, exportCount: 1 };
+    if (!res.ok) return { ok: false, message: res.message ?? res.status, url: undefined, exportReady: false };
+    return { ok: true, url: res.url, exportCount: 1, exportReady: true };
   }
 
   if (input.mode === 'hyperframes-episode') {
-    // F-011: 无有效时间线不得假装成功
     if (!hasEffectiveTimeline(input.timeline)) {
-      return { ok: false, message: NO_TIMELINE_MSG };
+      return { ok: false, message: NO_TIMELINE_MSG, exportReady: false };
     }
     const res = await api.renderHyperframes({
       timeline: input.timeline,
       templateId: 'nx9-vertical-episode',
     });
     if (!res.ok || !res.taskId) {
-      return { ok: false, message: res.status || 'HyperFrames 提交失败' };
+      return { ok: false, message: res.status || 'HyperFrames 提交失败', exportReady: false };
     }
-    return { ok: true, taskId: res.taskId, message: res.status };
+    return { ok: true, taskId: res.taskId, message: 'submitted', exportReady: false };
   }
 
   if (input.mode === 'remotion-bundle') {
     if (!hasEffectiveTimeline(input.timeline)) {
-      return { ok: false, message: NO_TIMELINE_MSG };
+      return { ok: false, message: NO_TIMELINE_MSG, exportReady: false };
     }
     const { timelineToRemotionStudioBundle } = await import('@nx9/shared');
     const bundle = timelineToRemotionStudioBundle(input.timeline!);
@@ -79,42 +90,60 @@ export async function runExportPack(input: ExportPackInput): Promise<ExportPackR
       zip.file(file.name, file.content);
     }
     const blob = await zip.generateAsync({ type: 'blob' });
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = bundle.zipFilename || `${input.prefix}-remotion.zip`;
-    a.click();
-    URL.revokeObjectURL(a.href);
-    return { ok: true, exportCount: bundle.files.length };
+    triggerDownload(blob, bundle.zipFilename || `${input.prefix}-remotion.zip`);
+    return { ok: true, exportCount: bundle.files.length, exportReady: true };
   }
 
   if (input.mode === 'ecom-pack') {
-    const { ECOM_ALL_SPECS } = await import('@nx9/shared');
     const selected = input.selectedSpecs ?? [];
-    if (selected.length === 0) return { ok: false, message: '请选择至少一个电商规格' };
+    if (selected.length === 0) return { ok: false, message: '请选择至少一个电商规格', exportReady: false };
+    const plan = planEcomPackFiles({
+      selectedSpecs: selected,
+      pictures: input.pictures,
+      clips: input.clips,
+      prefix: input.prefix,
+    });
+    if (plan.files.length === 0) {
+      const detail = plan.skipped.map((s) => `${s.specId}: ${s.reason}`).join('；') || '无匹配媒资';
+      return { ok: false, message: `电商包无有效文件（${detail}）`, exportCount: 0, exportReady: false };
+    }
     const ecomZip = new JSZip();
-    const baseImages = input.pictures.length > 0 ? input.pictures : [];
-    for (const specId of selected) {
-      const spec = ECOM_ALL_SPECS.find((s) => s.specId === specId);
-      if (!spec) continue;
-      const label = spec.label.replace(/[\\/:*?"<>|]/g, '_');
-      for (let idx = 0; idx < Math.max(baseImages.length, 1); idx++) {
-        const ext = spec.category === 'video' ? 'mp4' : 'jpg';
-        const name = `${label}/${input.prefix}-${String(idx + 1).padStart(2, '0')}.${ext}`;
-        try {
-          if (baseImages[idx]) {
-            const blob = await fetchBlob(baseImages[idx]);
-            ecomZip.file(name, blob);
-          }
-        } catch { /* skip single failure */ }
+    let packed = 0;
+    const failed: string[] = [];
+    for (const file of plan.files) {
+      try {
+        const blob = await fetchBlob(file.sourceUrl);
+        ecomZip.file(file.name, blob);
+        packed += 1;
+      } catch {
+        failed.push(file.name);
       }
     }
+    if (packed === 0) {
+      return {
+        ok: false,
+        message: `电商包下载全部失败（${failed.length} 项）`,
+        exportCount: 0,
+        exportReady: false,
+      };
+    }
     const blob = await ecomZip.generateAsync({ type: 'blob' });
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = `${input.prefix}-ecom-pack.zip`;
-    a.click();
-    URL.revokeObjectURL(a.href);
-    return { ok: true, exportCount: selected.length };
+    triggerDownload(blob, `${input.prefix}-ecom-pack.zip`);
+    const skipNote = plan.skipped.length > 0
+      ? `；跳过 ${plan.skipped.length} 个规格`
+      : '';
+    const failNote = failed.length > 0 ? `；${failed.length} 个文件下载失败` : '';
+    return {
+      ok: true,
+      exportCount: packed,
+      exportReady: true,
+      message: `已打包 ${packed} 个文件${skipNote}${failNote}`.trim() || undefined,
+    };
+  }
+
+  const mediaCount = input.pictures.length + input.clips.length + input.sounds.length;
+  if (mediaCount === 0) {
+    return { ok: false, message: '无可导出的媒资', exportCount: 0, exportReady: false };
   }
 
   const zip = new JSZip();
@@ -137,7 +166,6 @@ export async function runExportPack(input: ExportPackInput): Promise<ExportPackR
   }
   const manifestObj = { exportedAt: new Date().toISOString(), items: manifest };
   zip.file('manifest.json', JSON.stringify(manifestObj, null, 2));
-  // EP-P2-02: CSV 清单
   const csvHeader = 'kind,filename,url';
   const csvRows = manifest.map((m) => `"${m.kind}","${m.path}","${m.url}"`);
   zip.file('manifest.csv', [csvHeader, ...csvRows].join('\n'));
@@ -145,10 +173,6 @@ export async function runExportPack(input: ExportPackInput): Promise<ExportPackR
     zip.file('prompts.txt', input.prompts.join('\n\n---\n\n'));
   }
   const blob = await zip.generateAsync({ type: 'blob' });
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
-  a.download = `${input.prefix}-pack.zip`;
-  a.click();
-  URL.revokeObjectURL(a.href);
-  return { ok: true, exportCount: manifest.length };
+  triggerDownload(blob, `${input.prefix}-pack.zip`);
+  return { ok: true, exportCount: manifest.length, exportReady: true };
 }

@@ -31,7 +31,7 @@
     "sharp": "^0.34.5",
     "@hyperframes/producer": "^0.7.64",
     "@hyperframes/core": "^0.7.64",
-    "@remotion/renderer": "^4.0.0"
+    "@remotion/renderer": "4.0.499"
   },
   "devDependencies": {
     "@nestjs/cli": "^11.0.0",

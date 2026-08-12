@@ -6,9 +6,9 @@
 import { describe, it, expect, vi } from 'vitest';
 import { render } from '@testing-library/react';
 import { ReactFlowProvider } from '@xyflow/react';
-import { removeShotFromBreakdown, resolveDeskActiveEpisodeId, stripEpisodeConfirmation, reorderShotsInBreakdown, mergeIncrementalBreakdown } from '../../../engine/storyboard-desk-runner';
+import { computeCompositionStats, captureDeskUndoSnapshot, deskLineArtUrl, mergeShotsInBreakdown, removeShotFromBreakdown, resolveDeskActiveEpisodeId, retiredShotIds, stripEpisodeConfirmation, reorderShotsInBreakdown, mergeIncrementalBreakdown, isShotComposed } from '../../../engine/storyboard-desk-runner';
 import { migrateUpstreamChainStoryboard, resolveConnectedStoryboardDeskId, validateDirectorHandoff } from '../../../engine/chain-storyboard-utils';
-import { activeChainEpisodeShots, buildLineArtShotPatch, chainStoryboardHash, getEpisodeContactSheet, emptyStoryboardPreview, lineArtVersionHash, patchChainShot, scopeStoryboardPreviewFrames, type ScriptBreakdownPayload, type StoryboardPreviewPayload } from '@nx9/shared';
+import { activeChainEpisodeShots, buildLineArtShotPatch, CHAIN_STORYBOARD_HANDOFF_HASH_SCHEMA_VERSION, chainStoryboardHash, getEpisodeContactSheet, emptyStoryboardPreview, lineArtVersionHash, mergeStoryboardShotFromBreakdown, migrateLegacyLineArtShot, patchChainShot, scopeStoryboardPreviewFrames, storyboardShotsFromScriptBreakdown, type ScriptBreakdownPayload, type StoryboardPreviewPayload } from '@nx9/shared';
 
 // Mock dependencies for component smoke test
 vi.mock('@xyflow/react', async () => {
@@ -126,11 +126,22 @@ describe('removeShotFromBreakdown', () => {
 describe('stripEpisodeConfirmation', () => {
   it('removes the specified episode from confirmedEpisodeIds', () => {
     const result = stripEpisodeConfirmation(
-      { confirmedEpisodeIds: ['ep-1', 'ep-2'], gridConfirmed: true },
+      {
+        confirmedEpisodeIds: ['ep-1', 'ep-2'],
+        gridConfirmed: true,
+        chainStoryboard: {
+          version: 2,
+          confirmedEpisodeIds: ['ep-1', 'ep-2'],
+          gridConfirmed: true,
+          shots: [],
+        },
+      },
       'ep-1',
     );
     expect(result.gridConfirmed).toBe(false);
     expect(result.confirmedEpisodeIds).toEqual(['ep-2']);
+    expect(result.chainStoryboard?.gridConfirmed).toBe(false);
+    expect(result.chainStoryboard?.confirmedEpisodeIds).toEqual(['ep-2']);
   });
 
   it('returns empty array when confirmedEpisodeIds is not an array', () => {
@@ -183,6 +194,19 @@ describe('getEpisodeContactSheet', () => {
 });
 
 describe('line-art/keyframe contract', () => {
+  it('projects storyboard previews into lineArtUrl only', () => {
+    const payload = makeBasePayload(1);
+    payload.episodes[0].shots[0].previewImageUrl = 'line-art-url';
+    payload.episodes[0].shots[0].status = 'approved';
+
+    const [shot] = storyboardShotsFromScriptBreakdown(payload);
+
+    expect(shot.lineArtUrl).toBe('line-art-url');
+    expect(shot.firstFrameAssetId).toBeNull();
+    expect(shot.keyframeStatus).toBe('draft');
+    expect(shot.status).toBe('draft');
+  });
+
   it('stores line art separately without changing director keyframe fields', () => {
     const shot = {
       id: 'shot-1',
@@ -205,6 +229,129 @@ describe('line-art/keyframe contract', () => {
     expect(patched.sketchPrompt).toBe('line prompt');
     expect(patched.firstFrameAssetId).toBe('color-keyframe-url');
     expect(patched.keyframeStatus).toBe('approved');
+    expect(patched.sourceRevision).toBe(1);
+  });
+
+  it('bumps sourceRevision only for upstream-owned shot content', () => {
+    const shot = {
+      id: 'shot-1',
+      index: 1,
+      durationSec: 4,
+      shotType: 'medium',
+      descriptionZh: '测试镜头',
+      promptEn: 'test',
+      status: 'review',
+      sourceRevision: 3,
+      lineArtUrl: 'line-art-url',
+      firstFrameAssetId: 'color-keyframe-url',
+    } as any;
+    const chain = { version: 2 as const, shots: [shot] };
+    const [keyframePatched] = patchChainShot(chain, 'shot-1', {
+      firstFrameAssetId: 'new-keyframe',
+      keyframeRevision: 4,
+      director3dGuide: {
+        sourceBlockId: 'director-3d',
+        captureId: 'c1',
+        captureUrl: 'guide',
+        appliedAt: '2026-08-12T00:00:00.000Z',
+      },
+      videoAssetId: 'video-url',
+    });
+    expect(keyframePatched.sourceRevision).toBe(3);
+    expect(keyframePatched.firstFrameAssetId).toBe('new-keyframe');
+
+    const [descPatched] = patchChainShot(chain, 'shot-1', {
+      descriptionZh: '改了描述',
+    });
+    expect(descPatched.sourceRevision).toBe(4);
+  });
+
+  it('keeps director production state when upstream line art changes', () => {
+    const payload = makeBasePayload(1);
+    payload.episodes[0].shots[0].previewImageUrl = 'new-line-art';
+    const [base] = storyboardShotsFromScriptBreakdown(payload);
+    const merged = mergeStoryboardShotFromBreakdown(base, {
+      ...base,
+      lineArtUrl: 'old-line-art',
+      firstFrameAssetId: 'color-keyframe',
+      keyframeStatus: 'approved',
+      status: 'approved',
+      videoAssetId: 'video-url',
+      director3dGuide: {
+        sourceBlockId: 'director-3d',
+        captureId: 'capture-1',
+        captureUrl: 'guide-url',
+        appliedAt: '2026-08-12T00:00:00.000Z',
+      },
+      sketchApprovedAt: '2026-08-11T00:00:00.000Z',
+    });
+
+    expect(merged.lineArtUrl).toBe('new-line-art');
+    expect(merged.sketchApprovedAt).toBeNull();
+    expect(merged.firstFrameAssetId).toBe('color-keyframe');
+    expect(merged.keyframeStatus).toBe('approved');
+    expect(merged.videoAssetId).toBe('video-url');
+    expect(merged.director3dGuide?.captureUrl).toBe('guide-url');
+    expect(merged.sourceRevision).toBe(2);
+  });
+
+  it('migrates only high-confidence legacy line-art pollution', () => {
+    const polluted = migrateLegacyLineArtShot({
+      id: 'shot-1',
+      index: 1,
+      durationSec: 3,
+      shotType: 'medium',
+      descriptionZh: '测试',
+      promptEn: 'test',
+      status: 'approved',
+      lineArtUrl: 'same-url',
+      firstFrameAssetId: 'same-url',
+      keyframeStatus: 'approved',
+    });
+    expect(polluted.migrated).toBe(true);
+    expect(polluted.shot.lineArtUrl).toBe('same-url');
+    expect(polluted.shot.firstFrameAssetId).toBeNull();
+    expect(polluted.shot.keyframeStatus).toBe('draft');
+
+    const reviewed = migrateLegacyLineArtShot({
+      ...polluted.shot,
+      firstFrameAssetId: 'same-url',
+      reviewHistory: [{
+        id: 'review-1',
+        stage: 'keyframe',
+        decision: 'approved',
+        createdAt: '2026-08-12T00:00:00.000Z',
+      }],
+    });
+    expect(reviewed.migrated).toBe(false);
+    expect(reviewed.shot.firstFrameAssetId).toBe('same-url');
+  });
+
+  it('deskLineArtUrl ignores director keyframe URLs', () => {
+    expect(deskLineArtUrl({ lineArtUrl: 'line.png' })).toBe('line.png');
+    expect(deskLineArtUrl({ lineArtUrl: '  line.png  ' })).toBe('line.png');
+    expect(deskLineArtUrl({ lineArtUrl: null })).toBeUndefined();
+    expect(deskLineArtUrl({ lineArtUrl: '   ' })).toBeUndefined();
+    expect(deskLineArtUrl({ lineArtUrl: undefined })).toBeUndefined();
+    expect(deskLineArtUrl(null)).toBeUndefined();
+  });
+
+  it('composition coverage does not count firstFrameAssetId as line art', () => {
+    const payload = makeBasePayload(2);
+    const shots = payload.episodes[0].shots;
+    const urlMap = new Map<string, string | undefined>();
+    urlMap.set('shot-1', deskLineArtUrl({ lineArtUrl: 'line.png' }));
+    urlMap.set('shot-2', deskLineArtUrl({
+      lineArtUrl: null,
+      firstFrameAssetId: 'color-keyframe.png',
+    } as { lineArtUrl?: string | null }));
+
+    expect(isShotComposed(shots[0], undefined, urlMap.get('shot-1'))).toBe(true);
+    expect(isShotComposed(shots[1], undefined, urlMap.get('shot-2'))).toBe(false);
+
+    const stats = computeCompositionStats(shots, undefined, urlMap, new Set(), new Set());
+    expect(stats.composed).toBe(1);
+    expect(stats.coverage).toBe(0.5);
   });
 });
 
@@ -270,13 +417,33 @@ describe('episode scope boundary', () => {
 });
 
 describe('handoff hash contract', () => {
-  it('hashes chain content stably and scopes line-art version to the episode', () => {
+  it('scopes upstream ownership and ignores downstream production writes', () => {
     const chain = {
       version: 2 as const,
       activeEpisodeId: 'ep-1',
       shots: [
-        { id: 'shot-2', episodeId: 'ep-2', lineArtUrl: 'line-2' },
-        { id: 'shot-1', episodeId: 'ep-1', lineArtUrl: 'line-1' },
+        {
+          id: 'shot-1',
+          episodeId: 'ep-1',
+          index: 1,
+          durationSec: 3,
+          shotType: 'medium',
+          descriptionZh: '镜头一',
+          promptEn: 'shot one',
+          lineArtUrl: 'line-1',
+          status: 'draft',
+        },
+        {
+          id: 'shot-2',
+          episodeId: 'ep-2',
+          index: 1,
+          durationSec: 3,
+          shotType: 'wide',
+          descriptionZh: '镜头二',
+          promptEn: 'shot two',
+          lineArtUrl: 'line-2',
+          status: 'draft',
+        },
       ] as any,
     };
     const reordered = { ...chain, shots: [...chain.shots].reverse() };
@@ -286,13 +453,62 @@ describe('handoff hash contract', () => {
 
     const handoff = {
       scriptHash: 'script-1',
-      storyboardHash: chainStoryboardHash(chain),
+      storyboardHash: chainStoryboardHash(chain, 'ep-1'),
       lineartVersion: lineArtVersionHash(chain, 'ep-1'),
+      hashSchemaVersion: CHAIN_STORYBOARD_HANDOFF_HASH_SCHEMA_VERSION,
       handoffVersion: 1,
       confirmedAt: '2026-08-04T00:00:00.000Z',
+      episodeId: 'ep-1',
     };
     expect(validateDirectorHandoff({ handoff, chain, episodeId: 'ep-1', scriptHash: 'script-1' }).valid).toBe(true);
     expect(validateDirectorHandoff({ handoff: { ...handoff, scriptHash: 'old' }, chain, episodeId: 'ep-1', scriptHash: 'script-1' }).valid).toBe(false);
+
+    const downstreamPatched = {
+      ...chain,
+      shots: chain.shots.map((shot: any) => shot.id === 'shot-1'
+        ? {
+            ...shot,
+            firstFrameAssetId: 'color-keyframe',
+            keyframePreviousUrl: 'old-color-keyframe',
+            keyframeStatus: 'approved',
+            status: 'approved',
+            director3dGuide: {
+              sourceBlockId: 'director-3d',
+              captureId: 'capture-1',
+              captureUrl: 'guide-url',
+              appliedAt: '2026-08-12T00:00:00.000Z',
+            },
+            videoAssetId: 'video-url',
+            videoStatus: 'approved',
+            reviewHistory: [{
+              id: 'review-1',
+              stage: 'keyframe',
+              decision: 'approved',
+              createdAt: '2026-08-12T00:00:00.000Z',
+            }],
+          }
+        : shot),
+    };
+    expect(chainStoryboardHash(downstreamPatched, 'ep-1')).toBe(handoff.storyboardHash);
+    expect(validateDirectorHandoff({
+      handoff,
+      chain: downstreamPatched,
+      episodeId: 'ep-1',
+      scriptHash: 'script-1',
+    }).valid).toBe(true);
+
+    const upstreamPatched = {
+      ...downstreamPatched,
+      shots: downstreamPatched.shots.map((shot: any) => shot.id === 'shot-1'
+        ? { ...shot, descriptionZh: '已修改的分镜描述' }
+        : shot),
+    };
+    expect(validateDirectorHandoff({
+      handoff,
+      chain: upstreamPatched,
+      episodeId: 'ep-1',
+      scriptHash: 'script-1',
+    }).valid).toBe(false);
   });
 });
 
@@ -327,6 +543,63 @@ describe('desk episode scope', () => {
     payload.episodes.push({ id: 'ep-2', index: 2, title: '第2集', shots: [] });
     expect(resolveDeskActiveEpisodeId({ activeEpisodeId: 'ep-2' }, payload)).toBe('ep-2');
     expect(resolveDeskActiveEpisodeId({ activeEpisodeId: 'ep-old' }, payload)).toBe('ep-1');
+  });
+});
+
+describe('mergeShotsInBreakdown', () => {
+  it('retires both source ids and creates a new merged shot', () => {
+    const payload = makeBasePayload(3);
+    const next = mergeShotsInBreakdown(payload, ['shot-1', 'shot-2']);
+    expect(next).not.toBe(payload);
+    const ids = next.episodes[0].shots.map((s) => s.id);
+    expect(ids).not.toContain('shot-1');
+    expect(ids).not.toContain('shot-2');
+    expect(ids.some((id) => id.startsWith('shot-merged-'))).toBe(true);
+    expect(next.episodes[0].shots).toHaveLength(2);
+    expect(retiredShotIds(payload, next).sort()).toEqual(['shot-1', 'shot-2']);
+  });
+
+  it('returns the same payload when merging a single shot', () => {
+    const payload = makeBasePayload(2);
+    expect(mergeShotsInBreakdown(payload, ['shot-1'])).toBe(payload);
+  });
+});
+
+describe('captureDeskUndoSnapshot', () => {
+  it('clones payload, preview frames and confirmation for undo', () => {
+    const payload = makeBasePayload(2);
+    const preview = {
+      ...emptyStoryboardPreview(),
+      frames: [{
+        id: 'f1',
+        order: 1,
+        label: 'f1',
+        startSec: 0,
+        endSec: 3,
+        sourceShotId: 'shot-1',
+        promptSummary: '',
+        imageUrl: 'https://x/a.png',
+        status: 'success' as const,
+        locked: false,
+      }],
+    };
+    const snap = captureDeskUndoSnapshot({
+      confirmedEpisodeIds: ['ep-1'],
+      storyboardPreview: preview,
+      contactSheetUrl: 'https://x/sheet.png',
+      gridConfirmed: true,
+      chainStoryboard: { version: 2, shots: [{ id: 'shot-1', lineArtUrl: 'line.png' }] },
+    }, payload);
+
+    payload.episodes[0].shots[0].title = 'mutated';
+    preview.frames[0].imageUrl = 'https://x/mutated.png';
+
+    expect(snap.payload.episodes[0].shots[0].title).not.toBe('mutated');
+    expect(snap.storyboardPreview?.frames[0].imageUrl).toBe('https://x/a.png');
+    expect(snap.confirmedEpisodeIds).toEqual(['ep-1']);
+    expect(snap.contactSheetUrl).toBe('https://x/sheet.png');
+    expect(snap.gridConfirmed).toBe(true);
+    expect((snap.chainStoryboard as { shots: Array<{ lineArtUrl?: string }> }).shots[0].lineArtUrl).toBe('line.png');
   });
 });
 

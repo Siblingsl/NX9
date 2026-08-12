@@ -46,6 +46,11 @@ interface DirectorDeliverTabProps {
   onGoToMissing: () => void;
   lastPushReceipt?: { at?: string; shotCount?: number; clipGenId?: string };
   reviewMode: 'manual' | 'auto';
+  /** DD-P1-03：外审显式作用域 */
+  episodeId?: string | null;
+  sourceChainDeskId?: string;
+  reviewShots?: import('@nx9/shared').StoryboardShot[];
+  clipBatchLabel?: string | null;
 }
 
 export function DirectorDeliverTab({
@@ -79,6 +84,10 @@ export function DirectorDeliverTab({
   onGoToMissing,
   lastPushReceipt,
   reviewMode,
+  episodeId,
+  sourceChainDeskId,
+  reviewShots,
+  clipBatchLabel,
 }: DirectorDeliverTabProps) {
   return (
     <div className="dd2-deliver">
@@ -124,6 +133,9 @@ export function DirectorDeliverTab({
                   nodes: nodes as never,
                   edges: edges as never,
                   updateNodeData,
+                  shots: reviewShots,
+                  episodeId,
+                  sourceChainDeskId,
                   openSession: true,
                 });
                 appendLog('导演台 · 已打开宫格外审');
@@ -327,8 +339,12 @@ export function DirectorDeliverTab({
         {' · '}
         {keyframeGatePassed ? '审阅已放行' : `审阅未放行（待 ${reviewStats.pending + reviewStats.failed + reviewStats.missing}）`}
       </div>
-      {lastPushReceipt?.at ? (
-        <div className="dd2-push-receipt">已写入 clip-gen · {lastPushReceipt.shotCount ?? 0} 镜 · {new Date(lastPushReceipt.at).toLocaleString()}</div>
+      {clipBatchLabel || lastPushReceipt?.at ? (
+        <div className="dd2-push-receipt">
+          {clipBatchLabel
+            ?? `已写入 clip-gen · ${lastPushReceipt?.shotCount ?? 0} 镜`}
+          {lastPushReceipt?.at ? ` · ${new Date(lastPushReceipt.at).toLocaleString()}` : ''}
+        </div>
       ) : null}
     </div>
   );

@@ -60,38 +60,42 @@ describe('F-045 acceptance — 导演台 WebGL 生命周期', () => {
 
   // ═══════════ G3: Director3dStageEmbed — Path A dispose ═══════════
   describe('G3: Director3dStageEmbed — Path A dispose + 生命周期', () => {
-    const src = readWeb('blocks/core/director-desk/director-3d-stage-embed.tsx');
+    const embed = readWeb('blocks/core/director-desk/director-3d-stage-embed.tsx');
+    const host = readWeb('engine/director3d-host-controller.tsx');
 
     it('有 disposeRef 存储 renderer.dispose', () => {
-      expect(src).toContain('disposeRef');
+      expect(embed).toContain('Director3dHostController');
+      expect(host).toContain('disposeRef');
     });
 
     it('cleanup effect 调用 disposeRef + disposeDirectorWebGLLifecycle', () => {
-      expect(src).toContain('disposeRef.current?.()');
-      expect(src).toContain('disposeDirectorWebGLLifecycle');
+      expect(host).toContain('disposeRef.current?.()');
+      expect(host).toContain('disposeDirectorWebGLLifecycle');
     });
 
     it('handleRendererReady 存储 renderer.dispose', () => {
-      expect(src).toContain('handleRendererReady');
-      expect(src).toContain('renderer.dispose');
+      expect(host).toContain('handleRendererReady');
+      expect(host).toContain('renderer.dispose');
     });
   });
 
   // ═══════════ G4: Director3dPanel — Path B dispose ═══════════
   describe('G4: Director3dPanel — Path B dispose + onRendererReady', () => {
-    const src = readWeb('panels/Director3dPanel.tsx');
+    const panel = readWeb('panels/Director3dPanel.tsx');
+    const host = readWeb('engine/director3d-host-controller.tsx');
 
     it('有 disposeRef 存储 renderer.dispose', () => {
-      expect(src).toContain('disposeRef');
+      expect(panel).toContain('Director3dHostController');
+      expect(host).toContain('disposeRef');
     });
 
     it('cleanup 调用 dispose + disposeDirectorWebGLLifecycle', () => {
-      expect(src).toContain('disposeRef.current?.()');
-      expect(src).toContain('disposeDirectorWebGLLifecycle');
+      expect(host).toContain('disposeRef.current?.()');
+      expect(host).toContain('disposeDirectorWebGLLifecycle');
     });
 
     it('Director3dShell 传入 onRendererReady', () => {
-      expect(src).toContain('onRendererReady');
+      expect(host).toContain('onRendererReady: handleRendererReady');
     });
   });
 

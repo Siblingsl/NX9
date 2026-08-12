@@ -24,6 +24,8 @@ import {
 import { useWorkspaceDocument } from '../../../../../stores/workspace-document';
 import { useActivityLog } from '../../../../../stores/activity-log';
 import { api } from '../../../../../api/client';
+import { stripEpisodeConfirmation } from '../../../../storyboard-desk-runner';
+import { resolveUpstreamChainDesk } from '../../../../chain-storyboard-utils';
 import {
   checkStoryboardConsistencyWithAi,
   findConnectedPictureGenNode,
@@ -73,13 +75,20 @@ function panoramaScopeKey(
   return [activeEpisodeId || 'single-episode', frame?.sceneId || frame?.sceneCode || 'default-scene'].join('::');
 }
 
-function previewNodePatch(
+export function previewNodePatch(
   current: StoryboardPreviewPayload,
   frames: StoryboardPreviewFrame[],
   breakdown?: ScriptBreakdownPayload,
   extra?: Partial<StoryboardPreviewPayload>,
+  deskData?: Record<string, unknown>,
+  episodeId?: string | null,
 ) {
   const summary = frames.filter((f) => f.status === 'success' || f.status === 'locked').length;
+  const confirmation: {
+    gridConfirmed?: boolean;
+    confirmedEpisodeIds?: string[];
+    chainStoryboard?: ReturnType<typeof readChainStoryboard>;
+  } = deskData ? stripEpisodeConfirmation(deskData, episodeId ?? null) : {};
   return {
     storyboardPreview: {
       ...current,
@@ -91,6 +100,7 @@ function previewNodePatch(
       confirmedAt: null,
     },
     ...(breakdown ? { scriptBreakdown: breakdown } : {}),
+    ...confirmation,
     previewUrls: frames.map((f) => f.imageUrl).filter(Boolean),
     batchCount: frames.length,
     content: `Storyboard Preview · ${frames.length} Images · ${summary === frames.length ? 'Ready' : `${summary}/${frames.length}`}`,
@@ -103,6 +113,23 @@ export function useStoryboardPreviewState(blockId: string) {
   const appendLog = useActivityLog((s) => s.append);
   const storyboard = useWorkspaceDocument((s) => s.storyboard);
   const shots = useMemo(() => activeEpisodeShots(storyboard), [storyboard]);
+  const activeEpisodeId = storyboard.activeEpisodeId ?? null;
+
+  const stripConnectedDeskConfirmation = useCallback(
+    (episodeId: string | null) => {
+      const nodes = getNodes();
+      const edges = getEdges();
+      const deskId = resolveUpstreamChainDesk(blockId, nodes, edges);
+      if (!deskId || deskId === blockId) return;
+      const desk = nodes.find((n) => n.id === deskId);
+      if (!desk) return;
+      updateNodeData(
+        deskId,
+        stripEpisodeConfirmation((desk.data ?? {}) as Record<string, unknown>, episodeId),
+      );
+    },
+    [blockId, getEdges, getNodes, updateNodeData],
+  );
 
   const upstreamBreakdown = useMemo(() => {
     const nodes = getNodes();
@@ -405,10 +432,18 @@ export function useStoryboardPreviewState(blockId: string) {
           .filter((f) => !idSet.has(f.id) || f.locked)
           .sort((a, b) => a.order - b.order)
           .map((f, i) => ({ ...f, order: i + 1, label: `Shot${String(i + 1).padStart(2, '0')}` }));
-        return previewNodePatch(current, frames, readBreakdown(data));
+        return previewNodePatch(
+          current,
+          frames,
+          readBreakdown(data),
+          undefined,
+          data,
+          activeEpisodeId,
+        );
       });
+      stripConnectedDeskConfirmation(activeEpisodeId);
     },
-    [blockId, readBreakdown, readPayload, updateNodeData],
+    [activeEpisodeId, blockId, readBreakdown, readPayload, stripConnectedDeskConfirmation, updateNodeData],
   );
 
   const batchStyleReplace = useCallback(
@@ -452,10 +487,18 @@ export function useStoryboardPreviewState(blockId: string) {
             endSec,
           };
         });
-        return previewNodePatch(current, frames, readBreakdown(data));
+        return previewNodePatch(
+          current,
+          frames,
+          readBreakdown(data),
+          undefined,
+          data,
+          activeEpisodeId,
+        );
       });
+      stripConnectedDeskConfirmation(activeEpisodeId);
     },
-    [blockId, readBreakdown, readPayload, updateNodeData],
+    [activeEpisodeId, blockId, readBreakdown, readPayload, stripConnectedDeskConfirmation, updateNodeData],
   );
 
   const insertAfter = useCallback(
@@ -481,10 +524,18 @@ export function useStoryboardPreviewState(blockId: string) {
           userModified: true,
         };
         const frames = [...current.frames, newFrame].sort((a, b) => a.order - b.order);
-        return previewNodePatch(current, frames, readBreakdown(data));
+        return previewNodePatch(
+          current,
+          frames,
+          readBreakdown(data),
+          undefined,
+          data,
+          activeEpisodeId,
+        );
       });
+      stripConnectedDeskConfirmation(activeEpisodeId);
     },
-    [blockId, readBreakdown, readPayload, updateNodeData],
+    [activeEpisodeId, blockId, readBreakdown, readPayload, stripConnectedDeskConfirmation, updateNodeData],
   );
 
   const removeFrame = useCallback(
@@ -498,10 +549,18 @@ export function useStoryboardPreviewState(blockId: string) {
           .filter((f) => f.id !== frameId)
           .sort((a, b) => a.order - b.order)
           .map((f, i) => ({ ...f, order: i + 1, label: `Shot${String(i + 1).padStart(2, '0')}` }));
-        return previewNodePatch(current, frames, readBreakdown(data));
+        return previewNodePatch(
+          current,
+          frames,
+          readBreakdown(data),
+          undefined,
+          data,
+          activeEpisodeId,
+        );
       });
+      stripConnectedDeskConfirmation(activeEpisodeId);
     },
-    [blockId, readBreakdown, readPayload, updateNodeData],
+    [activeEpisodeId, blockId, readBreakdown, readPayload, stripConnectedDeskConfirmation, updateNodeData],
   );
 
   const regenerateFrame = useCallback(
@@ -563,11 +622,17 @@ export function useStoryboardPreviewState(blockId: string) {
             targetFrame!.sourceShotId,
             imageUrl,
           );
-          return {
-            ...previewNodePatch(current, frames, breakdown),
-            ...patchDeskChainFrame(data, targetFrame!.sourceShotId, imageUrl),
-          };
+          const chainPatch = patchDeskChainFrame(data, targetFrame!.sourceShotId, imageUrl);
+          return previewNodePatch(
+            current,
+            frames,
+            breakdown,
+            undefined,
+            { ...data, ...chainPatch },
+            activeEpisodeId,
+          );
         });
+        stripConnectedDeskConfirmation(activeEpisodeId);
         updateNodeData(pictureNode.id, {
           status: 'success',
           previewUrl: imageUrl,
@@ -591,7 +656,7 @@ export function useStoryboardPreviewState(blockId: string) {
         appendLog(`单张重新生成失败: ${String(e)}`);
       }
     },
-    [appendLog, blockId, connectedPictureNode, getNodes, readBreakdown, readPayload, syncPictureSettingsToExecNode, updateNodeData],
+    [activeEpisodeId, appendLog, blockId, connectedPictureNode, getNodes, readBreakdown, readPayload, stripConnectedDeskConfirmation, syncPictureSettingsToExecNode, updateNodeData],
   );
 
   const generateAllFrames = useCallback(
@@ -657,23 +722,33 @@ export function useStoryboardPreviewState(blockId: string) {
         const successUrl = frames.find((f) => f.id === frame.id)?.imageUrl;
         updateNodeData(blockId, (node) => {
           const data = (node.data ?? {}) as Record<string, unknown>;
-          return {
-            ...previewNodePatch(current, frames, breakdown),
-            ...(successUrl ? patchDeskChainFrame(data, frame.sourceShotId, successUrl) : {}),
-          };
+          const chainPatch = successUrl
+            ? patchDeskChainFrame(data, frame.sourceShotId, successUrl)
+            : {};
+          return previewNodePatch(
+            current,
+            frames,
+            breakdown,
+            undefined,
+            { ...data, ...chainPatch },
+            activeEpisodeId,
+          );
         });
       }
 
+      stripConnectedDeskConfirmation(activeEpisodeId);
       appendLog(`批量生成完成 · ${targets.length} 张`);
       updateNodeData(blockId, { status: 'idle' });
     },
     [
+      activeEpisodeId,
       appendLog,
       blockId,
       connectedPictureNode,
       getNodes,
       readBreakdown,
       readPayload,
+      stripConnectedDeskConfirmation,
       syncFromStoryboard,
       syncPictureSettingsToExecNode,
       updateNodeData,

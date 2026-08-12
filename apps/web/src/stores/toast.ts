@@ -43,6 +43,14 @@ export function toastError(message: string, action?: { label: string; onClick: (
   });
 }
 
-export function toastSuccess(message: string) {
-  return useToast.getState().push({ message, variant: 'success' });
+export function toastSuccess(
+  message: string,
+  action?: { label: string; onClick: () => void },
+) {
+  return useToast.getState().push({
+    message,
+    variant: 'success',
+    actionLabel: action?.label,
+    onAction: action?.onClick,
+  });
 }

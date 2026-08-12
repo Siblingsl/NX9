@@ -873,14 +873,22 @@ function AssetsHub({
                 </div>
                 <div className="min-w-0 flex-1 space-y-1">
                   <strong className="text-sm">{c.name}</strong>
-                  <input
-                    className="w-full text-[11px] border border-line rounded-lg px-2 py-1"
-                    value={c.consistencyPrompt || ''}
-                    placeholder="一致性 Prompt"
-                    onChange={(e) =>
-                      desk.saveCharacter({ ...c, consistencyPrompt: e.target.value })
+                  <p className="truncate text-[11px]" style={{ color: 'var(--sd-muted)' }}>
+                    {c.consistencyPrompt?.trim() || '未设一致性 Prompt（请在完整素材库编辑）'}
+                  </p>
+                  <button
+                    type="button"
+                    className="text-[10px] text-brand hover:underline"
+                    onClick={() =>
+                      useAssetLibraryModalUi.getState().openAt({
+                        tab: 'character',
+                        itemId: c.id,
+                        returnHint: '来自制作台资产快览',
+                      })
                     }
-                  />
+                  >
+                    在素材库编辑 Prompt / 设定板
+                  </button>
                   <div className="w-full">
                     <ImageUploadSlot
                       url={c.referenceAudioUrl ?? undefined}

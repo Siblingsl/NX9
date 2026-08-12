@@ -17,8 +17,14 @@ import type {
   VoiceCreativeExtension,
 } from '../types/creative-asset-center';
 import type { SoundAssetProfile } from '../types/sound-library';
+import {
+  FACE_RIG_FACE_GROUPS,
+  buildFaceRigPrompt,
+  faceRigSkipBodyIds,
+  getFaceRig,
+} from './character-face-rig';
 import { defaultCharacterVariants, mergeVariantSlots, CAC_COSTUME_VARIANT_PRESETS } from '../data/creative-asset-presets';
-import { touchStructuredPrompt } from '../types/creative-asset-center';
+import { DEFAULT_PROP_VARIANTS, DEFAULT_SCENE_VARIANTS, touchStructuredPrompt } from '../types/creative-asset-center';
 
 /** @deprecated 使用 buildCharacterMasterSheetPrompt；保留兼容导出名 */
 export const CHARACTER_SHEET_PROMPT_TEMPLATE = CHARACTER_SHEET_MASTER_PROMPT_TEMPLATE;
@@ -53,7 +59,11 @@ export function getCharacterCreative(c: CharacterProfile): CharacterCreativeExte
 }
 
 export function getSceneCreative(item: BacklotWorkspaceItem): SceneCreativeExtension {
-  return (item.creative as SceneCreativeExtension) ?? {};
+  const raw = (item.creative as SceneCreativeExtension) ?? {};
+  return {
+    ...raw,
+    variants: mergeVariantSlots(raw.variants, DEFAULT_SCENE_VARIANTS),
+  };
 }
 
 export function getShotCreative(item: BacklotWorkspaceItem): ShotCreativeExtension {
@@ -77,7 +87,11 @@ export function getCostumeCreative(item: BacklotWorkspaceItem): import('../types
 }
 
 export function getPropCreative(item: BacklotWorkspaceItem): import('../types/creative-asset-center').PropCreativeExtension {
-  return (item.creative as import('../types/creative-asset-center').PropCreativeExtension) ?? {};
+  const raw = (item.creative as import('../types/creative-asset-center').PropCreativeExtension) ?? {};
+  return {
+    ...raw,
+    variants: mergeVariantSlots(raw.variants, DEFAULT_PROP_VARIANTS),
+  };
 }
 
 export function getVoiceCreative(s: SoundAssetProfile): VoiceCreativeExtension {
@@ -95,6 +109,7 @@ export function buildCharacterBiblePrompt(c: CharacterProfile): string {
     section('性格', ext.personalityText || bible.personality),
     section('背景', ext.backgroundStory || bible.background),
     section('外貌', bible.appearance),
+    section('面部结构（参数锁）', buildCharacterFaceRigPrompt(c)),
     section('世界观', ext.worldView),
     section('声音', bible.voice),
     section('关系', bible.relationships),
@@ -145,7 +160,9 @@ export function buildCharacterSheetGenerationPrompt(
   const refHint = [ext.fullSheetUrl, c.referenceImageUrl, ext.frontViewUrl].find((u) => u?.trim());
   const personality = ext.personalityText || c.bible?.personality || '';
   const role = ext.identityRole || ext.occupation || c.bible?.identity || '';
-  const appearance = c.bible?.appearance || ext.appearanceDetails?.specialMarks || c.consistencyPrompt || '';
+  const appearanceText = c.bible?.appearance || ext.appearanceDetails?.specialMarks || c.consistencyPrompt || '';
+  // 捏脸参数是结构层，排在自由描述之前；两者冲突时以参数为准
+  const appearance = lines(buildCharacterFaceRigPrompt(c), appearanceText);
   const input = {
     characterName: c.name,
     characterDescription: c.descriptionZh || c.consistencyPrompt || appearance,
@@ -542,20 +559,34 @@ export function resolveAssetPromptText(
   return text || buildHookPrompt(item);
 }
 
+/** 捏脸参数 → 面部结构段（不含体型；体型并入「身体数据」） */
+export function buildCharacterFaceRigPrompt(c: CharacterProfile): string {
+  return buildFaceRigPrompt(getFaceRig(c), { groups: FACE_RIG_FACE_GROUPS });
+}
+
 function formatBodyMetrics(ext: CharacterCreativeExtension): string {
   const m = ext.bodyMetrics;
-  if (!m) return '';
-  return [
-    m.bust && `胸围 ${m.bust}`,
-    m.waist && `腰围 ${m.waist}`,
-    m.hip && `臀围 ${m.hip}`,
-    m.shoulderWidth && `肩宽 ${m.shoulderWidth}`,
-    m.legLength && `腿长 ${m.legLength}`,
-    m.handLength && `手长 ${m.handLength}`,
-    m.footLength && `脚长 ${m.footLength}`,
+  const measured = [
+    m?.bust && `胸围 ${m.bust}`,
+    m?.waist && `腰围 ${m.waist}`,
+    m?.hip && `臀围 ${m.hip}`,
+    m?.shoulderWidth && `肩宽 ${m.shoulderWidth}`,
+    m?.legLength && `腿长 ${m.legLength}`,
+    m?.handLength && `手长 ${m.handLength}`,
+    m?.footLength && `脚长 ${m.footLength}`,
   ]
     .filter(Boolean)
     .join(' · ');
+
+  // 实测值优先：同维度有数值时该捏人参数降级不写，避免数值与形容互相矛盾
+  const rigBody = buildFaceRigPrompt(getFaceRig(ext.faceRig), {
+    groups: ['body'],
+    skipIds: faceRigSkipBodyIds(m),
+    omitPriorityNote: true,
+    omitConsistencyNote: true,
+  });
+
+  return lines(measured, rigBody);
 }
 
 function formatAppearance(ext: CharacterCreativeExtension): string {

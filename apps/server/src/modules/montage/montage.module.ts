@@ -7,11 +7,12 @@ import { MontageController } from './montage.controller';
 import { MontageService } from './montage.service';
 import { HyperframesService } from './hyperframes.service';
 import { RemotionRenderer } from './remotion.renderer';
+import { VideoEditService } from './video-edit.service';
 
 @Module({
   imports: [GatewayModule, SettingsModule, WorkspaceModule],
   controllers: [MontageController],
-  providers: [MontageService, AnalyzeService, HyperframesService, RemotionRenderer],
+  providers: [MontageService, AnalyzeService, HyperframesService, RemotionRenderer, VideoEditService],
   exports: [MontageService, AnalyzeService, HyperframesService],
 })
 export class MontageModule {}

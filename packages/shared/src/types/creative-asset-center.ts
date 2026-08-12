@@ -49,6 +49,35 @@ export interface CharacterAppearanceDetails {
   accessories?: string;
 }
 
+/** 捏脸 / 捏人参数分组 */
+export type FaceRigGroupId =
+  | 'shape'
+  | 'eyes'
+  | 'brows'
+  | 'nose'
+  | 'mouth'
+  | 'surface'
+  | 'body';
+
+/**
+ * 捏脸 / 捏人参数（结构与量，不含颜色）。
+ *
+ * 取值 -100 ~ +100，0 为中性；|v| < FACE_RIG_DEADZONE 的项不编译进 Prompt。
+ * 颜色仍归 appearanceDetails；实测数值仍归 bodyMetrics。
+ */
+export interface CharacterFaceRig {
+  version: 1;
+  /** 分组 → 参数 id → 取值 */
+  values?: Partial<Record<FaceRigGroupId, Record<string, number>>>;
+  /** 解锁左右不对称的参数 id（默认对称联动） */
+  asymmetric?: string[];
+  /** 来源预设 id，用于「回到预设」与差异展示 */
+  presetId?: string | null;
+  updatedAt?: number;
+  /** 最近一次按当前参数重出定妆头像的时间戳（P2 用；参数未落图健康检查） */
+  renderedAt?: number;
+}
+
 export interface CharacterConsistencyMeta {
   negativePrompt?: string;
   consistencyPrompt?: string;
@@ -99,6 +128,8 @@ export interface CharacterCreativeExtension {
   viewsLocked?: boolean;
   bodyMetrics?: CharacterBodyMetrics;
   appearanceDetails?: CharacterAppearanceDetails;
+  /** 捏脸 / 捏人参数：结构层锚点，编译进 Prompt「面部结构」段 */
+  faceRig?: CharacterFaceRig;
   expressions?: CreativeVariantEntry[];
   poses?: CreativeVariantEntry[];
   angles?: CreativeVariantEntry[];
@@ -125,6 +156,8 @@ export interface CharacterCreativeExtension {
   /** 风格关键词 */
   styleKeywords?: string | null;
   gender?: string | null;
+  /** 定妆参考图历史（主图在 CharacterProfile.referenceImageUrl；此处保留最近若干张） */
+  referenceUrls?: string[];
 }
 
 export interface SceneCreativeExtension {
@@ -146,6 +179,9 @@ export interface SceneCreativeExtension {
   /** 场景挂接的道具库条目 id（Scn-01 / Prop-05） */
   propIds?: string[];
   locked?: boolean;
+  /** H-03 / P1：锁定时 Prompt 快照 */
+  lockedPromptSnapshot?: string;
+  lockedAt?: string;
   forbiddenDrift?: string;
   recommendedCharacters?: string[];
   recommendedShots?: string[];
@@ -153,11 +189,24 @@ export interface SceneCreativeExtension {
   recommendedSfx?: string[];
   recommendedActions?: string[];
   recommendedEmotions?: string[];
+  /**
+   * 场景变体（昼夜/雨天/停电等）。
+   * 轻量子档：同一空间锚点下的光照/天气状态，不另建库条目。
+   */
+  variants?: CreativeVariantEntry[];
   prompts?: {
     scene?: StructuredPrompt;
     negative?: StructuredPrompt;
   };
 }
+
+/** 场景变体默认槽（空白时可展示，首次编辑写入） */
+export const DEFAULT_SCENE_VARIANTS: CreativeVariantEntry[] = [
+  { id: 'day', label: '白天' },
+  { id: 'night', label: '夜晚' },
+  { id: 'rain', label: '雨天' },
+  { id: 'power_out', label: '停电' },
+];
 
 /** 公共镜头库运镜族（主分类） */
 export type ShotMoveFamily =
@@ -248,6 +297,14 @@ export interface VoiceCreativeExtension {
   };
 }
 
+/** 道具状态变体默认槽（拔出/损坏/沾血等，避免重复建档） */
+export const DEFAULT_PROP_VARIANTS: CreativeVariantEntry[] = [
+  { id: 'intact', label: '完好', prompt: 'same prop intact, locked landmark details' },
+  { id: 'drawn', label: '拔出/展开', prompt: 'same prop drawn or unfolded in use, locked landmark details' },
+  { id: 'damaged', label: '损坏', prompt: 'same prop damaged cracks or dents, locked landmark details' },
+  { id: 'stained', label: '沾污', prompt: 'same prop stained or bloodied, locked landmark details' },
+];
+
 /** 道具库 Creative Asset Center 扩展（轻量：对齐服装子集，无完整设定板五分类） */
 export interface PropCreativeExtension {
   /** 外观 / 用途简述 */
@@ -269,8 +326,13 @@ export interface PropCreativeExtension {
   sheetUrl?: string | null;
   /** 三视图正面格裁切封面（卡片优先） */
   coverUrl?: string | null;
+  /** 状态变体：完好 / 拔出 / 损坏 / 沾污（由 DEFAULT_PROP_VARIANTS 合并） */
+  variants?: CreativeVariantEntry[];
   /** 锁定后防漂移 */
   locked?: boolean;
+  /** H-03 / P1：锁定时 Prompt 快照 */
+  lockedPromptSnapshot?: string;
+  lockedAt?: string;
   prompts?: {
     prop?: StructuredPrompt;
     image?: StructuredPrompt;
@@ -313,10 +375,13 @@ export interface CostumeCreativeExtension {
   sheetUrl?: string | null;
   /** 设定板裁切/上传的正面全身衣封面 */
   frontFlatUrl?: string | null;
-  /** 状态变体：破损 / 湿衣 / 夜视 / 战斗等（轻量，默认空） */
+  /** 状态变体：破损 / 湿衣 / 夜视 / 战斗等（由 CAC_COSTUME_VARIANT_PRESETS 默认槽合并） */
   variants?: CreativeVariantEntry[];
   /** 锁定后防漂移 */
   locked?: boolean;
+  /** H-03 / P1：锁定时 Prompt 快照 */
+  lockedPromptSnapshot?: string;
+  lockedAt?: string;
   prompts?: {
     costume?: StructuredPrompt;
     image?: StructuredPrompt;

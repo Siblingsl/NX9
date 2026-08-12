@@ -7,9 +7,13 @@ import { projectFromSceneTemplate, sceneTemplateFromProject, type Director3dScen
 export function EnvDrawer({
   onUploadFile,
   onSaveSceneTemplate,
+  sceneTemplates,
+  onApplySceneTemplate,
 }: {
   onUploadFile?: (file: File) => Promise<{ url: string; filename?: string }>;
   onSaveSceneTemplate?: (template: Director3dSceneTemplate) => void;
+  sceneTemplates?: Director3dSceneTemplate[];
+  onApplySceneTemplate?: (templateId: string) => void;
 }) {
   const panorama = useDirectorStore((s) => s.project.panorama);
   const assets = useDirectorStore((s) => s.project.assets);
@@ -106,7 +110,7 @@ export function EnvDrawer({
               className="nx9-stage-mini-btn is-on"
               onClick={() => onSaveSceneTemplate(sceneTemplateFromProject(project, sceneLabel.trim() || 'NX9 场景模板'))}
             >
-              载入工作区
+              保存模板
             </button>
             <button type="button" className="nx9-stage-mini-btn" onClick={() => exportSceneTemplateJson(sceneTemplateFromProject(project, sceneLabel.trim() || 'NX9 场景模板'))}>
               导出模板
@@ -127,6 +131,27 @@ export function EnvDrawer({
             e.target.value = '';
           }}
         />
+        {onApplySceneTemplate && (
+          <>
+            <p className="nx9-stage-hint" style={{ marginTop: 12 }}>
+              已保存模板
+            </p>
+            {(sceneTemplates ?? []).length === 0 && (
+              <p className="nx9-stage-hint">还没有模板。保存后可在此回读并应用到当前镜头。</p>
+            )}
+            {(sceneTemplates ?? []).map((template) => (
+              <button
+                key={template.id}
+                type="button"
+                className="nx9-stage-layer"
+                onClick={() => onApplySceneTemplate(template.id)}
+              >
+                <span>{template.name}</span>
+                <span className="nx9-stage-chip">应用</span>
+              </button>
+            ))}
+          </>
+        )}
 
         <p className="nx9-stage-hint" style={{ marginTop: 14 }}>
           视口辅助

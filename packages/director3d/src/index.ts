@@ -19,6 +19,7 @@ export type {
   ViewMode,
   Director3dCandidate,
   Director3dCandidateStatus,
+  Director3dCommittedSceneSnapshot,
   Director3dCommitPayload,
   Director3dSceneTemplate,
   Director3dShotState,
@@ -29,6 +30,10 @@ export {
   normalizeDirectorProject,
   emptyShotState,
   normalizeShotState,
+  applySceneTemplateToShotState,
+  restoreCommittedSnapshot,
+  applyCandidateUploadResult,
+  quarantineDirector3dShotStates,
   projectFromSceneTemplate,
   projectFromShotState,
   sceneTemplateFromProject,
@@ -41,6 +46,21 @@ export { DirectorCanvas } from './canvas/DirectorCanvas';
 export { useDirectorStore } from './store/directorStore';
 export { mountDirector3d } from './mount';
 export { isWebGLAvailable } from './util/webgl';
+export {
+  NX9_SCULPT_MESH_CONTRACT,
+  P1_VIEWPORT_PARAM_IDS,
+  assertSculptMeshContract,
+  isP1ViewportParam,
+  type SculptCompatibilityReport,
+  type SculptModelSource,
+} from './sculpt/sculpt-contract';
+export { applyFaceRigToObject, readBoneScale, readMorphInfluence } from './sculpt/apply-face-rig';
+export { createBareSculptRoot, createProxyCharacter } from './sculpt/procedural-body';
+export { createProxyHeadMesh } from './sculpt/procedural-head';
+export { CharacterSculptViewport } from './sculpt/CharacterSculptViewport';
+export type { CharacterSculptViewportHandle } from './sculpt/CharacterSculptViewport';
+export { CharacterSculptScene } from './sculpt/CharacterSculptScene';
+export type { SculptViewState } from './sculpt/CharacterSculptScene';
 export {
   exportProjectJson,
   importProjectJson,

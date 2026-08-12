@@ -164,6 +164,8 @@ describe('F-038 acceptance', () => {
   // ═══════════ 前端 UI 权限门面 ═══════════
   describe('前端 UI 权限门面', () => {
     const src = read(MODAL_FILE);
+    const chars = read(resolve(WEB_ROOT, 'panels/asset-library/CharacterCardGrid.tsx'));
+    const entities = read(resolve(WEB_ROOT, 'panels/asset-library/EntityCardGrid.tsx'));
 
     it('导入 useLibraryAcl', () => {
       expect(src).toContain('useLibraryAcl');
@@ -182,11 +184,12 @@ describe('F-038 acceptance', () => {
     });
 
     it('canDeleteItem 守卫删除按钮 onClick', () => {
-      expect(src).toContain('canDeleteItem) handleDelete');
+      expect(src).toMatch(/canDeleteItem[\s\S]{0,120}handleDelete/);
     });
 
     it('复制到项目按钮存在', () => {
-      expect(src).toContain('复制到项目');
+      expect(chars).toContain('复制到项目');
+      expect(entities).toContain('复制到项目');
     });
 
     it('handleCopyPublicToWorkspace 回调存在', () => {
@@ -197,8 +200,9 @@ describe('F-038 acceptance', () => {
     });
 
     it('公共非内置条目显示复制到项目而非删除', () => {
-      expect(src).toContain("scope === 'public' ?");
-      expect(src).toContain('复制到项目');
+      expect(chars).toContain("scope === 'public' && !builtin");
+      expect(chars).toContain('复制到项目');
+      expect(entities).toContain('复制到项目');
     });
   });
 });

@@ -48,10 +48,10 @@ export const PICTURE_GEN_MODES: PictureGenModeDef[] = [
   },
   {
     id: 'upscale-hd',
-    label: '图片高清',
-    shortLabel: '高清',
+    label: '图片放大',
+    shortLabel: '放大',
     icon: ZoomIn,
-    hint: '放大并增强清晰度',
+    hint: '插值放大 2×/4×（不新增细节）',
   },
   {
     id: 'panorama-720',
@@ -178,6 +178,31 @@ export function resolvePictureReferenceUrls(data: Record<string, unknown>): stri
 
 /** 本节点上传参考上限（与视频参考上限对齐） */
 export const MAX_PICTURE_UPLOAD_REFS = 9;
+
+/**
+ * PG-03: 设置 / 清除风格参考图。
+ * 设置 → 锁定 style-ref 模式；清除 → 按剩余上传参考数回落基础模式
+ * （上游参考由工作区的自动同步 effect 再校正）。
+ */
+export function patchStyleImageUrl(
+  url: string | undefined,
+  data: Record<string, unknown>,
+): Record<string, unknown> {
+  const next = url?.trim() || undefined;
+  if (next) {
+    return {
+      styleImageUrl: next,
+      pictureGenMode: 'style-ref',
+      useImageReference: true,
+    };
+  }
+  const uploadCount = resolveUploadedReferenceUrls(data).length;
+  const mode = inferBasicPictureGenMode(uploadCount);
+  return {
+    styleImageUrl: undefined,
+    ...(readPictureGenMode(data) === 'style-ref' ? patchPictureGenMode(mode) : {}),
+  };
+}
 
 /** 写入主参考 + 额外参考槽（首张进 referenceImageUrl，其余进 referenceImageUrls） */
 export function patchUploadedReferenceUrls(

@@ -70,6 +70,11 @@ export interface BacklotWorkspaceItem {
   stageDeckScene?: unknown;
   /** 从自定义模板导入时关联的模板 id，用于覆盖保存 */
   sourceTemplateId?: string;
+  /**
+   * OL-02：轻量版本号（服/场/道）。另存新版本时 +1；
+   * 生成账本可写 `id@rev`。缺省视为 1。
+   */
+  revision?: number;
   /** Creative Asset Center 扩展数据 */
   creative?: import('../types/creative-asset-center').WorkspaceCreativeExtension;
   /** F-010: 软删除时间戳，非空表示已移入回收站 */

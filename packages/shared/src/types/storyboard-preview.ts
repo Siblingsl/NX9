@@ -67,6 +67,8 @@ export interface StoryboardPreviewFrame {
   /** 批审退回意见，重新出图时进入 Prompt。 */
   reviewNote?: string | null;
   stylePreset?: string | null;
+  /** P1：风格库稳定 id（与 stylePreset 名称/builtinKey 并存，兼容旧帧） */
+  styleAssetId?: string | null;
   status: StoryboardPreviewFrameStatus;
   /** 🔒 锁定后禁止任何批量/全量/修复触发的重新生成 */
   locked: boolean;

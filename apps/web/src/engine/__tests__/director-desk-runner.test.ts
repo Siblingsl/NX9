@@ -6,7 +6,9 @@ import type { Node, Edge } from '@xyflow/react';
 import {
   buildShotPrompt,
   findDirectorPictureGenNode,
+  pushKeyframesToClipGen,
   runDirectorDeskBatch,
+  resolveDirectorRunContext,
   resolveDirectorQueueShots,
   isDirectorKeyframeGatePassed,
   isShotKeyframeApproved,
@@ -15,11 +17,19 @@ import {
   getActiveEpisodeShots,
   summarizePendingKeyframeGate,
   approveAllDirectorKeyframes,
+  openReviewAfterDirectorBatch,
 } from '../director-desk-runner';
 import { patchUpstreamShot } from '../chain-storyboard-utils';
+import { runFlowBatch } from '../flow-runner';
+import { api } from '../../api/client';
 import { buildDirectorBatchLabel } from '../../blocks/core/director-desk/director-batch-opts';
 import { useWorkspaceDocument } from '../../stores/workspace-document';
-import type { StoryboardShot } from '@nx9/shared';
+import {
+  CHAIN_STORYBOARD_HANDOFF_HASH_SCHEMA_VERSION,
+  chainStoryboardHash,
+  lineArtVersionHash,
+  type StoryboardShot,
+} from '@nx9/shared';
 
 vi.mock('../picture-gen-runner', () => ({
   runPictureGenJob: vi.fn(async () => ['generated-keyframe-url']),
@@ -74,6 +84,268 @@ describe('findDirectorPictureGenNode (D-06/X-35)', () => {
     const edges: Edge[] = [];
     const result = findDirectorPictureGenNode('desk', nodes, edges);
     expect(result).toBeUndefined();
+  });
+});
+
+describe('resolveDirectorRunContext', () => {
+  function makeContextGraph() {
+    const shots = [
+      makeShot({ id: 's1', index: 1, episodeId: 'ep-1', lineArtUrl: 'line-1' }),
+      makeShot({ id: 's2', index: 2, episodeId: 'ep-1', lineArtUrl: 'line-2' }),
+    ];
+    const chain = {
+      version: 2 as const,
+      activeEpisodeId: 'ep-1',
+      confirmedEpisodeIds: ['ep-1'],
+      episodes: [{ id: 'ep-1', index: 1, title: '第一集', status: 'in_progress' as const }],
+      shots,
+    };
+    const handoff = {
+      episodeId: 'ep-1',
+      scriptHash: 'script-1',
+      storyboardHash: chainStoryboardHash(chain, 'ep-1'),
+      lineartVersion: lineArtVersionHash(chain, 'ep-1'),
+      hashSchemaVersion: CHAIN_STORYBOARD_HANDOFF_HASH_SCHEMA_VERSION,
+      handoffVersion: 1,
+      confirmedAt: '2026-08-12T00:00:00.000Z',
+      confirmed: true,
+    };
+    const nodes: Node[] = [
+      { id: 'director', type: 'director-desk', position: { x: 0, y: 0 }, data: { lastHandoff: handoff } },
+      {
+        id: 'storyboard',
+        type: 'storyboard-desk',
+        position: { x: -200, y: 0 },
+        data: {
+          chainStoryboard: chain,
+          breakdownJob: { sourcePackageHash: 'script-1' },
+        },
+      },
+    ];
+    const edges: Edge[] = [{ id: 'e1', source: 'storyboard', target: 'director' }];
+    const updateNodeData = (id: string, patch: Record<string, unknown>) => {
+      const node = nodes.find((item) => item.id === id);
+      if (node) node.data = { ...node.data, ...patch };
+    };
+    return { nodes, edges, updateNodeData, chain };
+  }
+
+  it('builds the same episode queue, line-art map, and chain patcher for every host', () => {
+    const graph = makeContextGraph();
+    const context = resolveDirectorRunContext({
+      deskBlockId: 'director',
+      nodes: graph.nodes,
+      edges: graph.edges,
+      updateNodeData: graph.updateNodeData,
+    });
+
+    expect(context.status).toBe('ready');
+    expect(context.shots.map((shot) => shot.id)).toEqual(['s1', 's2']);
+    expect(context.lineArtByShotId).toEqual({ s1: 'line-1', s2: 'line-2' });
+    expect(context.episodeConfirmed).toBe(true);
+    expect(context.patchShot?.('s1', { firstFrameAssetId: 'frame-1', keyframeStatus: 'review' })).toBe(true);
+    expect(context.patchShot?.('s2', { firstFrameAssetId: 'frame-2', keyframeStatus: 'review' })).toBe(true);
+
+    const written = (graph.nodes[1].data.chainStoryboard as typeof graph.chain).shots;
+    expect(written.find((shot) => shot.id === 's1')?.firstFrameAssetId).toBe('frame-1');
+    expect(written.find((shot) => shot.id === 's2')?.firstFrameAssetId).toBe('frame-2');
+
+    const reopened = resolveDirectorRunContext({
+      deskBlockId: 'director',
+      nodes: graph.nodes,
+      edges: graph.edges,
+      updateNodeData: graph.updateNodeData,
+    });
+    expect(reopened.status).toBe('ready');
+  });
+
+  it('blocks canvas execution when handoff is missing instead of returning an empty queue', () => {
+    const graph = makeContextGraph();
+    graph.nodes[0].data = {};
+    const context = resolveDirectorRunContext({
+      deskBlockId: 'director',
+      nodes: graph.nodes,
+      edges: graph.edges,
+      updateNodeData: graph.updateNodeData,
+    });
+
+    expect(context.status).toBe('blocked');
+    expect(context.blockCode).toBe('missing-handoff');
+    expect(context.shots).toEqual([]);
+  });
+
+  it('marks canvas Run as blocked when its director context is invalid', async () => {
+    const node: Node = {
+      id: 'director',
+      type: 'director-desk',
+      position: { x: 0, y: 0 },
+      data: {},
+    };
+    const writes: Record<string, unknown>[] = [];
+    const progress: Array<{ phase: string; error?: string }> = [];
+
+    await runFlowBatch(
+      [node],
+      [],
+      (_id, patch) => writes.push(patch),
+      (state) => progress.push(state),
+      undefined,
+      new Set(['director']),
+    );
+
+    expect(progress.at(-1)?.phase).toBe('blocked');
+    expect(progress.at(-1)?.error).toContain('未连接上游分镜台');
+    expect(writes.some((patch) => patch.status === 'blocked')).toBe(true);
+    expect(writes.some((patch) => patch.status === 'success')).toBe(false);
+  });
+
+  it('runs the resolved episode queue from canvas and writes every generated frame', async () => {
+    const graph = makeContextGraph();
+    const progress: Array<{ phase: string; error?: string }> = [];
+
+    await runFlowBatch(
+      graph.nodes,
+      graph.edges,
+      graph.updateNodeData,
+      (state) => progress.push(state),
+      undefined,
+      new Set(['director']),
+    );
+
+    expect(progress.at(-1)?.phase).toBe('done');
+    const shots = (graph.nodes[1].data.chainStoryboard as typeof graph.chain).shots;
+    expect(shots.every((shot) => shot.firstFrameAssetId === 'generated-keyframe-url')).toBe(true);
+    expect(graph.nodes[0].data.status).toBe('success');
+    expect((graph.nodes[0].data.batchSummary as { total: number }).total).toBe(2);
+  });
+
+  it('pushes a structured batch that clip-gen consumes per shot and writes back', async () => {
+    const graph = makeContextGraph();
+    const approvedShots = graph.chain.shots.map((shot, index) => ({
+      ...shot,
+      firstFrameAssetId: `approved-frame-${index + 1}`,
+      keyframeRevision: 3,
+      keyframeStatus: 'approved' as const,
+      status: 'approved' as const,
+    }));
+    graph.chain.shots = approvedShots;
+    graph.nodes[1].data = {
+      ...graph.nodes[1].data,
+      chainStoryboard: graph.chain,
+    };
+    graph.nodes.push({
+      id: 'clip',
+      type: 'clip-gen',
+      position: { x: 240, y: 0 },
+      data: { videoGenMode: 'image-to-video' },
+    });
+    graph.edges.push({ id: 'e2', source: 'director', target: 'clip' });
+
+    const pushed = pushKeyframesToClipGen({
+      deskBlockId: 'director',
+      nodes: graph.nodes,
+      edges: graph.edges,
+      updateNodeData: graph.updateNodeData,
+      shots: approvedShots,
+      episodeId: 'ep-1',
+    });
+    expect(pushed.shotCount).toBe(2);
+    expect((graph.nodes[2].data.directorKeyframeBatch as { version: number }).version).toBe(1);
+
+    const proxyVideo = vi.spyOn(api, 'proxyVideo').mockImplementation(async (body) => ({
+      ok: true,
+      status: 'success',
+      url: `video-for-${String(body.imageUrl).replace('approved-frame-', '')}`,
+    } as any));
+    localStorage.setItem('nx9.storyboardGuidePrefs.v1', JSON.stringify({
+      showOverlay: true,
+      showOnExport: true,
+      useForVideo: false,
+      kinds: {},
+    }));
+    try {
+      const progress: Array<{ phase: string }> = [];
+      await runFlowBatch(
+        graph.nodes,
+        graph.edges,
+        graph.updateNodeData,
+        (state) => progress.push(state),
+        undefined,
+        new Set(['clip']),
+      );
+
+      expect(progress.at(-1)?.phase).toBe('done');
+      expect(proxyVideo).toHaveBeenCalledTimes(2);
+      expect(proxyVideo.mock.calls.map(([body]) => body.imageUrl)).toEqual([
+        'approved-frame-1',
+        'approved-frame-2',
+      ]);
+      const written = (graph.nodes[1].data.chainStoryboard as typeof graph.chain).shots;
+      expect(written.map((shot) => shot.videoAssetId)).toEqual(['video-for-1', 'video-for-2']);
+      const batch = graph.nodes[2].data.directorKeyframeBatch as { status: string };
+      expect(batch.status).toBe('consumed');
+      expect(graph.nodes[2].data.directorBatchReceipt).toMatchObject({
+        status: 'consumed',
+        succeededShotIds: ['s1', 's2'],
+      });
+    } finally {
+      localStorage.removeItem('nx9.storyboardGuidePrefs.v1');
+      proxyVideo.mockRestore();
+    }
+  });
+
+  it('blocks a stale keyframe batch against its source chain before video requests', async () => {
+    const graph = makeContextGraph();
+    const approvedShots = graph.chain.shots.map((shot, index) => ({
+      ...shot,
+      firstFrameAssetId: `approved-frame-${index + 1}`,
+      keyframeRevision: 1,
+      keyframeStatus: 'approved' as const,
+      status: 'approved' as const,
+    }));
+    graph.chain.shots = approvedShots;
+    graph.nodes[1].data = { ...graph.nodes[1].data, chainStoryboard: graph.chain };
+    graph.nodes.push({
+      id: 'clip',
+      type: 'clip-gen',
+      position: { x: 240, y: 0 },
+      data: { videoGenMode: 'image-to-video' },
+    });
+    graph.edges.push({ id: 'e2', source: 'director', target: 'clip' });
+    pushKeyframesToClipGen({
+      deskBlockId: 'director',
+      nodes: graph.nodes,
+      edges: graph.edges,
+      updateNodeData: graph.updateNodeData,
+      shots: approvedShots,
+      episodeId: 'ep-1',
+    });
+    graph.chain.shots = graph.chain.shots.map((shot) => shot.id === 's2'
+      ? {
+          ...shot,
+          firstFrameAssetId: 'newer-frame',
+          keyframeRevision: 2,
+        }
+      : shot);
+    graph.nodes[1].data = { ...graph.nodes[1].data, chainStoryboard: graph.chain };
+    const proxyVideo = vi.spyOn(api, 'proxyVideo');
+    try {
+      const progress: Array<{ phase: string }> = [];
+      await runFlowBatch(
+        graph.nodes,
+        graph.edges,
+        graph.updateNodeData,
+        (state) => progress.push(state),
+        undefined,
+        new Set(['clip']),
+      );
+
+      expect(progress.at(-1)?.phase).toBe('blocked');
+      expect(proxyVideo).not.toHaveBeenCalled();
+      expect((graph.nodes[2].data.directorKeyframeBatch as { status: string }).status).toBe('stale');
+    } finally {
+      proxyVideo.mockRestore();
+    }
   });
 });
 
@@ -204,7 +476,12 @@ describe('patchUpstreamShot integration', () => {
   });
 
   it('batch generation writes success through patchShot, not global shots', async () => {
-    const shot = makeShot({ id: 's1', index: 1, firstFrameAssetId: null });
+    const shot = makeShot({
+      id: 's1',
+      index: 1,
+      firstFrameAssetId: null,
+      lineArtUrl: 'line-art-url',
+    });
     const chain = { version: 2 as const, activeEpisodeId: 'ep-1', shots: [shot] };
     const nodes: Node[] = [
       { id: 'desk', type: 'director-desk', position: { x: 0, y: 0 }, data: {} },
@@ -229,7 +506,86 @@ describe('patchUpstreamShot integration', () => {
       maxRetries: 0,
     });
     expect(summary.done).toBe(1);
-    expect((nodes[1].data.chainStoryboard as typeof chain).shots[0].firstFrameAssetId).toBe('generated-keyframe-url');
+    const generated = (nodes[1].data.chainStoryboard as typeof chain).shots[0];
+    expect(generated.firstFrameAssetId).toBe('generated-keyframe-url');
+    expect(generated.firstFrameAssetId).not.toBe(generated.lineArtUrl);
+    expect(generated.keyframeRevision).toBe(1);
+    expect(generated.keyframeProvenance).toMatchObject({
+      role: 'director-color-keyframe',
+      generator: 'picture-gen',
+      sourceLineArtUrl: 'line-art-url',
+      batchId: expect.any(String),
+      promptHash: expect.any(String),
+      usedRefs: expect.any(Array),
+      colorCheck: expect.objectContaining({ verdict: expect.stringMatching(/color|unknown|suspect-monochrome/) }),
+    });
+    expect(generated.keyframeStatus).not.toBe('failed');
+  });
+
+  it('suspect-monochrome keeps the URL and forces review, never failed', async () => {
+    const shot = makeShot({ id: 's1', index: 1, firstFrameAssetId: null });
+    const chain = { version: 2 as const, activeEpisodeId: 'ep-1', shots: [shot] };
+    const nodes: Node[] = [
+      { id: 'desk', type: 'director-desk', position: { x: 0, y: 0 }, data: {} },
+      { id: 'sb', type: 'storyboard-desk', position: { x: 100, y: 0 }, data: { chainStoryboard: chain } },
+    ];
+    const edges: Edge[] = [{ id: 'e1', source: 'sb', target: 'desk' }];
+    const summary = await runDirectorDeskBatch({
+      shots: [shot],
+      shotIds: ['s1'],
+      filter: 'selected',
+      skipExisting: false,
+      skipApproved: false,
+      forceCharacterRef: false,
+      forceSceneRef: false,
+      reviewMode: 'auto',
+      maxRetries: 0,
+      inspectKeyframeColor: async () => ({ verdict: 'suspect-monochrome', chromaMean: 0 }),
+      patchShot: (id, patch) => {
+        patchUpstreamShot((nodeId, nodePatch) => {
+          const node = nodes.find((item) => item.id === nodeId);
+          if (node) node.data = { ...node.data, ...nodePatch };
+        }, 'desk', nodes, edges, id, patch);
+      },
+    });
+    expect(summary.done).toBe(1);
+    expect(summary.failed).toBe(0);
+    const generated = (nodes[1].data.chainStoryboard as typeof chain).shots[0];
+    expect(generated.firstFrameAssetId).toBe('generated-keyframe-url');
+    expect(generated.keyframeStatus).toBe('review');
+    expect(generated.status).toBe('review');
+    expect(generated.keyframeProvenance?.colorCheck?.verdict).toBe('suspect-monochrome');
+  });
+
+  it('unknown color check does not block auto-approve', async () => {
+    const shot = makeShot({ id: 's1', index: 1, firstFrameAssetId: null });
+    const chain = { version: 2 as const, activeEpisodeId: 'ep-1', shots: [shot] };
+    const nodes: Node[] = [
+      { id: 'desk', type: 'director-desk', position: { x: 0, y: 0 }, data: {} },
+      { id: 'sb', type: 'storyboard-desk', position: { x: 100, y: 0 }, data: { chainStoryboard: chain } },
+    ];
+    const edges: Edge[] = [{ id: 'e1', source: 'sb', target: 'desk' }];
+    await runDirectorDeskBatch({
+      shots: [shot],
+      shotIds: ['s1'],
+      filter: 'selected',
+      skipExisting: false,
+      skipApproved: false,
+      forceCharacterRef: false,
+      forceSceneRef: false,
+      reviewMode: 'auto',
+      maxRetries: 0,
+      inspectKeyframeColor: async () => { throw new Error('inspect down'); },
+      patchShot: (id, patch) => {
+        patchUpstreamShot((nodeId, nodePatch) => {
+          const node = nodes.find((item) => item.id === nodeId);
+          if (node) node.data = { ...node.data, ...nodePatch };
+        }, 'desk', nodes, edges, id, patch);
+      },
+    });
+    const generated = (nodes[1].data.chainStoryboard as typeof chain).shots[0];
+    expect(generated.keyframeStatus).toBe('approved');
+    expect(generated.keyframeProvenance?.colorCheck?.verdict).toBe('unknown');
   });
 
   it('concurrent-style upstream patches read the latest chain and preserve both updates', () => {
@@ -379,5 +735,163 @@ describe('buildShotPrompt line-art integration', () => {
     } finally {
       useWorkspaceDocument.setState({ storyboard: originalStoryboard });
     }
+  });
+
+  it('requires full-color cinematic keyframe wording', () => {
+    const shot = makeShot({ id: 's1', index: 1, lineArtUrl: 'line.png' });
+    const built = buildShotPrompt(shot, [], {
+      forceCharacterRef: false,
+      forceSceneRef: false,
+      preferLineArtRef: true,
+      lineArtByShotId: { s1: 'line.png' },
+    });
+    expect(built.prompt.toLowerCase()).toMatch(/full-color/);
+    expect(built.prompt.toLowerCase()).toMatch(/keyframe|cinematic/);
+  });
+});
+
+describe('openReviewAfterDirectorBatch scope', () => {
+  it('uses explicit shots and does not invent pending from empty scope', () => {
+    const shots = [
+      makeShot({
+        id: 's1',
+        index: 1,
+        episodeId: 'ep-a',
+        firstFrameAssetId: 'https://cdn.example/a.png',
+        keyframeStatus: 'review',
+        status: 'review',
+      }),
+      makeShot({
+        id: 's2',
+        index: 2,
+        episodeId: 'ep-b',
+        firstFrameAssetId: 'https://cdn.example/b.png',
+        keyframeStatus: 'review',
+        status: 'review',
+      }),
+    ];
+    const result = openReviewAfterDirectorBatch({
+      deskBlockId: 'desk',
+      nodes: [],
+      edges: [],
+      updateNodeData: () => undefined,
+      shots: shots.filter((s) => s.episodeId === 'ep-a'),
+      episodeId: 'ep-a',
+      sourceChainDeskId: 'sb-1',
+      succeededShotIds: ['s1'],
+      openSession: false,
+    });
+    expect(result.pendingIndices).toEqual([1]);
+    expect(result.gatePassed).toBe(false);
+  });
+});
+
+describe('双集 / 多链 / 刷新持久化', () => {
+  it('run context only queues the handoff episode', () => {
+    const shots = [
+      makeShot({ id: 'a1', index: 1, episodeId: 'ep-a', lineArtUrl: 'a-line' }),
+      makeShot({ id: 'b1', index: 1, episodeId: 'ep-b', lineArtUrl: 'b-line' }),
+    ];
+    const chain = {
+      version: 2 as const,
+      activeEpisodeId: 'ep-b',
+      confirmedEpisodeIds: ['ep-a', 'ep-b'],
+      episodes: [
+        { id: 'ep-a', index: 1, title: 'A', status: 'in_progress' as const },
+        { id: 'ep-b', index: 2, title: 'B', status: 'in_progress' as const },
+      ],
+      shots,
+    };
+    const handoff = {
+      episodeId: 'ep-a',
+      scriptHash: 'script-1',
+      storyboardHash: chainStoryboardHash(chain, 'ep-a'),
+      lineartVersion: lineArtVersionHash(chain, 'ep-a'),
+      hashSchemaVersion: CHAIN_STORYBOARD_HANDOFF_HASH_SCHEMA_VERSION,
+      handoffVersion: 1,
+      confirmedAt: '2026-08-12T00:00:00.000Z',
+      confirmed: true,
+    };
+    const nodes: Node[] = [
+      { id: 'director', type: 'director-desk', position: { x: 0, y: 0 }, data: { lastHandoff: handoff } },
+      {
+        id: 'storyboard',
+        type: 'storyboard-desk',
+        position: { x: -200, y: 0 },
+        data: { chainStoryboard: chain, breakdownJob: { sourcePackageHash: 'script-1' } },
+      },
+    ];
+    const edges: Edge[] = [{ id: 'e1', source: 'storyboard', target: 'director' }];
+    const context = resolveDirectorRunContext({
+      deskBlockId: 'director',
+      nodes,
+      edges,
+      updateNodeData: () => undefined,
+    });
+    expect(context.status).toBe('ready');
+    expect(context.shots.map((s) => s.id)).toEqual(['a1']);
+    expect(context.lineArtByShotId).toEqual({ a1: 'a-line' });
+    expect(context.patchShot?.('b1', { firstFrameAssetId: 'leak' })).toBe(false);
+  });
+
+  it('patching chain A does not mutate chain B', () => {
+    const chainA = {
+      version: 2 as const,
+      activeEpisodeId: 'ep-1',
+      shots: [makeShot({ id: 'a1', index: 1, episodeId: 'ep-1' })],
+    };
+    const chainB = {
+      version: 2 as const,
+      activeEpisodeId: 'ep-1',
+      shots: [makeShot({ id: 'b1', index: 1, episodeId: 'ep-1', firstFrameAssetId: 'keep-me' })],
+    };
+    const nodes: Node[] = [
+      { id: 'desk-a', type: 'director-desk', position: { x: 0, y: 0 }, data: {} },
+      { id: 'sb-a', type: 'storyboard-desk', position: { x: 100, y: 0 }, data: { chainStoryboard: chainA } },
+      { id: 'desk-b', type: 'director-desk', position: { x: 0, y: 200 }, data: {} },
+      { id: 'sb-b', type: 'storyboard-desk', position: { x: 100, y: 200 }, data: { chainStoryboard: chainB } },
+    ];
+    const edges: Edge[] = [
+      { id: 'ea', source: 'sb-a', target: 'desk-a' },
+      { id: 'eb', source: 'sb-b', target: 'desk-b' },
+    ];
+    const updateNodeData = (id: string, patch: Record<string, unknown>) => {
+      const node = nodes.find((item) => item.id === id);
+      if (node) node.data = { ...node.data, ...patch };
+    };
+    expect(patchUpstreamShot(updateNodeData, 'desk-a', nodes, edges, 'a1', {
+      firstFrameAssetId: 'a-frame',
+    })).toBe(true);
+    const a = (nodes.find((n) => n.id === 'sb-a')!.data as { chainStoryboard: typeof chainA }).chainStoryboard;
+    const b = (nodes.find((n) => n.id === 'sb-b')!.data as { chainStoryboard: typeof chainB }).chainStoryboard;
+    expect(a.shots[0].firstFrameAssetId).toBe('a-frame');
+    expect(b.shots[0].firstFrameAssetId).toBe('keep-me');
+  });
+
+  it('chainStoryboard JSON round-trip keeps director keyframe fields', () => {
+    const chain = {
+      version: 2 as const,
+      activeEpisodeId: 'ep-1',
+      shots: [
+        makeShot({
+          id: 's1',
+          index: 1,
+          episodeId: 'ep-1',
+          firstFrameAssetId: 'https://cdn.example/k.png',
+          keyframeRevision: 3,
+          keyframeStatus: 'approved',
+          keyframeProvenance: {
+            role: 'director-color-keyframe',
+            generator: 'picture-gen',
+            generatedAt: '2026-08-12T00:00:00.000Z',
+            colorCheck: { verdict: 'color', chromaMean: 40 },
+          },
+        }),
+      ],
+    };
+    const restored = JSON.parse(JSON.stringify(chain)) as typeof chain;
+    expect(restored.shots[0].firstFrameAssetId).toBe('https://cdn.example/k.png');
+    expect(restored.shots[0].keyframeRevision).toBe(3);
+    expect(restored.shots[0].keyframeProvenance?.colorCheck?.verdict).toBe('color');
   });
 });

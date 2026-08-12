@@ -10,6 +10,7 @@ import {
   Star,
   Palette,
 } from 'lucide-react';
+import { VirtualizedCardGrid } from './VirtualizedCardGrid';
 
 /** 无参考图时的内置情绪色块（暖纸壳内克制渐变，避免紫光） */
 const BUILTIN_SWATCH: Record<string, { from: string; to: string; mark: string }> = {
@@ -43,6 +44,7 @@ export interface StyleCardGridProps {
     description?: string;
     imageUrl?: string;
     builtin?: boolean;
+    overridesBuiltin?: boolean;
   }>;
   stylesById: Map<string, StylePresetProfile>;
   canDelete: boolean;
@@ -76,8 +78,11 @@ export function StyleCardGrid({
   }
 
   return (
-    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-4">
-      {items.map((item) => {
+    <VirtualizedCardGrid
+      items={items}
+      getKey={(item) => item.id}
+      estimateCardHeight={(cardWidth) => cardWidth * (3 / 4) + 72}
+      renderItem={(item) => {
         const style = stylesById.get(item.id);
         const isBuiltin = Boolean(item.builtin || style?.builtinKey);
         const favorite = Boolean(style?.favorite);
@@ -90,22 +95,32 @@ export function StyleCardGrid({
 
         return (
           <article
-            key={item.id}
-            className="group relative flex flex-col overflow-hidden rounded-xl border border-line bg-surface transition-colors hover:border-brand/35"
+            className="group relative flex h-full flex-col overflow-hidden rounded-xl border border-line bg-surface transition-colors hover:border-brand/35"
           >
             <StyleCover
               imageUrl={imageUrl}
               swatch={swatch}
               favorite={favorite}
               allowFavorite={!isBuiltin}
+              onOpen={() => onEdit(item.id)}
               onToggleFavorite={() => onToggleFavorite(item.id)}
             />
 
             <div className="relative z-10 flex items-start gap-1 border-t border-line px-2.5 py-2">
-              <div className="min-w-0 flex-1">
+              <button
+                type="button"
+                className="min-w-0 flex-1 text-left hover:text-brand"
+                title="点击编辑 · 可用菜单复制 @"
+                onClick={() => onEdit(item.id)}
+              >
                 <p className="truncate text-xs font-medium text-ink">
                   {isBuiltin ? (
                     <span className="mr-1 text-[9px] font-normal text-ink/50">内置</span>
+                  ) : null}
+                  {item.overridesBuiltin ? (
+                    <span className="mr-1 text-[9px] font-normal text-warn" title="自定义同名覆盖内置展示">
+                      覆盖中
+                    </span>
                   ) : null}
                   {item.label || '未命名风格'}
                 </p>
@@ -115,7 +130,7 @@ export function StyleCardGrid({
                 {familyLabel ? (
                   <p className="mt-1 truncate text-[10px] text-ink/35">{familyLabel}</p>
                 ) : null}
-              </div>
+              </button>
               <div className="relative shrink-0">
                 <button
                   type="button"
@@ -156,8 +171,8 @@ export function StyleCardGrid({
             </div>
           </article>
         );
-      })}
-    </div>
+      }}
+    />
   );
 }
 
@@ -166,16 +181,30 @@ function StyleCover({
   swatch,
   favorite,
   allowFavorite,
+  onOpen,
   onToggleFavorite,
 }: {
   imageUrl?: string;
   swatch?: { from: string; to: string; mark: string };
   favorite: boolean;
   allowFavorite: boolean;
+  onOpen: () => void;
   onToggleFavorite: () => void;
 }) {
   return (
-    <div className="relative aspect-[4/5] w-full overflow-hidden bg-black/15">
+    <div
+      role="button"
+      tabIndex={0}
+      title="点击编辑"
+      className="relative aspect-[4/5] w-full cursor-pointer overflow-hidden bg-black/15"
+      onClick={onOpen}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          onOpen();
+        }
+      }}
+    >
       {imageUrl ? (
         <img src={imageUrl} alt="" className="h-full w-full object-cover object-center" />
       ) : swatch ? (

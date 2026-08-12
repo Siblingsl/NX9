@@ -40,9 +40,9 @@ function ExportPackBlock(props: NodeProps) {
   const appendLog = useActivityLog((s) => s.append);
   const nodes = useNodes();
   const edges = useEdges();
-  // F-003: 链优先读取上游镜表（允许回退全局，因导出需全量）
+  // F-003: 仅读连接链镜表，禁止回退全局
   const shots = useMemo(
-    () => resolveShotsForBlock(props.id, nodes, edges, true),
+    () => resolveShotsForBlock(props.id, nodes, edges, false),
     [props.id, nodes, edges],
   );
   const storyboardVersion = useWorkspaceDocument((s) => s.storyboard.version);
@@ -96,10 +96,15 @@ function ExportPackBlock(props: NodeProps) {
 
   useEffect(() => {
     if (hfTask.status === 'done' && hfTask.url) {
-      updateNodeData(props.id, { episodeUrl: hfTask.url, status: 'success' });
+      updateNodeData(props.id, {
+        episodeUrl: hfTask.url,
+        status: 'success',
+        exportReady: true,
+      });
       appendLog(`HF 渲染完成 · ${hfTask.url}`);
     }
     if (hfTask.status === 'error') {
+      updateNodeData(props.id, { status: 'error', exportReady: false, error: hfTask.message });
       appendLog(`HF 渲染失败：${hfTask.message}`);
     }
   }, [hfTask.status, hfTask.url, hfTask.message, props.id, updateNodeData, appendLog]);
@@ -107,7 +112,7 @@ function ExportPackBlock(props: NodeProps) {
   const modeSourceHint = useMemo(() => {
     switch (exportMode) {
       case 'zip': return '需连接上游媒资节点';
-      case 'ffmpeg-episode': return shots.length > 0 ? `使用故事板 ${shots.length} 镜` : '需故事板有镜头';
+      case 'ffmpeg-episode': return shots.length > 0 ? `使用连接链 ${shots.length} 镜` : '需连接分镜台链';
       case 'hyperframes-episode':
       case 'remotion-bundle': return hasEffectiveTimeline ? '使用时间线编排' : '需先编排时间线（智能剪辑）';
       case 'ecom-pack': return selectedSpecs.length > 0 ? `电商规格包导出 ${selectedSpecs.length} 个规格` : '请选择至少一个电商规格';
@@ -153,9 +158,9 @@ function ExportPackBlock(props: NodeProps) {
       return;
     }
     if (exportMode === 'ffmpeg-episode' && shots.length === 0) {
-      updateNodeData(props.id, { status: 'error', message: '故事板无镜头' });
-      addHistoryEntry({ ok: false, message: '故事板无镜头' });
-      appendLog('导出未通过：故事板无镜头');
+      updateNodeData(props.id, { status: 'error', message: '无连接链镜表' });
+      addHistoryEntry({ ok: false, message: '无连接链镜表' });
+      appendLog('导出未通过：无连接链镜表');
       return;
     }
 
@@ -172,24 +177,28 @@ function ExportPackBlock(props: NodeProps) {
         prompts: upstream?.prompts ?? [],
         shots,
         timeline: effectiveTimeline,
+        selectedSpecs,
       });
       if (!res.ok) {
         const st = res.message?.includes('blocked') ? 'blocked' : 'error';
-        updateNodeData(props.id, { status: st, message: res.message });
+        updateNodeData(props.id, { status: st, message: res.message, exportReady: false });
         addHistoryEntry({ ok: false, message: res.message });
         appendLog(`导出未通过：${res.message}`);
         if (modeNeedsTimeline && res.message?.includes('时间线')) openSmartEdit();
         return;
       }
       const patch: Record<string, unknown> = {
-        status: 'success',
+        status: res.exportReady ? 'success' : 'running',
+        exportReady: res.exportReady === true,
         episodeUrl: res.url,
         lastExportAt: new Date().toISOString(),
         exportCount: res.exportCount,
-        message: undefined,
+        message: res.message,
       };
       if (exportMode === 'hyperframes-episode' && res.taskId) {
         patch.hfTaskId = res.taskId;
+        patch.status = 'running';
+        patch.exportReady = false;
         resetHfPolling();
       }
       updateNodeData(props.id, patch);
@@ -215,13 +224,17 @@ function ExportPackBlock(props: NodeProps) {
         }
       }
 
-      addHistoryEntry({
-        ok: true,
-        url: res.url,
-        manifestCsvUrl: manifestUrls.csvUrl,
-        manifestPdfUrl: manifestUrls.pdfUrl,
-      });
-      appendLog(`导出完成 · ${res.exportCount ? `${res.exportCount} 个文件` : res.url || ''}`);
+      if (res.exportReady) {
+        addHistoryEntry({
+          ok: true,
+          url: res.url,
+          manifestCsvUrl: manifestUrls.csvUrl,
+          manifestPdfUrl: manifestUrls.pdfUrl,
+        });
+        appendLog(`导出完成 · ${res.exportCount ? `${res.exportCount} 个文件` : res.url || ''}`);
+      } else {
+        appendLog(`导出已提交，等待渲染完成…${res.taskId ? ` (${res.taskId})` : ''}`);
+      }
     } catch (e) {
       const msg = String(e);
       updateNodeData(props.id, { status: 'error', error: msg });
@@ -244,6 +257,7 @@ function ExportPackBlock(props: NodeProps) {
     modeNeedsTimeline,
     hasEffectiveTimeline,
     openSmartEdit,
+    selectedSpecs,
   ]);
 
   /** F-015: 从历史中重试失败导出 */
@@ -255,7 +269,7 @@ function ExportPackBlock(props: NodeProps) {
 
   const composeEpisode = useCallback(async () => {
     if (shots.length === 0) {
-      appendLog('单集合成：故事板无镜头');
+      appendLog('单集合成：无连接链镜表');
       return;
     }
     setBusy(true);

@@ -129,6 +129,12 @@ export interface WorkspacePayloadV3 extends Omit<WorkspacePayloadV2, 'version'> 
   scriptDeskDrafts?: import('../utils/script-desk-archives').ScriptDeskFolderSnapshot[];
   /** 编剧台成稿进私有回收站 */
   scriptDeskTrash?: import('../utils/script-desk-archives').ScriptDeskFolderSnapshot[];
+  /** OL-14：素材 usage 轻量快照（健康扫描写入，供影响分析/离线对账） */
+  assetUsageIndex?: {
+    version: 1;
+    updatedAt: string;
+    entries: Record<string, { shotIds: string[]; nodeIds: string[] }>;
+  };
 }
 
 /** Workspace on disk — v1/v2 legacy or v3 Stage Deck */
@@ -227,6 +233,7 @@ export function normalizeWorkspacePayload(raw: Partial<WorkspacePayload>): Works
       mediaTrash: Array.isArray(mediaTrash) ? mediaTrash : undefined,
       scriptDeskDrafts: Array.isArray(scriptDeskDrafts) ? scriptDeskDrafts : undefined,
       scriptDeskTrash: Array.isArray(scriptDeskTrash) ? scriptDeskTrash : undefined,
+      assetUsageIndex: (raw as { assetUsageIndex?: WorkspacePayloadV3['assetUsageIndex'] }).assetUsageIndex,
     };
   }
   return {
@@ -234,5 +241,6 @@ export function normalizeWorkspacePayload(raw: Partial<WorkspacePayload>): Works
     mediaTrash: Array.isArray(mediaTrash) ? mediaTrash : undefined,
     scriptDeskDrafts: Array.isArray(scriptDeskDrafts) ? scriptDeskDrafts : undefined,
     scriptDeskTrash: Array.isArray(scriptDeskTrash) ? scriptDeskTrash : undefined,
+    assetUsageIndex: (raw as { assetUsageIndex?: WorkspacePayloadV3['assetUsageIndex'] }).assetUsageIndex,
   } as WorkspacePayload;
 }

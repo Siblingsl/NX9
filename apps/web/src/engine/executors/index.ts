@@ -1,2 +1,7 @@
-export type { BlockExecutor, BlockExecutorContext } from './types';
+export type {
+  BlockExecutor,
+  BlockExecutorContext,
+  ExecutorGraphEdge,
+  ExecutorGraphNode,
+} from './types';
 export { runPictureGenExecutor } from './picture-gen-executor';

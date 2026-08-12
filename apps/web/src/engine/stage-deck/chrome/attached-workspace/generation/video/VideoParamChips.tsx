@@ -79,7 +79,6 @@ export function VideoParamChips({ blockId, onPatch }: VideoParamChipsProps) {
   const aspect = (data.aspect as string) ?? '16:9';
   const durationSec = (data.durationSec as number) ?? 5;
   const resolution = (data.resolution as string) ?? '720';
-  const imageCount = (data.imageCount as number) ?? 1;
   const generateAudio = (data.generateAudio as boolean | undefined) ?? false;
 
   const resLabel =
@@ -105,12 +104,7 @@ export function VideoParamChips({ blockId, onPatch }: VideoParamChipsProps) {
         options={VIDEO_DURATION_OPTIONS.map((n) => ({ id: String(n), label: `${n}s` }))}
         onSelect={(v) => onPatch({ durationSec: Number(v) })}
       />
-      <ParamChip
-        label={`×${imageCount}`}
-        active={String(imageCount)}
-        options={[1, 2, 3, 4].map((n) => ({ id: String(n), label: `×${n}` }))}
-        onSelect={(v) => onPatch({ imageCount: Number(v) })}
-      />
+      {/* VG-05: ×N 条数芯片已移除——视频路径不消费 imageCount，避免死 UI */}
       <ParamChip
         label={generateAudio ? '有声' : '无声'}
         active={String(generateAudio)}

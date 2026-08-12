@@ -4,6 +4,11 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
+overrides:
+  remotion: 4.0.499
+  '@remotion/player': 4.0.499
+  '@remotion/renderer': 4.0.499
+
 importers:
 
   .:
@@ -42,7 +47,7 @@ importers:
         specifier: ^6.0.0
         version: 6.19.3(prisma@6.19.3(typescript@5.9.3))(typescript@5.9.3)
       '@remotion/renderer':
-        specifier: ^4.0.0
+        specifier: 4.0.499
         version: 4.0.499(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
       class-transformer:
         specifier: ^0.5.1
@@ -112,8 +117,8 @@ importers:
         specifier: workspace:*
         version: link:../../packages/shared
       '@remotion/player':
-        specifier: ^4.0.0
-        version: 4.0.494(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
+        specifier: 4.0.499
+        version: 4.0.499(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
       '@xyflow/react':
         specifier: ^12.10.0
         version: 12.11.2(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
@@ -129,6 +134,12 @@ importers:
       react-dom:
         specifier: ^19.0.0
         version: 19.2.7(react@19.2.7)
+      remotion:
+        specifier: 4.0.499
+        version: 4.0.499(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
+      three:
+        specifier: ^0.172.0
+        version: 0.172.0
       zustand:
         specifier: ^5.0.0
         version: 5.0.14(@types/react@19.2.17)(react@19.2.7)(use-sync-external-store@1.6.0(react@19.2.7))
@@ -148,6 +159,9 @@ importers:
       '@types/react-dom':
         specifier: ^19.0.0
         version: 19.2.3(@types/react@19.2.17)
+      '@types/three':
+        specifier: ^0.172.0
+        version: 0.172.0
       '@vitejs/plugin-react':
         specifier: ^4.3.0
         version: 4.7.0(vite@6.4.3(@types/node@22.20.1)(jiti@1.21.7)(terser@5.49.0))
@@ -178,6 +192,9 @@ importers:
 
   packages/director3d:
     dependencies:
+      '@nx9/shared':
+        specifier: workspace:*
+        version: link:../shared
       '@react-three/drei':
         specifier: ^10.0.0
         version: 10.7.7(@react-three/fiber@9.6.1(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(three@0.172.0))(@types/react@19.2.17)(@types/three@0.172.0)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(three@0.172.0)
@@ -219,13 +236,13 @@ importers:
         specifier: workspace:*
         version: link:../shared
       '@remotion/player':
-        specifier: ^4.0.0
-        version: 4.0.494(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
+        specifier: 4.0.499
+        version: 4.0.499(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
       react:
         specifier: ^19.0.0
         version: 19.2.7
       remotion:
-        specifier: ^4.0.0
+        specifier: 4.0.499
         version: 4.0.499(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
     devDependencies:
       '@types/react':
@@ -1213,8 +1230,8 @@ packages:
   '@remotion/licensing@4.0.499':
     resolution: {integrity: sha512-dKjaYAJsxCUXDvAjJW8bHIUe+dYAXEcq2M0RVrqdS1CEUZPUQXhzIbYILX+slcVb5c8/DD5t+edm7d2VSY81Tg==}
 
-  '@remotion/player@4.0.494':
-    resolution: {integrity: sha512-NevDx0QrUAd4zfGzhFGoeI/nHx0+jKlTQ2V3D3FX7nNlyDAcN8h0X21Mnp9vhFGlgw3GiF1tU21WCWGllfsw6Q==}
+  '@remotion/player@4.0.499':
+    resolution: {integrity: sha512-3qEjNUj0KamSgWLXDhXnHdVMIx0EBsdr7XM5+QGldj1EiZH54vXVKJsWJj6SYfPbaskfEWI0wjKGGh0ml3vJrw==}
     peerDependencies:
       react: '>=16.8.0'
       react-dom: '>=16.8.0'
@@ -3184,12 +3201,6 @@ packages:
   reflect-metadata@0.2.2:
     resolution: {integrity: sha512-urBwgfrvVP/eAyXx4hluJivBKzuEbSQs9rKWCrCkbSxNv8mxPcUZKeuoF3Uy4mJl3Lwprp6yy5/39VWigZ4K6Q==}
 
-  remotion@4.0.494:
-    resolution: {integrity: sha512-WiAUJ5rjhoYvBJzwp8ZLybhJZLe6VAwWk7pbs9Jv1yYLbHAV9RraUaNHuegaIKbbmgW2c9UDPgKjdZ9k9XjTyA==}
-    peerDependencies:
-      react: '>=16.8.0'
-      react-dom: '>=16.8.0'
-
   remotion@4.0.499:
     resolution: {integrity: sha512-QX5B1XDFBQpr8mYUBqhgCrH0cQJmqfI7zA46k9CsZhri/H9quXObYQBgeNDcxUhoulVvOOjVQqp5d0RAwB94HA==}
     peerDependencies:
@@ -4888,11 +4899,11 @@ snapshots:
 
   '@remotion/licensing@4.0.499': {}
 
-  '@remotion/player@4.0.494(react-dom@19.2.7(react@19.2.7))(react@19.2.7)':
+  '@remotion/player@4.0.499(react-dom@19.2.7(react@19.2.7))(react@19.2.7)':
     dependencies:
       react: 19.2.7
       react-dom: 19.2.7(react@19.2.7)
-      remotion: 4.0.494(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
+      remotion: 4.0.499(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
 
   '@remotion/renderer@4.0.499(react-dom@19.2.7(react@19.2.7))(react@19.2.7)':
     dependencies:
@@ -6861,11 +6872,6 @@ snapshots:
       strip-indent: 3.0.0
 
   reflect-metadata@0.2.2: {}
-
-  remotion@4.0.494(react-dom@19.2.7(react@19.2.7))(react@19.2.7):
-    dependencies:
-      react: 19.2.7
-      react-dom: 19.2.7(react@19.2.7)
 
   remotion@4.0.499(react-dom@19.2.7(react@19.2.7))(react@19.2.7):
     dependencies:

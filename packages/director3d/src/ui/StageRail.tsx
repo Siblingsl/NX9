@@ -7,9 +7,13 @@ import type { Director3dSceneTemplate } from '../schema/directorProject';
 export function StageRail({
   onUploadFile,
   onSaveSceneTemplate,
+  sceneTemplates,
+  onApplySceneTemplate,
 }: {
   onUploadFile?: (file: File) => Promise<{ url: string; filename?: string }>;
     onSaveSceneTemplate?: (template: Director3dSceneTemplate) => void;
+    sceneTemplates?: Director3dSceneTemplate[];
+    onApplySceneTemplate?: (templateId: string) => void;
 }) {
   const drawer = useDirectorStore((s) => s.activeDrawer);
   const setDrawer = useDirectorStore((s) => s.setActiveDrawer);
@@ -49,7 +53,12 @@ export function StageRail({
       {drawer === 'layers' && <LayersDrawer />}
       {drawer === 'add' && <AddDrawer />}
       {drawer === 'env' && (
-        <EnvDrawer onUploadFile={onUploadFile} onSaveSceneTemplate={onSaveSceneTemplate} />
+        <EnvDrawer
+          onUploadFile={onUploadFile}
+          onSaveSceneTemplate={onSaveSceneTemplate}
+          sceneTemplates={sceneTemplates}
+          onApplySceneTemplate={onApplySceneTemplate}
+        />
       )}
     </>
   );

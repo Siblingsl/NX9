@@ -6,6 +6,11 @@
  */
 import type { ScreenplayPackage } from '../types/screenplay-package';
 import type { StoryboardShot } from '../types/storyboard';
+import {
+  COMMON_PROP_KEYWORDS,
+  extractCostumeEntityNames,
+  extractPropEntityNames,
+} from './wardrobe-entity-extract';
 
 export interface ConsistencyCheckItem {
   id: string;
@@ -161,45 +166,36 @@ export function checkLocationConsistency(
 }
 
 /**
- * 检查道具连续性：场景描述中提到的道具是否在 Bible 中注册。
+ * 检查道具连续性：场景描述中提到的道具是否在角色外貌/定妆中出现过。
+ * 实体名表与预检共用 extractPropEntityNames。
  */
 export function checkPropConsistency(
   pkg: ScreenplayPackage,
 ): ConsistencyCheckItem[] {
   const items: ConsistencyCheckItem[] = [];
-  // ScreenplayCharacterDraft 无独立 props 字段：从外貌/定妆关键词中收集已提及道具词
-  const bibleProps = new Set<string>();
-  const propKeywords = ['手机', '剑', '枪', '包', '帽', '眼镜', '钥匙', '书', '笔', '箱', '灯', '杖'];
-  for (const char of pkg.bible.characters) {
-    const blob = [char.appearance, char.fixedVisualKeywords, char.identity]
-      .filter(Boolean)
-      .join(' ');
-    for (const kw of propKeywords) {
-      if (blob.includes(kw)) bibleProps.add(kw);
-    }
-  }
-  // 从场景描述中提取道具关键词（对齐 ScreenplaySceneDraft 现有字段）
+  const bibleProps = new Set(
+    extractPropEntityNames({ characters: pkg.bible.characters }).map((n) => n.toLowerCase()),
+  );
   for (const scene of pkg.bible.scenes) {
-    const text = [scene.summary, scene.sensoryNotes, scene.location, scene.era]
-      .filter(Boolean)
-      .join(' ');
-    for (const kw of propKeywords) {
-      if (text.includes(kw) && !bibleProps.has(kw)) {
-        items.push({
-          id: `prop-${scene.id || scene.name}-${kw}`,
-          severity: 'warn',
-          message: `场景「${scene.name || ''}」出现道具「${kw}」但未在角色外貌/定妆描述中出现`,
-          target: { type: 'scene', id: scene.name || scene.code || '' },
-          category: 'prop',
-        });
-      }
+    const sceneProps = extractPropEntityNames({ scenes: [scene] });
+    for (const name of sceneProps) {
+      const isKeyword = (COMMON_PROP_KEYWORDS as readonly string[]).includes(name);
+      if (!isKeyword) continue;
+      if (bibleProps.has(name.toLowerCase())) continue;
+      items.push({
+        id: `prop-${scene.id || scene.name}-${name}`,
+        severity: 'warn',
+        message: `场景「${scene.name || ''}」出现道具「${name}」但未在角色外貌/定妆描述中出现`,
+        target: { type: 'scene', id: scene.name || scene.code || '' },
+        category: 'prop',
+      });
     }
   }
   return items;
 }
 
 /**
- * 检查服装描述一致性。
+ * 检查服装描述一致性（与预检共用 extractCostumeEntityNames）。
  */
 export function checkCostumeConsistency(
   pkg: ScreenplayPackage,
@@ -211,6 +207,17 @@ export function checkCostumeConsistency(
         id: `costume-${char.name}-appearance`,
         severity: 'warn',
         message: `角色「${char.name}」缺少外貌/服装描述`,
+        target: { type: 'character', id: char.name },
+        category: 'costume',
+      });
+      continue;
+    }
+    const costumes = extractCostumeEntityNames([char]);
+    if (costumes.length === 0) {
+      items.push({
+        id: `costume-${char.name}-entity`,
+        severity: 'warn',
+        message: `角色「${char.name}」外貌中未识别到可建档服装名（建议写「身穿…」或「服装：…」）`,
         target: { type: 'character', id: char.name },
         category: 'costume',
       });

@@ -1,6 +1,11 @@
 import type { Edge, Node } from '@xyflow/react';
 import { getSpawnableBlocks, resolveAccepts, resolveEmits, lookupBlock } from '@nx9/shared';
-import { runFlowBatch, RUNNABLE_BLOCKS, type RunProgress } from '../../flow-runner';
+import {
+  runFlowBatch,
+  RUNNABLE_BLOCKS,
+  type FlowRunSignal,
+  type RunProgress,
+} from '../../flow-runner';
 import {
   clearCascadeEdges,
   collectCascadeChain,
@@ -19,7 +24,8 @@ export interface CascadeRunOptions {
   setEdges: (edges: Edge[] | ((prev: Edge[]) => Edge[])) => void;
   updateNodeData: (id: string, data: Record<string, unknown>) => void;
   onProgress?: (p: RunProgress) => void;
-  signal?: { cancelled: boolean };
+  /** PG-04: cancelled 块间检查；abortSignal 中断在途生成请求 */
+  signal?: FlowRunSignal;
 }
 
 /** Run upstream topological chain ending at blockId (inclusive) */

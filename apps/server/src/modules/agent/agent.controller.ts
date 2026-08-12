@@ -35,6 +35,26 @@ export class AgentController {
     return this.agent.screenplay(body?.sourceText ?? '', userId);
   }
 
+  @Post('script/screenplay-stream')
+  async screenplayStream(
+    @Body() body: { sourceText?: string },
+    @Headers('x-nx9-user-id') userId: string | undefined,
+    @Res() res: Response,
+  ) {
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    try {
+      await this.agent.screenplayStream(body?.sourceText ?? '', userId, (chunk: string) => {
+        res.write(`data: ${JSON.stringify({ text: chunk })}\n\n`);
+      });
+      res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
+    } catch (e) {
+      res.write(`data: ${JSON.stringify({ error: (e as Error).message })}\n\n`);
+    }
+    res.end();
+  }
+
   @Post('production/director-plan')
   directorPlan(@Body() body: { sourceText?: string }, @Headers('x-nx9-user-id') userId?: string) {
     return this.agent.directorPlan(body?.sourceText ?? '', userId);

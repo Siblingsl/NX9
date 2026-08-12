@@ -15,7 +15,7 @@ export interface InpaintWorkspaceProps {
 }
 
 export function InpaintWorkspace({ blockId, kind, onCollapse }: InpaintWorkspaceProps) {
-  const { updateNodeData } = useReactFlow();
+  const { updateNodeData, getNodes, getEdges } = useReactFlow();
   const appendLog = useActivityLog((s) => s.append);
   const data = useAttachedNodeData(blockId);
 
@@ -180,12 +180,29 @@ export function InpaintWorkspace({ blockId, kind, onCollapse }: InpaintWorkspace
       const file = new File([blob], 'mask.png', { type: 'image/png' });
       const uploaded = await api.uploadAsset(file);
       updateNodeData(blockId, { maskUrl: uploaded.url });
-      const res = await api.proxyFal({
-        model: 'fal-ai/fast-sdxl/inpainting',
-        input: { image_url: imageUrl, mask_url: uploaded.url, prompt: prompt.trim() },
+      const { runInpaintEdit, resolveInpaintModel, writeBackInpaintShot } = await import(
+        '../../../../inpaint-edit-runner'
+      );
+      const rendered = await runInpaintEdit({
+        imageUrl,
+        maskUrl: uploaded.url,
+        prompt: prompt.trim(),
+        model: resolveInpaintModel(data as Record<string, unknown>),
       });
-      if (!res.url) throw new Error('重绘失败');
-      updateNodeData(blockId, { status: 'success', previewUrl: res.url, output: res.url });
+      writeBackInpaintShot({
+        updateNodeData,
+        nodeId: blockId,
+        nodes: getNodes(),
+        edges: getEdges(),
+        linkedShotId: data.linkedShotId as string | undefined,
+        imageUrl: rendered.url,
+      });
+      updateNodeData(blockId, {
+        status: 'success',
+        previewUrl: rendered.url,
+        output: rendered.url,
+        inpaintModel: rendered.model,
+      });
       appendLog('局部重绘完成');
     } catch (e) {
       updateNodeData(blockId, { status: 'error', error: String(e) });

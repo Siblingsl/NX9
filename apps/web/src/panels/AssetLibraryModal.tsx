@@ -11,6 +11,7 @@ import {
   ASSET_LIBRARY_TABS,
   assetLibraryTabGroupsForScope,
   isAssetLibraryPublicOnlyKind,
+  isAssetLibraryNavKindForScope,
   BUILTIN_BACKLOT_TEMPLATES,
   MAX_ENV_REFERENCE_IMAGES,
   newBacklotWorkspaceItem,
@@ -40,6 +41,9 @@ import {
   getEmotionCreative,
   getCharacterCreative,
   getVoiceCreative,
+  DEFAULT_SCENE_VARIANTS,
+  DEFAULT_PROP_VARIANTS,
+  CAC_COSTUME_VARIANT_PRESETS,
   CAC_SHOT_SIZES,
   formatAssetMention,
   resolveStylePresets,
@@ -75,7 +79,6 @@ import {
   Search,
   Trash2,
   X,
-  ChevronLeft,
 } from 'lucide-react';
 import { api } from '../api/client';
 import { useAssetLibraryItems } from '../hooks/use-asset-library-items';
@@ -85,7 +88,8 @@ import { useWorkspaceCatalog } from '../stores/workspace-catalog';
 import { useWorkspaceDocument } from '../stores/workspace-document';
 import { useActivityLog } from '../stores/activity-log';
 import { toastError, toastSuccess } from '../stores/toast';
-import { confirmDelete } from '../stores/confirm-dialog';
+import { confirmDelete, askConfirm, askConfirmWithOption } from '../stores/confirm-dialog';
+import { useFlowRuntime } from '../stores/flow-runtime';
 import { useAssetLibraryGenSettings } from '../stores/asset-library-gen-settings';
 import AssetLibraryGenSettings, { resolveAssetLibraryImageRequest } from './asset-library/AssetLibraryGenSettings';
 import { useLibraryAcl } from '../engine/use-library-acl';
@@ -93,6 +97,11 @@ import { getGenPack } from '../engine/gen-skill-runtime';
 import { runPictureGenJob } from '../engine/picture-gen-runner';
 import { cropCharacterSheetPanels } from '../engine/character-sheet-crop';
 import { cropEntitySheetPanel } from '../engine/entity-sheet-crop';
+import {
+  summarizeAssetUsageForDelete,
+  rebindInvalidShotRefs,
+  disconnectAssetRefsOnDelete,
+} from '../engine/asset-ref-rebind';
 import { AssetTrashPanel } from './AssetTrashPanel';
 import {
   CharacterDetailFields,
@@ -105,17 +114,25 @@ import {
   StyleDetailFields,
 } from './asset-library/AssetDetailFields';
 import { AssetHealthBar, useAssetHealthAnalysis } from './asset-library/AssetHealthBar';
+import { AssetBlockingSummary } from './asset-library/AssetBlockingSummary';
+import { AssetBatchBar } from './asset-library/AssetBatchBar';
+import { AssetLibrarySourceStrip } from './asset-library/AssetLibrarySourceStrip';
+import { AssetDetailStickyBar } from './asset-library/AssetDetailStickyBar';
+import { AssetEditQuickJump } from './asset-library/AssetEditQuickJump';
 import { CharacterCardGrid } from './asset-library/CharacterCardGrid';
 import { EntityCardGrid, type EntityCardKind } from './asset-library/EntityCardGrid';
 import { ShotCardGrid } from './asset-library/ShotCardGrid';
 import { StyleCardGrid } from './asset-library/StyleCardGrid';
-import { SoundCardGrid } from './asset-library/SoundCardGrid';import { ShotFilterChipScroller } from './asset-library/ShotFilterChipScroller';
+import { SoundCardGrid } from './asset-library/SoundCardGrid';
+import { ShotFilterChipScroller } from './asset-library/ShotFilterChipScroller';
 import {
   healthFilterItemIds,
   type HealthIssueKey,
 } from '../engine/asset-library-health';
 
 const ENTITY_CARD_TABS = new Set<AssetLibraryKind>(['costume', 'scene', 'prop']);
+/** P-18：支持多选批量治理的 Tab */
+const BATCHABLE_TABS = new Set<AssetLibraryKind>(['character', 'costume', 'scene', 'prop']);
 
 function normalizeName(value: string | null | undefined): string {
   return (value ?? '').trim().toLowerCase();
@@ -127,27 +144,27 @@ const KIND_META: Record<
 > = {
   character: {
     newLabel: '新建角色',
-    emptyHint: '角色设定主入口：档案、三视图、设定板生成；可在生成节点 @角色 引用',
+    emptyHint: '角色设定主入口：档案、三视图、设定板生成；用「复制 @」粘贴到生成节点 Prompt',
     promptPlaceholder: '一致性 prompt…',
   },
   costume: {
     newLabel: '新建服装',
-    emptyHint: '创建服装套装，维护面料/配色/标志物，可在生成节点 @服装 引用',
+    emptyHint: '创建服装套装，维护面料/配色/标志物；用「复制 @」粘贴到 Prompt',
     promptPlaceholder: '造型、面料、配色、标志物…',
   },
   scene: {
     newLabel: '新建场景',
-    emptyHint: '场景设定主入口：空间锚点、多参考图、环境圣经同步；可在生成节点 @场景 引用',
+    emptyHint: '场景设定主入口：空间锚点、多参考图、环境圣经同步；用「复制 @」粘贴到 Prompt',
     promptPlaceholder: '环境、光线、空间描述…',
   },
   prop: {
     newLabel: '新建道具',
-    emptyHint: '创建道具档案，维护外观 Prompt 与参考图；可在生成节点 @道具 引用',
+    emptyHint: '创建道具档案，维护外观 Prompt 与参考图；用「复制 @」粘贴到 Prompt',
     promptPlaceholder: '外形、材质、标志细节…',
   },
   shot: {
     newLabel: '新建镜头',
-    emptyHint: '公共运镜词典为空 · 可新建条目，或检查筛选条件',
+    emptyHint: '公共运镜词典（仅公共库可见）· 可新建条目，或检查筛选条件',
     promptPlaceholder: '运镜、景别、机位描述…',
   },
   emotion: {
@@ -162,12 +179,12 @@ const KIND_META: Record<
   },
   style: {
     newLabel: '新建风格',
-    emptyHint: '轻量美学词典：名称、Prompt、可选参考图；分镜帧可点选 stylePreset',
+    emptyHint: '轻量美学词典：名称、Prompt、可选参考图；分镜帧可点选风格资产',
     promptPlaceholder: '画面美学、光影、材质…',
   },
   sound: {
     newLabel: '新建声音',
-    emptyHint: '配音 / 音效 / BGM 词典：名称、Prompt、可选音频；节点可 @声音 引用',
+    emptyHint: '配音 / 音效 / BGM 词典：名称、Prompt、可选音频；用「复制 @」粘贴到 Prompt',
     promptPlaceholder: '声音描述…',
   },
 };
@@ -181,6 +198,7 @@ export function AssetLibraryModal() {
   const setOpen = useAssetLibraryModalUi((s) => s.setOpen);
   const setScope = useAssetLibraryModalUi((s) => s.setScope);
   const setTab = useAssetLibraryModalUi((s) => s.setTab);
+  const returnToSource = useAssetLibraryModalUi((s) => s.returnToSource);
   const clearNavigateRequest = useAssetLibraryModalUi((s) => s.clearNavigateRequest);
 
   const activeId = useWorkspaceCatalog((s) => s.activeId);
@@ -223,9 +241,14 @@ export function AssetLibraryModal() {
 
   const [query, setQuery] = useState('');
   const [editId, setEditId] = useState<string | null>(null);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
   const [showTrash, setShowTrash] = useState(false);
   const [suggestCreateLabel, setSuggestCreateLabel] = useState<string | null>(null);
   const [returnHint, setReturnHint] = useState<string | null>(null);
+  const [resumeGapKey, setResumeGapKey] = useState<string | null>(null);
+  const [resumeSection, setResumeSection] = useState<
+    'characters' | 'scenes' | 'costumes' | 'props' | null
+  >(null);
   const [healthFilterKey, setHealthFilterKey] = useState<HealthIssueKey | null>(null);
   const [favoriteOnly, setFavoriteOnly] = useState(false);
   const [shotSystemId, setShotSystemId] = useState<string | 'all'>('all');
@@ -254,6 +277,25 @@ export function AssetLibraryModal() {
     if (open) void fetchPublic();
   }, [open, fetchPublic]);
 
+  /** P-18：切 Tab / Scope / 进入详情时清空多选 */
+  useEffect(() => {
+    setSelectedIds(new Set());
+  }, [tab, scope, editId]);
+
+  /** P1′ UX-P11：进编辑后锚到视觉/媒体区（缺图优先入口） */
+  useEffect(() => {
+    if (!editId) return;
+    const timer = window.setTimeout(() => {
+      const root = document.querySelector('.nx9-asset-library-modal');
+      if (!root) return;
+      const prefer = root.querySelector(
+        '#char-visual, #costume-core, #scene-space, #prop-archive, [data-asset-media-anchor]',
+      );
+      prefer?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    }, 80);
+    return () => window.clearTimeout(timer);
+  }, [editId, tab]);
+
   /** 情绪 / 爆点退出主导航；镜头/风格仅公共。私有误入时改道。 */
   useEffect(() => {
     if (!open) return;
@@ -281,6 +323,13 @@ export function AssetLibraryModal() {
     setTab(navigateRequest.tab);
     setSuggestCreateLabel(navigateRequest.suggestCreateLabel?.trim() || null);
     setReturnHint(navigateRequest.returnHint?.trim() || null);
+    setResumeGapKey(
+      navigateRequest.resumeGapKey?.trim()
+      || navigateRequest.suggestCreateLabel?.trim()
+      || navigateRequest.query?.trim()
+      || null,
+    );
+    setResumeSection(navigateRequest.resumeSection ?? null);
     if (navigateRequest.scope === 'public' || isAssetLibraryPublicOnlyKind(navigateRequest.tab)) {
       if (navigateRequest.itemId) setEditId(navigateRequest.itemId);
     } else {
@@ -311,7 +360,12 @@ export function AssetLibraryModal() {
     }
   }, [open]);
 
-  const healthAnalysis = useAssetHealthAnalysis(characters, workspaceItems, sounds);
+  const healthAnalysis = useAssetHealthAnalysis(
+    characters,
+    workspaceItems,
+    sounds,
+    resolveStylePresets(publicStyles),
+  );
 
   useEffect(() => {
     setHealthFilterKey(null);
@@ -643,9 +697,10 @@ export function AssetLibraryModal() {
   const shellFullEdit =
     characterFullEdit || entityFullEdit || shotFullEdit || styleFullEdit || soundFullEdit;
   const canEditPrivate = (scope !== 'private' || Boolean(activeId)) && canWrite;
+  /** 当前 scope 下可写（公共需 allowPublicWrite；私有需打开项目） */
+  const canEditCurrent = canWrite && (scope === 'public' || canEditPrivate);
   const canCreateAsset =
-    (scope === 'public' || canEditPrivate)
-    && canWrite
+    canEditCurrent
     && tab !== 'hook'
     && tab !== 'emotion';
 
@@ -672,12 +727,55 @@ export function AssetLibraryModal() {
   }, [open, scope, tab, canEditPrivate, environmentLibrary, upsertBacklotWorkspace]);
 
   const saveCharacter = useCallback(
-    (c: CharacterProfile) => {
+    async (c: CharacterProfile) => {
       const next = normalizeCharacterProfile(c);
+      const prev =
+        (scope === 'private' ? characters : publicCharacters).find((x) => x.id === next.id);
+      const oldName = prev?.name?.trim() ?? '';
+      const newName = next.name?.trim() ?? '';
+      if (prev && oldName && newName && oldName !== newName) {
+        const sync = await askConfirm({
+          title: '角色已改名',
+          description: `将「${oldName}」改为「${newName}」。是否同步更新分镜引用，并把旧名写入别名？\n选「仅改库名」则镜表仍用旧名，可能出现失效引用。`,
+          confirmLabel: '同步更新分镜',
+          cancelLabel: '仅改库名',
+          tone: 'neutral',
+        });
+        let toSave = next;
+        if (sync) {
+          const aliases = [...(next.creative?.aliases ?? [])];
+          if (!aliases.some((a) => a.trim().toLowerCase() === oldName.toLowerCase())) {
+            aliases.push(oldName);
+          }
+          toSave = {
+            ...next,
+            creative: { ...next.creative, aliases },
+          };
+          const runtime = useFlowRuntime.getState().runtime;
+          if (runtime?.getNodes && runtime.updateNodeData) {
+            const n = rebindInvalidShotRefs(runtime.getNodes(), runtime.updateNodeData, {
+              kind: 'character',
+              oldName,
+              newId: next.id,
+              newName,
+            });
+            toastSuccess(
+              n > 0
+                ? `已改名并同步 ${n} 镜引用 · 旧名已写入别名`
+                : '已改名（当前无分镜引用需同步）· 旧名已写入别名',
+            );
+          } else {
+            toastSuccess('已改名并写入别名（画布未就绪，分镜未同步）');
+          }
+        }
+        if (scope === 'private') upsertCharacter(toSave);
+        else publicUpsertCharacter(toSave);
+        return;
+      }
       if (scope === 'private') upsertCharacter(next);
       else publicUpsertCharacter(next);
     },
-    [scope, upsertCharacter, publicUpsertCharacter],
+    [scope, characters, publicCharacters, upsertCharacter, publicUpsertCharacter],
   );
 
   const saveWorkspaceItem = useCallback(
@@ -928,11 +1026,76 @@ export function AssetLibraryModal() {
           return;
         }
       }
-      const ok = await confirmDelete({
-        title: '移入回收站？',
-        description: '素材将移入回收站，30 天内可恢复。',
+
+      let label = id;
+      if (tab === 'character') {
+        label = characters.find((c) => c.id === id)?.name
+          ?? publicCharacters.find((c) => c.id === id)?.name
+          ?? id;
+      } else if (tab === 'sound') {
+        label = soundsById.get(id)?.name ?? id;
+      } else if (tab === 'style') {
+        label = stylesById.get(id)?.name ?? id;
+      } else {
+        label =
+          workspaceItems.find((x) => x.id === id)?.label
+          ?? publicTemplates.find((t) => t.id === id)?.label
+          ?? id;
+      }
+      const usage = summarizeAssetUsageForDelete(healthAnalysis, {
+        kind: tab,
+        id,
+        label,
+        characters,
       });
-      if (!ok) return;
+      const usageHint = usage.labels.length
+        ? `\n\n⚠ 仍被引用：${usage.labels.join('；')}。`
+        : '';
+
+      const result = await askConfirmWithOption({
+        title: '移入回收站？',
+        description: `「${label}」将移入回收站，30 天内可恢复。${usageHint}`,
+        confirmLabel: '移入回收站',
+        option: usage.labels.length
+          ? {
+              label: '同时断开镜表/绑定引用（推荐，避免幽灵失效）',
+              defaultChecked: true,
+            }
+          : {
+              label: '同时扫描并断开残留引用',
+              defaultChecked: false,
+            },
+      });
+      if (!result.confirmed) return;
+
+      const runtime = useFlowRuntime.getState().runtime;
+      if (result.optionChecked && runtime?.getNodes && runtime.updateNodeData) {
+        const cleared = disconnectAssetRefsOnDelete(
+          runtime.getNodes(),
+          runtime.updateNodeData,
+          { kind: tab, id, label },
+          (cid, patch) => {
+            const cur = characters.find((c) => c.id === cid);
+            if (cur) upsertCharacter({ ...cur, ...patch, creative: { ...cur.creative, ...patch.creative } });
+          },
+          characters,
+        );
+        // 场景挂接的 propIds
+        if (tab === 'prop') {
+          for (const item of workspaceItems) {
+            if (item.kind !== 'scene') continue;
+            const ext = (item.creative ?? {}) as { propIds?: string[] };
+            const propIds = ext.propIds ?? [];
+            if (!propIds.includes(id)) continue;
+            upsertBacklotWorkspace({
+              ...item,
+              creative: { ...ext, propIds: propIds.filter((pid) => pid !== id) },
+            });
+          }
+        }
+        if (cleared > 0) toastSuccess(`已断开 ${cleared} 处引用`);
+      }
+
       if (tab === 'character') {
         if (scope === 'private') removeCharacter(id);
         else publicRemoveCharacter(id);
@@ -978,6 +1141,11 @@ export function AssetLibraryModal() {
       setEnvironments,
       stylesById,
       soundsById,
+      healthAnalysis,
+      characters,
+      publicCharacters,
+      upsertCharacter,
+      upsertBacklotWorkspace,
     ],
   );
 
@@ -1540,6 +1708,19 @@ export function AssetLibraryModal() {
         appendLog(`素材库：复制公共角色「${copied.name}」到项目`);
         return;
       }
+      const publicSound = publicSounds.find((s) => s.id === itemId);
+      if (publicSound || soundsById.get(itemId)) {
+        const source = publicSound ?? soundsById.get(itemId);
+        if (!source || isBuiltinSoundAsset(source)) return;
+        const copy = refreshVoicePrompts(cloneSoundAsset(source));
+        upsertSound(copy);
+        setScope('private');
+        setTab('sound');
+        setEditId(copy.id);
+        setQuery('');
+        toastSuccess(`已复制「${copy.name}」到当前项目`);
+        return;
+      }
       const tpl = publicTemplates.find((t) => t.id === itemId);
       if (!tpl) return;
       const workspaceItem = templateToWorkspaceItem(tpl, tpl.id);
@@ -1556,12 +1737,84 @@ export function AssetLibraryModal() {
     [
       activeId,
       publicCharacters,
+      publicSounds,
       publicTemplates,
+      soundsById,
       upsertCharacter,
+      upsertSound,
       saveWorkspaceItem,
       appendLog,
       setScope,
       setTab,
+    ],
+  );
+
+  /** 私有 → 公共：发布副本到跨项目公共库 */
+  const handlePublishToPublic = useCallback(
+    async (itemId: string) => {
+      if (!canWrite) {
+        toastError('当前无权写入公共库');
+        return;
+      }
+      if (tab === 'character') {
+        const char = characters.find((c) => c.id === itemId);
+        if (!char) return;
+        const ok = await askConfirm({
+          title: '发布到公共库？',
+          description: `将「${char.name}」发布为公共副本，供各项目复用。不会删除项目内原条目。`,
+          confirmLabel: '发布',
+        });
+        if (!ok) return;
+        const published = refreshCharacterPrompts(
+          normalizeCharacterProfile({
+            ...char,
+            id: `char_pub_${Date.now().toString(36)}`,
+            sourceTemplateId: char.id,
+          }),
+        );
+        publicUpsertCharacter(published);
+        toastSuccess(`已发布「${published.name}」到公共库`);
+        appendLog(`素材库：发布角色「${published.name}」到公共`);
+        return;
+      }
+      if (tab === 'sound') {
+        const sound = sounds.find((s) => s.id === itemId);
+        if (!sound) return;
+        const ok = await askConfirm({
+          title: '发布到公共库？',
+          description: `将「${sound.name}」发布为公共副本。`,
+          confirmLabel: '发布',
+        });
+        if (!ok) return;
+        const published = refreshVoicePrompts(cloneSoundAsset(sound));
+        publicUpsertSound(published);
+        toastSuccess(`已发布「${published.name}」到公共库`);
+        return;
+      }
+      if (!ENTITY_CARD_TABS.has(tab) && tab !== 'shot') return;
+      const item = workspaceItems.find((x) => x.id === itemId);
+      if (!item || item.kind !== tab) return;
+      const ok = await askConfirm({
+        title: '发布到公共库？',
+        description: `将「${item.label}」发布为公共副本，供各项目复用。`,
+        confirmLabel: '发布',
+      });
+      if (!ok) return;
+      const tpl = workspaceItemToCustomTemplate(item, '从项目发布');
+      publicUpsertTemplate(tpl);
+      toastSuccess(`已发布「${tpl.label}」到公共库`);
+      appendLog(`素材库：发布「${tpl.label}」到公共`);
+    },
+    [
+      canWrite,
+      tab,
+      characters,
+      sounds,
+      workspaceItems,
+      publicUpsertCharacter,
+      publicUpsertSound,
+      publicUpsertTemplate,
+      appendLog,
     ],
   );
 
@@ -1601,19 +1854,240 @@ export function AssetLibraryModal() {
       if (!item || item.kind !== tab) return;
       if (tab === 'costume') {
         const ext = getCostumeCreative(item);
-        saveWorkspaceItem({ ...item, creative: { ...ext, locked: !ext.locked } });
+        const locked = !ext.locked;
+        const prompt = item.promptEn?.trim() || ext.prompts?.costume?.text?.trim() || '';
+        saveWorkspaceItem({
+          ...item,
+          creative: {
+            ...ext,
+            locked,
+            lockedPromptSnapshot: locked ? prompt : ext.lockedPromptSnapshot,
+            lockedAt: locked ? new Date().toISOString() : ext.lockedAt,
+          },
+        });
         return;
       }
       if (tab === 'prop') {
         const ext = getPropCreative(item);
-        saveWorkspaceItem({ ...item, creative: { ...ext, locked: !ext.locked } });
+        const locked = !ext.locked;
+        const prompt = item.promptEn?.trim() || ext.prompts?.prop?.text?.trim() || '';
+        saveWorkspaceItem({
+          ...item,
+          creative: {
+            ...ext,
+            locked,
+            lockedPromptSnapshot: locked ? prompt : ext.lockedPromptSnapshot,
+            lockedAt: locked ? new Date().toISOString() : ext.lockedAt,
+          },
+        });
         return;
       }
       const ext = getSceneCreative(item);
-      saveWorkspaceItem({ ...item, creative: { ...ext, locked: !ext.locked } });
+      const locked = !ext.locked;
+      const prompt = item.promptEn?.trim() || ext.prompts?.scene?.text?.trim() || '';
+      saveWorkspaceItem({
+        ...item,
+        creative: {
+          ...ext,
+          locked,
+          lockedPromptSnapshot: locked ? prompt : ext.lockedPromptSnapshot,
+          lockedAt: locked ? new Date().toISOString() : ext.lockedAt,
+        },
+      });
     },
     [tab, workspaceById, saveWorkspaceItem],
   );
+
+  const batchEnabled =
+    BATCHABLE_TABS.has(tab)
+    && !editId
+    && !showTrash
+    && canEditCurrent;
+
+  const selectableBatchIds = useMemo(() => {
+    if (!batchEnabled) return [] as string[];
+    return filtered.filter((i) => !i.builtin).map((i) => i.id);
+  }, [batchEnabled, filtered]);
+
+  const toggleBatchSelect = useCallback((id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+
+  const selectAllBatch = useCallback(() => {
+    setSelectedIds(new Set(selectableBatchIds));
+  }, [selectableBatchIds]);
+
+  const clearBatchSelection = useCallback(() => {
+    setSelectedIds(new Set());
+  }, []);
+
+  const handleBatchSetLock = useCallback(
+    (locked: boolean) => {
+      const ids = [...selectedIds];
+      if (ids.length === 0) return;
+      if (tab === 'character') {
+        const pool = scope === 'private' ? characters : publicCharacters;
+        for (const id of ids) {
+          const char = pool.find((c) => c.id === id);
+          if (!char) continue;
+          const snap = char.consistencyPrompt?.trim() || '';
+          saveCharacter({
+            ...char,
+            creative: {
+              ...char.creative,
+              viewsLocked: locked,
+              consistency: {
+                ...char.creative?.consistency,
+                locked,
+                lockedPromptSnapshot: locked
+                  ? snap
+                  : char.creative?.consistency?.lockedPromptSnapshot,
+                lockedAt: locked
+                  ? new Date().toISOString()
+                  : char.creative?.consistency?.lockedAt,
+              },
+            },
+          });
+        }
+      } else if (ENTITY_CARD_TABS.has(tab)) {
+        for (const id of ids) {
+          const item = workspaceById.get(id);
+          if (!item || item.kind !== tab) continue;
+          if (tab === 'costume') {
+            const ext = getCostumeCreative(item);
+            const prompt = item.promptEn?.trim() || ext.prompts?.costume?.text?.trim() || '';
+            saveWorkspaceItem({
+              ...item,
+              creative: {
+                ...ext,
+                locked,
+                lockedPromptSnapshot: locked ? prompt : ext.lockedPromptSnapshot,
+                lockedAt: locked ? new Date().toISOString() : ext.lockedAt,
+              },
+            });
+          } else if (tab === 'prop') {
+            const ext = getPropCreative(item);
+            const prompt = item.promptEn?.trim() || ext.prompts?.prop?.text?.trim() || '';
+            saveWorkspaceItem({
+              ...item,
+              creative: {
+                ...ext,
+                locked,
+                lockedPromptSnapshot: locked ? prompt : ext.lockedPromptSnapshot,
+                lockedAt: locked ? new Date().toISOString() : ext.lockedAt,
+              },
+            });
+          } else {
+            const ext = getSceneCreative(item);
+            const prompt = item.promptEn?.trim() || ext.prompts?.scene?.text?.trim() || '';
+            saveWorkspaceItem({
+              ...item,
+              creative: {
+                ...ext,
+                locked,
+                lockedPromptSnapshot: locked ? prompt : ext.lockedPromptSnapshot,
+                lockedAt: locked ? new Date().toISOString() : ext.lockedAt,
+              },
+            });
+          }
+        }
+      }
+      toastSuccess(locked ? `已锁定 ${ids.length} 项` : `已解锁 ${ids.length} 项`);
+      setSelectedIds(new Set());
+    },
+    [
+      selectedIds,
+      tab,
+      scope,
+      characters,
+      publicCharacters,
+      workspaceById,
+      saveCharacter,
+      saveWorkspaceItem,
+    ],
+  );
+
+  const handleBatchDelete = useCallback(async () => {
+    const ids = [...selectedIds];
+    if (ids.length === 0 || !canDeleteItem) return;
+    const labels = ids.map((id) => {
+      if (tab === 'character') {
+        return (scope === 'private' ? characters : publicCharacters).find((c) => c.id === id)?.name ?? id;
+      }
+      return (
+        workspaceItems.find((x) => x.id === id)?.label
+        ?? publicTemplates.find((t) => t.id === id)?.label
+        ?? id
+      );
+    });
+    const cited = ids.filter((id) => {
+      const label =
+        tab === 'character'
+          ? (scope === 'private' ? characters : publicCharacters).find((c) => c.id === id)?.name ?? id
+          : workspaceItems.find((x) => x.id === id)?.label
+            ?? publicTemplates.find((t) => t.id === id)?.label
+            ?? id;
+      return summarizeAssetUsageForDelete(healthAnalysis, {
+        kind: tab,
+        id,
+        label,
+        characters: scope === 'private' ? characters : publicCharacters,
+      }).labels.length > 0;
+    });
+    const usageHint = cited.length
+      ? `\n\n⚠ 其中 ${cited.length} 项仍被引用，移入回收站后可能出现失效引用。`
+      : '';
+    const ok = await confirmDelete({
+      title: `移入回收站 ${ids.length} 项？`,
+      description: `将移入：${labels.slice(0, 8).join('、')}${labels.length > 8 ? '…' : ''}。30 天内可恢复。${usageHint}`,
+    });
+    if (!ok) return;
+    for (const id of ids) {
+      if (tab === 'character') {
+        if (scope === 'private') removeCharacter(id);
+        else publicRemoveCharacter(id);
+      } else if (scope === 'private') {
+        if (tab === 'scene') {
+          const item = workspaceItems.find((x) => x.id === id);
+          if (item) {
+            const env = workspaceItemToEnvironmentProfile(item);
+            const current = useWorkspaceDocument.getState().environments?.environments ?? [];
+            setEnvironments({
+              version: 1,
+              environments: current.filter(
+                (e) => e.id !== env.id && normalizeName(e.name) !== normalizeName(item.label),
+              ),
+            });
+          }
+        }
+        if (ENTITY_CARD_TABS.has(tab)) removeBacklotWorkspace(id);
+      } else if (ENTITY_CARD_TABS.has(tab)) {
+        publicRemoveTemplate(id);
+      }
+    }
+    setSelectedIds(new Set());
+    toastSuccess(`已移入回收站 ${ids.length} 项`);
+  }, [
+    selectedIds,
+    canDeleteItem,
+    tab,
+    scope,
+    characters,
+    publicCharacters,
+    workspaceItems,
+    publicTemplates,
+    healthAnalysis,
+    removeCharacter,
+    publicRemoveCharacter,
+    removeBacklotWorkspace,
+    publicRemoveTemplate,
+    setEnvironments,
+  ]);
 
   const isBuiltinShotId = useCallback(
     (id: string) =>
@@ -1729,15 +2203,36 @@ export function AssetLibraryModal() {
 
   const handleScopeChange = useCallback(
     (next: AssetScope) => {
-      // UX-11：尽量保留 query；选中仅在目标库找不到同 id 时清空
+      const prevTab = useAssetLibraryModalUi.getState().tab;
+      const prevEditId = editId;
       setScope(next);
-      setEditId((prev) => prev);
-      // 切 scope 后 items 会变，下一帧再校验选中是否仍存在
-      setTimeout(() => {
-        /* selection validated via selected* memos becoming undefined */
-      }, 0);
+      if (!isAssetLibraryNavKindForScope(prevTab, next)) {
+        const fallback = assetLibraryTabGroupsForScope(next)[0]?.keys[0] ?? 'character';
+        setTab(fallback);
+        setEditId(null);
+        if (isAssetLibraryPublicOnlyKind(prevTab) && next === 'private') {
+          toastSuccess('镜头/风格仅在公共库；已切回可见 Tab');
+        }
+        return;
+      }
+      // P1′ UX-P06：尽量保留同 id 编辑态；目标库没有则回列表
+      if (prevEditId) {
+        window.setTimeout(() => {
+          const st = useWorkspaceDocument.getState();
+          const pub = usePublicAssetLibrary.getState().payload;
+          if (next === 'private') {
+            const hitChar = st.characters.characters.find((c) => c.id === prevEditId && !c.deletedAt);
+            const hitWs = st.backlotWorkspace.items.find((i) => i.id === prevEditId && !i.deletedAt);
+            if (!hitChar && !hitWs) setEditId(null);
+          } else {
+            const hitChar = pub.characters.some((c) => c.id === prevEditId);
+            const hitTpl = pub.templates.some((t) => t.id === prevEditId);
+            if (!hitChar && !hitTpl) setEditId(null);
+          }
+        }, 0);
+      }
     },
-    [setScope],
+    [setScope, setTab, editId],
   );
 
   if (!open) return null;
@@ -1753,17 +2248,31 @@ export function AssetLibraryModal() {
         onClick={() => setOpen(false)}
       />
       <div className="nx9-asset-library-modal relative w-[min(1120px,96vw)] h-[min(820px,92vh)] bg-surface rounded-2xl shadow-2xl flex flex-col overflow-hidden border border-line">
-        <header className="shrink-0 h-14 border-b border-line flex items-center px-5 gap-3">
+        <header className="shrink-0 border-b border-line flex items-center px-5 gap-3 py-2 min-h-14">
           <Layers size={20} className="text-brand shrink-0" />
-          <div className="flex-1 min-w-0">
+          <div className="min-w-0 shrink-0 max-w-[11rem]">
             <h2 className="font-semibold text-base text-ink">素材库</h2>
             <p className="text-[11px] text-ink/40 truncate">
               {scope === 'private'
                 ? `项目私有 · ${activeProject?.title ?? '未打开项目'}`
                 : '公共素材 · 全项目可用'}
             </p>
+            {scope === 'private' ? (
+              <button
+                type="button"
+                className="mt-0.5 text-[10px] text-brand hover:underline"
+                title="镜头与风格词典仅在公共库"
+                onClick={() => {
+                  handleScopeChange('public');
+                  setTab('shot');
+                  setEditId(null);
+                }}
+              >
+                镜头·风格在公共库 →
+              </button>
+            ) : null}
           </div>
-          <div className="flex rounded-xl border border-line p-0.5 bg-surface">
+          <div className="flex rounded-xl border border-line p-0.5 bg-surface shrink-0">
             <button
               type="button"
               onClick={() => handleScopeChange('private')}
@@ -1785,10 +2294,46 @@ export function AssetLibraryModal() {
               公共
             </button>
           </div>
+          {/* UX-P04：浏览态搜索进 Header，少一条 chrome */}
+          {!shellFullEdit && !showTrash ? (
+            <div className="relative min-w-0 flex-1 max-w-xs">
+              <Search
+                size={14}
+                className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-ink/30"
+              />
+              <input
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder={`搜索${ASSET_LIBRARY_TABS.find((t) => t.key === tab)?.label ?? ''}…`}
+                className="w-full rounded-lg border border-line py-1.5 pl-8 pr-3 text-xs"
+                aria-label="搜索当前子库"
+              />
+            </div>
+          ) : (
+            <div className="min-w-0 flex-1" />
+          )}
+          {!showTrash ? (
+            <AssetBlockingSummary
+              analysis={healthAnalysis}
+              tabs={assetLibraryTabGroupsForScope(scope).flatMap((g) => g.keys)}
+              onJump={(nextTab, key) => {
+                setTab(nextTab);
+                setEditId(null);
+                setHealthFilterKey(key);
+                setSuggestCreateLabel(null);
+                setFavoriteOnly(false);
+              }}
+            />
+          ) : null}
           <button
             type="button"
-            title="资产回收站"
-            onClick={() => setShowTrash((v) => !v)}
+            title={showTrash ? '关闭回收站' : '资产回收站'}
+            onClick={() => {
+              setShowTrash((v) => {
+                const next = !v;
+                return next;
+              });
+            }}
             className={`p-2 rounded-lg hover:bg-surface ${showTrash ? 'text-warn bg-warn/10' : 'text-ink/50'}`}
           >
             <Trash2 size={18} />
@@ -1802,12 +2347,7 @@ export function AssetLibraryModal() {
           </button>
         </header>
 
-        {showTrash ? (
-          <div className="flex-1 min-h-0 overflow-y-auto nx9-scroll p-4">
-            <AssetTrashPanel defaultScope={scope} />
-          </div>
-        ) : (
-        <div className="flex flex-1 min-h-0 flex-col">
+        <div className="relative flex min-h-0 flex-1 flex-col">
               {!shellFullEdit ? (
                 <>
                   <div className="shrink-0 flex items-center gap-1.5 px-4 py-2 border-b border-line overflow-x-auto nx9-scroll">
@@ -1853,51 +2393,49 @@ export function AssetLibraryModal() {
                     activeKey={healthFilterKey}
                     onSelectIssue={setHealthFilterKey}
                     onOpenItem={(id) => setEditId(id)}
+                    characters={characters}
+                    workspaceItems={workspaceItems}
+                    externalDrawer={showTrash ? 'trash' : null}
+                    onImpactOpenChange={(open) => {
+                      if (open) setShowTrash(false);
+                    }}
                   />
-
-                  {(returnHint || (suggestCreateLabel && !suggestCreateExactExists) || navStack.length > 0) && (
-                    <div className="shrink-0 flex flex-wrap items-center gap-2 border-b border-brand/20 bg-brand/5 px-4 py-2 text-[11px] text-ink/70">
-                      {navStack.length > 0 ? (
-                        <button
-                          type="button"
-                          onClick={popNavStack}
-                          className="rounded-full bg-surface px-2 py-0.5 text-brand hover:underline"
-                        >
-                          ← 返回{navStack[navStack.length - 1]?.label}
-                        </button>
-                      ) : null}
-                      {returnHint ? (
-                        <span className="rounded-full bg-surface px-2 py-0.5 text-ink/55">
-                          来自{returnHint}
-                        </span>
-                      ) : null}
-                      {suggestCreateLabel && !suggestCreateExactExists && canCreateAsset ? (
-                        <>
-                          <span className="min-w-0 flex-1 truncate">
-                            建议建档「{suggestCreateLabel}」（不会自动写入库，需确认）
-                          </span>
-                          <button
-                            type="button"
-                            onClick={() => handleCreate(suggestCreateLabel)}
-                            className="shrink-0 rounded-lg bg-brand px-2.5 py-1 text-[11px] font-medium text-white"
-                          >
-                            立即新建
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setSuggestCreateLabel(null)}
-                            className="shrink-0 rounded-lg border border-line px-2 py-1 text-[11px] text-ink/50"
-                          >
-                            忽略
-                          </button>
-                        </>
-                      ) : returnHint ? (
-                        <span className="text-ink/45">补齐后可关闭素材库，返回继续设定就绪检查</span>
-                      ) : null}
-                    </div>
-                  )}
                 </>
               ) : null}
+
+              <AssetLibrarySourceStrip
+                returnHint={returnHint}
+                suggestCreateLabel={suggestCreateLabel}
+                suggestCreateExactExists={suggestCreateExactExists}
+                canCreateAsset={canCreateAsset}
+                navPrevLabel={navStack.length > 0 ? (navStack[navStack.length - 1]?.label ?? null) : null}
+                onPopNav={popNavStack}
+                onReturnToSource={() => {
+                  const gapKey = resumeGapKey || suggestCreateLabel?.trim() || undefined;
+                  const section =
+                    resumeSection
+                    || (tab === 'costume'
+                      ? 'costumes'
+                      : tab === 'prop'
+                        ? 'props'
+                        : tab === 'scene'
+                          ? 'scenes'
+                          : 'characters');
+                  returnToSource({
+                    hint: returnHint || '设定就绪',
+                    gapKey,
+                    section,
+                    tab,
+                  });
+                  setReturnHint(null);
+                  setSuggestCreateLabel(null);
+                  setResumeGapKey(null);
+                  setResumeSection(null);
+                }}
+                onDismissReturnHint={() => setReturnHint(null)}
+                onCreateSuggested={() => handleCreate(suggestCreateLabel!)}
+                onDismissSuggest={() => setSuggestCreateLabel(null)}
+              />
 
               {scope === 'private' && !activeId ? (
                 <div className="flex-1 flex flex-col items-center justify-center p-8 text-center">
@@ -1909,19 +2447,8 @@ export function AssetLibraryModal() {
                   {!shellFullEdit ? (
                     <>
                       <div className="shrink-0 px-4 py-2 border-b border-line flex items-center gap-2">
-                        <div className="relative flex-1">
-                          <Search
-                            size={14}
-                            className="absolute left-2.5 top-1/2 -translate-y-1/2 text-ink/30"
-                          />
-                          <input
-                            value={query}
-                            onChange={(e) => setQuery(e.target.value)}
-                            placeholder={`搜索${ASSET_LIBRARY_TABS.find((t) => t.key === tab)?.label ?? ''}…`}
-                            className="w-full pl-8 pr-3 py-1.5 text-xs rounded-lg border border-line"
-                          />
-                        </div>
                         <span className="text-[10px] text-ink/40 shrink-0">{filtered.length} 项</span>
+                        <div className="min-w-0 flex-1" />
                         {(tab === 'shot' || tab === 'style' || tab === 'sound') && (
                           <button
                             type="button"
@@ -2212,45 +2739,94 @@ export function AssetLibraryModal() {
                   {tab === 'character' ? (
                     selectedChar ? (
                       <div className="flex min-h-0 flex-1 flex-col">
-                        <div className="nx9-asset-lib-sticky flex h-10 shrink-0 items-center gap-1.5 border-b border-line px-4">
-                          <button
-                            type="button"
-                            className="inline-flex h-7 shrink-0 items-center justify-center gap-0.5 rounded-md border border-line px-2 text-[10px] leading-none text-ink/60 hover:border-brand/40"
-                            onClick={() => setEditId(null)}
-                          >
-                            <ChevronLeft size={12} className="shrink-0" />
-                            返回
-                          </button>
-                          <span className="flex min-h-0 min-w-0 flex-1 items-center truncate text-xs font-semibold leading-none text-ink">
-                            {selectedChar.name}
-                          </span>
-                          <button
-                            type="button"
-                            className="inline-flex h-7 shrink-0 items-center justify-center rounded-md border border-line px-2 text-[10px] leading-none text-ink/60 hover:border-brand/40"
-                            onClick={() => {
-                              void navigator.clipboard.writeText(formatAssetMention('character', selectedChar.name));
-                              toastSuccess('已复制 @提及');
-                            }}
-                          >
-                            复制 @
-                          </button>
-                          <button
-                            type="button"
-                            className="inline-flex h-7 shrink-0 items-center justify-center rounded-md border border-line px-2 text-[10px] leading-none text-ink/60 hover:border-brand/40"
-                            onClick={() => handleToggleCharacterLock(selectedChar.id)}
-                          >
-                            {selectedChar.creative?.consistency?.locked ? '解锁' : '锁定'}
-                          </button>
-                        </div>
+                        <AssetDetailStickyBar
+                          title={selectedChar.name}
+                          onBackToList={() => setEditId(null)}
+                          navPrevLabel={navStack.length > 0 ? navStack[navStack.length - 1]?.label : null}
+                          onBackToPrev={navStack.length > 0 ? popNavStack : undefined}
+                          revisionLabel={`资产 v${selectedChar.revision ?? 1}`}
+                          onBumpRevision={canWrite ? () => {
+                            const rev = (selectedChar.revision ?? 1) + 1;
+                            const prompt = selectedChar.consistencyPrompt?.trim() || '';
+                            void saveCharacter({
+                              ...selectedChar,
+                              revision: rev,
+                              creative: {
+                                ...selectedChar.creative,
+                                consistency: {
+                                  ...selectedChar.creative?.consistency,
+                                  locked: true,
+                                  lockedPromptSnapshot: prompt || selectedChar.creative?.consistency?.lockedPromptSnapshot,
+                                  lockedAt: new Date().toISOString(),
+                                },
+                              },
+                            });
+                            toastSuccess(`已新建角色版本 v${rev}（已锁定 Prompt；旧镜 pin 仍钉旧版）`);
+                          } : undefined}
+                          onCopyMention={() => {
+                            void navigator.clipboard.writeText(formatAssetMention('character', selectedChar.name));
+                            toastSuccess('已复制 @提及');
+                          }}
+                          lockLabel={selectedChar.creative?.consistency?.locked ? '解锁' : '锁定'}
+                          onToggleLock={() => handleToggleCharacterLock(selectedChar.id)}
+                          primaryGen={
+                            canWrite
+                              ? [
+                                  {
+                                    label: '完整设定板',
+                                    disabled: !canCreateAsset || charSheetGenBusy,
+                                    title: '主生成 · 角色完整设定板',
+                                    onClick: () => {
+                                      if (canCreateAsset) void generateCharacterMasterSheet(selectedChar);
+                                    },
+                                  },
+                                  {
+                                    label: '五类原图',
+                                    disabled: !canCreateAsset || charSheetGenBusy || !selectedChar.creative?.fullSheetUrl?.trim(),
+                                    title: selectedChar.creative?.fullSheetUrl?.trim()
+                                      ? '基于完整设定板生成五类原图'
+                                      : '请先生成完整设定板',
+                                    onClick: () => {
+                                      if (canCreateAsset) void generateCharacterCategorySheets(selectedChar);
+                                    },
+                                  },
+                                ]
+                              : undefined
+                          }
+                          genSettingsSlot={
+                            canWrite ? (
+                              <AssetLibraryGenSettings
+                                preset="character-sheet"
+                                value={characterSheetGen}
+                                onChange={setCharacterSheetGen}
+                              />
+                            ) : undefined
+                          }
+                          moreActions={[
+                            ...(scope === 'private' && canWrite
+                              ? [{ label: '发布到公共', onClick: () => void handlePublishToPublic(selectedChar.id) }]
+                              : []),
+                            ...(canDeleteItem
+                              ? [{ label: '删除', danger: true as const, onClick: () => void handleDelete(selectedChar.id) }]
+                              : []),
+                          ]}
+                        />
+
+                        <AssetEditQuickJump
+                          items={filtered.map((i) => ({ id: i.id, label: i.label }))}
+                          currentId={selectedChar.id}
+                          onJump={(id) => setEditId(id)}
+                        />
 
                         <div className="min-h-0 flex-1 overflow-hidden">
                           <CharacterDetailFields
                             character={selectedChar}
-                            onChange={saveCharacter}
-                            onRefreshPrompts={() => saveCharacter(refreshCharacterPrompts(selectedChar))}
+                            onChange={(next) => { void saveCharacter(next); }}
+                            onRefreshPrompts={() => { void saveCharacter(refreshCharacterPrompts(selectedChar)); }}
                             onUploadAudio={(f) => void handleUploadAudio(f, { kind: 'character', id: selectedChar.id })}
                             onUploadView={(view, f) => void handleUploadCharacterView(f, selectedChar, view)}
                             costumeOptions={costumeBindOptions}
+                            chromeOwnsPrimaryGen
                             onGenerateMasterSheet={canWrite ? () => {
                               if (canCreateAsset) void generateCharacterMasterSheet(selectedChar);
                             } : undefined}
@@ -2259,13 +2835,6 @@ export function AssetLibraryModal() {
                             } : undefined}
                             generatingMasterSheet={charSheetGenBusy}
                             masterSheetProgress={charSheetGenProgress}
-                            genSettingsSlot={(
-                              <AssetLibraryGenSettings
-                                preset="character-sheet"
-                                value={characterSheetGen}
-                                onChange={setCharacterSheetGen}
-                              />
-                            )}
                             onPublishAudioToSound={canWrite ? () => {
                               const s = refreshVoicePrompts(
                                 newSoundAsset(`${selectedChar.name}·参考音`, 'voice'),
@@ -2275,6 +2844,10 @@ export function AssetLibraryModal() {
                                 audioUrl: selectedChar.referenceAudioUrl || '',
                                 description: `从角色「${selectedChar.name}」参考音发布`,
                               });
+                              void saveCharacter({
+                                ...selectedChar,
+                                soundAssetId: s.id,
+                              });
                               toastSuccess(`已发布到声音库：${s.name}`);
                               jumpToAsset('sound', s.id, s.name);
                             } : undefined}
@@ -2283,12 +2856,26 @@ export function AssetLibraryModal() {
                       </div>
                     ) : (
                       <div className="flex-1 min-h-0 overflow-y-auto nx9-scroll p-4">
+                        {batchEnabled ? (
+                          <AssetBatchBar
+                            count={selectedIds.size}
+                            totalSelectable={selectableBatchIds.length}
+                            canDelete={canDeleteItem}
+                            onSelectAll={selectAllBatch}
+                            onClear={clearBatchSelection}
+                            onLock={() => handleBatchSetLock(true)}
+                            onUnlock={() => handleBatchSetLock(false)}
+                            onDelete={() => void handleBatchDelete()}
+                          />
+                        ) : null}
                         <CharacterCardGrid
                           items={filtered}
                           charactersById={charactersById}
                           scope={scope}
                           canDelete={canDeleteItem}
                           emptyHint={tabMeta.emptyHint}
+                          selectedIds={batchEnabled ? selectedIds : undefined}
+                          onToggleSelect={batchEnabled ? toggleBatchSelect : undefined}
                           onEdit={(id) => setEditId(id)}
                           onDelete={(id) => void handleDelete(id)}
                           onCopyPublic={handleCopyPublicToWorkspace}
@@ -2298,48 +2885,126 @@ export function AssetLibraryModal() {
                             toastSuccess('已复制 @提及');
                           }}
                           onToggleLock={handleToggleCharacterLock}
+                          onPublishToPublic={
+                            scope === 'private' && canWrite
+                              ? (id) => void handlePublishToPublic(id)
+                              : undefined
+                          }
                         />
                       </div>
                     )
                   ) : ENTITY_CARD_TABS.has(tab) ? (
                     selectedWorkspaceItem ? (
                       <div className="flex min-h-0 flex-1 flex-col">
-                        <div className="nx9-asset-lib-sticky flex h-10 shrink-0 items-center gap-1.5 border-b border-line px-4">
-                          <button
-                            type="button"
-                            className="inline-flex h-7 shrink-0 items-center justify-center gap-0.5 rounded-md border border-line px-2 text-[10px] leading-none text-ink/60 hover:border-brand/40"
-                            onClick={() => setEditId(null)}
-                          >
-                            <ChevronLeft size={12} className="shrink-0" />
-                            返回
-                          </button>
-                          <span className="flex min-h-0 min-w-0 flex-1 items-center truncate text-xs font-semibold leading-none text-ink">
-                            {selectedWorkspaceItem.label}
-                          </span>
-                          <button
-                            type="button"
-                            className="inline-flex h-7 shrink-0 items-center justify-center rounded-md border border-line px-2 text-[10px] leading-none text-ink/60 hover:border-brand/40"
-                            onClick={() => {
-                              void navigator.clipboard.writeText(
-                                formatAssetMention(tab, selectedWorkspaceItem.label),
-                              );
-                              toastSuccess('已复制 @提及');
-                            }}
-                          >
-                            复制 @
-                          </button>
-                          <button
-                            type="button"
-                            className="inline-flex h-7 shrink-0 items-center justify-center rounded-md border border-line px-2 text-[10px] leading-none text-ink/60 hover:border-brand/40"
-                            onClick={() => handleToggleEntityLock(selectedWorkspaceItem.id)}
-                          >
-                            {tab === 'costume'
+                        <AssetDetailStickyBar
+                          title={selectedWorkspaceItem.label}
+                          badge={
+                            scope === 'public'
+                            && selectedWorkspaceItem.sourceTemplateId === selectedWorkspaceItem.id
+                              ? '预览·导入后可编'
+                              : BUILTIN_BACKLOT_TEMPLATES.some((t) => t.id === selectedWorkspaceItem.id && t.kind === tab)
+                                ? '内置只读'
+                                : null
+                          }
+                          onBackToList={() => setEditId(null)}
+                          navPrevLabel={navStack.length > 0 ? navStack[navStack.length - 1]?.label : null}
+                          onBackToPrev={navStack.length > 0 ? popNavStack : undefined}
+                          revisionLabel={`资产 v${selectedWorkspaceItem.revision ?? 1}`}
+                          onBumpRevision={
+                            canEditCurrent
+                              ? () => {
+                                  const ext =
+                                    tab === 'costume'
+                                      ? getCostumeCreative(selectedWorkspaceItem)
+                                      : tab === 'prop'
+                                        ? getPropCreative(selectedWorkspaceItem)
+                                        : getSceneCreative(selectedWorkspaceItem);
+                                  const rev = (selectedWorkspaceItem.revision ?? 1) + 1;
+                                  const prompt =
+                                    selectedWorkspaceItem.promptEn?.trim()
+                                    || (ext as { lockedPromptSnapshot?: string }).lockedPromptSnapshot
+                                    || '';
+                                  saveWorkspaceItem({
+                                    ...selectedWorkspaceItem,
+                                    revision: rev,
+                                    creative: {
+                                      ...ext,
+                                      locked: true,
+                                      lockedPromptSnapshot: prompt || (ext as { lockedPromptSnapshot?: string }).lockedPromptSnapshot,
+                                      lockedAt: new Date().toISOString(),
+                                    },
+                                  });
+                                  toastSuccess(`已新建版本 v${rev}（已锁定 Prompt）`);
+                                }
+                              : undefined
+                          }
+                          onCopyMention={() => {
+                            void navigator.clipboard.writeText(
+                              formatAssetMention(tab, selectedWorkspaceItem.label),
+                            );
+                            toastSuccess('已复制 @提及');
+                          }}
+                          lockLabel={
+                            tab === 'costume'
                               ? (getCostumeCreative(selectedWorkspaceItem).locked ? '解锁' : '锁定')
                               : tab === 'prop'
                                 ? (getPropCreative(selectedWorkspaceItem).locked ? '解锁' : '锁定')
-                                : (getSceneCreative(selectedWorkspaceItem).locked ? '解锁' : '锁定')}
-                          </button>
-                        </div>
+                                : (getSceneCreative(selectedWorkspaceItem).locked ? '解锁' : '锁定')
+                          }
+                          onToggleLock={() => handleToggleEntityLock(selectedWorkspaceItem.id)}
+                          primaryGen={
+                            canEditCurrent
+                              ? {
+                                  label:
+                                    tab === 'costume'
+                                      ? '服装设定板'
+                                      : tab === 'prop'
+                                        ? '道具三视图'
+                                        : '场景设定板',
+                                  disabled:
+                                    tab === 'costume'
+                                      ? costumeGenBusy
+                                      : tab === 'prop'
+                                        ? propGenBusy
+                                        : sceneGenBusy,
+                                  title: '主生成 · 设定板',
+                                  onClick: () => {
+                                    if (tab === 'costume') void generateCostumeSheets([selectedWorkspaceItem]);
+                                    else if (tab === 'prop') void generatePropSheet(selectedWorkspaceItem);
+                                    else void generateSceneSheet(selectedWorkspaceItem);
+                                  },
+                                }
+                              : undefined
+                          }
+                          genSettingsSlot={
+                            canEditCurrent ? (
+                              <AssetLibraryGenSettings
+                                preset={tab === 'scene' ? 'scene' : 'costume-sheet'}
+                                value={tab === 'scene' ? sceneSheetGen : costumeSheetGen}
+                                onChange={tab === 'scene' ? setSceneSheetGen : setCostumeSheetGen}
+                              />
+                            ) : undefined
+                          }
+                          moreActions={[
+                            ...(scope === 'private' && canWrite
+                              ? [{ label: '发布到公共', onClick: () => void handlePublishToPublic(selectedWorkspaceItem.id) }]
+                              : []),
+                            ...(canDeleteItem
+                              && !(
+                                scope === 'public'
+                                && !publicTemplates.some((t) => t.id === selectedWorkspaceItem.id && t.kind === tab)
+                                && BUILTIN_BACKLOT_TEMPLATES.some((t) => t.id === selectedWorkspaceItem.id && t.kind === tab)
+                              )
+                              ? [{ label: '删除', danger: true as const, onClick: () => void handleDelete(selectedWorkspaceItem.id) }]
+                              : []),
+                          ]}
+                        />
+
+                        <AssetEditQuickJump
+                          items={filtered.map((i) => ({ id: i.id, label: i.label }))}
+                          currentId={selectedWorkspaceItem.id}
+                          onJump={(id) => setEditId(id)}
+                        />
 
                         <div className="min-h-0 flex-1 overflow-hidden">
                           {tab === 'scene' ? (
@@ -2356,31 +3021,39 @@ export function AssetLibraryModal() {
                                 const hit = propBindOptions.find((p) => p.id === propId);
                                 jumpToAsset('prop', propId, hit?.label ?? propId);
                               }}
+                              chromeOwnsPrimaryGen
                               onGenerateSheet={
-                                canWrite && scope === 'private' && canEditPrivate
+                                canEditCurrent
                                   ? () => void generateSceneSheet(selectedWorkspaceItem)
                                   : undefined
                               }
                               generatingSheet={sceneGenBusy}
                               generateSheetError={entityGenError}
                               onCropCoverFromSheet={
-                                canWrite && scope === 'private' && canEditPrivate
+                                canEditCurrent
                                   ? () => void cropWorkspaceEntityCover(selectedWorkspaceItem)
                                   : undefined
                               }
                               croppingCover={entityCropBusy}
-                              genSettingsSlot={(
-                                <AssetLibraryGenSettings
-                                  preset="scene"
-                                  value={sceneSheetGen}
-                                  onChange={setSceneSheetGen}
-                                />
-                              )}
                               onSuggestCreateProps={
-                                canWrite && scope === 'private' && canEditPrivate
+                                canEditCurrent
                                   ? (names) => suggestCreatePropsFromScene(selectedWorkspaceItem, names)
                                   : undefined
                               }
+                              onUploadVariant={(variantId, file) => {
+                                void (async () => {
+                                  const res = await api.uploadAsset(file);
+                                  const ext = getSceneCreative(selectedWorkspaceItem);
+                                  const base = ext.variants?.length ? ext.variants : DEFAULT_SCENE_VARIANTS;
+                                  const variants = base.map((v) =>
+                                    v.id === variantId ? { ...v, imageUrl: res.url } : v,
+                                  );
+                                  saveWorkspaceItem({
+                                    ...selectedWorkspaceItem,
+                                    creative: { ...ext, variants },
+                                  });
+                                })();
+                              }}
                             />
                           ) : null}
                           {tab === 'costume' ? (
@@ -2409,7 +3082,8 @@ export function AssetLibraryModal() {
                                     void (async () => {
                                       const res = await api.uploadAsset(file);
                                       const ext = getCostumeCreative(selectedWorkspaceItem);
-                                      const variants = (ext.variants ?? []).map((v) =>
+                                      const base = ext.variants?.length ? ext.variants : CAC_COSTUME_VARIANT_PRESETS;
+                                      const variants = base.map((v) =>
                                         v.id === variantId ? { ...v, imageUrl: res.url } : v,
                                       );
                                       saveWorkspaceItem({
@@ -2434,13 +3108,7 @@ export function AssetLibraryModal() {
                                     );
                                     if (hit) jumpToAsset('character', hit.id, hit.name);
                                   }}
-                                  genSettingsSlot={(
-                                    <AssetLibraryGenSettings
-                                      preset="costume-sheet"
-                                      value={costumeSheetGen}
-                                      onChange={setCostumeSheetGen}
-                                    />
-                                  )}
+                                  chromeOwnsPrimaryGen
                                   onGenerateSheet={
                                     scope === 'private' && canEditPrivate
                                       ? () => {
@@ -2470,6 +3138,20 @@ export function AssetLibraryModal() {
                               onUploadRef={(f) => void handleUploadWorkspaceMedia(f, selectedWorkspaceItem, 'referenceUrls')}
                               onUploadSheet={(f) => void handleUploadWorkspaceMedia(f, selectedWorkspaceItem, 'sheetUrl')}
                               onUploadCover={(f) => void handleUploadWorkspaceMedia(f, selectedWorkspaceItem, 'coverUrl')}
+                              onUploadVariant={(variantId, file) => {
+                                void (async () => {
+                                  const res = await api.uploadAsset(file);
+                                  const ext = getPropCreative(selectedWorkspaceItem);
+                                  const base = ext.variants?.length ? ext.variants : DEFAULT_PROP_VARIANTS;
+                                  const variants = base.map((v) =>
+                                    v.id === variantId ? { ...v, imageUrl: res.url } : v,
+                                  );
+                                  saveWorkspaceItem({
+                                    ...selectedWorkspaceItem,
+                                    creative: { ...ext, variants },
+                                  });
+                                })();
+                              }}
                               boundSceneItems={propBoundScenes.get(selectedWorkspaceItem.id) ?? []}
                               onOpenScene={(sceneId) => {
                                 const hit = (propBoundScenes.get(selectedWorkspaceItem.id) ?? []).find((s) => s.id === sceneId);
@@ -2477,35 +3159,41 @@ export function AssetLibraryModal() {
                               }}
                               sceneOptions={sceneBindOptions}
                               onToggleLinkedScene={
-                                canWrite && scope === 'private'
+                                canEditCurrent
                                   ? (sceneId, linked) => togglePropLinkedScene(selectedWorkspaceItem, sceneId, linked)
                                   : undefined
                               }
                               onGenerateSheet={
-                                canWrite && scope === 'private' && canEditPrivate
+                                canEditCurrent
                                   ? () => void generatePropSheet(selectedWorkspaceItem)
                                   : undefined
                               }
                               generatingSheet={propGenBusy}
                               onCropCoverFromSheet={
-                                canWrite && scope === 'private' && canEditPrivate
+                                canEditCurrent
                                   ? () => void cropWorkspaceEntityCover(selectedWorkspaceItem)
                                   : undefined
                               }
                               croppingCover={entityCropBusy}
-                              genSettingsSlot={(
-                                <AssetLibraryGenSettings
-                                  preset="costume-sheet"
-                                  value={costumeSheetGen}
-                                  onChange={setCostumeSheetGen}
-                                />
-                              )}
+                              chromeOwnsPrimaryGen
                             />
                           ) : null}
                         </div>
                       </div>
                     ) : (
                       <div className="flex-1 min-h-0 overflow-y-auto nx9-scroll p-4">
+                        {batchEnabled ? (
+                          <AssetBatchBar
+                            count={selectedIds.size}
+                            totalSelectable={selectableBatchIds.length}
+                            canDelete={canDeleteItem}
+                            onSelectAll={selectAllBatch}
+                            onClear={clearBatchSelection}
+                            onLock={() => handleBatchSetLock(true)}
+                            onUnlock={() => handleBatchSetLock(false)}
+                            onDelete={() => void handleBatchDelete()}
+                          />
+                        ) : null}
                         <EntityCardGrid
                           kind={tab as EntityCardKind}
                           items={filtered}
@@ -2514,6 +3202,8 @@ export function AssetLibraryModal() {
                           canDelete={canDeleteItem}
                           emptyHint={tabMeta.emptyHint}
                           unboundCostumeIds={unboundCostumeIds}
+                          selectedIds={batchEnabled ? selectedIds : undefined}
+                          onToggleSelect={batchEnabled ? toggleBatchSelect : undefined}
                           onEdit={(id) => setEditId(id)}
                           onDelete={(id) => void handleDelete(id)}
                           onCopyPublic={handleCopyPublicToWorkspace}
@@ -2523,71 +3213,79 @@ export function AssetLibraryModal() {
                             toastSuccess('已复制 @提及');
                           }}
                           onToggleLock={handleToggleEntityLock}
+                          onPublishToPublic={
+                            scope === 'private' && canWrite
+                              ? (id) => void handlePublishToPublic(id)
+                              : undefined
+                          }
                         />
                       </div>
                     )
                   ) : tab === 'shot' ? (
                     selectedWorkspaceItem ? (
                       <div className="flex min-h-0 flex-1 flex-col">
-                        <div className="nx9-asset-lib-sticky flex h-10 shrink-0 items-center gap-1.5 border-b border-line px-4">
-                          <button
-                            type="button"
-                            className="inline-flex h-7 shrink-0 items-center justify-center gap-0.5 rounded-md border border-line px-2 text-[10px] leading-none text-ink/60 hover:border-brand/40"
-                            onClick={() => setEditId(null)}
-                          >
-                            <ChevronLeft size={12} className="shrink-0" />
-                            返回
-                          </button>
-                          <span className="flex min-h-0 min-w-0 flex-1 items-center truncate text-xs font-semibold leading-none text-ink">
-                            {isBuiltinShotId(selectedWorkspaceItem.id) ? (
-                              <span className="mr-1.5 text-[9px] font-normal text-ink/45">内置</span>
-                            ) : null}
-                            {selectedWorkspaceItem.label}
-                          </span>
-                          <button
-                            type="button"
-                            className="inline-flex h-7 shrink-0 items-center justify-center rounded-md border border-line px-2 text-[10px] leading-none text-ink/60 hover:border-brand/40"
-                            onClick={() => {
-                              void navigator.clipboard.writeText(
-                                formatAssetMention('shot', selectedWorkspaceItem.label),
-                              );
-                              toastSuccess('已复制 @提及');
-                            }}
-                          >
-                            复制 @
-                          </button>
-                          {isBuiltinShotId(selectedWorkspaceItem.id) ? (
-                            <button
-                              type="button"
-                              className="inline-flex h-7 shrink-0 items-center justify-center rounded-md border border-brand/35 bg-brand/10 px-2 text-[10px] leading-none text-brand hover:border-brand/50"
-                              onClick={() => handleCloneBuiltin(selectedWorkspaceItem.id)}
-                            >
-                              导入副本
-                            </button>
-                          ) : (
-                            <>
+                        <AssetDetailStickyBar
+                          title={`${isBuiltinShotId(selectedWorkspaceItem.id) ? '内置 · ' : ''}${selectedWorkspaceItem.label}`}
+                          onBackToList={() => setEditId(null)}
+                          navPrevLabel={navStack.length > 0 ? navStack[navStack.length - 1]?.label : null}
+                          onBackToPrev={navStack.length > 0 ? popNavStack : undefined}
+                          onCopyMention={() => {
+                            void navigator.clipboard.writeText(
+                              formatAssetMention('shot', selectedWorkspaceItem.label),
+                            );
+                            toastSuccess('已复制 @提及');
+                          }}
+                          lockLabel={
+                            isBuiltinShotId(selectedWorkspaceItem.id)
+                              ? undefined
+                              : (getShotCreative(selectedWorkspaceItem).locked ? '解锁' : '锁定')
+                          }
+                          onToggleLock={
+                            isBuiltinShotId(selectedWorkspaceItem.id)
+                              ? undefined
+                              : () => handleToggleShotLock(selectedWorkspaceItem.id)
+                          }
+                          more={
+                            isBuiltinShotId(selectedWorkspaceItem.id) ? (
                               <button
                                 type="button"
-                                className="inline-flex h-7 shrink-0 items-center justify-center rounded-md border border-line px-2 text-[10px] leading-none text-ink/60 hover:border-brand/40"
-                                onClick={() => handleToggleShotFavorite(selectedWorkspaceItem.id)}
+                                className="inline-flex h-7 shrink-0 items-center justify-center rounded-md border border-brand/35 bg-brand/10 px-2 text-[10px] leading-none text-brand hover:border-brand/50"
+                                onClick={() => handleCloneBuiltin(selectedWorkspaceItem.id)}
                               >
-                                {getShotCreative(selectedWorkspaceItem).favorite ? '取消收藏' : '收藏'}
+                                导入副本
                               </button>
-                              <button
-                                type="button"
-                                className="inline-flex h-7 shrink-0 items-center justify-center rounded-md border border-line px-2 text-[10px] leading-none text-ink/60 hover:border-brand/40"
-                                onClick={() => handleToggleShotLock(selectedWorkspaceItem.id)}
-                              >
-                                {getShotCreative(selectedWorkspaceItem).locked ? '解锁' : '锁定'}
-                              </button>
-                            </>
-                          )}
-                        </div>
+                            ) : (
+                              <>
+                                <button
+                                  type="button"
+                                  className="inline-flex h-7 shrink-0 items-center justify-center rounded-md border border-line px-2 text-[10px] leading-none text-ink/60 hover:border-brand/40"
+                                  onClick={() => handleToggleShotFavorite(selectedWorkspaceItem.id)}
+                                >
+                                  {getShotCreative(selectedWorkspaceItem).favorite ? '取消收藏' : '收藏'}
+                                </button>
+                                {canDeleteItem ? (
+                                  <button
+                                    type="button"
+                                    className="inline-flex h-7 shrink-0 items-center justify-center rounded-md border border-red-500/30 px-2 text-[10px] leading-none text-red-500 hover:bg-red-500/10"
+                                    onClick={() => void handleDelete(selectedWorkspaceItem.id)}
+                                  >
+                                    删除
+                                  </button>
+                                ) : null}
+                              </>
+                            )
+                          }
+                        />
                         {isBuiltinShotId(selectedWorkspaceItem.id) ? (
                           <div className="shrink-0 border-b border-brand/20 bg-brand/5 px-4 py-2 text-[11px] text-ink/70">
                             内置镜头只读。请先「导入副本」后再编辑或删除。
                           </div>
                         ) : null}
+                        <AssetEditQuickJump
+                          items={filtered.map((i) => ({ id: i.id, label: i.label }))}
+                          currentId={selectedWorkspaceItem.id}
+                          onJump={(id) => setEditId(id)}
+                        />
                         <div className="min-h-0 flex-1 overflow-hidden">
                           <ShotDetailFields
                             item={selectedWorkspaceItem}
@@ -2645,56 +3343,58 @@ export function AssetLibraryModal() {
                   ) : tab === 'style' ? (
                     selectedStyle ? (
                       <div className="flex min-h-0 flex-1 flex-col">
-                        <div className="nx9-asset-lib-sticky flex h-10 shrink-0 items-center gap-1.5 border-b border-line px-4">
-                          <button
-                            type="button"
-                            className="inline-flex h-7 shrink-0 items-center justify-center gap-0.5 rounded-md border border-line px-2 text-[10px] leading-none text-ink/60 hover:border-brand/40"
-                            onClick={() => setEditId(null)}
-                          >
-                            <ChevronLeft size={12} className="shrink-0" />
-                            返回
-                          </button>
-                          <span className="flex min-h-0 min-w-0 flex-1 items-center truncate text-xs font-semibold leading-none text-ink">
-                            {isBuiltinStylePreset(selectedStyle) ? (
-                              <span className="mr-1.5 text-[9px] font-normal text-ink/45">内置</span>
-                            ) : null}
-                            {selectedStyle.name}
-                          </span>
-                          <button
-                            type="button"
-                            className="inline-flex h-7 shrink-0 items-center justify-center rounded-md border border-line px-2 text-[10px] leading-none text-ink/60 hover:border-brand/40"
-                            onClick={() => {
-                              void navigator.clipboard.writeText(
-                                formatAssetMention('style', selectedStyle.name),
-                              );
-                              toastSuccess('已复制 @提及');
-                            }}
-                          >
-                            复制 @
-                          </button>
-                          {isBuiltinStylePreset(selectedStyle) ? (
-                            <button
-                              type="button"
-                              className="inline-flex h-7 shrink-0 items-center justify-center rounded-md border border-brand/35 bg-brand/10 px-2 text-[10px] leading-none text-brand hover:border-brand/50"
-                              onClick={() => handleCloneBuiltin(selectedStyle.id)}
-                            >
-                              导入副本
-                            </button>
-                          ) : (
-                            <button
-                              type="button"
-                              className="inline-flex h-7 shrink-0 items-center justify-center rounded-md border border-line px-2 text-[10px] leading-none text-ink/60 hover:border-brand/40"
-                              onClick={() => handleToggleStyleFavorite(selectedStyle.id)}
-                            >
-                              {selectedStyle.favorite ? '取消收藏' : '收藏'}
-                            </button>
-                          )}
-                        </div>
+                        <AssetDetailStickyBar
+                          title={`${isBuiltinStylePreset(selectedStyle) ? '内置 · ' : ''}${selectedStyle.name}`}
+                          onBackToList={() => setEditId(null)}
+                          navPrevLabel={navStack.length > 0 ? navStack[navStack.length - 1]?.label : null}
+                          onBackToPrev={navStack.length > 0 ? popNavStack : undefined}
+                          onCopyMention={() => {
+                            void navigator.clipboard.writeText(
+                              formatAssetMention('style', selectedStyle.name),
+                            );
+                            toastSuccess('已复制 @提及');
+                          }}
+                          more={
+                            isBuiltinStylePreset(selectedStyle) ? (
+                              <button
+                                type="button"
+                                className="inline-flex h-7 shrink-0 items-center justify-center rounded-md border border-brand/35 bg-brand/10 px-2 text-[10px] leading-none text-brand hover:border-brand/50"
+                                onClick={() => handleCloneBuiltin(selectedStyle.id)}
+                              >
+                                导入副本
+                              </button>
+                            ) : (
+                              <>
+                                <button
+                                  type="button"
+                                  className="inline-flex h-7 shrink-0 items-center justify-center rounded-md border border-line px-2 text-[10px] leading-none text-ink/60 hover:border-brand/40"
+                                  onClick={() => handleToggleStyleFavorite(selectedStyle.id)}
+                                >
+                                  {selectedStyle.favorite ? '取消收藏' : '收藏'}
+                                </button>
+                                {canDeleteItem ? (
+                                  <button
+                                    type="button"
+                                    className="inline-flex h-7 shrink-0 items-center justify-center rounded-md border border-red-500/30 px-2 text-[10px] leading-none text-red-500 hover:bg-red-500/10"
+                                    onClick={() => void handleDelete(selectedStyle.id)}
+                                  >
+                                    删除
+                                  </button>
+                                ) : null}
+                              </>
+                            )
+                          }
+                        />
                         {isBuiltinStylePreset(selectedStyle) ? (
                           <div className="shrink-0 border-b border-brand/20 bg-brand/5 px-4 py-2 text-[11px] text-ink/70">
                             内置风格只读。请先「导入副本」后再编辑或删除。
                           </div>
                         ) : null}
+                        <AssetEditQuickJump
+                          items={filtered.map((i) => ({ id: i.id, label: i.label }))}
+                          currentId={selectedStyle.id}
+                          onJump={(id) => setEditId(id)}
+                        />
                         <div className="min-h-0 flex-1 overflow-hidden">
                           <StyleDetailFields
                             style={selectedStyle}
@@ -2741,62 +3441,76 @@ export function AssetLibraryModal() {
                   ) : tab === 'sound' ? (
                     selectedSound ? (
                       <div className="flex min-h-0 flex-1 flex-col">
-                        <div className="nx9-asset-lib-sticky flex h-10 shrink-0 items-center gap-1.5 border-b border-line px-4">
-                          <button
-                            type="button"
-                            className="inline-flex h-7 shrink-0 items-center justify-center gap-0.5 rounded-md border border-line px-2 text-[10px] leading-none text-ink/60 hover:border-brand/40"
-                            onClick={() => setEditId(null)}
-                          >
-                            <ChevronLeft size={12} className="shrink-0" />
-                            返回
-                          </button>
-                          <span className="flex min-h-0 min-w-0 flex-1 items-center truncate text-xs font-semibold leading-none text-ink">
-                            {isBuiltinSoundAsset(selectedSound) ? (
-                              <span className="mr-1.5 text-[9px] font-normal text-ink/45">内置</span>
-                            ) : null}
-                            {selectedSound.name}
-                          </span>
-                          <button
-                            type="button"
-                            className="inline-flex h-7 shrink-0 items-center justify-center rounded-md border border-line px-2 text-[10px] leading-none text-ink/60 hover:border-brand/40"
-                            onClick={() => {
-                              void navigator.clipboard.writeText(
-                                formatAssetMention('sound', selectedSound.name),
-                              );
-                              toastSuccess('已复制 @提及');
-                            }}
-                          >
-                            复制 @
-                          </button>
-                          {isBuiltinSoundAsset(selectedSound) ? (
-                            <button
-                              type="button"
-                              className="inline-flex h-7 shrink-0 items-center justify-center rounded-md border border-brand/35 bg-brand/10 px-2 text-[10px] leading-none text-brand hover:border-brand/50"
-                              onClick={() => handleCloneBuiltin(selectedSound.id)}
-                            >
-                              导入副本
-                            </button>
-                          ) : (
-                            <button
-                              type="button"
-                              className="inline-flex h-7 shrink-0 items-center justify-center rounded-md border border-line px-2 text-[10px] leading-none text-ink/60 hover:border-brand/40"
-                              onClick={() => handleToggleSoundFavorite(selectedSound.id)}
-                            >
-                              {isSoundFavorite(selectedSound) ? '取消收藏' : '收藏'}
-                            </button>
-                          )}
-                        </div>
+                        <AssetDetailStickyBar
+                          title={`${isBuiltinSoundAsset(selectedSound) ? '内置 · ' : ''}${selectedSound.name}`}
+                          onBackToList={() => setEditId(null)}
+                          navPrevLabel={navStack.length > 0 ? navStack[navStack.length - 1]?.label : null}
+                          onBackToPrev={navStack.length > 0 ? popNavStack : undefined}
+                          onCopyMention={() => {
+                            void navigator.clipboard.writeText(
+                              formatAssetMention('sound', selectedSound.name),
+                            );
+                            toastSuccess('已复制 @提及');
+                          }}
+                          more={
+                            isBuiltinSoundAsset(selectedSound) ? (
+                              <button
+                                type="button"
+                                className="inline-flex h-7 shrink-0 items-center justify-center rounded-md border border-brand/35 bg-brand/10 px-2 text-[10px] leading-none text-brand hover:border-brand/50"
+                                onClick={() => handleCloneBuiltin(selectedSound.id)}
+                              >
+                                导入副本
+                              </button>
+                            ) : (
+                              <>
+                                <button
+                                  type="button"
+                                  className="inline-flex h-7 shrink-0 items-center justify-center rounded-md border border-line px-2 text-[10px] leading-none text-ink/60 hover:border-brand/40"
+                                  onClick={() => handleToggleSoundFavorite(selectedSound.id)}
+                                >
+                                  {isSoundFavorite(selectedSound) ? '取消收藏' : '收藏'}
+                                </button>
+                                {scope === 'private' && canWrite ? (
+                                  <button
+                                    type="button"
+                                    className="inline-flex h-7 shrink-0 items-center justify-center rounded-md border border-line px-2 text-[10px] leading-none text-ink/60 hover:border-brand/40"
+                                    onClick={() => void handlePublishToPublic(selectedSound.id)}
+                                  >
+                                    发布到公共
+                                  </button>
+                                ) : null}
+                                {canDeleteItem ? (
+                                  <button
+                                    type="button"
+                                    className="inline-flex h-7 shrink-0 items-center justify-center rounded-md border border-red-500/30 px-2 text-[10px] leading-none text-red-500 hover:bg-red-500/10"
+                                    onClick={() => void handleDelete(selectedSound.id)}
+                                  >
+                                    删除
+                                  </button>
+                                ) : null}
+                              </>
+                            )
+                          }
+                        />
                         {isBuiltinSoundAsset(selectedSound) ? (
                           <div className="shrink-0 border-b border-brand/20 bg-brand/5 px-4 py-2 text-[11px] text-ink/70">
                             内置声音只读。请先「导入副本」后再编辑或删除。
                           </div>
                         ) : null}
+                        <AssetEditQuickJump
+                          items={filtered.map((i) => ({ id: i.id, label: i.label }))}
+                          currentId={selectedSound.id}
+                          onJump={(id) => setEditId(id)}
+                        />
                         <div className="min-h-0 flex-1 overflow-hidden">
                           <VoiceDetailFields
                             sound={selectedSound}
                             readOnly={isBuiltinSoundAsset(selectedSound)}
                             onChange={saveSound}
                             onRefreshPrompts={() => saveSound(refreshVoicePrompts(selectedSound))}
+                            characterOptions={characters
+                              .filter((c) => !c.deletedAt)
+                              .map((c) => ({ id: c.id, name: c.name }))}
                             onUploadAudio={
                               !isBuiltinSoundAsset(selectedSound)
                                 ? (f) => void handleUploadAudio(f, { kind: 'sound', id: selectedSound.id })
@@ -2806,15 +3520,20 @@ export function AssetLibraryModal() {
                               !isBuiltinSoundAsset(selectedSound)
                               && characters.length
                               && selectedSound.audioUrl
-                                ? () => {
-                                    const target = characters[0];
-                                    if (!target) return;
-                                    saveCharacter({
+                                ? (characterId) => {
+                                    const target = characters.find((c) => c.id === characterId);
+                                    if (!target) {
+                                      toastError('未找到目标角色');
+                                      return;
+                                    }
+                                    void saveCharacter({
                                       ...target,
                                       referenceAudioUrl: selectedSound.audioUrl,
+                                      soundAssetId: selectedSound.id,
+                                      voiceProfileId: target.voiceProfileId ?? null,
                                     });
                                     toastSuccess(
-                                      `已将「${selectedSound.name}」设为角色「${target.name}」参考音（可在角色详情改绑）`,
+                                      `已将「${selectedSound.name}」设为角色「${target.name}」参考音（克隆源）`,
                                     );
                                   }
                                 : undefined
@@ -2845,159 +3564,69 @@ export function AssetLibraryModal() {
                       </div>
                     )
                   ) : (
-                  <div className="flex-1 flex min-h-0">
-                    <ul className="w-52 shrink-0 border-r border-line overflow-y-auto nx9-scroll p-2 space-y-0.5">
-                      {filtered.length === 0 && (
-                        <li className="text-[11px] text-ink/40 p-3 text-center">{tabMeta.emptyHint}</li>
-                      )}
-                      {filtered.map((item) => (
-                        <li key={item.id} className="group relative">
-                          <button
-                            type="button"
-                            onClick={() => setEditId(item.id)}
-                            className={`flex w-full items-center gap-2 text-left text-xs px-2 py-1.5 rounded-lg pr-8 ${
-                              editId === item.id
-                                ? 'bg-brand/10 text-brand'
-                                : 'hover:bg-surface text-ink/80'
-                            }`}
-                          >
-                            <span className="relative h-8 w-8 shrink-0 overflow-hidden rounded-md border border-line bg-surface">
-                              {item.imageUrl ? (
-                                <img src={item.imageUrl} alt="" className="h-full w-full object-cover" />
-                              ) : item.audioUrl ? (
-                                <span className="grid h-full w-full place-items-center text-[9px] text-ink/35">音</span>
-                              ) : (
-                                <span className="grid h-full w-full place-items-center text-[9px] text-ink/25">—</span>
-                              )}
-                              {!item.imageUrl && !item.audioUrl ? (
-                                <span className="absolute right-0.5 top-0.5 h-1.5 w-1.5 rounded-full bg-warn" title="缺媒体" />
-                              ) : null}
-                            </span>
-                            <span className="min-w-0 flex-1 truncate">
-                              {item.builtin && (
-                                <span className="text-[9px] text-ink/30 mr-1">内置</span>
-                              )}
-                              {item.label}
-                            </span>
-                          </button>
-                          {item.builtin ? (
-                            <button
-                              type="button"
-                              title="导入到当前库并编辑"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleCloneBuiltin(item.id);
-                              }}
-                              className="absolute right-1 top-1/2 -translate-y-1/2 px-1.5 py-0.5 rounded text-[10px] text-brand/80 hover:bg-brand/10 opacity-0 group-hover:opacity-100"
-                            >
-                              导入
-                            </button>
-                          ) : scope === 'public' ? (
-                            <button
-                              type="button"
-                              title="复制到项目私有库"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleCopyPublicToWorkspace(item.id);
-                              }}
-                              className="absolute right-1 top-1/2 -translate-y-1/2 px-1.5 py-0.5 rounded text-[10px] text-accent/80 hover:bg-accent/10 opacity-0 group-hover:opacity-100"
-                            >
-                              复制到项目
-                            </button>
-                          ) : (
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                if (canDeleteItem) void handleDelete(item.id);
-                              }}
-                              className={`absolute right-1 top-1/2 -translate-y-1/2 p-1 rounded ${canDeleteItem ? 'text-ink/30 hover:text-red-600 opacity-0 group-hover:opacity-100' : 'text-ink/10 cursor-not-allowed'}`}
-                            >
-                              <Trash2 size={12} />
-                            </button>
-                          )}
-                        </li>
-                      ))}
-                    </ul>
-
-                    <div className="flex-1 overflow-y-auto nx9-scroll p-4">
-                      {!editId && (
-                        <p className="text-sm text-ink/40 text-center mt-12">选择或新建素材进行编辑</p>
-                      )}
-
-                      {editId && selectedWorkspaceItem && (
-                        <div className="nx9-asset-lib-sticky sticky top-0 z-10 -mx-4 mb-3 flex flex-wrap items-center gap-2 border-b border-line bg-surface px-4 py-2">
-                          <span className="min-w-0 flex-1 truncate text-xs font-semibold text-ink">
-                            {selectedWorkspaceItem.label}
-                          </span>
-                          <button
-                            type="button"
-                            className="rounded-lg border border-line px-2 py-1 text-[10px] text-ink/60 hover:border-brand/40"
-                            onClick={() => {
-                              const label = selectedWorkspaceItem.label || '';
-                              const kind = tab;
-                              void navigator.clipboard.writeText(formatAssetMention(kind, label));
-                              toastSuccess('已复制 @提及');
-                            }}
-                          >
-                            复制 @
-                          </button>
-                          {tab === 'emotion' && (
-                            <button
-                              type="button"
-                              className="rounded-lg border border-line px-2 py-1 text-[10px] text-ink/60 hover:border-brand/40"
-                              onClick={() => {
-                                const item = selectedWorkspaceItem;
-                                const ext = getEmotionCreative(item);
-                                const locked = !ext.locked;
-                                const prompt = item.promptEn?.trim() || ext.prompts?.emotion?.text?.trim() || '';
-                                saveWorkspaceItem({
-                                  ...item,
-                                  creative: {
-                                    ...ext,
-                                    locked,
-                                    lockedPromptSnapshot: locked ? prompt : ext.lockedPromptSnapshot,
-                                    lockedAt: locked ? new Date().toISOString() : ext.lockedAt,
-                                  },
-                                });
-                              }}
-                            >
-                              {getEmotionCreative(selectedWorkspaceItem).locked ? '解锁' : '锁定'}
-                            </button>
-                          )}
-                        </div>
-                      )}
-
-                      {tab === 'emotion' && selectedWorkspaceItem && (
-                        <div className="space-y-2">
-                          <p className="rounded-lg border border-amber-200/70 bg-amber-50/50 px-2.5 py-1.5 text-[10px] text-ink/60">
-                            情绪库已降级。新氛围标签请在镜头「推荐情绪」维护；角色微表情请用角色表情格。
-                          </p>
-                          <EmotionDetailFields
-                            item={selectedWorkspaceItem}
-                            onChange={saveWorkspaceItem}
-                            onRefreshPrompts={() => saveWorkspaceItem(refreshWorkspacePrompts(selectedWorkspaceItem))}
-                            onUploadImage={(f) => void handleUploadWorkspaceMedia(f, selectedWorkspaceItem, 'imageUrl')}
-                          />
-                        </div>
-                      )}
-
-                      {scope === 'private' && selectedWorkspaceItem && (
+                  <div className="flex min-h-0 flex-1 flex-col p-4">
+                    <div className="mx-auto w-full max-w-lg space-y-3 rounded-xl border border-amber-200/70 bg-amber-50/40 p-4">
+                      <p className="text-xs font-semibold text-ink">
+                        {tab === 'emotion' ? '情绪库已退出主导航' : '爆点已退出素材库'}
+                      </p>
+                      <p className="text-[11px] leading-relaxed text-ink/60">
+                        {tab === 'emotion'
+                          ? '遗留条目仅只读兼容。新氛围标签请在镜头「推荐情绪」维护；角色微表情请用角色表情格。'
+                          : '爆点 SSOT 在编剧台 brief.hooks。库内钩子 kind 仅兼容旧数据与回收站。'}
+                      </p>
+                      <div className="flex flex-wrap gap-2">
                         <button
                           type="button"
-                          onClick={promoteToPublic}
-                          className="mt-4 text-xs text-accent hover:underline"
+                          className="rounded-lg border border-brand/35 bg-brand/10 px-3 py-1.5 text-[11px] font-medium text-brand"
+                          onClick={() => {
+                            setEditId(null);
+                            setTab(scope === 'public' ? 'shot' : 'character');
+                          }}
                         >
-                          复制到公共库
+                          {scope === 'public' ? '去镜头词典' : '去角色库'}
                         </button>
-                      )}
+                        {tab === 'emotion' && selectedWorkspaceItem ? (
+                          <span className="self-center text-[10px] text-ink/45">
+                            正在查看遗留：{selectedWorkspaceItem.label}
+                          </span>
+                        ) : null}
+                      </div>
+                      {tab === 'emotion' && selectedWorkspaceItem ? (
+                        <div className="pointer-events-auto max-h-[50vh] overflow-y-auto nx9-scroll rounded-lg border border-line bg-surface p-2">
+                          <EmotionDetailFields
+                            item={selectedWorkspaceItem}
+                            readOnly
+                            onChange={() => undefined}
+                            onRefreshPrompts={() => undefined}
+                            onUploadImage={async () => undefined}
+                          />
+                        </div>
+                      ) : null}
                     </div>
                   </div>
                   )}
                 </>
               )}
+          {showTrash ? (
+            <div className="absolute inset-y-0 right-0 z-40 flex w-[min(380px,92%)] flex-col border-l border-line bg-surface shadow-2xl">
+              <div className="flex h-11 shrink-0 items-center gap-2 border-b border-line px-3">
+                <Trash2 size={14} className="text-warn" />
+                <span className="flex-1 text-xs font-semibold text-ink">回收站</span>
+                <button
+                  type="button"
+                  className="rounded-lg p-1.5 text-ink/50 hover:bg-surface hover:text-ink"
+                  aria-label="关闭回收站"
+                  onClick={() => setShowTrash(false)}
+                >
+                  <X size={16} />
+                </button>
+              </div>
+              <div className="min-h-0 flex-1 overflow-y-auto nx9-scroll p-3">
+                <AssetTrashPanel defaultScope={scope} />
+              </div>
+            </div>
+          ) : null}
         </div>
-        )}
       </div>
     </div>,
     document.body,

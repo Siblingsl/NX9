@@ -217,6 +217,8 @@ const FlowSurfaceInner = memo(function FlowSurfaceInner({
     (screen) => screen,
   );
   const cancelRunRef = useRef(false);
+  /** PG-16: 画布级停止时 abort 在途生成请求 */
+  const runAbortRef = useRef<AbortController | null>(null);
   const resumedGateRef = useRef<Set<string>>(new Set());
   const loadWorkflowTemplateRef = useRef<
     (id: string, mode: 'merge' | 'replace') => Promise<void>
@@ -804,6 +806,9 @@ const FlowSurfaceInner = memo(function FlowSurfaceInner({
       };
       let taskId: string | null = resume ? queueSnapshot.taskId : null;
       cancelRunRef.current = false;
+      runAbortRef.current?.abort();
+      const runAbort = new AbortController();
+      runAbortRef.current = runAbort;
       if (!resume) {
         try {
           const task = await api.createTask('batch', label);
@@ -893,7 +898,10 @@ const FlowSurfaceInner = memo(function FlowSurfaceInner({
             if (p.currentId) highlightBlock(p.currentId, { keepMode: true });
           }
         },
-        { get cancelled() { return cancelRunRef.current; } },
+        {
+          get cancelled() { return cancelRunRef.current || runAbort.signal.aborted; },
+          abortSignal: runAbort.signal,
+        },
         onlyIds,
         completedBefore,
       );
@@ -932,6 +940,9 @@ const FlowSurfaceInner = memo(function FlowSurfaceInner({
   const runCascade = useCallback(
     async (blockId: string) => {
       cancelRunRef.current = false;
+      runAbortRef.current?.abort();
+      const runAbort = new AbortController();
+      runAbortRef.current = runAbort;
       appendLog('Cascade 级联运行开始');
       try {
         await runCascadeFromBlock({
@@ -941,7 +952,10 @@ const FlowSurfaceInner = memo(function FlowSurfaceInner({
           getNodes: () => nodesRef.current,
           setEdges,
           updateNodeData: updateNodeDataStable,
-          signal: { get cancelled() { return cancelRunRef.current; } },
+          signal: {
+            get cancelled() { return cancelRunRef.current || runAbort.signal.aborted; },
+            abortSignal: runAbort.signal,
+          },
           onProgress: (p) => {
             if (p.phase === 'blocked') {
               appendLog(`Cascade 关键帧审阅阻塞 · 待审 ${(p.pendingShots ?? []).join(', ')}`);
@@ -961,8 +975,12 @@ const FlowSurfaceInner = memo(function FlowSurfaceInner({
   const runSelectedDownstream = useCallback(
     async (ids: string[]) => {
       cancelRunRef.current = false;
+      runAbortRef.current?.abort();
+      const runAbort = new AbortController();
+      runAbortRef.current = runAbort;
       appendLog('重跑下游链开始');
       for (const id of ids) {
+        if (runAbort.signal.aborted) break;
         await runDownstreamFromBlock({
           blockId: id,
           nodes: nodesRef.current,
@@ -970,7 +988,10 @@ const FlowSurfaceInner = memo(function FlowSurfaceInner({
           getNodes: () => nodesRef.current,
           setEdges,
           updateNodeData: updateNodeDataStable,
-          signal: { get cancelled() { return cancelRunRef.current; } },
+          signal: {
+            get cancelled() { return cancelRunRef.current || runAbort.signal.aborted; },
+            abortSignal: runAbort.signal,
+          },
           onProgress: (p) => {
             if (p.phase === 'blocked') {
               appendLog(`下游链审阅阻塞 · ${(p.pendingShots ?? []).join(', ')}`);
@@ -1008,6 +1029,7 @@ const FlowSurfaceInner = memo(function FlowSurfaceInner({
 
   const stopRun = useCallback(() => {
     cancelRunRef.current = true;
+    runAbortRef.current?.abort();
     cancelBatch();
     appendLog('已请求停止运行');
   }, [cancelBatch, appendLog]);

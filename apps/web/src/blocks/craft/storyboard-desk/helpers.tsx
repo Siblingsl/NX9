@@ -160,6 +160,7 @@ export type ShotEditDraft = Pick<
   | 'compositionTemplateId'
   | 'costumeOverrides'
   | 'propIds'
+  | 'shotAssetId'
 > & {
   dialogueText: string;
   dialogueSpeaker: string;
@@ -190,6 +191,7 @@ export function createShotEditDraft(shot: ScriptBreakdownShot): ShotEditDraft {
     compositionTemplateId: shot.compositionTemplateId ?? null,
     costumeOverrides: (shot.costumeOverrides ?? []).map((o) => ({ ...o })),
     propIds: [...(shot.propIds ?? [])],
+    shotAssetId: shot.shotAssetId ?? null,
     dialogueText: shot.dialogue?.[0]?.text ?? '',
     dialogueSpeaker: shot.dialogue?.[0]?.speaker ?? '',
   };

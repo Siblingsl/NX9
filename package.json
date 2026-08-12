@@ -23,6 +23,11 @@
     "pnpm": ">=10"
   },
   "pnpm": {
+    "overrides": {
+      "remotion": "4.0.499",
+      "@remotion/player": "4.0.499",
+      "@remotion/renderer": "4.0.499"
+    },
     "onlyBuiltDependencies": [
       "@prisma/client",
       "@prisma/engines",

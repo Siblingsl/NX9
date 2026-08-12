@@ -1,11 +1,12 @@
 import { lazy, memo, Suspense, useCallback, useMemo, useRef } from 'react';
 import { type NodeProps, useEdges, useNodes, useReactFlow } from '@xyflow/react';
-import { gatherUpstream, AUDIO_FORMAT_OPTIONS, SPEECH_RATE_OPTIONS, resolveRunLabel } from '@nx9/shared';
+import { gatherUpstream, AUDIO_FORMAT_OPTIONS, SPEECH_RATE_OPTIONS, resolveRunLabel, resolveCharacterReferenceAudio } from '@nx9/shared';
 import { BlockShell } from '../shared/BlockShell';
 import { GenUpstreamHint } from '../shared/upstream-hints';
 import { useUpstreamPrompt } from '../shared/use-upstream-prompt';
 import { api } from '../../api/client';
 import { useActivityLog } from '../../stores/activity-log';
+import { runSoundGenBgm, synthesizeTts } from '../../engine/sound-gen-runner';
 import { useUnifiedMentions } from '../../engine/use-unified-mentions';
 import { useCredentialVault } from '../../stores/credential-vault';
 import { useAllAssetLibraryItems } from '../../hooks/use-asset-library-items';
@@ -30,6 +31,7 @@ function SoundGenBlock(props: NodeProps) {
   const refInputRef = useRef<HTMLInputElement>(null);
   const appendLog = useActivityLog((s) => s.append);
   const characters = useWorkspaceDocument((s) => s.characters.characters);
+  const soundLibrarySounds = useWorkspaceDocument((s) => s.soundLibrary.sounds);
   const soundMode = (props.data?.soundMode as string) ?? 'tts';
   const text = (props.data?.text as string) ?? '';
   const upstreamPrompt = (props.data?.upstreamPrompt as string) ?? '';
@@ -53,7 +55,9 @@ function SoundGenBlock(props: NodeProps) {
     () => characters.find((c) => c.id === characterId),
     [characters, characterId],
   );
-  const luxRef = selectedChar?.referenceAudioUrl || referenceAudioUrl;
+  const luxRef =
+    resolveCharacterReferenceAudio(selectedChar, soundLibrarySounds).audioUrl
+    || referenceAudioUrl;
 
   const uploadRefAudio = useCallback(
     async (file: File) => {
@@ -95,27 +99,25 @@ function SoundGenBlock(props: NodeProps) {
     updateNodeData(props.id, { status: 'running' });
     appendLog(`AI 配音启动 · ${props.id}`);
     try {
-      const res = await api.proxyTts({
+      const res = await synthesizeTts({
         input,
-        voice: provider === 'luxtts' ? `luxtts:${luxRef}` : voice,
-        useLuxTts: provider === 'luxtts',
-        referenceAudioUrl: provider === 'luxtts' ? luxRef : undefined,
-        luxTtsProfileId: selectedChar?.id,
-        response_format: audioFormat,
-        speed: speechRate,
+        voice,
+        provider,
+        referenceAudioUrl: luxRef,
+        characterId: selectedChar?.id,
+        audioFormat,
+        speechRate,
+        instructions: (props.data?.instructions as string) || undefined,
       });
       updateNodeData(props.id, {
-        status: 'done',
+        status: 'success',
         audioUrl: res.url,
         content: input,
         providerUsed: res.provider,
       });
       appendLog(
-        `AI 配音完成 · ${props.id} · ${res.provider ?? 'tts'} · ${Math.round(res.bytes / 1024)}KB`,
+        `AI 配音完成 · ${props.id} · ${res.provider ?? 'tts'} · ${Math.round((res.bytes ?? 0) / 1024)}KB`,
       );
-      if (res.fallback?.reason) {
-        appendLog(`TTS 保底：${res.fallback.reason}`);
-      }
     } catch (e) {
       updateNodeData(props.id, { status: 'error', error: String(e) });
       appendLog(`AI 配音失败 · ${props.id}`);
@@ -123,6 +125,7 @@ function SoundGenBlock(props: NodeProps) {
   }, [
     appendLog,
     props.id,
+    props.data,
     text,
     provider,
     voice,
@@ -159,35 +162,14 @@ function SoundGenBlock(props: NodeProps) {
     try {
       const resolvedPrompt = resolveMentions(content);
       const finalPrompt = resolvedPrompt.resolved || content;
-      const res = await fetch('/api/gateway/music', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt: finalPrompt, durationSec: 30, provider: bgmSettings.provider, apiKey: bgmSettings.apiKey }),
-      });
-      if (!res.ok) {
-        const err = await res.text();
-        throw new Error(err || 'BGM 生成失败');
-      }
-      const { taskId } = await res.json();
-      let attempts = 0;
-      const poll = async (): Promise<string> => {
-        const pollRes = await fetch(`/api/gateway/music/${taskId}`);
-        if (!pollRes.ok) throw new Error('查询任务状态失败');
-        const task = await pollRes.json();
-        if (task.status === 'done') return task.url;
-        if (task.status === 'error') throw new Error(task.error || 'BGM 生成失败');
-        if (++attempts > 30) throw new Error('BGM 生成超时');
-        await new Promise((r) => setTimeout(r, 2000));
-        return poll();
-      };
-      const url = await poll();
-      updateNodeData(props.id, { status: 'done', audioUrl: url });
+      const url = await runSoundGenBgm(finalPrompt, 30);
+      updateNodeData(props.id, { status: 'success', audioUrl: url });
       appendLog(`BGM 生成完成 · ${props.id}`);
     } catch (e) {
       updateNodeData(props.id, { status: 'error', error: String(e) });
       appendLog(`BGM 生成失败 · ${props.id}`);
     }
-  }, [props.id, props.data, updateNodeData, appendLog]);
+  }, [props.id, props.data, updateNodeData, appendLog, resolveMentions, bgmSettings.apiKey]);
 
   if (soundMode === 'cast') {
     return (
@@ -385,16 +367,18 @@ function SoundGenBlock(props: NodeProps) {
               onChange={(e) => {
                 const id = e.target.value;
                 const c = characters.find((x) => x.id === id);
+                const resolved = resolveCharacterReferenceAudio(c, soundLibrarySounds);
                 updateNodeData(props.id, {
                   characterId: id,
-                  referenceAudioUrl: c?.referenceAudioUrl ?? '',
+                  referenceAudioUrl: resolved.audioUrl ?? '',
+                  soundAssetId: resolved.soundAssetId ?? null,
                 });
               }}
               className="w-full rounded-lg border border-line bg-surface px-2 py-1 text-xs"
             >
               <option value="">— 从角色库选择 —</option>
               {characters
-                .filter((c) => c.referenceAudioUrl)
+                .filter((c) => Boolean(resolveCharacterReferenceAudio(c, soundLibrarySounds).audioUrl))
                 .map((c) => (
                   <option key={c.id} value={c.id}>
                     {c.name}

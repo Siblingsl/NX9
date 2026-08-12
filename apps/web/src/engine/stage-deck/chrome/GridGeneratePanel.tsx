@@ -3,7 +3,7 @@ import { useFlowCommands } from '../../../stores/flow-commands';
 import { useWorkspaceDocument } from '../../../stores/workspace-document';
 import { useFlowRuntime } from '../../../stores/flow-runtime';
 import { useActivityLog } from '../../../stores/activity-log';
-import type { StoryboardShot } from '@nx9/shared';
+import { buildLineArtShotPatch, type StoryboardShot } from '@nx9/shared';
 
 function newShot(index: number): StoryboardShot {
   return {
@@ -40,6 +40,7 @@ export function GridGeneratePanel({ selectedBlockId }: GridGeneratePanelProps) {
   const splitUrls = (node?.data?.splitUrls as string[]) ?? [];
   const isGridSplit = node?.type === 'grid-split';
   const gridStyle = node?.data?.style as string | undefined;
+  const asLineArt = gridStyle === 'line-art';
 
   const spawnGridChain = () => {
     requestSpawn('grid-split');
@@ -64,22 +65,36 @@ export function GridGeneratePanel({ selectedBlockId }: GridGeneratePanelProps) {
       const shot = shots[i];
       if (!shot) {
         const ns = newShot(i + 1);
-        ns.firstFrameAssetId = url;
-        ns.status = 'review';
+        if (asLineArt) {
+          Object.assign(ns, buildLineArtShotPatch(url));
+        } else {
+          ns.firstFrameAssetId = url;
+          ns.status = 'review';
+          ns.keyframeStatus = 'review';
+        }
         newShots.push(ns);
         assigned++;
         return;
       }
-      updateShot(shot.id, {
-        firstFrameAssetId: url,
-        status: 'review',
-      });
+      if (asLineArt) {
+        updateShot(shot.id, buildLineArtShotPatch(url));
+      } else {
+        updateShot(shot.id, {
+          firstFrameAssetId: url,
+          status: 'review',
+          keyframeStatus: 'review',
+        });
+      }
       assigned++;
     });
     if (newShots.length > 0) {
       addShots(newShots, 'append');
     }
-    appendLog(`已将 ${assigned} 张切分图写入故事板（待审阅）`);
+    appendLog(
+      asLineArt
+        ? `已将 ${assigned} 张线稿写入分镜 lineArtUrl（未占用导演关键帧）`
+        : `已将 ${assigned} 张切分图写入故事板关键帧（待审阅）`,
+    );
   };
 
   return (
@@ -89,7 +104,7 @@ export function GridGeneratePanel({ selectedBlockId }: GridGeneratePanelProps) {
       </p>
       {gridStyle === 'line-art' && (
         <p className="text-[10px] text-brand/70 bg-brand/5 rounded-lg px-2 py-1">
-          线稿模式 · 分配后故事板镜头自动标为「待审阅」
+          线稿模式 · 只写入 lineArtUrl，不占用导演关键帧
         </p>
       )}
       <div className="flex gap-2">

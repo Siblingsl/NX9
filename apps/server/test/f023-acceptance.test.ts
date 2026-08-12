@@ -137,6 +137,8 @@ describe('F-023 acceptance', () => {
   // ── ScriptDeskBlock UI 集成 ──
   describe('ScriptDeskBlock UI integration', () => {
     const src = readWeb(SCRIPT_DESK_BLOCK);
+    const diag = readWeb('blocks/nx9/script-desk/DiagnosticsPanel.tsx');
+    const bible = readWeb('blocks/nx9/script-desk/BiblePanel.tsx');
 
     it('imports runConsistencyCheck and applyConsistencyFixes', () => {
       expect(src).toContain('runConsistencyCheck');
@@ -144,11 +146,11 @@ describe('F-023 acceptance', () => {
     });
 
     it('has 运行手动一致性检查 button', () => {
-      expect(src).toContain('运行手动一致性检查');
+      expect(diag).toContain('运行手动一致性检查');
     });
 
     it('has 一键修复缺失字段 button', () => {
-      expect(src).toContain('一键修复缺失字段');
+      expect(diag).toContain('一键修复缺失字段');
     });
 
     it('has handleManualConsistencyCheck callback', () => {
@@ -170,18 +172,19 @@ describe('F-023 acceptance', () => {
     });
 
     it('diagnostic items are clickable with entityId', () => {
-      expect(src).toContain('sd2-diag--clickable');
-      expect(src).toContain('onClick={() => handleDiagClick(d.entityId)}');
-      expect(src).toContain('点击定位到 Bible');
+      expect(diag).toContain('sd2-diag--clickable');
+      expect(diag).toContain('onClick={() => onDiagClick(d)}');
+      expect(diag).toContain('点击定位到设定');
+      expect(src).toContain('onDiagClick={handleDiagClick}');
     });
 
     it('Bible character cards use highlightedBibleId', () => {
-      expect(src).toContain('highlightedBibleId === c.name');
-      expect(src).toContain('sd2-bible-card--highlight');
+      expect(bible).toContain('highlightedBibleId === c.name');
+      expect(bible).toContain('sd2-bible-card--highlight');
     });
 
     it('Bible scene cards use highlightedBibleId', () => {
-      expect(src).toContain('highlightedBibleId === s.name');
+      expect(bible).toContain('highlightedBibleId === s.name');
     });
   });
 

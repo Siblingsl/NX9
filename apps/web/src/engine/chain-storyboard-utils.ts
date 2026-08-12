@@ -10,9 +10,11 @@ import {
   buildChainStoryboardPayload,
   patchChainShot as patchChainShotShared,
   activeChainEpisodeShots,
+  CHAIN_STORYBOARD_HANDOFF_HASH_SCHEMA_VERSION,
   chainStoryboardHash,
   lineArtVersionHash,
   migrateGlobalToChainStoryboard,
+  hygieneChainStoryboard,
   type ChainStoryboardPayload,
   type StoryboardShot,
   type EpisodeMeta,
@@ -39,15 +41,29 @@ export function resolveUpstreamChainDesk(
   edges: Array<{ source: string; target: string }>,
 ): string | null {
   const nodeMap = new Map(nodes.map((n) => [n.id, n]));
-  const incoming = edges.filter((e) => e.target === nodeId);
-  for (const edge of incoming) {
-    const sourceNode = nodeMap.get(edge.source);
-    if (!sourceNode) continue;
-    const data = sourceNode.data as Record<string, unknown>;
-    const chain = readChainStoryboard(data);
-    if (chain) return sourceNode.id;
-    if (sourceNode.type === 'storyboard-desk' || sourceNode.type === 'storyboard-preview' || sourceNode.type === 'story-grid') {
-      return sourceNode.id;
+  const visited = new Set<string>();
+  const queue = [nodeId];
+  while (queue.length > 0) {
+    const current = queue.shift();
+    if (!current || visited.has(current)) continue;
+    visited.add(current);
+    const incoming = edges.filter((e) => e.target === current);
+    for (const edge of incoming) {
+      const sourceNode = nodeMap.get(edge.source);
+      if (!sourceNode) continue;
+      const data = sourceNode.data as Record<string, unknown>;
+      const chain = readChainStoryboard(data);
+      if (chain) return sourceNode.id;
+      if (
+        sourceNode.type === 'storyboard-desk'
+        || sourceNode.type === 'storyboard-preview'
+        || sourceNode.type === 'story-grid'
+      ) {
+        return sourceNode.id;
+      }
+      if (sourceNode.type === 'director-desk' || sourceNode.type === 'director-3d') {
+        queue.push(sourceNode.id);
+      }
     }
   }
   return null;
@@ -241,6 +257,51 @@ export function migrateUpstreamChainStoryboard(
   return true;
 }
 
+/**
+ * 把读时清洗（线稿污染 / Data URL 3D 截图）写回 chain，避免脏字段一直躺在工作区 JSON。
+ */
+export function persistChainStoryboardHygiene(
+  updateNodeData: (id: string, data: Record<string, unknown>) => void,
+  deskId: string,
+  nodeData: Record<string, unknown>,
+): { migratedCount: number; quarantinedCount: number } {
+  const raw = nodeData.chainStoryboard as ChainStoryboardPayload | undefined;
+  if (!raw || !Array.isArray(raw.shots)) {
+    return { migratedCount: 0, quarantinedCount: 0 };
+  }
+  const result = hygieneChainStoryboard(raw);
+  if (
+    result.migratedCount === 0
+    && result.quarantinedCount === 0
+    && result.chain.mediaRoleSchemaVersion === raw.mediaRoleSchemaVersion
+  ) {
+    return { migratedCount: 0, quarantinedCount: 0 };
+  }
+  updateNodeData(deskId, { chainStoryboard: result.chain });
+  return {
+    migratedCount: result.migratedCount,
+    quarantinedCount: result.quarantinedCount,
+  };
+}
+
+export function persistUpstreamChainHygiene(
+  updateNodeData: (id: string, data: Record<string, unknown>) => void,
+  nodeId: string,
+  nodes: Node[],
+  edges: Array<{ source: string; target: string }>,
+): boolean {
+  const deskId = resolveUpstreamChainDesk(nodeId, nodes, edges);
+  if (!deskId) return false;
+  const deskNode = nodes.find((node) => node.id === deskId);
+  if (!deskNode) return false;
+  const result = persistChainStoryboardHygiene(
+    updateNodeData,
+    deskId,
+    deskNode.data as Record<string, unknown>,
+  );
+  return result.migratedCount > 0 || result.quarantinedCount > 0;
+}
+
 export function validateDirectorHandoff(input: {
   handoff: Record<string, unknown> | undefined;
   chain: ChainStoryboardPayload | undefined;
@@ -249,9 +310,15 @@ export function validateDirectorHandoff(input: {
 }): { valid: boolean; reason: string } {
   const { handoff, chain, episodeId, scriptHash } = input;
   if (!handoff || !chain || !episodeId) return { valid: false, reason: '缺少交接数据' };
+  if (handoff.hashSchemaVersion !== CHAIN_STORYBOARD_HANDOFF_HASH_SCHEMA_VERSION) {
+    return { valid: false, reason: '交接哈希版本过旧' };
+  }
+  if (handoff.episodeId !== episodeId) {
+    return { valid: false, reason: '交接集不匹配' };
+  }
   const checks = [
     ['scriptHash', handoff.scriptHash, scriptHash],
-    ['storyboardHash', handoff.storyboardHash, chainStoryboardHash(chain)],
+    ['storyboardHash', handoff.storyboardHash, chainStoryboardHash(chain, episodeId)],
     ['lineartVersion', handoff.lineartVersion, lineArtVersionHash(chain, episodeId)],
   ] as const;
   const mismatch = checks.find(([, expected, actual]) => !expected || !actual || expected !== actual);

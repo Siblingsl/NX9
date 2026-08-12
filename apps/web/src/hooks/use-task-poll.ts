@@ -18,15 +18,18 @@ export function useTaskPoll() {
     intervalRef.current = setInterval(async () => {
       try {
         const res = await api.getTaskStatus(taskId);
-        const s = res.status as TaskStatus;
-        if (s === 'done') {
+        const raw = res.status;
+        if (raw === 'done') {
           setTask({ status: 'done', url: res.url });
           if (intervalRef.current) clearInterval(intervalRef.current);
-        } else if (s === 'error') {
-          setTask({ status: 'error', message: res.message || '渲染失败' });
+        } else if (raw === 'error' || raw === 'cancelled') {
+          setTask({
+            status: 'error',
+            message: res.message || (raw === 'cancelled' ? '渲染已取消' : '渲染失败'),
+          });
           if (intervalRef.current) clearInterval(intervalRef.current);
         } else {
-          setTask({ status: s });
+          setTask({ status: (raw as TaskStatus) || 'queued' });
         }
       } catch {
         setTask({ status: 'error', message: '轮询失败' });

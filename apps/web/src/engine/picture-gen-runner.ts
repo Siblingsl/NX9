@@ -1,5 +1,12 @@
 import { resolvePictureModelForRequest } from '@nx9/shared';
 import { api } from '../api/client';
+import { pollVideoUntilDone, VideoPollTimeoutError } from './poll-task';
+import { packPictureRefs } from './picture-gen-refs';
+
+export interface PictureGenJobMeta {
+  truncatedRefs?: number;
+  taskId?: string;
+}
 
 export interface PictureGenJobInput {
   prompt: string;
@@ -21,6 +28,8 @@ export interface PictureGenJobInput {
   imageSizeTier?: string;
   resolutionTier?: string;
   signal?: AbortSignal;
+  /** PG-14/PG-17: 截断数、异步 taskId 回传 */
+  onMeta?: (meta: PictureGenJobMeta) => void;
 }
 
 export const PANORAMA_720_PROMPT_SUFFIX = [
@@ -70,6 +79,8 @@ export async function runPictureGenJob(input: PictureGenJobInput): Promise<strin
   const safePrompt = prompt || 'high quality refined image, preserve subject';
 
   if (def.provider === 'fal') {
+    // PG-11: fal 代理单次只返回 1 张（res.url 单值），n>1 在此链路不可达；
+    // 多张请走「生成多图」多提示词批量。
     const falInput: Record<string, unknown> = { prompt: safePrompt };
     if (input.negativePrompt?.trim()) {
       falInput.negative_prompt = input.negativePrompt.trim();
@@ -82,11 +93,15 @@ export async function runPictureGenJob(input: PictureGenJobInput): Promise<strin
       falInput.num_images = 1;
       falInput.enable_safety_checker = true;
     }
-    const ref =
-      input.referenceImageUrl?.trim() ||
-      input.referenceImageUrls?.find((u) => u?.trim())?.trim() ||
-      '';
-    const style = input.styleImageUrl?.trim();
+    const packed = packPictureRefs({
+      provider: 'fal',
+      primary: input.referenceImageUrl,
+      extras: input.referenceImageUrls,
+      style: input.styleImageUrl,
+    });
+    if (packed.truncatedCount > 0) input.onMeta?.({ truncatedRefs: packed.truncatedCount });
+    const ref = packed.primary ?? '';
+    const style = packed.style;
     // fal 的 supportsReference 表示「该端点是图生图专用」，文生图应换模型，而不是在这里硬失败
     if (def.supportsReference) {
       if (!ref && !style) {
@@ -98,8 +113,8 @@ export async function runPictureGenJob(input: PictureGenJobInput): Promise<strin
       const s = input.strength;
       falInput.strength =
         typeof s === 'number' && s > 0 && s <= 1 ? s : 0.85;
-      if (style && ref && style !== ref) {
-        falInput.prompt = `${safePrompt}\n\n[Style reference attached; match visual style]`;
+      if (packed.styleNote) {
+        falInput.prompt = `${safePrompt}\n\n${packed.styleNote}`;
       }
     }
      const res = await api.proxyFal({ model: def.model, input: falInput }, { signal: input.signal });
@@ -114,14 +129,15 @@ export async function runPictureGenJob(input: PictureGenJobInput): Promise<strin
       ? '1024x1024'
       : '1792x1024'
     : input.size || def.defaultSize || '1024x1024';
-  const refForProxy =
-    input.referenceImageUrl?.trim() ||
-    input.referenceImageUrls?.find((u) => u?.trim())?.trim() ||
-    input.styleImageUrl?.trim() ||
-    '';
-  const extraRefs = (input.referenceImageUrls ?? [])
-    .map((u) => u?.trim())
-    .filter((u): u is string => !!u && u !== refForProxy);
+  // PG-14: 按 provider 限额裁剪；风格图插在主参考后的安全位，注记按下标指认
+  const packed = packPictureRefs({
+    provider: def.provider,
+    primary: input.referenceImageUrl,
+    extras: input.referenceImageUrls,
+    style: input.styleImageUrl,
+  });
+  const refForProxy = packed.primary ?? '';
+  const dedupedExtraRefs = packed.extras;
   const tier =
     input.imageSizeTier?.trim() ||
     input.resolutionTier?.trim() ||
@@ -129,8 +145,11 @@ export async function runPictureGenJob(input: PictureGenJobInput): Promise<strin
   const sendRefs = Boolean(
     refForProxy && (def.supportsReference || def.provider === 'gemini' || def.provider === 'openai'),
   );
+  const proxyPrompt = packed.styleNote
+    ? `${safePrompt}\n\n${packed.styleNote}`
+    : safePrompt;
   const res = (await api.proxyImage({
-    prompt: safePrompt,
+    prompt: proxyPrompt,
     model: def.model,
     provider: def.provider,
     size: requestSize,
@@ -139,7 +158,7 @@ export async function runPictureGenJob(input: PictureGenJobInput): Promise<strin
     ...(sendRefs
       ? {
           referenceImageUrl: refForProxy,
-          ...(extraRefs.length ? { referenceImageUrls: extraRefs } : {}),
+          ...(dedupedExtraRefs.length ? { referenceImageUrls: dedupedExtraRefs } : {}),
         }
       : {}),
   }, { signal: input.signal })) as {
@@ -149,10 +168,18 @@ export async function runPictureGenJob(input: PictureGenJobInput): Promise<strin
     status?: string;
     taskId?: string;
     message?: string;
+    truncatedRefs?: number;
   };
+  const truncatedRefs = Math.max(packed.truncatedCount, Number(res.truncatedRefs) || 0);
+  if (truncatedRefs > 0) input.onMeta?.({ truncatedRefs });
   if (res.status === 'processing' && res.taskId) {
-    const url = await pollClipTask(res.taskId);
-    if (!url) throw new Error(res.message ?? 'Magic Hour 图片仍在生成中');
+    input.onMeta?.({ taskId: res.taskId, truncatedRefs: truncatedRefs || undefined });
+    // PG-02: 异步图片任务与视频同口径轮询（默认 60 次 × 5s），不再单次查询即失败
+    // PG-17: 超时文案走图片口径，taskId 由调用方持久化
+    const url = await pollVideoUntilDone(res.taskId, {
+      signal: input.signal,
+      mediaKind: 'image',
+    });
     const urls = [url];
     return panorama ? normalizePanoramaUrls(urls) : urls;
   }
@@ -161,9 +188,42 @@ export async function runPictureGenJob(input: PictureGenJobInput): Promise<strin
   return panorama ? normalizePanoramaUrls(urls) : urls;
 }
 
+/**
+ * 轮询异步媒体任务直至终态（PG-02 后为完整循环）。
+ * 成功返回 url；失败/超时抛错。
+ */
 export async function pollClipTask(taskId: string): Promise<string | undefined> {
-  const res = await api.pollVideo(taskId);
-  if (res.status === 'success' && res.url) return res.url;
-  if (res.status === 'failed') throw new Error(res.message ?? '视频生成失败');
-  return undefined;
+  return pollVideoUntilDone(taskId);
+}
+
+export interface PendingImageTask {
+  taskId: string;
+  prompt?: string;
+}
+
+/**
+ * PG-17: 恢复超时的异步图片任务。成功则返回 url 列表；仍 processing 的保留。
+ */
+export async function resumePendingImageTasks(
+  tasks: PendingImageTask[],
+  signal?: AbortSignal,
+): Promise<{ urls: string[]; stillPending: PendingImageTask[]; failed: PendingImageTask[] }> {
+  const urls: string[] = [];
+  const stillPending: PendingImageTask[] = [];
+  const failed: PendingImageTask[] = [];
+  for (const task of tasks) {
+    if (!task.taskId?.trim()) continue;
+    try {
+      const url = await pollVideoUntilDone(task.taskId, { signal, mediaKind: 'image' });
+      urls.push(url);
+    } catch (e) {
+      if (e instanceof Error && e.name === 'AbortError') throw e;
+      if (e instanceof VideoPollTimeoutError) {
+        stillPending.push(task);
+      } else {
+        failed.push(task);
+      }
+    }
+  }
+  return { urls, stillPending, failed };
 }

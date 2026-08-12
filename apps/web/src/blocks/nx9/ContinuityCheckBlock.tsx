@@ -6,7 +6,14 @@ import { NodeSummaryBody } from '../shared/NodeSummaryBody';
 import { ScreenModal } from '../../components/ui/ScreenModal';
 import { api } from '../../api/client';
 import { autoFixContinuityIssue } from '../../engine/inpaint-repair';
-import { resolveShotsForBlock } from '../../engine/chain-storyboard-utils';
+import { resolveShotsForBlock, resolveUpstreamChainDesk } from '../../engine/chain-storyboard-utils';
+import {
+  CONTINUITY_IMAGE_CAP,
+  CONTINUITY_SYSTEM_PROMPT,
+  buildContinuityUserText,
+  resolveContinuityModel,
+  sliceContinuityImages,
+} from '../../engine/continuity-check-runner';
 import { useActivityLog } from '../../stores/activity-log';
 import { useFlowRuntime, useStoryboardUi } from '../../stores/flow-runtime';
 import { useWorkspaceDocument } from '../../stores/workspace-document';
@@ -19,11 +26,23 @@ function ContinuityCheckBlock(props: NodeProps) {
   const runCascade = runtime?.runCascade;
   const nodes = useNodes();
   const edges = useEdges();
-  // F-003: 链优先读取上游镜表
-  const storyboardShots = useMemo(
-    () => resolveShotsForBlock(props.id, nodes, edges, true),
+  // 多链：只认连线上游分镜台，禁止全画布 find 第一个 desk
+  const upstreamDeskId = useMemo(
+    () => resolveUpstreamChainDesk(props.id, nodes, edges),
     [props.id, nodes, edges],
   );
+  const storyboardShots = useMemo(
+    () => resolveShotsForBlock(props.id, nodes, edges, false),
+    [props.id, nodes, edges],
+  );
+  const focusUpstreamDesk = useCallback(() => {
+    if (upstreamDeskId) {
+      runtime?.focusBlock?.(upstreamDeskId);
+      return true;
+    }
+    appendLog('[连贯性] 未找到连线上游分镜台');
+    return false;
+  }, [appendLog, runtime, upstreamDeskId]);
   const updateShot = useWorkspaceDocument((s) => s.updateShot);
   const selectShot = useStoryboardUi((s) => s.selectShot);
   const [reportOpen, setReportOpen] = useState(false);
@@ -48,26 +67,32 @@ function ContinuityCheckBlock(props: NodeProps) {
     }
     updateNodeData(props.id, { status: 'running' });
     try {
-      const res = await api.proxyLlm({
-        model: 'gpt-4o-mini',
+      const sliced = sliceContinuityImages(images);
+      if (sliced.note) appendLog(`连贯性检查：${sliced.note}`);
+      const llmBody: Record<string, unknown> = {
         messages: [
-          {
-            role: 'system',
-            content:
-              '你是分镜 continuity supervisor。对比多张镜头静帧，列出服装、光影、轴线、道具不一致之处。输出 JSON: {"summary":"...","issues":["..."]}',
-          },
+          { role: 'system', content: CONTINUITY_SYSTEM_PROMPT },
           {
             role: 'user',
             content: [
               {
                 type: 'text',
-                text: `检查 ${images.length} 个镜头的连贯性。上下文：${upstream?.prompts?.join(' ') ?? ''}`,
+                text: buildContinuityUserText({
+                  imageCount: images.length,
+                  omitted: sliced.omitted,
+                  context: upstream?.prompts?.join(' ') ?? '',
+                }),
               },
-              ...images.slice(0, 4).map((url) => ({ type: 'image_url', image_url: { url } })),
+              ...sliced.sent.map((url) => ({ type: 'image_url', image_url: { url } })),
             ],
           },
         ],
-      });
+      };
+      const continuityModel = resolveContinuityModel(
+        (props.data ?? {}) as Record<string, unknown>,
+      );
+      if (continuityModel) llmBody.model = continuityModel;
+      const res = await api.proxyLlm(llmBody);
       const raw = (res as { content?: string }).content ?? JSON.stringify(res);
       let summary = raw;
       let parsedIssues: string[] = [];
@@ -83,9 +108,12 @@ function ContinuityCheckBlock(props: NodeProps) {
         continuityReport: summary,
         continuityIssues: parsedIssues,
         content: summary,
-        meta: { issueCount: parsedIssues.length, checkedImages: images.length },
+        imagesChecked: images.length,
+        imagesOmitted: sliced.omitted,
+        continuityCapNote: sliced.note,
+        meta: { issueCount: parsedIssues.length, checkedImages: images.length, omitted: sliced.omitted },
       });
-      appendLog(`连贯性检查完成 · ${parsedIssues.length} 项`);
+      appendLog(`连贯性检查完成 · ${parsedIssues.length} 项${sliced.note ? ` · ${sliced.note}` : ''}`);
       setReportOpen(true);
     } catch (e) {
       const partialText = `## 连贯性检查失败 (partial)\n\nLLM 调用中断：${String(e)}`;
@@ -97,7 +125,7 @@ function ContinuityCheckBlock(props: NodeProps) {
         continuityIssues: [],
       });
     }
-  }, [upstream, storyboardShots, props.id, updateNodeData, appendLog]);
+  }, [upstream, storyboardShots, props.data, props.id, updateNodeData, appendLog]);
 
   const handleJumpToShot = useCallback(
     (issue: string) => {
@@ -111,12 +139,12 @@ function ContinuityCheckBlock(props: NodeProps) {
       if (matched) {
         selectShot(matched.id);
         updateShot(matched.id, {});
-        const desk = runtime?.getNodes().find((n) => n.type === 'storyboard-desk');
-        if (desk) runtime?.focusBlock?.(desk.id);
-        appendLog(`[连贯性] 跳转镜头 ${matched.sceneCode ?? matched.id} · 请打开分镜台`);
+        if (focusUpstreamDesk()) {
+          appendLog(`[连贯性] 跳转镜头 ${matched.sceneCode ?? matched.id} · 请打开分镜台`);
+        }
       }
     },
-    [storyboardShots, selectShot, updateShot, appendLog, runtime],
+    [storyboardShots, selectShot, updateShot, appendLog, focusUpstreamDesk],
   );
 
   const handleRegenerate = useCallback(
@@ -132,12 +160,12 @@ function ContinuityCheckBlock(props: NodeProps) {
         await runCascade(matched.linkedBlockId);
         appendLog(`[连贯性] 重生成镜头 ${matched.sceneCode ?? matched.id}`);
       } else {
-        const desk = runtime?.getNodes().find((n) => n.type === 'storyboard-desk');
-        if (desk) runtime?.focusBlock?.(desk.id);
-        appendLog(`[连贯性] 无关联节点，请用画布「分镜台」处理`);
+        if (focusUpstreamDesk()) {
+          appendLog(`[连贯性] 无关联节点，请用画布「分镜台」处理`);
+        }
       }
     },
-    [storyboardShots, runCascade, appendLog, runtime],
+    [storyboardShots, runCascade, appendLog, focusUpstreamDesk],
   );
 
   const picN = upstream?.pictures?.length ?? 0;
@@ -160,7 +188,9 @@ function ContinuityCheckBlock(props: NodeProps) {
             ? issues.length
               ? `发现 ${issues.length} 项不一致，点击查看报告`
               : '检查完成，暂无明显问题'
-            : `上游 ${picN} 图 · ${clipN} 视频 · 至少 2 张图可检`
+            : `上游 ${picN} 图 · ${clipN} 视频 · 至少 2 张图可检${
+                picN > CONTINUITY_IMAGE_CAP ? `（超出 ${CONTINUITY_IMAGE_CAP} 张将提示并截取）` : ''
+              }`
         }
         summaryClickable={Boolean(report)}
         onSummaryClick={() => setReportOpen(true)}

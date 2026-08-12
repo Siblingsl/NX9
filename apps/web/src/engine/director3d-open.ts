@@ -1,104 +1,74 @@
-import {
-  emptyStoryboardPreview,
-  resolveConnectedStoryboardPreviewForDirector3dId,
-  type StoryboardPreviewPayload,
-} from '@nx9/shared';
-import { normalizeDirectorProject, type DirectorProject } from '@nx9/director3d';
+import { normalizeDirectorProject } from '@nx9/director3d';
 import { useDirector3dUi } from '../stores/director3d-ui';
-import { useWorkspaceDocument } from '../stores/workspace-document';
-import { prepareDirectorProjectForShot } from './director3d-character-sync';
-import { findChainShot } from './chain-storyboard-aggregate';
+import {
+  resolveDirector3dHostContext,
+  type Director3dHostEdge,
+} from './director3d-host-controller';
 
-type FlowNode = { id: string; type?: string | null; data?: Record<string, unknown> | unknown };
-type FlowEdge = { source: string; target: string };
+type FlowNode = {
+  id: string;
+  type?: string | null;
+  data?: Record<string, unknown> | unknown;
+};
 
 export interface Director3dOpenContext {
   blockId: string;
   nodes: FlowNode[];
-  edges: FlowEdge[];
-  /** 若提供，打开前写入节点 data（绑定分镜等） */
+  edges: Director3dHostEdge[];
   updateNodeData?: (id: string, patch: Record<string, unknown>) => void;
-  /** 覆盖当前绑定帧（节点内切换后打开） */
   frameIdOverride?: string | null;
 }
 
-/** 解析导演台当前绑定的分镜预览与帧，并打开全屏 3D 舞台。 */
+/**
+ * 打开全屏容器。上下游、episode、shot、线稿和存储节点均由唯一 host resolver 决定。
+ */
 export function openDirector3dStage(ctx: Director3dOpenContext): void {
-  const node = ctx.nodes.find((item) => item.id === ctx.blockId);
-  const data = (node?.data ?? {}) as Record<string, unknown>;
-  const project = normalizeDirectorProject(data.scene);
-  const characters = useWorkspaceDocument.getState().characters.characters;
-
-  const previewBlockId = resolveConnectedStoryboardPreviewForDirector3dId(
-    ctx.blockId,
-    ctx.nodes,
-    ctx.edges,
-  );
-  const previewNode = previewBlockId
-    ? ctx.nodes.find((item) => item.id === previewBlockId)
-    : undefined;
-  const previewRaw = (previewNode?.data as Record<string, unknown> | undefined)
-    ?.storyboardPreview as StoryboardPreviewPayload | undefined;
-  const previewPayload =
-    previewRaw?.version === 1 && Array.isArray(previewRaw.frames)
-      ? { ...emptyStoryboardPreview(), ...previewRaw }
-      : emptyStoryboardPreview();
-
-  const linkedFrameId =
-    ctx.frameIdOverride !== undefined
-      ? ctx.frameIdOverride
-      : ((data.linkedStoryboardPreviewFrameId as string | undefined) ??
-        previewPayload.selectedFrameId ??
-        null);
-  const linkedFrame = previewPayload.frames.find((frame) => frame.id === linkedFrameId);
-
-  // 仅真实 720 全景可作天空盒；2D 关键帧/参考图不可塞 panorama（会变成照片背景+网格）
-  const panoramaUrl = previewPayload.panorama720?.imageUrl;
-  const referenceUrl = linkedFrame?.imageUrl ?? linkedFrame?.referenceImageUrl ?? undefined;
-  // F-003: 优先从链镜表读取；禁止回退全局
-  const linkedShotId = data.linkedShotId as string | undefined;
-  let lineArtUrl: string | undefined;
-  if (linkedShotId) {
-    const shot = findChainShot(linkedShotId, ctx.nodes as Array<{ id: string; type?: string | null; data?: Record<string, unknown> }>);
-    lineArtUrl = shot?.firstFrameAssetId ?? undefined;
-  }
-
-  let environmentProject: DirectorProject = panoramaUrl
-    ? { ...project, panorama: { url: panoramaUrl, yaw: 0, exposure: 1 } }
-    : project;
-  const flatRefs = new Set([referenceUrl, lineArtUrl].filter(Boolean) as string[]);
-  if (environmentProject.panorama?.url && flatRefs.has(environmentProject.panorama.url)) {
-    environmentProject = { ...environmentProject, panorama: null };
-  }
-
-  const nextProject = prepareDirectorProjectForShot(
-    environmentProject,
-    linkedFrame?.characterIds,
-    characters,
-    linkedFrame?.director3dGuide?.characterPlacements,
-    linkedFrame?.characterNames,
-  );
-
-  ctx.updateNodeData?.(ctx.blockId, {
-    linkedStoryboardPreviewId: previewBlockId ?? null,
-    linkedStoryboardPreviewFrameId: linkedFrame?.id ?? null,
-    linkedShotId: linkedFrame?.sourceShotId ?? (data.linkedShotId as string | null) ?? null,
+  const nodes = ctx.nodes as import('@xyflow/react').Node[];
+  const resolved = resolveDirector3dHostContext({
+    contextBlockId: ctx.blockId,
+    requestedPreviewFrameId: ctx.frameIdOverride,
+    nodes,
+    edges: ctx.edges,
   });
-  if (previewBlockId && linkedFrame && ctx.updateNodeData) {
-    ctx.updateNodeData(previewBlockId, {
-      storyboardPreview: { ...previewPayload, selectedFrameId: linkedFrame.id },
-    });
-  }
+  const storageNode = nodes.find(
+    (node) => node.id === resolved.storageBlockId,
+  );
+  const storageData = (storageNode?.data ?? {}) as Record<string, unknown>;
+  const embeddedData =
+    resolved.storageMode === 'embedded-director'
+      ? ((storageData.director3d as Record<string, unknown> | undefined) ?? {})
+      : storageData;
+  const project = normalizeDirectorProject(
+    embeddedData.standaloneProject ??
+      embeddedData.scene ??
+      storageData.scene,
+  );
+
+  ctx.updateNodeData?.(resolved.storageBlockId, {
+    activeShotId: resolved.activeShotId,
+    linkedShotId: resolved.activeShotId,
+    linkedStoryboardPreviewId: resolved.sourceChainDeskId ?? null,
+    linkedStoryboardPreviewFrameId: resolved.previewFrameId ?? null,
+  });
 
   useDirector3dUi.getState().openForBlock(
     ctx.blockId,
-    nextProject,
-    linkedFrame?.sourceShotId ?? (data.linkedShotId as string | undefined),
-    previewBlockId && linkedFrame
-      ? { previewBlockId, frameId: linkedFrame.id }
+    project,
+    resolved.activeShotId ?? undefined,
+    resolved.sourceChainDeskId && resolved.previewFrameId
+      ? {
+          previewBlockId: resolved.sourceChainDeskId,
+          frameId: resolved.previewFrameId,
+        }
       : undefined,
   );
   useDirector3dUi
     .getState()
-    .setHostBridge(panoramaUrl ?? referenceUrl ?? lineArtUrl ?? null);
+    .setHostBridge(
+      resolved.panoramaUrl ??
+        (resolved.activeShotId
+          ? resolved.lineArtByShotId[resolved.activeShotId]
+          : null) ??
+        null,
+    );
 }

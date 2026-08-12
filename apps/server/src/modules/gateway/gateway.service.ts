@@ -17,6 +17,18 @@ import { GeminiAdapter } from './gemini.adapter';
 import { VoiceboxAdapter } from './voicebox.adapter';
 import { upstreamException, upstreamTimeout } from './upstream-error';
 import { isRetryableUpstreamStatus, retryAfterMs } from './upstream-retry';
+import {
+  applyVideoPayloadExtras,
+  isLocallyBoundMediaUrl,
+  mimeFromMediaPath,
+  videoRequestNeedsReferenceChannel,
+} from './video-payload.util';
+import {
+  countImageRefUrls,
+  decideMagicHourImageRoute,
+  isExplicitMagicHourRoute,
+  MAGIC_HOUR_REF_BLOCKED,
+} from './image-proxy-policy';
 import type { LuxTtsNoGpuFallback } from '@nx9/shared';
 
 export interface TtsFallbackInfo {
@@ -229,11 +241,22 @@ export class GatewayService {
     if (!model.startsWith('grok-imagine-video')) return raw || undefined;
 
     const resolution = this.normalizeOpenAiVideoResolution(opts.resolution);
-    const aspect = String(opts.aspectRatio ?? '').trim();
+    const aspect = String(opts.aspectRatio ?? '').trim().replace('/', ':');
+    // VG-24: 画幅优先于客户端传来的横屏 size
     if (aspect === '16:9') {
       if (resolution === '480p') return '848x480';
       if (resolution === '720p') return '1280x720';
       if (resolution === '1080p') return '1920x1080';
+    }
+    if (aspect === '9:16') {
+      if (resolution === '480p') return '480x848';
+      if (resolution === '720p') return '720x1280';
+      if (resolution === '1080p') return '1080x1920';
+    }
+    if (aspect === '1:1') {
+      if (resolution === '480p') return '480x480';
+      if (resolution === '720p') return '1024x1024';
+      if (resolution === '1080p') return '1080x1080';
     }
     if (raw === '854x480') return '848x480';
     return raw || undefined;
@@ -265,10 +288,36 @@ export class GatewayService {
   }
 
   private imageUrlForOpenAiVideo(url: string, provider: VideoProviderRuntime, model: string): string {
-    if (provider.isLocalBridge && model.toLowerCase().startsWith('grok-imagine-video') && url.startsWith('/media/')) {
-      return this.mediaUrlToDataUri(url);
+    return this.mediaUrlForOpenAiVideo(url, provider, model, 'image');
+  }
+
+  /** VG-13: 本地桥把 /media 转 data URI；云端只拼公网/本机 HTTP，随后由 assert 拦截 loopback */
+  private mediaUrlForOpenAiVideo(
+    url: string,
+    provider: VideoProviderRuntime,
+    model: string,
+    kind: 'image' | 'video',
+  ): string {
+    const trimmed = url.trim();
+    if (provider.isLocalBridge && trimmed.startsWith('/media/')) {
+      if (kind === 'video' || model.toLowerCase().startsWith('grok-imagine-video')) {
+        return this.mediaUrlToDataUri(trimmed);
+      }
     }
-    return this.publicMediaUrl(url);
+    return this.publicMediaUrl(trimmed);
+  }
+
+  private assertCloudCanReachMedia(urls: string[], provider: VideoProviderRuntime, label: string): void {
+    if (provider.isLocalBridge) return;
+    const unreachable = urls.filter((u) => isLocallyBoundMediaUrl(u) || u.startsWith('/media/'));
+    if (unreachable.length === 0) return;
+    throw new BadRequestException(
+      `${label}无法被云端视频通道读取（本机或相对路径）。请改用可公网访问的地址，或切换到本地 GrokGo 测试桥。`,
+    );
+  }
+
+  private magicHourReferenceBlockedMessage(): string {
+    return '当前通道不支持参考视频/尾帧，请配置 OpenAI 兼容视频端点（Magic Hour 无法承接参考媒体）。';
   }
 
   async proxyLlmStream(
@@ -377,6 +426,8 @@ export class GatewayService {
     taskId?: string;
     status?: 'success' | 'processing' | 'failed';
     message?: string;
+    truncatedRefs?: number;
+    routedProvider?: string;
   }> {
     const prompt = ((body.prompt as string) ?? '').trim();
     if (!prompt) throw new BadRequestException('Image prompt is required');
@@ -384,9 +435,19 @@ export class GatewayService {
     const model = (body.model as string) || 'gemini-2.5-flash-image';
     const size = (body.size as string) || '1024x1024';
     const n = Math.min(4, Math.max(1, (body.n as number) || 1));
+    const refCount = countImageRefUrls(body);
+    const explicitMh = isExplicitMagicHourRoute(model, body.provider as string | undefined);
 
     if (this.shouldUseMagicHour(model, body.provider as string | undefined)) {
-      return this.proxyImageMagicHour({ prompt, model, size, n }, userId, workspaceId);
+      // PG-30: 带参考图时禁止静默切 Magic Hour；显式 MH 允许但标记截断
+      const decision = decideMagicHourImageRoute(refCount, explicitMh);
+      if (!decision.ok) throw new BadRequestException(decision.error);
+      const mh = await this.proxyImageMagicHour({ prompt, model, size, n }, userId, workspaceId);
+      return {
+        ...mh,
+        ...(decision.truncatedRefs ? { truncatedRefs: decision.truncatedRefs } : {}),
+        routedProvider: 'magichour',
+      };
     }
 
     if (this.shouldUseGemini(model, body.provider as string | undefined)) {
@@ -408,7 +469,15 @@ export class GatewayService {
     const apiKey = this.apiKey('image');
     if (!apiKey) {
       if (this.magicHour.hasKey()) {
-        return this.proxyImageMagicHour({ prompt, model: 'magic-hour', size, n }, userId, workspaceId);
+        // PG-30: 无主 Key 回落 MH 时，带参考图直接拒绝，勿静默丢图
+        const decision = decideMagicHourImageRoute(refCount, false);
+        if (!decision.ok) throw new BadRequestException(decision.error || MAGIC_HOUR_REF_BLOCKED);
+        const mh = await this.proxyImageMagicHour(
+          { prompt, model: 'magic-hour', size, n },
+          userId,
+          workspaceId,
+        );
+        return { ...mh, routedProvider: 'magichour' };
       }
       throw new BadRequestException('Primary API key not configured');
     }
@@ -424,7 +493,9 @@ export class GatewayService {
         if (typeof u === 'string' && u.trim()) refCandidates.push(u.trim());
       }
     }
-    const uniqueRefs = [...new Set(refCandidates)].slice(0, 4);
+    const uniqueAll = [...new Set(refCandidates)];
+    const uniqueRefs = uniqueAll.slice(0, 4);
+    const truncatedRefs = Math.max(0, uniqueAll.length - uniqueRefs.length);
 
     // gpt-image / 兼容通道：有参考图时走 /images/edits（multipart），纯文生图走 /images/generations
     const res = uniqueRefs.length
@@ -482,6 +553,7 @@ export class GatewayService {
       urls,
       revisedPrompt: json.data[0].revised_prompt,
       status: 'success',
+      ...(truncatedRefs > 0 ? { truncatedRefs } : {}),
     };
   }
 
@@ -581,6 +653,7 @@ export class GatewayService {
     taskId?: string;
     status?: 'success' | 'processing' | 'failed';
     message?: string;
+    truncatedRefs?: number;
   }> {
     const prompt = ((body.prompt as string) ?? '').trim();
     const model = (body.model as string) || 'gemini-2.5-flash-image';
@@ -597,11 +670,16 @@ export class GatewayService {
         if (typeof u === 'string' && u.trim()) refCandidates.push(u.trim());
       }
     }
-    for (const refUrl of refCandidates.slice(0, 3)) {
+    const uniqueGeminiRefs = [...new Set(refCandidates)];
+    const geminiRefs = uniqueGeminiRefs.slice(0, 3);
+    let truncatedRefs = Math.max(0, uniqueGeminiRefs.length - geminiRefs.length);
+    let droppedRefs = 0;
+    for (const refUrl of geminiRefs) {
       try {
         if (refUrl.startsWith('data:')) {
           const m = refUrl.match(/^data:([^;]+);base64,(.+)$/);
           if (m) referenceParts.push({ inlineBase64: m[2], mimeType: m[1] });
+          else droppedRefs += 1;
           continue;
         }
         const local = resolveMediaUrl(refUrl);
@@ -622,12 +700,18 @@ export class GatewayService {
             const buf = Buffer.from(await imgRes.arrayBuffer());
             const ct = imgRes.headers.get('content-type') || 'image/png';
             referenceParts.push({ inlineBase64: buf.toString('base64'), mimeType: ct });
+          } else {
+            droppedRefs += 1;
           }
+          continue;
         }
+        droppedRefs += 1;
       } catch {
-        /* 参考图可选 */
+        // PG-35: 外链/读盘失败计入 truncatedRefs，不再静默跳过
+        droppedRefs += 1;
       }
     }
+    truncatedRefs += droppedRefs;
 
     const imageSizeTier =
       (typeof body.imageSizeTier === 'string' && body.imageSizeTier.trim()) ||
@@ -650,6 +734,7 @@ export class GatewayService {
       urls: result.urls,
       revisedPrompt: result.text,
       status: 'success',
+      ...(truncatedRefs > 0 ? { truncatedRefs } : {}),
     };
   }
 
@@ -704,7 +789,7 @@ export class GatewayService {
 
   /**
    * Video generation — async-capable OpenAI-compatible endpoint.
-   * Polls up to 90s when upstream returns task id.
+   * VG-18: 提交后若上游返回 taskId，立即把 processing 交还给客户端轮询，不再内嵌 90s 长轮询。
    */
   async proxyVideo(body: Record<string, unknown>, userId?: string, workspaceId?: string): Promise<{
     ok: boolean;
@@ -712,19 +797,43 @@ export class GatewayService {
     status: 'success' | 'processing' | 'failed';
     taskId?: string;
     message?: string;
+    /** VG-30: 提交时实际使用的视频通道 Base URL */
+    providerBaseUrl?: string;
   }> {
     const prompt = ((body.prompt as string) ?? '').trim();
     if (!prompt) throw new BadRequestException('Video prompt is required');
 
     const model = this.normalizeOpenAiVideoModel((body.model as string) || 'veo');
     if (this.shouldUseMagicHour(model, body.provider as string | undefined)) {
-      return this.proxyVideoMagicHour(body, userId, workspaceId);
+      // VG-14: 有参考/尾帧时禁止静默切 Magic Hour
+      if (videoRequestNeedsReferenceChannel(body)) {
+        throw new BadRequestException(this.magicHourReferenceBlockedMessage());
+      }
+      const explicitMh =
+        /magic/.test(String(body.provider || '').toLowerCase())
+        || this.magicHour.isMagicHourModel(model);
+      return this.proxyVideoMagicHour(
+        body,
+        userId,
+        workspaceId,
+        explicitMh ? undefined : '当前配置走 Magic Hour 通道',
+      );
     }
 
     const provider = this.resolveVideoProvider(body);
     const { apiKey, baseUrl } = provider;
     if (!apiKey) {
-      if (this.magicHour.hasKey()) return this.proxyVideoMagicHour(body, userId);
+      if (this.magicHour.hasKey()) {
+        if (videoRequestNeedsReferenceChannel(body)) {
+          throw new BadRequestException(this.magicHourReferenceBlockedMessage());
+        }
+        return this.proxyVideoMagicHour(
+          body,
+          userId,
+          workspaceId,
+          '未配置视频 API Key，已回落到 Magic Hour',
+        );
+      }
       throw new BadRequestException(`${provider.label} 未配置 API Key`);
     }
 
@@ -733,6 +842,7 @@ export class GatewayService {
       ? this.imageUrlForOpenAiVideo(body.imageUrl, provider, model)
       : '';
     if (imageUrl) {
+      this.assertCloudCanReachMedia([imageUrl], provider, '首图');
       payload.image_url = imageUrl;
       if (model.startsWith('grok-imagine-video')) {
         payload.image = { url: imageUrl };
@@ -747,14 +857,25 @@ export class GatewayService {
       ? (body.referenceVideos as string[]).filter((u) => typeof u === 'string' && u.trim())
       : [];
     if (referenceImages.length) {
-      payload.reference_images = referenceImages.map((url) =>
+      const normalizedImages = referenceImages.map((url) =>
         this.imageUrlForOpenAiVideo(url, provider, model),
       );
+      this.assertCloudCanReachMedia(normalizedImages, provider, '参考图');
+      payload.reference_images = normalizedImages;
       payload.image_urls = payload.reference_images;
     }
     if (referenceVideos.length) {
-      payload.reference_videos = referenceVideos;
-      payload.video_urls = referenceVideos;
+      // VG-13: 参考视频与图片走同一可达性归一（本地桥 data URI / 云端拒绝 loopback）
+      const normalizedVideos = referenceVideos.map((url) =>
+        this.mediaUrlForOpenAiVideo(url, provider, model, 'video'),
+      );
+      this.assertCloudCanReachMedia(
+        [...referenceVideos, ...normalizedVideos],
+        provider,
+        '参考视频',
+      );
+      payload.reference_videos = normalizedVideos;
+      payload.video_urls = normalizedVideos;
     }
     if (body.aspect_ratio) payload.aspect_ratio = body.aspect_ratio;
     if (body.duration) payload.duration = body.duration;
@@ -766,6 +887,16 @@ export class GatewayService {
     });
     if (normalizedSize) payload.size = normalizedSize;
     if (normalizedResolution) payload.resolution = normalizedResolution;
+    // VG-02/03/04: seed / negative_prompt / modelParams / generate_audio / last_frame_url
+    const lastFrameRaw = typeof body.lastFrameUrl === 'string' ? body.lastFrameUrl.trim() : '';
+    const lastFrameUrl = lastFrameRaw
+      ? this.imageUrlForOpenAiVideo(lastFrameRaw, provider, model)
+      : undefined;
+    if (lastFrameUrl) this.assertCloudCanReachMedia([lastFrameUrl], provider, '尾帧');
+    applyVideoPayloadExtras(payload, {
+      ...body,
+      lastFrameUrl,
+    });
 
     let res: Response;
     try {
@@ -788,7 +919,17 @@ export class GatewayService {
     }
 
     if (res.status === 404 || res.status === 405) {
-      if (this.magicHour.hasKey()) return this.proxyVideoMagicHour(body, userId);
+      if (videoRequestNeedsReferenceChannel(body)) {
+        return { ok: false, status: 'failed', message: this.magicHourReferenceBlockedMessage() };
+      }
+      if (this.magicHour.hasKey()) {
+        return this.proxyVideoMagicHour(
+          body,
+          userId,
+          workspaceId,
+          '上游不支持 /videos/generations，已回落到 Magic Hour',
+        );
+      }
       return {
         ok: false,
         status: 'failed',
@@ -824,19 +965,23 @@ export class GatewayService {
       (json.request_id as string) ||
       (json.requestId as string);
 
+    // VG-18: processing + taskId 立即返回，由客户端 pollVideo 单次查询
+    // VG-30: 带回提交时的 providerBaseUrl，避免用户改设置后 poll 打错通道
     if (this.isVideoProcessingStatus(json.status) || (taskId && !this.isVideoSuccessStatus(json.status))) {
-      if (taskId) {
-        const polled = await this.pollVideoTask(provider, taskId);
-        if (polled) return polled;
-      }
-      return { ok: true, status: 'processing', taskId, message: '视频生成中，请稍后重试查询' };
+      return {
+        ok: true,
+        status: 'processing',
+        taskId,
+        message: '视频生成中，请稍后重试查询',
+        providerBaseUrl: baseUrl,
+      };
     }
 
     const url = await this.extractVideoUrl(json);
     if (url) {
       const local = await this.saveVideoFromUrl(url, baseUrl);
       void this.track('video', { userId, model, workspaceId });
-      return { ok: true, status: 'success', url: local, taskId };
+      return { ok: true, status: 'success', url: local, taskId, providerBaseUrl: baseUrl };
     }
 
     return {
@@ -844,6 +989,7 @@ export class GatewayService {
       status: taskId ? 'processing' : 'failed',
       taskId,
       message: `视频 API 返回格式无法识别（字段: ${Object.keys(json).join(', ') || '空响应'}）`,
+      providerBaseUrl: baseUrl,
     };
   }
 
@@ -851,6 +997,7 @@ export class GatewayService {
     body: Record<string, unknown>,
     userId?: string,
     workspaceId?: string,
+    fallbackNote?: string,
   ): Promise<{
     ok: boolean;
     url?: string;
@@ -897,19 +1044,33 @@ export class GatewayService {
     if (project.status === 'complete') {
       const remote = this.magicHour.downloadUrls(project)[0];
       if (!remote) {
-        return { ok: false, status: 'failed', taskId, message: 'Magic Hour 视频完成但无下载地址' };
+        return {
+          ok: false,
+          status: 'failed',
+          taskId,
+          message: fallbackNote
+            ? `${fallbackNote}；Magic Hour 视频完成但无下载地址`
+            : 'Magic Hour 视频完成但无下载地址',
+        };
       }
       const local = await this.saveVideoFromUrl(remote);
       void this.track('video', { userId, model, workspaceId });
-      return { ok: true, status: 'success', url: local, taskId };
+      return {
+        ok: true,
+        status: 'success',
+        url: local,
+        taskId,
+        message: fallbackNote,
+      };
     }
 
     if (project.status === 'error' || project.status === 'canceled') {
+      const err = this.magicHour.projectErrorMessage(project);
       return {
         ok: false,
         status: 'failed',
         taskId,
-        message: this.magicHour.projectErrorMessage(project),
+        message: fallbackNote ? `${fallbackNote}；${err}` : err,
       };
     }
 
@@ -917,7 +1078,9 @@ export class GatewayService {
       ok: true,
       status: 'processing',
       taskId,
-      message: 'Magic Hour 视频生成中，请稍后轮询',
+      message: fallbackNote
+        ? `${fallbackNote}；Magic Hour 视频生成中，请稍后轮询`
+        : 'Magic Hour 视频生成中，请稍后轮询',
     };
   }
 
@@ -978,47 +1141,48 @@ export class GatewayService {
 
     const provider = this.resolveVideoProvider(baseUrlOverride ? { baseUrl: baseUrlOverride } : {});
     if (!provider.apiKey) throw new BadRequestException(`${provider.label} 未配置 API Key`);
-    const polled = await this.pollVideoTask(provider, taskId);
-    if (polled?.status === 'success' && polled.url) {
+    // VG-18: HTTP poll 单次查询，节奏交给客户端 pollVideoUntilDone
+    const json = await this.fetchVideoTaskStatus(provider, taskId);
+    const polled = await this.interpretVideoTaskStatus(provider, taskId, json);
+    if (polled.status === 'success' && polled.url) {
       void this.track('video', { userId, workspaceId });
     }
-    return (
-      polled ?? {
-        ok: false,
-        status: 'processing',
-        taskId,
-        message: '视频仍在生成中',
-      }
-    );
+    return polled;
   }
 
-  private async pollVideoTask(
+  /** VG-18: 单次解读上游任务状态，不做服务端代等 */
+  private async interpretVideoTaskStatus(
     provider: VideoProviderRuntime,
     taskId: string,
-  ): Promise<{ ok: boolean; url?: string; status: 'success' | 'processing' | 'failed'; taskId: string; message?: string } | null> {
-    for (let i = 0; i < 18; i++) {
-      await new Promise((r) => setTimeout(r, 5000));
-      const json = await this.fetchVideoTaskStatus(provider, taskId);
-      if (!json) continue;
-      const message = this.upstreamErrorMessage(json);
-      if (this.isVideoFailedStatus(json.status)) {
-        return { ok: false, status: 'failed', taskId, message };
-      }
-      if (this.isVideoSuccessStatus(json.status)) {
-        const url = await this.extractVideoUrl(json);
-        if (url) {
-          const local = await this.saveVideoFromUrl(url, provider.baseUrl);
-          return { ok: true, status: 'success', url: local, taskId };
-        }
-        return { ok: false, status: 'failed', taskId, message: '视频任务完成但未返回可下载地址' };
-      }
+    json: Record<string, unknown> | null,
+  ): Promise<{
+    ok: boolean;
+    url?: string;
+    status: 'success' | 'processing' | 'failed';
+    taskId: string;
+    message?: string;
+  }> {
+    if (!json) {
+      return { ok: true, status: 'processing', taskId, message: '视频仍在生成中' };
+    }
+    const message = this.upstreamErrorMessage(json);
+    if (this.isVideoFailedStatus(json.status)) {
+      return { ok: false, status: 'failed', taskId, message };
+    }
+    if (this.isVideoSuccessStatus(json.status)) {
       const url = await this.extractVideoUrl(json);
       if (url) {
         const local = await this.saveVideoFromUrl(url, provider.baseUrl);
         return { ok: true, status: 'success', url: local, taskId };
       }
+      return { ok: false, status: 'failed', taskId, message: '视频任务完成但未返回可下载地址' };
     }
-    return null;
+    const url = await this.extractVideoUrl(json);
+    if (url) {
+      const local = await this.saveVideoFromUrl(url, provider.baseUrl);
+      return { ok: true, status: 'success', url: local, taskId };
+    }
+    return { ok: true, status: 'processing', taskId, message: message || '视频仍在生成中' };
   }
 
   private async fetchVideoTaskStatus(
@@ -1295,6 +1459,17 @@ export class GatewayService {
     const baseUrl = this.baseUrl((body.ttsBaseUrl as string) || cfg.ttsBaseUrl);
     const model = (body.model as string) || 'tts-1';
     const format = (body.response_format as string) || 'mp3';
+    const payload: Record<string, unknown> = {
+      model,
+      voice: effectiveVoice,
+      input,
+      response_format: format,
+    };
+    if (typeof body.speed === 'number') payload.speed = body.speed;
+    const instructions = typeof body.instructions === 'string' ? body.instructions.trim() : '';
+    if (instructions && !String(model).startsWith('tts-1')) {
+      payload.instructions = instructions;
+    }
 
     const res = await fetch(`${baseUrl}/audio/speech`, {
       method: 'POST',
@@ -1302,7 +1477,7 @@ export class GatewayService {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${apiKey}`,
       },
-      body: JSON.stringify({ model, voice: effectiveVoice, input, response_format: format }),
+      body: JSON.stringify(payload),
     });
 
     if (!res.ok) {
@@ -1492,12 +1667,7 @@ export class GatewayService {
     const local = resolveMediaUrl(url);
     if (!local) throw new BadRequestException(`无法解析本地媒体: ${url}`);
     const buf = readFileSync(local);
-    const lower = local.toLowerCase();
-    const mime = lower.endsWith('.png')
-      ? 'image/png'
-      : lower.endsWith('.webp')
-        ? 'image/webp'
-        : 'image/jpeg';
+    const mime = mimeFromMediaPath(local);
     return `data:${mime};base64,${buf.toString('base64')}`;
   }
 

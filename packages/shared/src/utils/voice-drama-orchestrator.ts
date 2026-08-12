@@ -5,6 +5,7 @@
  */
 import type { StoryboardShot, VoiceLine } from '../types/storyboard';
 import type { TimelinePayload, TimelineTrack, TimelineClip } from '../types/timeline';
+import { nextTrackId } from './timeline-ops';
 
 export interface VoiceDramaConfig {
   /** 对白行 → 配音 */
@@ -52,21 +53,37 @@ export function buildVoiceDramaTimeline(
       startSec: 0,
       durationSec: 3,
       label: l.speaker || 'VO',
+      shotId: l.shotId ?? undefined,
+      soundAssetId: l.soundAssetId ?? undefined,
     }));
 
   if (voClips.length > 0) {
     tracks.push({
-      id: 'track-vo',
+      id: nextTrackId(tracks, 'audio'),
       kind: 'audio',
+      label: '对白',
       clips: voClips,
     });
+    // 已有 BGM 轨时自动压低，避免盖过人声
+    for (let i = 0; i < tracks.length; i++) {
+      const track = tracks[i]!;
+      if (track.kind !== 'audio' || track.label !== 'BGM') continue;
+      tracks[i] = {
+        ...track,
+        clips: track.clips.map((clip) => ({
+          ...clip,
+          volume: clip.volume != null ? Math.min(clip.volume, 0.4) : 0.4,
+        })),
+      };
+    }
   }
 
-  // 添加 BGM 轨
+  // 添加 BGM 轨（有对白时自动 duck 到 40%，薄加深）
   if (bgmUrl) {
     tracks.push({
-      id: 'track-bgm',
+      id: nextTrackId(tracks, 'audio'),
       kind: 'audio',
+      label: 'BGM',
       clips: [{
         id: 'bgm-1',
         type: 'audio',
@@ -74,6 +91,7 @@ export function buildVoiceDramaTimeline(
         startSec: 0,
         durationSec: baseTimeline.durationSec ?? 60,
         label: 'BGM',
+        volume: voClips.length > 0 ? 0.4 : 1,
       }],
     });
   }

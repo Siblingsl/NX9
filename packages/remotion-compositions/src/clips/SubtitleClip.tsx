@@ -36,6 +36,7 @@ export const SubtitleClip: React.FC<SubtitleClipProps> = ({ clip }) => {
           borderRadius: 8,
           textAlign: 'center',
           maxWidth: '90%',
+          ...(clip.style as React.CSSProperties | undefined),
         }}
       >
         {clip.text}

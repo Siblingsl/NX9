@@ -241,8 +241,10 @@ describe('F-016 分镜多集批量拆镜队列', () => {
   });
 
   it('StoryboardDeskBlock 多处拆镜按钮全量拆镜走队列', () => {
-    const src = readWeb('blocks/craft/storyboard-desk/use-storyboard-desk.tsx');
-    expect(src).toContain('全 ${upstreamPackage.screenplay.episodes.length} 集拆镜');
-    expect(src).toContain('queueState.status');
+    const hook = readWeb('blocks/craft/storyboard-desk/use-storyboard-desk.tsx');
+    const panel = readWeb('blocks/craft/storyboard-desk/breakdown-panel.tsx');
+    expect(panel).toContain('全 ${upstreamPackage.screenplay.episodes.length} 集重拆');
+    expect(hook).toContain('queueState.status');
+    expect(panel).toContain('breakdownFromPackage(undefined, true)');
   });
 });

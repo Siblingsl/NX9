@@ -47,6 +47,7 @@ interface DirectorMainPanelProps {
   batchSummary?: { done?: number; failed?: number; skipped?: number };
   lastResults: Array<{ shotId: string; index?: number; ok?: boolean; error?: string }>;
   focusShot: (shotId: string) => void;
+  colorCheckWarning?: string | null;
 }
 
 export function DirectorMainPanel({
@@ -94,6 +95,7 @@ export function DirectorMainPanel({
   batchSummary,
   lastResults,
   focusShot,
+  colorCheckWarning,
 }: DirectorMainPanelProps) {
   const pictureModel = typeof pictureNodeData.model === 'string' ? pictureNodeData.model : '';
   const pictureSize = typeof pictureNodeData.size === 'string' ? pictureNodeData.size : '1024x1024';
@@ -192,22 +194,30 @@ export function DirectorMainPanel({
         <button
           type="button"
           className="dd2-btn dd2-btn--primary dd2-btn--batch"
-          disabled={running || stats.total === 0 || (referenceGaps.length > 0 && (forceCharacterRef || forceSceneRef))}
+          disabled={running || stats.total === 0 || (referenceGaps.length > 0 && (forceCharacterRef || forceSceneRef || prefer3dRef))}
           onClick={() => void runBatch(filter === 'selected' ? 'selected' : 'filter')}
         >
           <Play size={13} /> {primaryLabel}
         </button>
       </div>
 
+      {colorCheckWarning ? (
+        <div className="dd2-color-check" role="status">
+          {colorCheckWarning}
+        </div>
+      ) : null}
+
       {referenceGaps.length > 0 ? (
         <div className="dd2-reference-gaps" role="status">
-          <strong>本次入队参考缺失</strong>
+          <strong>本次入队不可拍 / 参考缺失</strong>
           {referenceGaps.map((gap) => (
             <button key={gap.shotId} type="button" onClick={() => focusShot(gap.shotId)}>
               #{gap.index} · {gap.missingForced.join('、')}
             </button>
           ))}
-          {(forceCharacterRef || forceSceneRef) && <small>参考锁开启，补齐后才能批出。</small>}
+          {(forceCharacterRef || forceSceneRef || prefer3dRef) && (
+            <small>参考锁或 3D 可拍闸开启，补齐定妆/参考后才能批出。</small>
+          )}
         </div>
       ) : null}
 

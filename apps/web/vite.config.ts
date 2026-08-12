@@ -9,10 +9,17 @@ const sharedSrc = path.resolve(__dirname, '../../packages/shared/src/index.ts');
 export default defineConfig({
   plugins: [react()],
   resolve: {
+    // 合成源码经 alias 引入时，避免 pnpm 从 compositions / web 各解析一份 remotion
+    dedupe: ['remotion', '@remotion/player', 'react', 'react-dom'],
     alias: {
       '@': path.resolve(__dirname, './src'),
       '@nx9/shared': sharedSrc,
       '@nx9/director3d': path.resolve(__dirname, '../../packages/director3d/src/index.ts'),
+      // 剪辑台预览与服务端渲染共用同一份合成源码（预览 = 成片）
+      '@nx9/remotion-compositions': path.resolve(
+        __dirname,
+        '../../packages/remotion-compositions/src/index.ts',
+      ),
     },
   },
   optimizeDeps: {

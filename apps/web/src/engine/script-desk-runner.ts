@@ -272,13 +272,104 @@ export function applyPendingMessagePatch(
   });
   const target = session.messages.find((m) => m.id === messageId);
   if (!target?.pendingPatch) {
-    return { package: pkg, session: { ...session, messages, updatedAt: new Date().toISOString() } };
+    return { package: pkg, session: compactAgentSession({ ...session, messages, updatedAt: new Date().toISOString() }) };
   }
   const nextPkg = applyPackagePatch(pkg, target.pendingPatch);
   return {
     package: nextPkg,
-    session: { ...session, messages, updatedAt: new Date().toISOString() },
+    session: compactAgentSession({ ...session, messages, updatedAt: new Date().toISOString() }),
   };
+}
+
+/** 丢弃 pending 时去掉整集正文，避免 node.data 膨胀 */
+export function discardPendingMessagePatch(
+  session: ScriptDeskAgentSession,
+  messageId: string,
+): ScriptDeskAgentSession {
+  const messages = session.messages.map((m) =>
+    m.id === messageId ? { ...m, discarded: true, pendingPatch: undefined } : m,
+  );
+  return compactAgentSession({ ...session, messages, updatedAt: new Date().toISOString() });
+}
+
+/** 已应用/已丢弃消息不再内嵌 pendingPatch 全文 */
+export function compactAgentSession(session: ScriptDeskAgentSession): ScriptDeskAgentSession {
+  let changed = false;
+  const messages = session.messages.map((m) => {
+    if (!(m.applied || m.discarded) || m.pendingPatch == null) return m;
+    changed = true;
+    return { ...m, pendingPatch: undefined };
+  });
+  if (!changed) return session;
+  return { ...session, messages, updatedAt: session.updatedAt };
+}
+
+export type ScriptDeskErrorCode =
+  | 'abort'
+  | 'rate_limit'
+  | 'timeout'
+  | 'content_filter'
+  | 'format_fail'
+  | 'empty_output'
+  | 'visual_style_missing'
+  | 'unknown';
+
+export interface ClassifiedScriptDeskError {
+  code: ScriptDeskErrorCode;
+  message: string;
+  hint: string;
+}
+
+export function classifyScriptDeskError(error: unknown): ClassifiedScriptDeskError {
+  if ((error instanceof DOMException || error instanceof Error) && error.name === 'AbortError') {
+    return { code: 'abort', message: '已停止', hint: '已保留成功部分，可继续或重试失败集' };
+  }
+  const raw = error instanceof Error ? error.message : String(error);
+  const lower = raw.toLowerCase();
+  if (/视觉风格/.test(raw)) {
+    return { code: 'visual_style_missing', message: raw, hint: '到设定页选择全片视觉风格后再生成' };
+  }
+  if (/429|rate limit|限流|too many/.test(lower)) {
+    return { code: 'rate_limit', message: raw, hint: '稍后再试，或到设置换模型/通道' };
+  }
+  if (/timeout|timed out|超时/.test(lower)) {
+    return { code: 'timeout', message: raw, hint: '网络或模型超时，可缩短单集后再试' };
+  }
+  if (/content.?filter|safety|审核|敏感/.test(lower)) {
+    return { code: 'content_filter', message: raw, hint: '请改写提示后重试' };
+  }
+  if (/未返回正文|empty/.test(raw.toLowerCase())) {
+    return { code: 'empty_output', message: raw, hint: '模型空响应，检查通道后重试' };
+  }
+  if (/未返回|无效集|无法解析|体例/.test(raw)) {
+    return { code: 'format_fail', message: raw, hint: '模型输出体例不合，可重试或改用上传成稿' };
+  }
+  return { code: 'unknown', message: raw, hint: '可重试；若反复失败请检查模型设置' };
+}
+
+export function formatScriptDeskError(error: unknown): string {
+  const classified = classifyScriptDeskError(error);
+  if (classified.code === 'abort') return classified.message;
+  return `${classified.message} · ${classified.hint}`;
+}
+
+function wordTargetLine(pkg: ScreenplayPackage): string {
+  const n = pkg.brief.episodeWordTarget;
+  if (typeof n !== 'number' || !Number.isFinite(n) || n < 100) return '';
+  return `单集字数目标约 ${Math.round(n)} 字（允许 ±20%），不要灌水凑字。`;
+}
+
+async function requestScreenplayText(
+  sourceText: string,
+  options?: { signal?: AbortSignal; onChunk?: (text: string) => void },
+): Promise<string> {
+  if (options?.onChunk) {
+    const streamed = await api.scriptScreenplayStream({ sourceText }, options);
+    return String(streamed.screenplay ?? '').trim();
+  }
+  const res = await api.scriptScreenplay({ sourceText }, { signal: options?.signal });
+  const raw = res as { screenplay?: string; script?: string };
+  return String(raw.screenplay ?? raw.script ?? '').trim();
 }
 
 /** 续写：追加一集到末尾（不替换已有集正文） */
@@ -288,6 +379,7 @@ export async function runAppendEpisodeSkill(
     nextEpisodeIndex: number;
     userInstruction?: string;
     signal?: AbortSignal;
+    onChunk?: (text: string) => void;
   },
 ): Promise<{ assistantText: string; patch: Partial<ScreenplayPackage> }> {
   const signal = options.signal;
@@ -303,6 +395,7 @@ export async function runAppendEpisodeSkill(
 
   const context = [
     SCREENPLAY_FORMAT_LOCK,
+    wordTargetLine(pkg),
     formatSampleFromEpisodes(pkg.screenplay.episodes),
     pkg.brief.title ? `标题：${pkg.brief.title}` : '',
     pkg.brief.logline ? `logline：${pkg.brief.logline}` : '',
@@ -323,9 +416,7 @@ export async function runAppendEpisodeSkill(
   ].filter(Boolean).join('\n\n');
 
   if (signal?.aborted) throw new DOMException('已中止', 'AbortError');
-  const res = await api.scriptScreenplay({ sourceText: context }, { signal });
-  const raw = res as { screenplay?: string; script?: string };
-  const text = String(raw.screenplay ?? raw.script ?? '').trim();
+  const text = await requestScreenplayText(context, { signal, onChunk: options.onChunk });
   if (!text) throw new Error('剧本生成未返回正文');
 
   const generated = ingestTextToPackage(emptyScreenplayPackage(), text, {
@@ -362,6 +453,7 @@ export async function runRewriteEpisodeSkill(
     episodeIndex: number;
     userInstruction?: string;
     signal?: AbortSignal;
+    onChunk?: (text: string) => void;
   },
 ): Promise<{ assistantText: string; patch: Partial<ScreenplayPackage> }> {
   const signal = options.signal;
@@ -377,6 +469,7 @@ export async function runRewriteEpisodeSkill(
 
   const context = [
     SCREENPLAY_FORMAT_LOCK,
+    wordTargetLine(pkg),
     formatSampleFromEpisodes(pkg.screenplay.episodes),
     pkg.brief.title ? `标题：${pkg.brief.title}` : '',
     pkg.brief.logline ? `logline：${pkg.brief.logline}` : '',
@@ -404,10 +497,7 @@ export async function runRewriteEpisodeSkill(
   ].filter(Boolean).join('\n\n');
 
   if (signal?.aborted) throw new DOMException('已中止', 'AbortError');
-  const res = await api.scriptScreenplay({ sourceText: context }, { signal });
-
-  const raw = res as { screenplay?: string; script?: string };
-  const text = String(raw.screenplay ?? raw.script ?? '').trim();
+  const text = await requestScreenplayText(context, { signal, onChunk: options.onChunk });
   if (!text) throw new Error('重写未返回正文');
 
   const generated = ingestTextToPackage(emptyScreenplayPackage(), text, {
@@ -441,11 +531,13 @@ export async function runGenerateScreenplaySkill(
   userInstruction: string,
   episodeIndex?: number,
   signal?: AbortSignal,
+  onChunk?: (text: string) => void,
 ): Promise<{ assistantText: string; patch: Partial<ScreenplayPackage> }> {
   if (signal?.aborted) throw new DOMException('已中止', 'AbortError');
   const existingText = screenplayFullText(pkg);
   const context = [
     SCREENPLAY_FORMAT_LOCK,
+    wordTargetLine(pkg),
     formatSampleFromEpisodes(pkg.screenplay.episodes),
     pkg.brief.title ? `标题：${pkg.brief.title}` : '',
     pkg.brief.logline ? `logline：${pkg.brief.logline}` : '',
@@ -464,9 +556,7 @@ export async function runGenerateScreenplaySkill(
   ].filter(Boolean).join('\n\n');
 
   if (signal?.aborted) throw new DOMException('已中止', 'AbortError');
-  const res = await api.scriptScreenplay({ sourceText: context }, { signal });
-  const raw = res as { screenplay?: string; script?: string };
-  const text = String(raw.screenplay ?? raw.script ?? '').trim();
+  const text = await requestScreenplayText(context, { signal, onChunk });
   if (!text) throw new Error('剧本生成未返回正文');
 
   if (episodeIndex != null) {
