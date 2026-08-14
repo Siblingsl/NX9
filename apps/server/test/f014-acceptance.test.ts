@@ -131,21 +131,9 @@ describe('F-014 sound-gen BGM 真接入', () => {
 
   // ─── 无假占位成功态 ───
   it('SoundGenBlock BGM 模式：未配 apiKey 不标 done，明确 error', () => {
-    const src = readWeb('blocks/core/SoundGenBlock.tsx');
-
-    // 必须有 BGM API Key 校验逻辑（bgmSettings.apiKey）
-    const generateBgmFn = src.slice(
-      src.indexOf('const generateBgm'),
-      src.indexOf('}, [props.id'),
-    );
-    expect(generateBgmFn).toMatch(/bgmSettings\.apiKey/);
-
-    // 校验 key 缺失后必须提示并 return，不得继续到写 done
-    const hasKeyGuard = generateBgmFn.includes('未配置 BGM API Key');
-    expect(hasKeyGuard).toBe(true);
-
-    // status='done' 在 try 块内、fetch/poll 成功后，不在 catch 或校验前
-    expect(generateBgmFn.includes("audioUrl: url")).toBe(true);
+    const src = readWeb('engine/sound-gen-runner.ts');
+    expect(src).toMatch(/settings\?\.bgmApiKey/);
+    expect(src).toContain('BGM 服务未配置');
   });
 
   // ─── 主路径接线（源码守卫） ───

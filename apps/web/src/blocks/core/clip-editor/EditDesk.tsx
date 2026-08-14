@@ -37,6 +37,7 @@ const ENGINES: SmartEditEngine[] = ['auto', 'remotion', 'hyperframes', 'ffmpeg']
 export interface OrchestrateOutcome {
   timeline: TimelinePayload;
   suggestions: SmartSuggestion[];
+  notes: string[];
 }
 
 export interface EditDeskProps {
@@ -75,6 +76,7 @@ export interface EditDeskProps {
     shotId: string,
     url: string,
     meta?: { prompt?: string; model?: string },
+    adopt?: boolean,
   ) => string | undefined;
 
   onLog: (msg: string) => void;
@@ -175,10 +177,11 @@ export function EditDesk(props: EditDeskProps) {
       editor.reset(result.timeline, { keepHistory: !!timeline && clipCount > 0 });
       setSelectedClipId(null);
       setPlayheadSec(0);
+      const noteText = (result.notes ?? []).length > 0 ? ` · ${result.notes.join(' · ')}` : '';
       setDeskTip(
         result.suggestions.length > 0
-          ? `时间线已生成 · ${result.suggestions.length} 条建议待确认`
-          : '时间线已生成',
+          ? `时间线已生成 · ${result.suggestions.length} 条建议待确认${noteText}`
+          : `时间线已生成${noteText}`,
       );
     } catch (e) {
       setDeskTip(`编排失败：${e instanceof Error ? e.message : String(e)}`);
@@ -194,7 +197,11 @@ export function EditDesk(props: EditDeskProps) {
         editor.apply(sg.ops);
         onLog(`已采纳建议：${sg.message}`);
       } else {
-        onLog(`建议已确认（提示型，无时间线变更）：${sg.message}`);
+        onLog(
+          sg.kind === 'template-patch'
+            ? `旧版 template-patch 已停用：HyperFrames 直接消费时间线，无需采纳模板变量（${sg.message}）`
+            : `建议已确认（提示型，无时间线变更）：${sg.message}`,
+        );
       }
       onSuggestionResolved(sg.id, true);
     },
@@ -209,6 +216,9 @@ export function EditDesk(props: EditDeskProps) {
       onSuggestionResolved(sg.id, true);
     }
     if (plan.conflictNote) onLog(plan.conflictNote);
+    if (pendingItems.some((s) => s.kind === 'template-patch')) {
+      onLog('旧版 template-patch 已停用：HyperFrames 直接消费时间线，无需采纳模板变量');
+    }
     onLog(`已全部采纳 ${pendingItems.length} 条建议`);
     setSuggestOpen(false);
   }, [pendingItems, editor, onSuggestionResolved, onLog]);
@@ -222,11 +232,16 @@ export function EditDesk(props: EditDeskProps) {
         editor.reset(makeEmptyTimeline());
         tl = makeEmptyTimeline();
       }
-      const wantKind: TimelineTrackKind = payload.mediaType === 'audio' ? 'audio' : 'video';
+      let wantKind: TimelineTrackKind = payload.mediaType === 'audio' ? 'audio' : 'video';
       let targetTrackId = trackId;
       if (targetTrackId) {
         const t = tl.tracks.find((x) => x.id === targetTrackId);
         if (!t || t.kind !== wantKind || t.locked) targetTrackId = null;
+      }
+      // SE-SPEC-04: 图片可拖入贴片轨，作为 overlay clip 使用位姿编辑
+      if (wantKind === 'video' && payload.mediaType === 'image' && targetTrackId) {
+        const targetTrack = tl.tracks.find((x) => x.id === targetTrackId);
+        if (targetTrack?.kind === 'overlay') wantKind = 'overlay';
       }
       if (!targetTrackId) {
         const t = tl.tracks.find((x) => x.kind === wantKind && !x.locked);
@@ -236,7 +251,7 @@ export function EditDesk(props: EditDeskProps) {
           targetTrackId = nextTrackId(tl.tracks, wantKind);
           ops.push({
             op: 'add-track',
-            track: { id: targetTrackId, kind: wantKind, label: wantKind === 'audio' ? '音频' : '视频', clips: [] },
+            track: { id: targetTrackId, kind: wantKind, label: wantKind === 'audio' ? '音频' : wantKind === 'overlay' ? '贴片' : '视频', clips: [] },
           });
         }
       }
@@ -276,11 +291,11 @@ export function EditDesk(props: EditDeskProps) {
   // ── 智能替换回写 ──
   const replaceLoc = replaceClipId && timeline ? findTimelineClip(timeline, replaceClipId) : null;
   const handleReplaced = useCallback(
-    (newUrl: string, sourceDurationSec?: number) => {
+    (newUrl: string, sourceDurationSec?: number, opts?: { adopt?: boolean }) => {
       if (!replaceClipId) return;
       const shotId = replaceLoc?.clip.shotId;
       const takeId = shotId && onWritebackShotVersion
-        ? onWritebackShotVersion(shotId, newUrl, { prompt: '智能替换' })
+        ? onWritebackShotVersion(shotId, newUrl, { prompt: '智能替换' }, opts?.adopt)
         : undefined;
       const ops: TimelineOp[] = [
         {
@@ -298,7 +313,13 @@ export function EditDesk(props: EditDeskProps) {
         });
       }
       editor.apply(ops);
-      onLog(takeId ? `智能替换已采纳并写回镜 take（${takeId}）` : '智能替换已采纳（检查器可回滚）');
+      onLog(
+        takeId
+          ? opts?.adopt
+            ? `智能替换已采用为镜头正式版（${takeId}）`
+            : `智能替换已采纳并写回镜 take（${takeId}）`
+          : '智能替换已采纳（检查器可回滚）',
+      );
       setReplaceClipId(null);
     },
     [replaceClipId, replaceLoc?.clip.shotId, onWritebackShotVersion, editor, onLog],
@@ -492,6 +513,8 @@ export function EditDesk(props: EditDeskProps) {
               onSeek={seek}
               onFrameUpdate={setPlayheadSec}
               playerRef={playerRef}
+              engine={engine}
+              profile={profile}
             />
           ) : (
             <div className="ed-empty ed-empty--stage">
@@ -596,8 +619,14 @@ export function EditDesk(props: EditDeskProps) {
               <button
                 type="button"
                 className="ed-btn ed-btn--primary ed-btn--block"
-                disabled={!hasContent || pendingItems.length > 0}
-                title={pendingItems.length > 0 ? '请先处理待确认建议' : '确认时间线并送交已连接的交付打包'}
+                disabled={!hasContent || pendingItems.length > 0 || engine === 'ffmpeg'}
+                title={
+                  engine === 'ffmpeg'
+                    ? 'FFmpeg 仅诊断拼接，不包含裁剪/转场/音轨，禁止送交导出；请改用 Remotion 或 HyperFrames'
+                    : pendingItems.length > 0
+                      ? '请先处理待确认建议'
+                      : '确认时间线并送交已连接的交付打包'
+                }
                 onClick={() => timeline && onConfirm(timeline)}
               >
                 {pendingItems.length > 0
@@ -607,7 +636,8 @@ export function EditDesk(props: EditDeskProps) {
               <button
                 type="button"
                 className="ed-btn ed-btn--block"
-                disabled={!hasContent}
+                disabled={!hasContent || engine === 'ffmpeg'}
+                title={engine === 'ffmpeg' ? 'FFmpeg 仅诊断拼接，禁止同步到交付打包' : undefined}
                 onClick={() => timeline && onSyncOnly(timeline)}
               >
                 仅同步时间线

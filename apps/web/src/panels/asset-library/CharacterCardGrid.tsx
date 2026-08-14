@@ -257,7 +257,7 @@ function CardMoreMenu({
     <div
       ref={ref}
       role="menu"
-      className="absolute right-0 bottom-full z-20 mb-1 min-w-[9.5rem] overflow-hidden rounded-xl border border-line bg-surface py-1 shadow-lg"
+      className="nx9-asset-lib-menu absolute right-0 bottom-full z-20 mb-1 min-w-[9.5rem] overflow-hidden rounded-xl border border-line bg-surface py-1 shadow-lg"
     >
       <MenuItem icon={<Pencil size={12} />} label="编辑" onClick={onEdit} />
       <MenuItem icon={<AtSign size={12} />} label="复制 @提及" onClick={onCopyMention} />

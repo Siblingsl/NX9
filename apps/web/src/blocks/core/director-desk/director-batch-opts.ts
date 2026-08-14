@@ -10,6 +10,7 @@ interface BatchOptsParams {
   forceCharacterRef: boolean;
   forceSceneRef: boolean;
   styleLock: boolean;
+  useGlobalArtDirection?: boolean;
   globalArtDirection?: string;
   episodeArtDirection?: string;
   prefer3dRef: boolean;
@@ -44,6 +45,7 @@ export function buildBatchOpts(params: BatchOptsParams) {
     forceCharacterRef: params.forceCharacterRef,
     forceSceneRef: params.forceSceneRef,
     styleLock: params.styleLock,
+    useGlobalArtDirection: params.useGlobalArtDirection === true,
     globalArtDirection: params.globalArtDirection,
     episodeArtDirection: params.episodeArtDirection,
     prefer3dRef: params.prefer3dRef,

@@ -1,4 +1,5 @@
 import { memo, useCallback, useMemo } from 'react';
+import { useReactFlow } from '@xyflow/react';
 import { Box, FileText, ImageIcon, Loader2, Maximize2, Music, Play, Video } from 'lucide-react';
 import {
   lookupBlock,
@@ -25,6 +26,7 @@ const STATUS_LABEL: Record<NodeRunStatus, string> = {
   success: '完成',
   error: '失败',
   waiting: '等待',
+  skipped: '跳过',
   disabled: '停用',
 };
 
@@ -251,6 +253,7 @@ function VideoOnlyBody({
 
 /** 生成类节点摘要 — 走 NodeSummaryBody 统一骨架 */
 export const CanvasNodeBody = memo(function CanvasNodeBody({
+  blockId,
   kind,
   data,
   alias,
@@ -267,6 +270,7 @@ export const CanvasNodeBody = memo(function CanvasNodeBody({
   const videoUrl = kind === 'clip-gen' ? (data.videoUrl as string | undefined) : undefined;
   const outputCount = resolveNodeOutputCount(kind, data);
   const focusPromptBar = useDeckUi((s) => s.focusPromptBar);
+  const { setNodes } = useReactFlow();
   const configSummary =
     (data.model as string | undefined) ??
     (data.provider as string | undefined) ??
@@ -275,9 +279,13 @@ export const CanvasNodeBody = memo(function CanvasNodeBody({
   const openWorkspace = useCallback(
     (e?: React.MouseEvent) => {
       e?.stopPropagation();
-      if (canOpenWorkspace) focusPromptBar();
+      if (!canOpenWorkspace) return;
+      // 工作区开在节点下方，必须先让 React Flow 认选中，否则锚点不会挂载
+      setNodes((prev) => prev.map((n) => ({ ...n, selected: n.id === blockId })));
+      useDeckUi.getState().setSelection(blockId, kind);
+      focusPromptBar();
     },
-    [canOpenWorkspace, focusPromptBar],
+    [blockId, canOpenWorkspace, focusPromptBar, kind, setNodes],
   );
 
   const isPicture = kind === 'picture-gen';

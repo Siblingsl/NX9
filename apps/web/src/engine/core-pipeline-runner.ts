@@ -19,7 +19,6 @@ import { getGenPack } from './gen-skill-runtime';
 import { runPictureGenExecutor } from './executors';
 import type { ExecutorGraphEdge, ExecutorGraphNode } from './executors/types';
 import {
-  activeEpisodeShots,
   appendStoryboardVideoVersion,
   appendEpisodeExportRecord,
   appendStoryboardReviewEvent,
@@ -295,10 +294,28 @@ export async function batchGenerateKeyframesFromShots(
   return { ok, fail };
 }
 
-/** 批审：全部有图的镜头 → keyframeStatus=approved */
-export function approveAllKeyframes(): number {
-  const doc = useWorkspaceDocument.getState();
-  const shots = activeEpisodeShots(doc.storyboard);
+/** DR-01: 批审全部有图的链镜头 → keyframeStatus=approved（只写链镜表）。 */
+export interface ApproveAllKeyframesResult {
+  ok: number;
+  /** DR-01: 无链镜表时禁止回退全局批审（F-003）。 */
+  blocked?: 'no-chain';
+}
+
+/** DR-01: 批审只写链镜表（画布 runtime / 镜像），禁止写全局 storyboard。 */
+export function approveAllKeyframes(): ApproveAllKeyframesResult {
+  const runtime = useFlowRuntime.getState().runtime;
+  const mirrored = getMirroredFlowGraph();
+  const graphNodes = runtime?.getNodes()?.length ? runtime.getNodes() : mirrored.nodes;
+  const chainShots = getAllChainShots(graphNodes);
+  if (chainShots.length === 0) {
+    log('无上游链镜表，已禁止全局批审（F-003）。请连接分镜台后再批');
+    return { ok: 0, blocked: 'no-chain' };
+  }
+  const episodeId = resolveActiveEpisodeId(useWorkspaceDocument.getState().storyboard);
+  const scoped = episodeId
+    ? chainShots.filter((s) => !s.episodeId || s.episodeId === episodeId)
+    : chainShots;
+  const shots = scoped.length > 0 ? scoped : chainShots;
   let n = 0;
   for (const shot of shots) {
     if (!shot.firstFrameAssetId) continue;
@@ -308,16 +325,21 @@ export function approveAllKeyframes(): number {
       decision: 'approved' as const,
       createdAt: new Date().toISOString(),
     };
-    doc.updateShot(shot.id, {
-      keyframeStatus: 'approved',
-      status: 'approved',
-      keyframeReviewNote: null,
-      reviewHistory: appendStoryboardReviewEvent(shot, event),
-    });
+    const latestNodes = runtime?.getNodes()?.length ? runtime.getNodes() : graphNodes;
+    patchShotOnChainGraph(
+      shot.id,
+      {
+        keyframeStatus: 'approved',
+        status: 'approved',
+        keyframeReviewNote: null,
+        reviewHistory: appendStoryboardReviewEvent(shot, event),
+      },
+      latestNodes,
+    );
     n++;
   }
-  log(`批审完成 · ${n} 镜关键帧已批准`);
-  return n;
+  log(`批审完成 · ${n} 镜关键帧已批准（链镜表）`);
+  return { ok: n };
 }
 
 /** VG-10: 写回链镜表（画布挂载走 runtime，未挂载走镜像） */
@@ -457,7 +479,7 @@ export async function batchGenerateVideosFromShots(
   clipGenBlockId?: string,
   chainShots?: StoryboardShot[],
   opts?: { signal?: AbortSignal },
-): Promise<{ ok: number; fail: number }> {
+): Promise<{ ok: number; fail: number; skipped: number }> {
   const doc = useWorkspaceDocument.getState();
   const runtime = useFlowRuntime.getState().runtime;
   const mirrored = getMirroredFlowGraph();
@@ -471,7 +493,7 @@ export async function batchGenerateVideosFromShots(
 
   if (!resolvedChain.length) {
     log('无上游链镜表，已禁止回退全局批出（F-004）。请连接分镜台/导演台后再试');
-    return { ok: 0, fail: 0 };
+    return { ok: 0, fail: 0, skipped: 0 };
   }
 
   const sourceShots = resolvedChain;
@@ -481,7 +503,7 @@ export async function batchGenerateVideosFromShots(
     : sourceShots;
   if (shots.length === 0) {
     log(requested ? '上游镜头列表为空' : '分镜列表为空');
-    return { ok: 0, fail: 0 };
+    return { ok: 0, fail: 0, skipped: 0 };
   }
 
   const patchShotOnChain = (shotId: string, patch: Partial<StoryboardShot>) => {
@@ -512,6 +534,10 @@ export async function batchGenerateVideosFromShots(
   if (unapproved.length > 0) {
     log(`还有 ${unapproved.length} 镜未批审关键帧，请先完成批审`);
   }
+  // VG-43: 未批审 / 无分镜图镜头计为 skipped，随返回值与节点 message 上浮
+  const skipped = shots.filter(
+    (s) => !s.firstFrameAssetId || s.keyframeStatus !== 'approved',
+  ).length;
 
   const targets = shots.filter(
     (s) =>
@@ -523,10 +549,10 @@ export async function batchGenerateVideosFromShots(
     const allHave = shots.every((s) => s.videoAssetId);
     if (allHave) {
       log(`全部 ${shots.length} 镜已有视频`);
-      return { ok: shots.length, fail: 0 };
+      return { ok: shots.length, fail: 0, skipped: 0 };
     }
     log('没有可生成视频的镜头（需要已批审 + 有分镜图）');
-    return { ok: 0, fail: 0 };
+    return { ok: 0, fail: 0, skipped };
   }
 
   log(`开始批量视频 · ${targets.length} 镜`);
@@ -589,7 +615,7 @@ export async function batchGenerateVideosFromShots(
   if (preflight.blocked) {
     if (clipNode) updateFn(clipNode.id, { status: 'error', error: preflight.blocked });
     log(`批量视频已阻断 · ${preflight.blocked}`);
-    return { ok: 0, fail: 0 };
+    return { ok: 0, fail: 0, skipped: 0 };
   }
 
   // VG-06: 并发/重试单轨（兼容旧 maxRetry 字段名）
@@ -826,28 +852,32 @@ export async function batchGenerateVideosFromShots(
       pendingVideoTasks: pendingTasks,
       ...(pendingCount > 0
         ? { message: `${pendingCount} 个任务仍在后台生成，可在工作台继续查询` }
-        : { message: undefined }),
+        : skipped > 0
+          ? { message: `跳过 ${skipped} 镜（关键帧未批审或无分镜图）` }
+          : { message: undefined }),
     });
   }
   doc.setProjectStatus('draft');
-  log(`批量视频结束 · 成功 ${ok} · 失败 ${fail}${pendingCount ? ` · 后台 ${pendingCount}` : ''}`);
-  return { ok, fail };
+  log(`批量视频结束 · 成功 ${ok} · 失败 ${fail} · 跳过 ${skipped}${pendingCount ? ` · 后台 ${pendingCount}` : ''}`);
+  return { ok, fail, skipped };
 }
 
 /**
  * 简单拼接导出：优先 FFmpeg concat 故事板视频；
  * 成功后标记 export-pack 节点 done + projectStatus。
  */
-/** @deprecated F-003: 使用 chainShots 感知的导出路径代替全局 storyboard.shots。 */
+/** DR-03: 简单拼接导出只消费链镜表（runtime / 镜像），禁止回退全局 storyboard.shots。 */
 export async function simpleConcatExport(): Promise<{ ok: boolean; url?: string; message?: string }> {
-  if (process.env.NODE_ENV === 'development') {
-    console.warn(
-      '[F-003] simpleConcatExport 使用全局 storyboard.shots，应迁移到链感知路径。',
-    );
-  }
-  const doc = useWorkspaceDocument.getState();
-  const shots = activeEpisodeShots(doc.storyboard);
   const runtime = useFlowRuntime.getState().runtime;
+  const mirrored = getMirroredFlowGraph();
+  const graphNodes = runtime?.getNodes()?.length ? runtime.getNodes() : mirrored.nodes;
+  const chainShots = getAllChainShots(graphNodes);
+  const doc = useWorkspaceDocument.getState();
+  const episodeId = resolveActiveEpisodeId(doc.storyboard);
+  const scoped = episodeId
+    ? chainShots.filter((s) => !s.episodeId || s.episodeId === episodeId)
+    : chainShots;
+  const shots = scoped.length > 0 ? scoped : chainShots;
   const exportNode = runtime?.getNodes().find((node) => node.type === 'export-pack');
   const exportData = (exportNode?.data ?? {}) as Record<string, unknown>;
   const reject = (message: string) => {
@@ -855,6 +885,9 @@ export async function simpleConcatExport(): Promise<{ ok: boolean; url?: string;
     log(message);
     return { ok: false as const, message };
   };
+  if (chainShots.length === 0) {
+    return reject('未连接上游链镜表，已禁止回退全局导出（F-003）。请连接分镜台后再导出');
+  }
   const missingVideoCount = shots.filter((shot) => !shot.videoAssetId).length;
   if (missingVideoCount > 0) {
     const message = `还有 ${missingVideoCount} 镜未生成视频，请补齐后再导出`;

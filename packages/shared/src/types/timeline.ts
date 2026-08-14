@@ -38,6 +38,8 @@ export interface TimelineClip {
   sourceDurationSec?: number;
   /** 智能替换前的原素材地址，供回滚溯源 */
   replacedFrom?: string;
+  /** SE-SPEC-04: 贴片位姿；x/y 为合成画面百分比锚点（50/50=居中），scale 为缩放倍率 */
+  overlay?: { x: number; y: number; scale: number; rotation?: number };
   /**
    * OL-19 加深：成片轨绑定的声音库条目 id。
    * 配音/对白 clip 优先写此字段，便于 unused / 重绑 / 替换源音。

@@ -135,9 +135,9 @@ describe('F-017 构图模板 / 参考板强约束', () => {
   });
 
   it('StoryboardDeskBlock 保存时写入 compositionTemplateId', () => {
-    const src = readWeb('blocks/craft/storyboard-desk/use-storyboard-desk.tsx');
+    const src = readWeb('blocks/craft/storyboard-desk/handoff-ops.ts');
     // patchShotInPayload 调用中包含 compositionTemplateId
-    expect(src).toContain('compositionTemplateId: editDraft.compositionTemplateId');
+    expect(src).toContain('compositionTemplateId: editDraft.compositionTemplateId ?? null');
   });
 
   // ─── flow-runner 源码守卫 ───

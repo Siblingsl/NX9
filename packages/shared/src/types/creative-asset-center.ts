@@ -71,12 +71,21 @@ export interface CharacterFaceRig {
   values?: Partial<Record<FaceRigGroupId, Record<string, number>>>;
   /** 解锁左右不对称的参数 id（默认对称联动） */
   asymmetric?: string[];
+  /** 左右不对称扩展值：仅 asymmetric 列表内的项；未写的一侧回退到 values 基础值 */
+  sideValues?: Partial<Record<string, { L?: number; R?: number }>>;
   /** 来源预设 id，用于「回到预设」与差异展示 */
   presetId?: string | null;
   updatedAt?: number;
   /** 最近一次按当前参数重出定妆头像的时间戳（P2 用；参数未落图健康检查） */
   renderedAt?: number;
+  /** 最近一次定妆出图使用的网格契约版本（防旧代理截图冒充新契约） */
+  meshContractVersion?: number;
+  /** 定妆出图时的参数指纹（faceRigHash）；参数改变后健康条提示需重出 */
+  faceLockHash?: string;
 }
+
+/** 出图所用网格契约版本；与 NX9_SCULPT_MESH_CONTRACT 对齐，防旧代理截图冒充新契约 */
+export const NX9_SCULPT_MESH_CONTRACT_VERSION = 1;
 
 export interface CharacterConsistencyMeta {
   negativePrompt?: string;

@@ -12,7 +12,6 @@ const TRANSITION_KINDS: Array<{ id: TimelineTransition['kind'] | 'none'; label: 
   { id: 'none', label: '无' },
   { id: 'cut', label: '硬切' },
   { id: 'fade', label: '淡入淡出' },
-  { id: 'wipe', label: '划像' },
 ];
 
 export interface InspectorPanelProps {
@@ -60,6 +59,7 @@ export function InspectorPanel({
   const canSplit =
     playheadSec > clip.startSec + 0.1 && playheadSec < clip.startSec + clip.durationSec - 0.1;
   const transitionKind = clip.transitionOut?.kind ?? 'none';
+  const overlay = clip.overlay ?? { x: 50, y: 50, scale: 1, rotation: 0 };
 
   return (
     <div className="ed-inspector">
@@ -257,6 +257,9 @@ export function InspectorPanel({
               </button>
             ))}
           </div>
+          <p className="ed-field-hint">
+            wipe / shader 暂未接入渲染层，当前仅支持无 / 硬切 / 淡入淡出；旧时间线里的 wipe/shader 会按淡出处理。
+          </p>
           {clip.transitionOut && clip.transitionOut.kind !== 'cut' && (
             <label className="ed-field">
               <span>转场时长 {clip.transitionOut.durationSec.toFixed(2)}s</span>
@@ -279,6 +282,56 @@ export function InspectorPanel({
         </section>
       )}
 
+      {clip.type === 'overlay' && (
+        <section className="ed-inspector__section">
+          <h4>贴片位姿（预览与 Remotion 成片同源）</h4>
+          <label className="ed-field">
+            <span>水平位置 {Math.round(overlay.x)}%</span>
+            <input
+              type="range"
+              min={0}
+              max={100}
+              step={1}
+              value={overlay.x}
+              onChange={(e) => setClip({ overlay: { ...overlay, x: Number(e.target.value) } })}
+            />
+          </label>
+          <label className="ed-field">
+            <span>垂直位置 {Math.round(overlay.y)}%</span>
+            <input
+              type="range"
+              min={0}
+              max={100}
+              step={1}
+              value={overlay.y}
+              onChange={(e) => setClip({ overlay: { ...overlay, y: Number(e.target.value) } })}
+            />
+          </label>
+          <label className="ed-field">
+            <span>缩放 {overlay.scale.toFixed(2)}×</span>
+            <input
+              type="range"
+              min={0.2}
+              max={3}
+              step={0.05}
+              value={overlay.scale}
+              onChange={(e) => setClip({ overlay: { ...overlay, scale: Number(e.target.value) } })}
+            />
+          </label>
+          <label className="ed-field">
+            <span>旋转 {overlay.rotation ?? 0}°</span>
+            <input
+              type="number"
+              min={-180}
+              max={180}
+              step={1}
+              value={overlay.rotation ?? 0}
+              onChange={(e) => setClip({ overlay: { ...overlay, rotation: Number(e.target.value) } })}
+            />
+          </label>
+          <p className="ed-field-hint">贴片默认 50/50 居中，预览与 Remotion 导出共用同一坐标。</p>
+        </section>
+      )}
       {clip.type === 'subtitle' && (
         <section className="ed-inspector__section">
           <h4>字幕</h4>

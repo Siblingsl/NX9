@@ -4,7 +4,8 @@ import {
 import { useWorkspaceDocument } from '../../../stores/workspace-document';
 import { useFlowRuntime, useStoryboardUi } from '../../../stores/flow-runtime';
 import { useViewMode } from '../stores/view-mode';
-import { getAllChainShots } from '../../chain-storyboard-aggregate';
+import { findDeskIdForShot, getAllChainShots } from '../../chain-storyboard-aggregate';
+import { resolveDownstreamDirectorDeskId } from '../../chain-storyboard-utils';
 
 export type OpenReviewGateOptions = {
   /** 镜头 index 列表（与审阅关卡 pendingShots 一致） */
@@ -91,7 +92,19 @@ export function openReviewGateSession(
 
   useViewMode.getState().setMode('review');
   const runtime = useFlowRuntime.getState().runtime;
-  const director = runtime?.getNodes().find((n) => n.type === 'director-desk');
+  const nodes = runtime?.getNodes() ?? [];
+  const edges = runtime?.getEdges() ?? [];
+  // SB-D-10: 多链下只聚焦「待审镜头所属链」的下游导演台；无链/无出边时不猜第一个
+  let sourceChainDeskId = opts.sourceChainDeskId;
+  if (!sourceChainDeskId) {
+    const firstPending = shots.find((s) => pendingIndices.includes(s.index))
+      ?? shots.find((s) => opts.pendingShotIds?.includes(s.id));
+    if (firstPending) sourceChainDeskId = findDeskIdForShot(firstPending.id, nodes) ?? undefined;
+  }
+  const directorId = sourceChainDeskId
+    ? resolveDownstreamDirectorDeskId(sourceChainDeskId, nodes as any, edges as any)
+    : undefined;
+  const director = directorId ? nodes.find((n) => n.id === directorId) : undefined;
   if (director) runtime?.focusBlock(director.id);
 
   if (!pendingIndices.length) return pendingIndices;

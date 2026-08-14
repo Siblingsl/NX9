@@ -2,10 +2,11 @@ import { FACE_RIG_PARAMS } from '@nx9/shared';
 import type { Object3D, Mesh } from 'three';
 import { BufferGeometry } from 'three';
 import { normalizeMorphName } from './morph-alias';
+import { MATERIAL_DRIVERS, hasMaterialChannel } from './material-drivers';
 
 export const NX9_SCULPT_MESH_CONTRACT = 1;
 
-/** P1 视口必须真变形。其余项字典仍在，驱动器缺 morph/骨则跳过，只进 Prompt。 */
+/** P1 视口必须真变形。material 驱动器缺通道会在兼容报告标 missing，不再静默跳过。 */
 export const P1_VIEWPORT_PARAM_IDS = [
   'faceLength',
   'jawWidth',
@@ -186,7 +187,12 @@ export function assertSculptMeshContract(
 
   for (const def of FACE_RIG_PARAMS) {
     const driver = def.driver ?? 'morph';
-    if (driver === 'prompt' || driver === 'material') continue;
+    if (driver === 'prompt') continue;
+    if (driver === 'material') {
+      if (hasMaterialChannel(root, MATERIAL_DRIVERS[def.id]?.channel)) mappedParamIds.push(def.id);
+      else missingParamIds.push(def.id);
+      continue;
+    }
     if (driver === 'bone') {
       const boneDef = BONE_DRIVERS[def.id];
       if (!boneDef) {

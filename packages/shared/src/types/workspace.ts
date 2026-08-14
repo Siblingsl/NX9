@@ -54,6 +54,12 @@ export interface FlowBlock {
   width?: number;
   height?: number;
   selected?: boolean;
+  /** 场景组等父子嵌套：子节点指向父节点 id */
+  parentId?: string;
+  /** React Flow extent；场景组子节点为 'parent' */
+  extent?: 'parent';
+  hidden?: boolean;
+  style?: Record<string, unknown>;
 }
 
 export interface FlowLink {

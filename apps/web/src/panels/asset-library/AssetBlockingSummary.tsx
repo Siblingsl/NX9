@@ -47,7 +47,7 @@ export function AssetBlockingSummary({
         <ChevronDown size={12} className={open ? 'rotate-180 transition' : 'transition'} />
       </button>
       {open ? (
-        <div className="absolute right-0 top-full z-30 mt-1 w-56 overflow-hidden rounded-xl border border-line bg-surface py-1 shadow-lg">
+        <div className="nx9-asset-lib-menu absolute right-0 top-full z-30 mt-1 w-56 overflow-hidden rounded-xl border border-line bg-surface py-1 shadow-lg">
           <p className="px-3 py-1.5 text-[10px] text-ink/45">点击跳转到对应 Tab 并过滤</p>
           {summary.byTab.map((row) => (
             <button

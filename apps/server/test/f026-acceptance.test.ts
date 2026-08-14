@@ -136,11 +136,12 @@ describe('F-026 acceptance', () => {
     });
 
     it('确认后导演台可按本集批出关键帧', () => {
-      expect(handoff).toContain('确认后导演台可按本集批出关键帧');
+      expect(handoff).toContain('确认后自动同步交接至已连接导演台；导演台可按本集批出关键帧。');
     });
 
     it('已聚焦导演台 · 请开台批出关键帧', () => {
-      expect(src).toContain('已聚焦导演台 · 交接数据已同步');
+      const ops = readWeb('blocks/craft/storyboard-desk/handoff-ops.ts');
+      expect(ops).toContain('已聚焦导演台 · 交接数据已同步');
     });
 
     it('foot actions 无批量线稿按钮', () => {

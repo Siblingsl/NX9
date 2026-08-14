@@ -11,7 +11,7 @@ describe('TOOL-04 iterator / loop', () => {
   });
 
   it('flow-runner iterator 分支调用 advanceIteratorIndex', () => {
-    const src = readFileSync(resolve(__dirname, '../flow-runner.ts'), 'utf8');
+    const src = readFileSync(resolve(__dirname, '../flow-runner-ops/media-ops.ts'), 'utf8');
     const branch = src.slice(src.indexOf("if (kind === 'iterator')"), src.indexOf("if (kind === 'picker')"));
     expect(branch).toContain('advanceIteratorIndex');
     expect(branch).toContain('lastEmittedIndex');

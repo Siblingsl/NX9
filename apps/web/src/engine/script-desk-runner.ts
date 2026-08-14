@@ -81,12 +81,16 @@ function formatSampleFromEpisodes(episodes: ScreenplayPackage['screenplay']['epi
 function withSceneDraftsFromEpisodes(
   pkg: ScreenplayPackage,
   patch: Partial<ScreenplayPackage>,
+  options: { upsertEpisodes?: boolean } = {},
 ): Partial<ScreenplayPackage> {
-  const merged = applyPackagePatch(pkg, patch);
+  const upsertPatch = options.upsertEpisodes === false
+    ? patch
+    : { ...patch, episodesMergeMode: 'upsert' } as Partial<ScreenplayPackage>;
+  const merged = applyPackagePatch(pkg, upsertPatch);
   const enriched = enrichBibleScenesFromPackage(merged);
-  if (enriched.bible.scenes === merged.bible.scenes) return patch;
+  if (enriched.bible.scenes === merged.bible.scenes) return upsertPatch;
   return {
-    ...patch,
+    ...upsertPatch,
     bible: {
       world: enriched.bible.world ?? pkg.bible.world,
       characters: enriched.bible.characters,
@@ -252,6 +256,8 @@ export function appendAgentMessage(
     skillId: msg.skillId,
     pendingPatch: msg.pendingPatch,
     applied: msg.applied,
+    discarded: msg.discarded,
+    errorCode: msg.errorCode,
   };
   const messages = [...(session?.messages ?? []), nextMsg].slice(-80);
   return {
@@ -427,19 +433,16 @@ export async function runAppendEpisodeSkill(
   const newEpisode = generated.screenplay.episodes[0];
   if (!newEpisode) throw new Error('续写未返回有效集内容');
 
-  const episodes = [
-    ...pkg.screenplay.episodes,
-    {
-      ...newEpisode,
-      id: `ep-${Date.now()}-${options.nextEpisodeIndex}`,
-      index: options.nextEpisodeIndex,
-      title: newEpisode.title || `第${options.nextEpisodeIndex}集`,
-    },
-  ];
+  const newEpisodePatch = {
+    ...newEpisode,
+    id: `ep-${Date.now()}-${options.nextEpisodeIndex}`,
+    index: options.nextEpisodeIndex,
+    title: newEpisode.title || `第${options.nextEpisodeIndex}集`,
+  };
 
   return {
     assistantText: `已续写第 ${options.nextEpisodeIndex} 集（追加到末尾）。`,
-    patch: withSceneDraftsFromEpisodes(pkg, { screenplay: { ...pkg.screenplay, episodes } }),
+    patch: withSceneDraftsFromEpisodes(pkg, { screenplay: { ...pkg.screenplay, episodes: [newEpisodePatch] } }),
   };
 }
 
@@ -508,20 +511,16 @@ export async function runRewriteEpisodeSkill(
   const replacement = generated.screenplay.episodes[0];
   if (!replacement?.bodyMd.trim()) throw new Error('重写未返回有效集内容');
 
-  const episodes = pkg.screenplay.episodes.map((ep) =>
-    ep.index === options.episodeIndex
-      ? {
-          ...ep,
-          title: replacement.title?.trim() || ep.title,
-          bodyMd: replacement.bodyMd,
-          updatedAt: new Date().toISOString(),
-        }
-      : ep,
-  );
+  const targetPatch = {
+    ...target,
+    title: replacement.title?.trim() || target.title,
+    bodyMd: replacement.bodyMd,
+    updatedAt: new Date().toISOString(),
+  };
 
   return {
     assistantText: `已重写第 ${options.episodeIndex} 集（已考虑与前后集衔接）。`,
-    patch: withSceneDraftsFromEpisodes(pkg, { screenplay: { ...pkg.screenplay, episodes } }),
+    patch: withSceneDraftsFromEpisodes(pkg, { screenplay: { ...pkg.screenplay, episodes: [targetPatch] } }),
   };
 }
 
@@ -567,16 +566,22 @@ export async function runGenerateScreenplaySkill(
     });
     const replacement = generated.screenplay.episodes[0];
     if (!replacement) throw new Error('续写未返回有效集内容');
-    const episodes = pkg.screenplay.episodes.map((ep) =>
-      ep.index === episodeIndex
-        ? { ...replacement, id: ep.id, index: ep.index, title: ep.title || replacement.title }
-        : ep,
-    );
+    const targetEp = pkg.screenplay.episodes.find((ep) => ep.index === episodeIndex);
+    if (!targetEp) throw new Error(`第 ${episodeIndex} 集不存在`);
+    const patchEp = {
+      ...targetEp,
+      ...replacement,
+      id: targetEp.id,
+      index: targetEp.index,
+      title: targetEp.title || replacement.title,
+      updatedAt: new Date().toISOString(),
+    };
     return {
       assistantText: `已续写第 ${episodeIndex} 集，请确认后点「应用此步产出」。`,
-      patch: withSceneDraftsFromEpisodes(pkg, { screenplay: { ...pkg.screenplay, episodes } }),
+      patch: withSceneDraftsFromEpisodes(pkg, { screenplay: { ...pkg.screenplay, episodes: [patchEp] } }),
     };
   }
+
 
   const next = ingestTextToPackage(emptyScreenplayPackage(), text, {
     sourceType: 'generated',
@@ -592,7 +597,7 @@ export async function runGenerateScreenplaySkill(
         episodeCount: next.screenplay.episodes.length,
       },
       screenplay: next.screenplay,
-    }),
+    }, { upsertEpisodes: false }),
   };
 }
 
@@ -684,18 +689,36 @@ export async function runScriptDeskSkill(
   pkg: ScreenplayPackage,
   userInstruction: string,
   signal?: AbortSignal,
-): Promise<{ assistantText: string; patch?: Partial<ScreenplayPackage> }> {
+  onChunk?: (text: string) => void,
+): Promise<{ assistantText: string; patch?: Partial<ScreenplayPackage>; errorCode?: ScriptDeskErrorCode }> {
   try {
     if (signal?.aborted) throw new DOMException('已中止', 'AbortError');
     if (skillId === 'generate' && !pkg.bible.world?.visualStyleNotes?.trim()) {
       throw new Error('生成剧本前必须先选择人物与全片视觉风格');
     }
-    const res = await api.scriptDeskChat({
-      skillId,
-      userInstruction: userInstruction.trim() || undefined,
-      package: pkg as unknown as Record<string, unknown>,
-    }, { signal });
-    const rawPatch = (res.patch ?? {}) as Record<string, unknown>;
+    let rawPatch: Record<string, unknown>;
+    let explanation: string;
+    if (onChunk) {
+      const streamed = await api.scriptDeskChatStream({
+        skillId,
+        userInstruction: userInstruction.trim() || undefined,
+        package: pkg as unknown as Record<string, unknown>,
+      }, { signal, onChunk });
+      const parsed = JSON.parse(streamed.full) as {
+        patch?: Record<string, unknown>;
+        explanation?: string;
+      };
+      rawPatch = (parsed.patch ?? parsed) as Record<string, unknown>;
+      explanation = String(parsed.explanation ?? '已生成补丁，请确认后应用。');
+    } else {
+      const res = await api.scriptDeskChat({
+        skillId,
+        userInstruction: userInstruction.trim() || undefined,
+        package: pkg as unknown as Record<string, unknown>,
+      }, { signal });
+      rawPatch = (res.patch ?? {}) as Record<string, unknown>;
+      explanation = res.explanation;
+    }
 
     if (skillId === 'consistency') {
       const llmDiags = (rawPatch.diagnostics
@@ -723,18 +746,19 @@ export async function runScriptDeskSkill(
         }
       }
       return {
-        assistantText: res.explanation || `一致性检查完成（LLM + 规则 + 专检），诊断 ${merged.length} 条。`,
+        assistantText: explanation || `一致性检查完成（LLM + 规则 + 专检），诊断 ${merged.length} 条。`,
         patch: { diagnostics: merged },
       };
     }
 
     const patch = coerceSkillPackagePatch(pkg, rawPatch);
     return {
-      assistantText: res.explanation || 'LLM 已生成补丁，请确认后应用。',
+      assistantText: explanation || 'LLM 已生成补丁，请确认后应用。',
       patch: Object.keys(patch).length > 0 ? patch : undefined,
     };
   } catch (e) {
     const fallback = String(e);
+    const degradedErrorCode = classifyScriptDeskError(e).code;
     if (skillId === 'consistency') {
       const localDiags = buildNarrativeConsistencyDiagnostics(pkg);
       const checkItems = runConsistencyChecks(pkg);
@@ -753,6 +777,7 @@ export async function runScriptDeskSkill(
       return {
         assistantText: `LLM 一致性检查失败，已降级为规则+专检：${fallback}`,
         patch: { diagnostics: merged },
+        errorCode: degradedErrorCode,
       };
     }
 
@@ -763,6 +788,7 @@ export async function runScriptDeskSkill(
         return {
           assistantText: `Skill 通道失败，已降级为成稿生成：${fallback}\n${local.assistantText}`,
           patch: local.patch,
+          errorCode: degradedErrorCode,
         };
       } catch {
         /* fall through */
@@ -774,6 +800,7 @@ export async function runScriptDeskSkill(
         return {
           assistantText: `Skill 通道失败，已降级为资产抽取：${fallback}\n${local.assistantText}`,
           patch: local.patch,
+          errorCode: degradedErrorCode,
         };
       } catch {
         /* fall through */
@@ -782,6 +809,7 @@ export async function runScriptDeskSkill(
 
     return {
       assistantText: `LLM 调用失败，已降级为本地草稿：${fallback}`,
+      errorCode: degradedErrorCode,
       patch: userInstruction.trim()
         ? {
           brief: {

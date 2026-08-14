@@ -11,10 +11,12 @@ import {
   type ChainStoryboardPayload,
 } from '@nx9/shared';
 import {
+  resolveDownstreamDirectorDeskId,
   resolveUpstreamChainDesk,
   validateDirectorHandoff,
 } from '../chain-storyboard-utils';
 import {
+  buildDirectorHandoff,
   DESK_SESSION_DRAFT_VERSION,
   parseDeskSessionDraft,
   serializeDeskSessionDraft,
@@ -139,6 +141,70 @@ describe('连贯性检查多链定位', () => {
     ];
     expect(resolveUpstreamChainDesk('cont-b', nodes, edges)).toBe('desk-b');
     expect(resolveUpstreamChainDesk('dir-a', nodes, edges)).toBe('desk-a');
+  });
+});
+
+describe('分镜台打开导演台多链定位（SB-D-01）', () => {
+  it('两套链并存时只返回本台出边可达的导演台', () => {
+    const nodes: any[] = [
+      { id: 'sb-a', type: 'storyboard-desk', data: {} },
+      { id: 'sb-b', type: 'storyboard-desk', data: {} },
+      { id: 'dir-a', type: 'director-desk', data: {} },
+      { id: 'dir-b', type: 'director-desk', data: {} },
+    ];
+    const edges = [
+      { source: 'sb-a', target: 'dir-a' },
+      { source: 'sb-b', target: 'dir-b' },
+    ];
+    expect(resolveDownstreamDirectorDeskId('sb-a', nodes, edges)).toBe('dir-a');
+    expect(resolveDownstreamDirectorDeskId('sb-b', nodes, edges)).toBe('dir-b');
+  });
+
+  it('中间经过普通节点时仍按出边可达定位，找不到则返回 null', () => {
+    const nodes: any[] = [
+      { id: 'sb-a', type: 'storyboard-desk', data: {} },
+      { id: 'pass', type: 'picture-gen', data: {} },
+      { id: 'dir-a', type: 'director-desk', data: {} },
+      { id: 'dir-other', type: 'director-desk', data: {} },
+    ];
+    const edges = [
+      { source: 'sb-a', target: 'pass' },
+      { source: 'pass', target: 'dir-a' },
+    ];
+    expect(resolveDownstreamDirectorDeskId('sb-a', nodes, edges)).toBe('dir-a');
+    expect(resolveDownstreamDirectorDeskId('dir-other', nodes, edges)).toBeNull();
+  });
+});
+
+describe('分镜台确认自动推送交接（SB-D-04）', () => {
+  it('buildDirectorHandoff 使用传入确认态与版本，哈希与链一致且可被导演台校验', () => {
+    const chain = makeChain('ep-1');
+    const confirmedChain = { ...chain, gridConfirmed: true, confirmedEpisodeIds: ['ep-1'] };
+    const handoff = buildDirectorHandoff({
+      sourceStoryboardBlockId: 'sb-a',
+      chain: confirmedChain,
+      scriptHash: 'pkg|confirmed|ep-1:body',
+      episodeId: 'ep-1',
+      episodeTitle: '第1集',
+      shotCount: 2,
+      shotIds: ['shot-1', 'shot-2'],
+      compositionCoverage: 1,
+      confirmed: true,
+      confirmedEpisodeIds: ['ep-1'],
+      handoffVersion: 2,
+      confirmedAt: '2026-08-12T02:00:00.000Z',
+    });
+    expect(handoff.handoffVersion).toBe(2);
+    expect(handoff.confirmed).toBe(true);
+    expect(handoff.confirmedEpisodeIds).toEqual(['ep-1']);
+    expect(handoff.storyboardHash).toBe(chainStoryboardHash(confirmedChain, 'ep-1'));
+    expect(handoff.lineartVersion).toBe(lineArtVersionHash(chain, 'ep-1'));
+    expect(validateDirectorHandoff({
+      handoff: handoff as unknown as Record<string, unknown>,
+      chain: confirmedChain,
+      episodeId: 'ep-1',
+      scriptHash: 'pkg|confirmed|ep-1:body',
+    }).valid).toBe(true);
   });
 });
 

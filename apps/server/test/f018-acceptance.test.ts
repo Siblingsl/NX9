@@ -133,7 +133,7 @@ describe('F-018 导演台多机位预设', () => {
 
   // ─── 批出请求体含 cameraPrompt ───
   it('core-pipeline-runner 将 cameraPrompt 注入生成 prompt', () => {
-    const src = readWeb('engine/core-pipeline-runner.ts');
+    const src = readWeb('engine/executors/picture-gen-executor.ts');
 
     expect(src).toContain('director3dGuide?.cameraPrompt');
     expect(src).toContain('3D camera direction');

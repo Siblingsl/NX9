@@ -263,3 +263,30 @@ export function applySplitMixedDirector3dGraph(input: {
     : input.edges;
   return { nodes, edges };
 }
+
+/** DD-D-11: 工作区加载时对 split-required 混装导演台做非破坏性自动拆分。 */
+export function autoSplitMixedDirector3dGraph(input: {
+  nodes: Node[];
+  edges: Edge[];
+}): { nodes: Node[]; edges: Edge[]; splitCount: number } {
+  let nodes = input.nodes;
+  let edges = input.edges;
+  let splitCount = 0;
+  for (let guard = 0; guard < 16; guard += 1) {
+    const node = nodes.find(
+      (item) => item.type === 'director-desk' && needsDirector3dSplit(item.type, record(item.data)),
+    );
+    if (!node) break;
+    const result = splitMixedDirector3dNode({
+      directorDeskId: node.id,
+      nodes,
+      edges,
+    });
+    if (!result.ok) break;
+    const next = applySplitMixedDirector3dGraph({ nodes, edges, result });
+    nodes = next.nodes;
+    edges = next.edges;
+    splitCount += 1;
+  }
+  return { nodes, edges, splitCount };
+}

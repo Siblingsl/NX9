@@ -57,6 +57,8 @@ export async function generateStoryboardFrameImage(
   if (!prompt.trim()) throw new Error('Prompt 为空');
 
   const { modelId, size } = resolvePictureGenSettings(pictureNodeData, previewSettings);
+  // PG-44: 分镜预览域直调 runPictureGenJob，不冒充 picture-gen 节点 result；
+  // 产物只写 preview frame / lineArtUrl，不写链镜 firstFrame，也不写节点 usedAssetIds。
   const urls = await runPictureGenJob({
     prompt,
     modelId,

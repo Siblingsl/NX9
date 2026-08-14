@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  activeEpisodeShots,
   appendStoryboardReviewEvent,
   filterStoryboardGuideOverlay,
   resolveStoryboardGuideOverlay,
@@ -8,13 +7,14 @@ import {
   type StoryboardReviewStage,
   type StoryboardShot,
 } from '@nx9/shared';
+import { useEdges, useNodes, useReactFlow } from '@xyflow/react';
 import { ComposerWorkspaceShell } from '../composer/ComposerWorkspaceShell';
 import { useDeckUi } from '../../../stores/deck-ui';
 import { useAttachedNodeData } from '../generation/use-attached-node-data';
-import { useWorkspaceDocument } from '../../../../../stores/workspace-document';
 import { useFlowRuntime } from '../../../../../stores/flow-runtime';
 import { useStoryboardGuidePrefs } from '../../../../../stores/storyboard-guide-prefs';
 import { batchGenerateKeyframesFromShots } from '../../../../core-pipeline-runner';
+import { patchUpstreamShot, resolveShotsForBlock } from '../../../../../engine/chain-storyboard-utils';
 import { resolveStoryboardBoardMeta } from '../storyboard-preview/storyboard-board-meta';
 import { StoryboardGuideOverlayView } from '../storyboard-preview/StoryboardGuideOverlay';
 import '../../../../../styles/storyboard-board.css';
@@ -63,9 +63,10 @@ export function ReportWorkspace({ blockId, kind, onCollapse }: ReportWorkspacePr
     (data.gateMode as string | undefined) === 'video' ? 'video' : 'keyframe';
   const isVideo = gateMode === 'video';
   const stage: StoryboardReviewStage = gateMode;
-  const storyboard = useWorkspaceDocument((state) => state.storyboard);
-  const shots = useMemo(() => activeEpisodeShots(storyboard), [storyboard]);
-  const updateShot = useWorkspaceDocument((state) => state.updateShot);
+  const { updateNodeData } = useReactFlow();
+  const nodes = useNodes();
+  const edges = useEdges();
+  const shots = useMemo(() => resolveShotsForBlock(blockId, nodes, edges), [blockId, nodes, edges]);
   const runtime = useFlowRuntime((state) => state.runtime);
   const guideShowOverlay = useStoryboardGuidePrefs((s) => s.showOverlay);
   const guideKindsMap = useStoryboardGuidePrefs((s) => s.kinds);
@@ -77,6 +78,11 @@ export function ReportWorkspace({ blockId, kind, onCollapse }: ReportWorkspacePr
   const [regeneratingShotId, setRegeneratingShotId] = useState<string | null>(null);
   const [editingShotId, setEditingShotId] = useState<string | null>(null);
   const [rejectionDrafts, setRejectionDrafts] = useState<Record<string, string>>({});
+  const writeChainShot = useCallback(
+    (shotId: string, patch: Partial<StoryboardShot>) =>
+      patchUpstreamShot(updateNodeData, blockId, nodes, edges, shotId, patch),
+    [updateNodeData, blockId, nodes, edges],
+  );
   const isReviewGate = false; // 审阅关卡已拆除；批审改由导演台承接
 
   const counts = useMemo(() => {
@@ -123,21 +129,23 @@ export function ReportWorkspace({ blockId, kind, onCollapse }: ReportWorkspacePr
         createdAt: new Date().toISOString(),
       };
       if (isVideo) {
-        updateShot(shot.id, {
+        const ok = writeChainShot(shot.id, {
           status: 'approved',
           videoStatus: 'approved',
           reviewHistory: appendStoryboardReviewEvent(shot, event),
         });
+        if (!ok) runtime?.updateNodeData(blockId, { status: 'blocked', gatePassed: false });
       } else {
-        updateShot(shot.id, {
+        const ok = writeChainShot(shot.id, {
           status: 'approved',
           keyframeStatus: 'approved',
           keyframeReviewNote: null,
           reviewHistory: appendStoryboardReviewEvent(shot, event),
         });
+        if (!ok) runtime?.updateNodeData(blockId, { status: 'blocked', gatePassed: false });
       }
     },
-    [isVideo, stage, updateShot],
+    [isVideo, stage, writeChainShot, runtime, blockId],
   );
 
   const rejectShot = useCallback(
@@ -153,13 +161,13 @@ export function ReportWorkspace({ blockId, kind, onCollapse }: ReportWorkspacePr
       };
       runtime?.updateNodeData(blockId, { status: 'blocked', gatePassed: false });
       if (isVideo) {
-        updateShot(shot.id, {
+        writeChainShot(shot.id, {
           status: 'failed',
           videoStatus: 'failed',
           reviewHistory: appendStoryboardReviewEvent(shot, event),
         });
       } else {
-        updateShot(shot.id, {
+        writeChainShot(shot.id, {
           status: 'failed',
           keyframeStatus: 'failed',
           keyframeReviewNote: comment,
@@ -175,7 +183,7 @@ export function ReportWorkspace({ blockId, kind, onCollapse }: ReportWorkspacePr
         setRegeneratingShotId(null);
       }
     },
-    [blockId, isVideo, rejectionDrafts, runtime, stage, updateShot],
+    [blockId, isVideo, rejectionDrafts, runtime, stage, writeChainShot],
   );
 
   const approveAll = useCallback(() => {
@@ -265,7 +273,7 @@ export function ReportWorkspace({ blockId, kind, onCollapse }: ReportWorkspacePr
               </div>
             )}
             {shots.length === 0 ? (
-              <p className="py-8 text-center text-[11px] text-ink/35">故事板暂无镜头</p>
+              <p className="py-8 text-center text-[11px] text-ink/35">未连接上游分镜台链，禁止回退全局审阅</p>
             ) : (
               <div className="sb-board-grid is-cols-3">
                 {shots.map((shot) => {

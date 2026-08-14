@@ -95,6 +95,14 @@ describe('director keyframe batch', () => {
     expect(first.batch.status).toBe('consumed');
     expect(first.receipt.succeededShotIds).toEqual(['s1', 's2']);
     expect(first.chain.shots.map((shot) => shot.videoAssetId)).toEqual(['video-s1', 'video-s2']);
+    // DD-D-01: 视频写回不得覆盖关键帧批准语义。
+    expect(first.chain.shots.map((shot) => shot.keyframeStatus)).toEqual(['approved', 'approved']);
+    expect(first.chain.shots.map((shot) => shot.status)).toEqual(['approved', 'approved']);
+    expect(first.chain.shots.map((shot) => shot.videoStatus)).toEqual(['review', 'review']);
+    // VG-36: 导演批次成片与批量同口径建 videoVersions
+    expect(first.chain.shots.map((shot) => shot.videoVersions?.length)).toEqual([1, 1]);
+    expect(first.chain.shots.map((shot) => shot.videoVersions?.[0]?.url)).toEqual(['video-s1', 'video-s2']);
+    expect(first.chain.shots.map((shot) => shot.videoVersions?.[0]?.model)).toEqual(['veo', 'veo']);
 
     const reopened = await consumeDirectorKeyframeBatch({
       batch: first.batch,

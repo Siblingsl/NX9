@@ -1,11 +1,26 @@
 import { useRef, useState } from 'react';
-import { Download, Expand, FolderPlus, History, Trash2, User } from 'lucide-react';
+import {
+  Check,
+  Copy,
+  Download,
+  Expand,
+  FileText,
+  History,
+  Mountain,
+  PackagePlus,
+  Trash2,
+  UserPlus,
+} from 'lucide-react';
 import { setMediaPinDragData } from '../../../../../media-pin-drag';
 import type { PictureGenerationHistoryEntry } from '../../../../../picture-gen-history';
+import { ComposerPopover } from '../../composer/ComposerPopover';
 
 function stop(e: React.SyntheticEvent) {
   e.stopPropagation();
 }
+
+const iconBtnClass =
+  'inline-flex h-4 w-4 items-center justify-center rounded text-ink/45 hover:bg-brand/10 hover:text-brand';
 
 /** PG-10: 下载生成图（跨域失败时回退新窗口打开） */
 async function downloadImage(url: string, index: number): Promise<void> {
@@ -38,10 +53,16 @@ export interface PictureResultGalleryProps {
   characters?: { id: string; name: string }[];
   history?: PictureGenerationHistoryEntry[];
   onRestoreHistory?: (id: string) => void;
+  /** PG-45: 只恢复该轮用户提示词，不替换当前生成结果 */
+  onRestorePrompt?: (entryId: string) => void;
   /** PG-33: 批量失败条目（第 n 条 + 错误摘要） */
   failures?: { index: number; error: string }[];
   /** 拖出钉板时的来源节点 id */
   sourceBlockId?: string;
+  /** 最近一次实际发给上游的编译提示词（兼容旧调用；优先用 compiledPromptsByUrl） */
+  compiledPrompt?: string;
+  /** 每张生成图自己的发送稿（url → prompt） */
+  compiledPromptsByUrl?: Record<string, string>;
   /** @deprecated 空列表直接不渲染，保留以免调用方报错 */
   emptyHint?: string;
   showLabel?: boolean;
@@ -58,111 +79,208 @@ export function PictureResultGallery({
   characters = [],
   history = [],
   onRestoreHistory,
+  onRestorePrompt,
   failures = [],
   sourceBlockId,
+  compiledPrompt,
+  compiledPromptsByUrl,
   showLabel = true,
 }: PictureResultGalleryProps) {
   const [lightbox, setLightbox] = useState<string | null>(null);
   const [pendingDelete, setPendingDelete] = useState<number | null>(null);
   const [charMenu, setCharMenu] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [promptOpen, setPromptOpen] = useState(false);
+  const [copied, setCopied] = useState(false);
   const draggedRef = useRef(false);
+  const promptBtnRef = useRef<HTMLButtonElement>(null);
 
   if (urls.length === 0 && failures.length === 0) return null;
 
   const pendingUrl = pendingDelete != null ? urls[pendingDelete] : null;
-  const selectedUrl = selectedIndex != null ? urls[selectedIndex] : urls[0];
+  const safeIndex = Math.min(Math.max(selectedIndex, 0), Math.max(0, urls.length - 1));
+  const selectedUrl = urls[safeIndex];
+  const promptText = (
+    (selectedUrl && compiledPromptsByUrl?.[selectedUrl]?.trim()) ||
+    (selectedUrl && compiledPromptsByUrl?.[selectedUrl.trim()]?.trim()) ||
+    // 仅选中最新一张时，才允许回退到单值 compiledPrompt
+    (safeIndex === 0 ? compiledPrompt?.trim() : '') ||
+    ''
+  ).trim();
+  const showActions = Boolean(selectedUrl || promptText);
+
+  const closeOtherMenus = (keep?: 'char' | 'history' | 'prompt') => {
+    if (keep !== 'char') setCharMenu(false);
+    if (keep !== 'history') setHistoryOpen(false);
+    if (keep !== 'prompt') setPromptOpen(false);
+  };
+
+  const handleCopyPrompt = async () => {
+    if (!promptText) return;
+    try {
+      await navigator.clipboard.writeText(promptText);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1500);
+    } catch {
+      /* ignore */
+    }
+  };
 
   return (
     <div className="min-w-0 flex flex-col gap-1.5 nodrag nopan" onMouseDown={stop}>
       {showLabel && (
-        <div className="flex items-center gap-1.5">
-          <span className="text-[9px] font-medium text-ink/50 tracking-wide">生成结果</span>
-          <span className="text-[9px] text-ink/30 tabular-nums">{urls.length}</span>
-          <span className="text-[9px] text-ink/28">拖出钉到画布</span>
-          {selectedUrl ? (
-            <span className="ml-auto flex items-center gap-1">
-              <button
-                type="button"
-                onMouseDown={stop}
-                onClick={() => void downloadImage(selectedUrl, selectedIndex ?? 0)}
-                className="inline-flex items-center gap-0.5 text-[9px] text-ink/45 hover:text-brand"
-                title="下载选中图"
-              >
-                <Download size={9} />
-                下载
-              </button>
-              {onSaveToLibrary && (
+        <div className="flex h-5 shrink-0 items-center justify-between gap-2 min-w-0">
+          <div
+            className="flex h-full items-center gap-1 min-w-0"
+            title="拖出缩略图可钉到画布"
+          >
+            <span className="shrink-0 text-[9px] leading-none font-medium text-ink/50 tracking-wide">
+              生成结果
+            </span>
+            <span className="shrink-0 text-[9px] leading-none text-ink/30 tabular-nums">
+              {urls.length}
+            </span>
+          </div>
+          {showActions ? (
+            <div className="flex h-full shrink-0 items-center gap-0.5">
+              {promptText ? (
+                <>
+                  <button
+                    ref={promptBtnRef}
+                    type="button"
+                    onMouseDown={stop}
+                    onClick={() => {
+                      closeOtherMenus('prompt');
+                      setPromptOpen((v) => !v);
+                      setCopied(false);
+                    }}
+                    className={iconBtnClass}
+                    title="查看发送稿"
+                    aria-label="查看发送稿"
+                  >
+                    <FileText size={11} />
+                  </button>
+                  <ComposerPopover
+                    open={promptOpen}
+                    onClose={() => setPromptOpen(false)}
+                    anchorRef={promptBtnRef}
+                    placement="below"
+                    align="end"
+                    width={180}
+                    tone="desk"
+                  >
+                    <div className="px-2 pt-1.5 pb-2" onMouseDown={stop}>
+                      <div className="mb-1.5 flex items-center justify-between gap-1.5">
+                        <span className="shrink-0 text-[10px] font-medium text-ink/75">发送稿</span>
+                        <button
+                          type="button"
+                          onClick={() => void handleCopyPrompt()}
+                          className="inline-flex shrink-0 items-center gap-0.5 rounded border border-brand/35 bg-brand/15 px-1.5 py-0.5 text-[9px] font-medium text-brand hover:bg-brand/25"
+                          title="复制发送稿"
+                          aria-label="复制发送稿"
+                        >
+                          {copied ? <Check size={10} /> : <Copy size={10} />}
+                          {copied ? '已复制' : '复制'}
+                        </button>
+                      </div>
+                      <pre className="max-h-28 overflow-y-auto nx9-scroll whitespace-pre-wrap break-words rounded-md border border-line/40 bg-surface px-1.5 py-1 text-[9px] leading-snug text-ink/75">
+                        {promptText}
+                      </pre>
+                    </div>
+                  </ComposerPopover>
+                </>
+              ) : null}
+              {selectedUrl ? (
                 <>
                   <button
                     type="button"
                     onMouseDown={stop}
-                    onClick={() => onSaveToLibrary(selectedUrl, 'scene')}
-                    className="inline-flex items-center gap-0.5 text-[9px] text-ink/45 hover:text-brand"
-                    title="把选中图入库为场景参考"
+                    onClick={() => void downloadImage(selectedUrl, selectedIndex ?? 0)}
+                    className={iconBtnClass}
+                    title="下载选中图"
+                    aria-label="下载选中图"
                   >
-                    <FolderPlus size={9} />
-                    入库·场景
+                    <Download size={11} />
                   </button>
-                  <button
-                    type="button"
-                    onMouseDown={stop}
-                    onClick={() => onSaveToLibrary(selectedUrl, 'prop')}
-                    className="inline-flex items-center gap-0.5 text-[9px] text-ink/45 hover:text-brand"
-                    title="把选中图入库为道具参考"
-                  >
-                    <FolderPlus size={9} />
-                    入库·道具
-                  </button>
-                </>
-              )}
-              {onSaveToCharacter && characters.length > 0 && (
-                <span className="relative">
-                  <button
-                    type="button"
-                    onMouseDown={stop}
-                    onClick={() => setCharMenu((v) => !v)}
-                    className="inline-flex items-center gap-0.5 text-[9px] text-ink/45 hover:text-brand"
-                    title="把选中图写入角色定妆并升 revision"
-                  >
-                    <User size={9} />
-                    入库·角色
-                  </button>
-                  {charMenu && (
-                    <div
-                      className="absolute right-0 top-full z-30 mt-1 min-w-[140px] max-h-40 overflow-y-auto rounded-lg border border-line/40 bg-surface py-1 shadow-lg"
-                      onMouseDown={stop}
-                    >
-                      {characters.map((c) => (
-                        <button
-                          key={c.id}
-                          type="button"
-                          onClick={() => {
-                            onSaveToCharacter(selectedUrl, c.id);
-                            setCharMenu(false);
-                          }}
-                          className="block w-full px-2 py-1 text-left text-[10px] text-ink/70 hover:bg-brand/10 hover:text-brand truncate"
-                        >
-                          {c.name}
-                        </button>
-                      ))}
-                    </div>
+                  {onSaveToLibrary && (
+                    <>
+                      <button
+                        type="button"
+                        onMouseDown={stop}
+                        onClick={() => onSaveToLibrary(selectedUrl, 'scene')}
+                        className={iconBtnClass}
+                        title="入库为场景参考"
+                        aria-label="入库为场景参考"
+                      >
+                        <Mountain size={11} />
+                      </button>
+                      <button
+                        type="button"
+                        onMouseDown={stop}
+                        onClick={() => onSaveToLibrary(selectedUrl, 'prop')}
+                        className={iconBtnClass}
+                        title="入库为道具参考"
+                        aria-label="入库为道具参考"
+                      >
+                        <PackagePlus size={11} />
+                      </button>
+                    </>
                   )}
-                </span>
-              )}
-              {history.length > 0 && onRestoreHistory && (
-                <button
-                  type="button"
-                  onMouseDown={stop}
-                  onClick={() => setHistoryOpen((v) => !v)}
-                  className="inline-flex items-center gap-0.5 text-[9px] text-ink/45 hover:text-brand"
-                  title="查看此前各轮生成结果"
-                >
-                  <History size={9} />
-                  历史 {history.length}
-                </button>
-              )}
-            </span>
+                  {onSaveToCharacter && characters.length > 0 && (
+                    <span className="relative flex h-full items-center">
+                      <button
+                        type="button"
+                        onMouseDown={stop}
+                        onClick={() => {
+                          closeOtherMenus('char');
+                          setCharMenu((v) => !v);
+                        }}
+                        className={iconBtnClass}
+                        title="入库为角色定妆"
+                        aria-label="入库为角色定妆"
+                      >
+                        <UserPlus size={11} />
+                      </button>
+                      {charMenu && (
+                        <div
+                          className="absolute right-0 top-full z-30 mt-1 min-w-[140px] max-h-40 overflow-y-auto rounded-lg border border-line/40 bg-surface py-1 shadow-lg"
+                          onMouseDown={stop}
+                        >
+                          {characters.map((c) => (
+                            <button
+                              key={c.id}
+                              type="button"
+                              onClick={() => {
+                                onSaveToCharacter(selectedUrl, c.id);
+                                setCharMenu(false);
+                              }}
+                              className="block w-full px-2 py-1 text-left text-[10px] text-ink/70 hover:bg-brand/10 hover:text-brand truncate"
+                            >
+                              {c.name}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </span>
+                  )}
+                  {history.length > 0 && onRestoreHistory && (
+                    <button
+                      type="button"
+                      onMouseDown={stop}
+                      onClick={() => {
+                        closeOtherMenus('history');
+                        setHistoryOpen((v) => !v);
+                      }}
+                      className={iconBtnClass}
+                      title={`历史生成 ${history.length} 轮`}
+                      aria-label={`历史生成 ${history.length} 轮`}
+                    >
+                      <History size={11} />
+                    </button>
+                  )}
+                </>
+              ) : null}
+            </div>
           ) : null}
         </div>
       )}
@@ -201,9 +319,9 @@ export function PictureResultGallery({
             >
               <button
                 type="button"
-                onClick={() => {
-                  if (draggedRef.current) return;
+                onPointerDown={() => {
                   onSelect?.(i);
+                  setPromptOpen(false);
                 }}
                 onDoubleClick={() => setLightbox(url)}
                 className="absolute inset-0"
@@ -248,19 +366,31 @@ export function PictureResultGallery({
           <span className="text-[9px] text-ink/40">此前各轮 · 点击恢复为当前结果</span>
           <div className="flex items-center gap-1.5 overflow-x-auto nx9-scroll pb-0.5">
             {history.map((entry) => (
-              <button
-                key={entry.id}
-                type="button"
-                onMouseDown={stop}
-                onClick={() => onRestoreHistory(entry.id)}
-                className="relative w-12 h-12 rounded-lg overflow-hidden border border-line/40 shrink-0 hover:border-brand/40"
-                title={`${entry.prompt || '上一轮'} · ${new Date(entry.createdAt).toLocaleString()}`}
-              >
-                <img src={entry.urls[0]} alt="" className="w-full h-full object-cover" />
-                <span className="pointer-events-none absolute inset-x-0 bottom-0 bg-ink/60 text-white text-[8px] text-center">
-                  {entry.urls.length}
-                </span>
-              </button>
+              <div key={entry.id} className="flex flex-col items-center gap-0.5 shrink-0">
+                <button
+                  type="button"
+                  onMouseDown={stop}
+                  onClick={() => onRestoreHistory(entry.id)}
+                  className="relative w-12 h-12 rounded-lg overflow-hidden border border-line/40 hover:border-brand/40"
+                  title={`${entry.prompt || '上一轮'} · ${new Date(entry.createdAt).toLocaleString()}`}
+                >
+                  <img src={entry.urls[0]} alt="" className="w-full h-full object-cover" />
+                  <span className="pointer-events-none absolute inset-x-0 bottom-0 bg-ink/60 text-white text-[8px] text-center">
+                    {entry.urls.length}
+                  </span>
+                </button>
+                {onRestorePrompt && (
+                  <button
+                    type="button"
+                    onMouseDown={stop}
+                    onClick={() => onRestorePrompt(entry.id)}
+                    className="text-[8px] text-ink/40 hover:text-brand whitespace-nowrap"
+                    title="恢复该轮用户提示词，不替换当前生成图"
+                  >
+                    恢复提示词
+                  </button>
+                )}
+              </div>
             ))}
           </div>
         </div>

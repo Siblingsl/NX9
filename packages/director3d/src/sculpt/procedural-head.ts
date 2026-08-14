@@ -55,6 +55,10 @@ const MORPH_ORDER = [
   'faceLength.neg',
   'jawWidth.pos',
   'jawWidth.neg',
+  'jawWidth.pos.L',
+  'jawWidth.neg.L',
+  'jawWidth.pos.R',
+  'jawWidth.neg.R',
   'eyeSpacing.pos',
   'eyeSpacing.neg',
   'noseBridgeHeight.pos',
@@ -62,7 +66,7 @@ const MORPH_ORDER = [
 ] as const;
 
 /**
- * P1 代理头：只实现视口切片 4 个身份 morph。禁止为空 morph 占位。
+ * P1 代理头：只实现视口切片 4 个身份 morph（jawWidth 含 .L/.R 扩展）。禁止为空 morph 占位。
  */
 export function createProxyHeadMesh(material?: MeshStandardMaterial): Mesh {
   const geo = buildHeadGeometry();
@@ -71,6 +75,10 @@ export function createProxyHeadMesh(material?: MeshStandardMaterial): Mesh {
     morphAbsolute(geo, (x, y, z) => [x, y * 0.72, z]),
     morphAbsolute(geo, (x, y, z) => (y < -0.02 ? [x * 1.7, y, z] : [x, y, z])),
     morphAbsolute(geo, (x, y, z) => (y < -0.02 ? [x * 0.45, y, z] : [x, y, z])),
+    morphAbsolute(geo, (x, y, z) => (y < -0.02 && x < 0 ? [x * 1.7, y, z] : [x, y, z])),
+    morphAbsolute(geo, (x, y, z) => (y < -0.02 && x < 0 ? [x * 0.45, y, z] : [x, y, z])),
+    morphAbsolute(geo, (x, y, z) => (y < -0.02 && x > 0 ? [x * 1.7, y, z] : [x, y, z])),
+    morphAbsolute(geo, (x, y, z) => (y < -0.02 && x > 0 ? [x * 0.45, y, z] : [x, y, z])),
     morphAbsolute(geo, (x, y, z) => {
       const inEye = Math.abs(x) > 0.03 && Math.abs(x) < 0.14 && y > -0.03 && y < 0.08 && z > 0.04;
       if (!inEye || x === 0) return [x, y, z];

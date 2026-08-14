@@ -160,7 +160,7 @@ export function AssetDetailStickyBar({
                 <ChevronDown size={11} />
               </button>
               {genOpen ? (
-                <div className="absolute right-0 top-full z-30 mt-1 min-w-[10rem] overflow-hidden rounded-lg border border-line bg-surface py-1 shadow-lg">
+                <div className="nx9-asset-lib-menu absolute right-0 top-full z-30 mt-1 min-w-[10rem] overflow-hidden rounded-lg border border-line bg-surface py-1 shadow-lg">
                   {genItems.map((item) => (
                     <button
                       key={item.label}
@@ -205,7 +205,7 @@ export function AssetDetailStickyBar({
                 参数
               </button>
               {settingsOpen ? (
-                <div className="absolute right-0 top-full z-30 mt-1 w-[min(280px,70vw)] rounded-lg border border-line bg-surface p-2 shadow-lg">
+                <div className="nx9-asset-lib-menu absolute right-0 top-full z-30 mt-1 w-[min(280px,70vw)] rounded-lg border border-line bg-surface p-2 shadow-lg">
                   {genSettingsSlot}
                 </div>
               ) : null}
@@ -229,7 +229,7 @@ export function AssetDetailStickyBar({
             <MoreHorizontal size={14} />
           </button>
           {moreOpen ? (
-            <div className="absolute right-0 top-full z-30 mt-1 min-w-[9.5rem] overflow-hidden rounded-lg border border-line bg-surface py-1 shadow-lg">
+            <div className="nx9-asset-lib-menu absolute right-0 top-full z-30 mt-1 min-w-[9.5rem] overflow-hidden rounded-lg border border-line bg-surface py-1 shadow-lg">
               {onBumpRevision ? (
                 <button
                   type="button"

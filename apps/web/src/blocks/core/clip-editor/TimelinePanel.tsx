@@ -8,6 +8,8 @@ import {
   type TimelinePayload,
   type TimelineTrack,
   type TimelineTrackKind,
+  sortVolumeKeyframes,
+  type TimelineVolumeKeyframe,
 } from '@nx9/shared';
 
 export const HEAD_W = 96;
@@ -48,6 +50,17 @@ interface DragState {
   moved: boolean;
 }
 
+interface VolumeDragState {
+  clipId: string;
+  keyframeAtSec: number;
+  volume: number;
+  durationSec: number;
+  clipStartLeft: number;
+  startClientX: number;
+  currentAtSec: number;
+  moved: boolean;
+}
+
 export interface TimelinePanelProps {
   timeline: TimelinePayload;
   pxPerSec: number;
@@ -77,7 +90,123 @@ function formatTick(sec: number): string {
   return Number.isInteger(sec) ? `${sec}s` : `${sec.toFixed(1)}s`;
 }
 
+interface VolumeEnvelopeProps {
+  clip: TimelineClip;
+  pxPerSec: number;
+  drag: VolumeDragState | null;
+  onPointerDown: (e: React.PointerEvent, clip: TimelineClip, kf: TimelineVolumeKeyframe) => void;
+  onPointerMove: (e: React.PointerEvent) => void;
+  onPointerUp: (e: React.PointerEvent) => void;
+}
+
+/** DR-06: 选中片段时在轨上展示音量包络折线 + 可拖拽菱形关键帧。 */
+function VolumeEnvelope({
+  clip,
+  pxPerSec,
+  drag,
+  onPointerDown,
+  onPointerMove,
+  onPointerUp,
+}: VolumeEnvelopeProps) {
+  const keys = useMemo(() => sortVolumeKeyframes(clip.volumeKeyframes), [clip.volumeKeyframes]);
+  if (keys.length === 0) return null;
+  const width = Math.max(6, clip.durationSec * pxPerSec);
+  const xOf = (sec: number) => Math.max(0, Math.min(width, sec * pxPerSec));
+  const yOf = (volume: number) => Math.round(100 - (Math.max(0, Math.min(2, volume)) / 2) * 100);
+  const points = keys
+    .map((kf) => {
+      const active = drag?.clipId === clip.id && drag.keyframeAtSec === kf.atSec;
+      return `${xOf(active ? drag!.currentAtSec : kf.atSec)},${yOf(kf.volume)}`;
+    })
+    .join(' ');
+  const last = keys[keys.length - 1];
+  const linePoints = points + (last ? ` ${width},${yOf(last.volume)}` : '');
+  return (
+    <div className="ed-clip__volume" aria-hidden="true">
+      <svg className="ed-clip__volume-line" viewBox={`0 0 ${width} 100`} preserveAspectRatio="none">
+        <polyline points={linePoints} />
+      </svg>
+      {keys.map((kf) => {
+        const active = drag?.clipId === clip.id && drag.keyframeAtSec === kf.atSec;
+        const left = xOf(active ? drag!.currentAtSec : kf.atSec);
+        return (
+          <span
+            key={`${kf.atSec}-${kf.volume}`}
+            className={`ed-clip__volume-kf ${active ? 'is-dragging' : ''}`}
+            style={{ left: `${left}px`, top: `${yOf(kf.volume)}%` }}
+            title={`音量 ${Math.round(kf.volume * 100)}% · ${kf.atSec.toFixed(2)}s`}
+            onPointerDown={(e) => onPointerDown(e, clip, kf)}
+            onPointerMove={onPointerMove}
+            onPointerUp={onPointerUp}
+          />
+        );
+      })}
+    </div>
+  );
+}
+
+interface AudioPeakData {
+  bars: number[];
+}
+
+const audioPeakCache = new Map<string, AudioPeakData>();
+
+/** SE-SPEC-03: 用 WebAudio 解码对白/BGM 并绘制波形；解码失败保持纯色块。 */
+function useAudioPeaks(urls: string[]): Map<string, AudioPeakData> {
+  const [peaks, setPeaks] = useState<Map<string, AudioPeakData>>(() => {
+    const m = new Map<string, AudioPeakData>();
+    for (const u of urls) {
+      const cached = audioPeakCache.get(u);
+      if (cached) m.set(u, cached);
+    }
+    return m;
+  });
+  const key = urls.join('|');
+  useEffect(() => {
+    let cancelled = false;
+    const pending = urls.filter((u) => !audioPeakCache.has(u) && !peaks.has(u));
+    for (const url of pending) {
+      void (async () => {
+        try {
+          const Ctor = window.AudioContext
+            ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+          if (!Ctor) return;
+          const res = await fetch(url);
+          if (!res.ok) return;
+          const buf = await res.arrayBuffer();
+          const ctx = new Ctor();
+          const audio = await ctx.decodeAudioData(buf);
+          const channel = audio.getChannelData(0);
+          const barCount = 48;
+          const block = Math.max(1, Math.floor(channel.length / barCount));
+          const bars: number[] = [];
+          for (let i = 0; i < barCount; i++) {
+            let max = 0;
+            const start = i * block;
+            const end = Math.min(channel.length, start + block);
+            for (let j = start; j < end; j++) max = Math.max(max, Math.abs(channel[j]));
+            bars.push(max);
+          }
+          await ctx.close();
+          const data: AudioPeakData = { bars };
+          audioPeakCache.set(url, data);
+          if (!cancelled) {
+            setPeaks((prev) => { const next = new Map(prev); next.set(url, data); return next; });
+          }
+        } catch {
+          /* 解码失败保持纯色块，不阻塞时间轴 */
+        }
+      })();
+    }
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key]);
+  return peaks;
+}
 export function TimelinePanel({
+
   timeline,
   pxPerSec,
   onZoom,
@@ -92,6 +221,9 @@ export function TimelinePanel({
   const [drag, setDrag] = useState<DragState | null>(null);
   const dragRef = useRef<DragState | null>(null);
   dragRef.current = drag;
+  const [volumeDrag, setVolumeDrag] = useState<VolumeDragState | null>(null);
+  const volumeDragRef = useRef<VolumeDragState | null>(null);
+  volumeDragRef.current = volumeDrag;
 
   // Ctrl+滚轮缩放（native 监听，preventDefault 需要非 passive）
   useEffect(() => {
@@ -108,6 +240,18 @@ export function TimelinePanel({
   }, [pxPerSec, onZoom]);
 
   const contentWidth = Math.max(320, timeline.durationSec * pxPerSec + 240);
+
+  const audioUrls = useMemo(
+    () => [
+      ...new Set(
+        timeline.tracks
+          .filter((t) => t.kind === 'audio')
+          .flatMap((t) => t.clips.filter((c) => c.type === 'audio').map((c) => c.assetUrl).filter(Boolean)),
+      ),
+    ],
+    [timeline],
+  );
+  const audioPeaks = useAudioPeaks(audioUrls);
 
   /** 磁吸目标：其他片段边缘 + 播放头 + 0 点 */
   const snapTargets = useMemo(() => {
@@ -204,6 +348,64 @@ export function TimelinePanel({
       });
     }
   }, [apply, snap, timeline]);
+
+  // ── 音量包络关键帧（DR-06：拖动只改 atSec，音量保持） ──
+  const onVolumeKeyframeDown = useCallback(
+    (e: React.PointerEvent, clip: TimelineClip, kf: TimelineVolumeKeyframe) => {
+      if (e.button !== 0) return;
+      e.stopPropagation();
+      (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+      onSelect(clip.id);
+      setVolumeDrag({
+        clipId: clip.id,
+        keyframeAtSec: kf.atSec,
+        volume: kf.volume,
+        durationSec: clip.durationSec,
+        clipStartLeft: clip.startSec * pxPerSec,
+        startClientX: e.clientX,
+        currentAtSec: kf.atSec,
+        moved: false,
+      });
+    },
+    [onSelect, pxPerSec],
+  );
+
+  const onVolumeKeyframeMove = useCallback(
+    (e: React.PointerEvent) => {
+      const d = volumeDragRef.current;
+      if (!d) return;
+      const el = scrollRef.current;
+      if (!el) return;
+      const rect = el.getBoundingClientRect();
+      const atSec = Math.max(
+        0,
+        Math.min(
+          d.durationSec,
+          (e.clientX - rect.left + el.scrollLeft - HEAD_W - d.clipStartLeft) / pxPerSec,
+        ),
+      );
+      const moved = d.moved || Math.abs(e.clientX - d.startClientX) > 3;
+      setVolumeDrag({ ...d, currentAtSec: atSec, moved });
+    },
+    [pxPerSec],
+  );
+
+  const onVolumeKeyframeUp = useCallback(
+    (e: React.PointerEvent) => {
+      const d = volumeDragRef.current;
+      if (!d) return;
+      e.stopPropagation();
+      setVolumeDrag(null);
+      if (!d.moved) return;
+      apply({
+        op: 'set-volume-keyframe',
+        clipId: d.clipId,
+        atSec: d.currentAtSec,
+        volume: d.volume,
+      });
+    },
+    [apply],
+  );
 
   // ── 标尺 seek ──
   const seekFromEvent = useCallback(
@@ -387,10 +589,27 @@ export function TimelinePanel({
                         {clip.type === 'subtitle' ? clip.text || clip.label : clip.label}
                       </span>
                       <span className="ed-clip__dur">{clip.durationSec.toFixed(1)}s</span>
+                      {clip.type === 'audio' && audioPeaks.get(clip.assetUrl) && (
+                        <span className="ed-clip__wave" aria-hidden="true">
+                          {audioPeaks.get(clip.assetUrl)!.bars.map((v, i) => (
+                            <i key={i} style={{ height: `${Math.max(10, Math.round(v * 90))}%` }} />
+                          ))}
+                        </span>
+                      )}
                       {clip.transitionOut && clip.transitionOut.kind !== 'cut' && (
                         <span className="ed-clip__transition" title={`转场 ${clip.transitionOut.kind} ${clip.transitionOut.durationSec}s`} />
                       )}
                       {clip.replacedFrom && <span className="ed-clip__replaced" title="已智能替换" />}
+                      {selectedClipId === clip.id && (clip.volumeKeyframes?.length ?? 0) > 0 && (
+                        <VolumeEnvelope
+                          clip={clip}
+                          pxPerSec={pxPerSec}
+                          drag={volumeDrag}
+                          onPointerDown={onVolumeKeyframeDown}
+                          onPointerMove={onVolumeKeyframeMove}
+                          onPointerUp={onVolumeKeyframeUp}
+                        />
+                      )}
                       {!track.locked && (
                         <>
                           <span
@@ -429,6 +648,9 @@ export function TimelinePanel({
             </button>
             <button type="button" className="ed-mini-btn" onClick={() => addTrack('subtitle')}>
               + 字幕轨
+            </button>
+            <button type="button" className="ed-mini-btn" onClick={() => addTrack('overlay')} title="贴片位姿可在检查器编辑（预览与 Remotion 同源）">
+              + 贴片轨
             </button>
           </div>
         </div>

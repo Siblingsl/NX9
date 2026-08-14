@@ -8,6 +8,7 @@ import type {
   ScreenplayCharacterDraft,
   ScreenplayPackage,
   ScreenplaySceneDraft,
+  ScriptDeskAgentSession,
 } from '@nx9/shared';
 import {
   characterDraftFromPartial,
@@ -396,4 +397,64 @@ export function renameLibraryCharacterProfile(
       aliases,
     },
   };
+}
+
+
+/** 3.2: 全局改名同步未应用 pendingPatch，避免 Apply 后旧名写回 */
+export function renameCharacterInPendingPatch(
+  patch: Partial<ScreenplayPackage> | Record<string, unknown> | undefined,
+  oldName: string,
+  newName: string,
+): Partial<ScreenplayPackage> | Record<string, unknown> | undefined {
+  if (!patch || typeof patch !== 'object') return patch;
+  const old = oldName.trim();
+  const nw = newName.trim();
+  if (!old || !nw || old === nw) return patch;
+  const escaped = old.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const re = new RegExp(escaped, 'g');
+  const p = patch as Record<string, unknown>;
+  const screenplay = p.screenplay as Record<string, unknown> | undefined;
+  const episodes = Array.isArray(screenplay?.episodes)
+    ? (screenplay.episodes as Array<Record<string, unknown>>).map((ep) => ({
+        ...ep,
+        bodyMd: String(ep.bodyMd ?? '').replace(re, nw),
+        title: String(ep.title ?? '').replace(re, nw),
+      }))
+    : screenplay?.episodes;
+  const bible = p.bible as Record<string, unknown> | undefined;
+  const characters = Array.isArray(bible?.characters)
+    ? (bible.characters as Array<Record<string, unknown>>).map((c) => ({
+        ...c,
+        name: String(c.name ?? '').replace(re, nw),
+        identity: typeof c.identity === 'string' ? c.identity.replace(re, nw) : c.identity,
+        personality: typeof c.personality === 'string' ? c.personality.replace(re, nw) : c.personality,
+        appearance: typeof c.appearance === 'string' ? c.appearance.replace(re, nw) : c.appearance,
+        relationships: typeof c.relationships === 'string' ? c.relationships.replace(re, nw) : c.relationships,
+      }))
+    : bible?.characters;
+  const next: Record<string, unknown> = { ...p };
+  if (screenplay) {
+    next.screenplay = { ...screenplay, episodes };
+  }
+  if (bible) {
+    next.bible = { ...bible, characters };
+  }
+  return JSON.stringify(next) === JSON.stringify(p) ? patch : next;
+}
+
+export function renameCharacterInPendingSession(
+  session: ScriptDeskAgentSession,
+  oldName: string,
+  newName: string,
+): ScriptDeskAgentSession | null {
+  let changed = false;
+  const messages = session.messages.map((m) => {
+    if (!m.pendingPatch || m.applied || m.discarded) return m;
+    const nextPatch = renameCharacterInPendingPatch(m.pendingPatch, oldName, newName);
+    if (nextPatch === m.pendingPatch) return m;
+    changed = true;
+    return { ...m, pendingPatch: nextPatch };
+  });
+  if (!changed) return null;
+  return { ...session, messages, updatedAt: new Date().toISOString() };
 }

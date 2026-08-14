@@ -8,6 +8,8 @@ const SHORTCUTS = [
   { keys: 'Ctrl+A', action: '全选模块' },
   { keys: 'Ctrl+点击', action: '追加 / 取消选中模块' },
   { keys: 'Ctrl+左键拖拽空白', action: '滑动框选多个模块' },
+  { keys: '多选后浮条', action: '运行 / 打组·解组 / 折叠 / 复制 / 对齐 / 删除' },
+  { keys: '双击场景组名', action: '重命名场景组' },
   { keys: 'Delete', action: '删除选中模块' },
   { keys: '?', action: '快捷键帮助' },
   { keys: '顶栏书本图标', action: '提示词模板库' },

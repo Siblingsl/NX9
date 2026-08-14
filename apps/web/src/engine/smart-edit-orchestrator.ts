@@ -30,6 +30,8 @@ export type { SmartSuggestion };
 export interface OrchestrateResult {
   timeline: TimelinePayload;
   suggestions: SmartSuggestion[];
+  /** 编排诚实提示（如未做参考分析 / 模板变量说明），显示在台内结果条 */
+  notes: string[];
 }
 
 function makeId() {
@@ -77,7 +79,6 @@ function buildTrimSuggestions(timeline: TimelinePayload): SmartSuggestion[] {
         kind: 'trim',
         targetClipIds: [clip.id],
         message: `「${clip.label}」${clip.durationSec}s 明显偏长（中位 ${median}s），建议收短到 ${target}s`,
-        patch: {},
         ops: [
           {
             op: 'trim-clip',
@@ -107,7 +108,6 @@ function buildTransitionSuggestion(
     kind: 'transition',
     targetClipIds: [],
     message: `为 ${boundaries} 处镜头衔接统一设置 fade ${durationSec}s 转场`,
-    patch: {},
     ops: [{ op: 'set-transition', transition: { kind: 'fade', durationSec } }],
     confidence: 0.7,
   };
@@ -124,7 +124,6 @@ function buildDuckingSuggestion(timeline: TimelinePayload): SmartSuggestion | nu
     kind: 'ducking',
     targetClipIds: bgm.clips.map((c) => c.id),
     message: `检测到 ${dialogue.clips.length} 段对白，建议 BGM 音量压至 40% 避免压盖人声`,
-    patch: {},
     ops: [{ op: 'duck-audio', trackId: bgm.id, volume: 0.4 }],
     confidence: 0.65,
   };
@@ -142,6 +141,7 @@ export async function orchestrateDramaTimeline(opts: {
     status?: string;
     durationSec?: number;
     videoAssetId?: string | null;
+    videoStatus?: string;
     firstFrameAssetId?: string | null;
     audioAssetId?: string | null;
     descriptionZh?: string;
@@ -151,7 +151,7 @@ export async function orchestrateDramaTimeline(opts: {
   bgmUrl?: string;
 }): Promise<OrchestrateResult> {
   const shots = [...opts.shots]
-    .filter((s) => (opts.approvedOnly ? s.status === 'approved' : true))
+    .filter((s) => (opts.approvedOnly ? s.videoStatus === 'approved' : true))
     .sort((a, b) => a.index - b.index)
     .map((s) => ({
       id: s.id,
@@ -160,6 +160,7 @@ export async function orchestrateDramaTimeline(opts: {
       durationSec: s.durationSec ?? 4,
       descriptionZh: s.descriptionZh ?? '',
       videoAssetId: s.videoAssetId,
+      videoStatus: s.videoStatus,
       firstFrameAssetId: s.firstFrameAssetId,
       audioAssetId: s.audioAssetId,
       subtitleText: s.subtitleText,
@@ -213,7 +214,7 @@ export async function orchestrateDramaTimeline(opts: {
   const ducking = buildDuckingSuggestion(timeline);
   if (ducking) suggestions.push(ducking);
 
-  return { timeline, suggestions };
+  return { timeline, suggestions, notes: [] };
 }
 
 /** 爆款编排：从上游 clips 顺序拼轨 */
@@ -227,6 +228,7 @@ export async function orchestrateViralTimeline(opts: {
 }): Promise<OrchestrateResult> {
   const clips = opts.clips.filter(Boolean);
   const suggestions: SmartSuggestion[] = [];
+  const notes: string[] = [];
 
   let startSec = 0;
   const videoClips: TimelineClip[] = [];
@@ -287,15 +289,6 @@ export async function orchestrateViralTimeline(opts: {
   // D4: probe 真实时长校准（爆款素材时长全靠估，校准价值最大）
   timeline = await calibrateTimeline(timeline);
 
-  suggestions.push({
-    id: makeId(),
-    kind: 'transition',
-    targetClipIds: [],
-    message: `已设置 fade 0.25s 默认转场，共 ${clips.length} 段`,
-    patch: {},
-    ops: [],
-    confidence: 1,
-  });
 
   if (clips.length > 0) {
     try {
@@ -325,36 +318,32 @@ export async function orchestrateViralTimeline(opts: {
               kind: 'beat-cut' as const,
               targetClipIds: target ? [target.id] : [],
               message: `参考节奏：${s.description || s.shotType || '镜'} ${(s.durationSec ?? 0).toFixed(1)}s${target ? ` → 应用到「${target.label}」` : ''}`,
-              patch: {},
               ops,
               confidence: 0.6,
+              meta: {
+                algorithm: 'reference-shot-durations' as const,
+                source: 'analyze-reference',
+                audioAnalyzed: false,
+              },
             };
           });
         suggestions.push(...beatCutSgs);
       }
     } catch {
-      /* analyze-reference 不可用时静默降级 */
     }
   }
 
-  const hfVars: Record<string, string> = {};
-  clips.forEach((url, i) => {
-    hfVars[`clip_url_${i}`] = url;
-    hfVars[`clip_id_${i}`] = `clip-${url.slice(-8)}`;
-  });
-  hfVars['clip_count'] = String(clips.length);
-  hfVars['total_duration_sec'] = String(fullDur.toFixed(1));
-  suggestions.push({
-    id: makeId(),
-    kind: 'template-patch',
-    targetClipIds: videoClips.map((c) => c.id),
-    message: `HF 模板变量已注入（${Object.keys(hfVars).length} 项）`,
-    patch: { templateVars: hfVars as unknown as Record<string, unknown> },
-    ops: [],
-    confidence: 0.8,
-  });
+  if (clips.length > 0) {
+    notes.push(
+      suggestions.some((s) => s.kind === 'beat-cut')
+        ? '参考节奏：已按参考视频镜头分析生成 beat-cut 建议（algorithm: reference-shot-durations，未做音频听感）。'
+        : '未做音频听感/未分析参考：本次未生成 beat-cut 建议，时间线按等分时长编排。',
+    );
+  }
 
-  return { timeline, suggestions };
+  notes.push('HF 模板变量无需注入：HyperFrames 直接消费时间线片段，无独立 templateVars 通道。');
+
+  return { timeline, suggestions, notes };
 }
 
 export function validateTimeline(timeline: TimelinePayload | undefined | null): { ok: boolean; warnings: string[] } {

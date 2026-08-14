@@ -1,5 +1,6 @@
 export type ViewMode = 'director' | 'camera';
 export type TransformMode = 'translate' | 'rotate' | 'scale';
+import type { CharacterFaceRig } from '@nx9/shared';
 export type DirectorObjectKind = 'character' | 'prop' | 'mesh';
 export type GeometryPrimitiveType = 'box' | 'sphere' | 'cylinder' | 'cone';
 export type ViewportAspectRatio = '16:9' | '9:16' | '1:1';
@@ -48,6 +49,8 @@ export interface DirectorObject {
   kind: DirectorObjectKind;
   /** 绑定工作区角色，便于按分镜恢复人物摆位。 */
   sourceCharacterId?: string;
+  /** B4：捏模参数快照；导演台人偶按 faceRig.body 缩放，无需重查素材库。 */
+  faceRig?: CharacterFaceRig;
   visible: boolean;
   locked: boolean;
   transform: DirectorTransform;

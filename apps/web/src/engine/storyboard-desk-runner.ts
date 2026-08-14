@@ -1,8 +1,11 @@
 import {
   bindStoryboardShotAssets,
+  CHAIN_STORYBOARD_HANDOFF_HASH_SCHEMA_VERSION,
   buildChainStoryboardPayload,
+  chainStoryboardHash,
   flattenScriptBreakdownShots,
   isScreenplayPackage,
+  lineArtVersionHash,
   mergeStoryboardShotFromBreakdown,
   readChainStoryboard,
   screenplayFullText,
@@ -425,6 +428,72 @@ export function buildEpisodeReadyMeta(input: {
   };
 }
 
+export interface DirectorHandoffPayload {
+  sourceStoryboardBlockId: string;
+  scriptHash: string;
+  storyboardHash: string;
+  lineartVersion: string;
+  hashSchemaVersion: number;
+  handoffVersion: number;
+  confirmedAt?: string;
+  episodeId: string | null;
+  episodeTitle?: string;
+  shotCount: number;
+  compositionCoverage: number;
+  confirmed: boolean;
+  confirmedEpisodeIds: string[];
+  lineArtFrameCount: number;
+  lineArtFrameIds: string[];
+  lineArtFrames: Array<{ shotId: string; imageUrl: string }>;
+  at: string;
+}
+
+/**
+ * SB-D-04: 分镜台→导演台交接数据统一构建。
+ * 确认自动推送与「打开导演台」共用同一份字段，避免两处漂移。
+ */
+export function buildDirectorHandoff(input: {
+  sourceStoryboardBlockId: string;
+  preview?: StoryboardPreviewPayload | null;
+  currentEpisodeShotIds?: Set<string>;
+  chain?: ChainStoryboardPayload | null;
+  scriptHash: string;
+  episodeId: string | null;
+  episodeTitle?: string;
+  shotCount: number;
+  shotIds: string[];
+  compositionCoverage: number;
+  confirmed: boolean;
+  confirmedEpisodeIds: string[];
+  handoffVersion: number;
+  confirmedAt?: string | null;
+  at?: string;
+}): DirectorHandoffPayload {
+  const lineArtFrames = (input.preview?.frames ?? [])
+    .filter((f) => f.sourceShotId && f.imageUrl && input.currentEpisodeShotIds?.has(f.sourceShotId))
+    .map((f) => ({ shotId: f.sourceShotId!, imageUrl: f.imageUrl! }));
+  const chain = input.chain ?? null;
+  return {
+    sourceStoryboardBlockId: input.sourceStoryboardBlockId,
+    scriptHash: input.scriptHash,
+    storyboardHash: chain ? chainStoryboardHash(chain, input.episodeId) : '',
+    lineartVersion: chain ? lineArtVersionHash(chain, input.episodeId) : '',
+    hashSchemaVersion: CHAIN_STORYBOARD_HANDOFF_HASH_SCHEMA_VERSION,
+    handoffVersion: input.handoffVersion,
+    confirmedAt: input.confirmedAt ?? undefined,
+    episodeId: input.episodeId,
+    episodeTitle: input.episodeTitle,
+    shotCount: input.shotCount,
+    compositionCoverage: input.compositionCoverage,
+    confirmed: input.confirmed,
+    confirmedEpisodeIds: [...input.confirmedEpisodeIds],
+    lineArtFrameCount: lineArtFrames.length,
+    lineArtFrameIds: [...input.shotIds],
+    lineArtFrames,
+    at: input.at ?? new Date().toISOString(),
+  };
+}
+
 // ── SB-P1-03 增镜/合镜/拆镜 ──
 
 function clonePayload(payload: ScriptBreakdownPayload): ScriptBreakdownPayload {
@@ -540,6 +609,88 @@ export function splitShotInBreakdown(
   };
   original.dialogue = leftDialogue;
   episode.shots.splice(pos.shotIndex + 1, 0, rightShot);
+  episode.shots.forEach((s, i) => { s.index = i + 1; });
+  return next;
+}
+
+/**
+ * SB-D-02/SB-D-05: 复制镜必须清空线稿媒体字段并回到 draft，
+ * 且整个 payload 深拷贝后再重排 index，禁止就地改原对象。
+ */
+function cloneShotForCopy(source: ScriptBreakdownShot): ScriptBreakdownShot {
+  const copy = { ...source } as ScriptBreakdownShot & { sketchUrl?: string | null };
+  copy.id = '';
+  copy.sceneCode = '';
+  copy.previewImageUrl = null;
+  copy.referenceImageUrl = null;
+  copy.sketchUrl = null;
+  copy.status = 'draft';
+  return copy as ScriptBreakdownShot;
+}
+
+export function copyShotInBreakdown(
+  payload: ScriptBreakdownPayload,
+  episodeId: string,
+  shotId: string,
+  template?: Partial<ScriptBreakdownShot>,
+): ScriptBreakdownPayload {
+  const next = clonePayload(payload);
+  const episode = next.episodes.find((ep) => ep.id === episodeId);
+  if (!episode) return payload;
+  const idx = episode.shots.findIndex((s) => s.id === shotId);
+  if (idx < 0) return payload;
+  const source = episode.shots[idx]!;
+  const copy = {
+    ...cloneShotForCopy(source),
+    id: `${shotId}-copy-${Date.now().toString(36)}`,
+    ...template,
+  };
+  episode.shots.splice(idx + 1, 0, copy);
+  episode.shots.forEach((s, i) => { s.index = i + 1; });
+  return next;
+}
+
+export function copyShotsInBreakdown(
+  payload: ScriptBreakdownPayload,
+  episodeId: string,
+  shotIds: string[],
+): ScriptBreakdownPayload {
+  if (shotIds.length === 0) return payload;
+  const next = clonePayload(payload);
+  const episode = next.episodes.find((ep) => ep.id === episodeId);
+  if (!episode) return payload;
+  const sorted = [...shotIds].sort((a, b) => {
+    const ia = episode!.shots.findIndex((s) => s.id === a);
+    const ib = episode!.shots.findIndex((s) => s.id === b);
+    return ia - ib;
+  });
+  for (let i = 0; i < sorted.length; i++) {
+    const id = sorted[i];
+    const idx = episode.shots.findIndex((s) => s.id === id);
+    if (idx < 0) continue;
+    const source = episode.shots[idx]!;
+    const copy = {
+      ...cloneShotForCopy(source),
+      id: `${id}-copy-${Date.now().toString(36)}-${i}`,
+    };
+    episode.shots.splice(idx + 1, 0, copy);
+  }
+  episode.shots.forEach((s, i) => { s.index = i + 1; });
+  return next;
+}
+
+export function removeShotsFromBreakdown(
+  payload: ScriptBreakdownPayload,
+  episodeId: string,
+  shotIds: Iterable<string>,
+): ScriptBreakdownPayload {
+  const next = clonePayload(payload);
+  const episode = next.episodes.find((ep) => ep.id === episodeId);
+  if (!episode) return payload;
+  const idSet = new Set(shotIds);
+  const remaining = episode.shots.filter((s) => !idSet.has(s.id));
+  if (remaining.length === 0) return payload;
+  episode.shots = remaining;
   episode.shots.forEach((s, i) => { s.index = i + 1; });
   return next;
 }

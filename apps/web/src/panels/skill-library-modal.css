@@ -369,3 +369,150 @@
     border-bottom: 1px solid var(--line, rgba(0, 0, 0, 0.08));
   }
 }
+
+/* 暗色画布：与素材库同套实底主题，避免浅米色弹层 */
+.nx9-app-dark .nx9-skill-lib,
+.nx9-app-dark-body .nx9-skill-lib {
+  --ink: #e8e6e3;
+  --line: rgba(255, 255, 255, 0.12);
+  --brand: var(--nx9-brand, #5e9b8a);
+  background: #1a1816 !important;
+  color: #e8e6e3;
+  border-color: rgba(255, 255, 255, 0.12) !important;
+  box-shadow: 0 28px 80px rgba(0, 0, 0, 0.55);
+  color-scheme: dark;
+}
+
+.nx9-app-dark .nx9-skill-lib__header,
+.nx9-app-dark-body .nx9-skill-lib__header {
+  border-bottom-color: rgba(255, 255, 255, 0.1);
+}
+
+.nx9-app-dark .nx9-skill-lib__sidebar,
+.nx9-app-dark-body .nx9-skill-lib__sidebar {
+  border-right-color: rgba(255, 255, 255, 0.1);
+  background: #171513;
+}
+
+.nx9-app-dark .nx9-skill-lib__search,
+.nx9-app-dark-body .nx9-skill-lib__search {
+  background: #24221f;
+  border-color: rgba(255, 255, 255, 0.14);
+}
+
+.nx9-app-dark .nx9-skill-lib__search input,
+.nx9-app-dark-body .nx9-skill-lib__search input {
+  color: #f5f2ec;
+}
+
+.nx9-app-dark .nx9-skill-lib__search input::placeholder,
+.nx9-app-dark-body .nx9-skill-lib__search input::placeholder {
+  color: rgba(232, 230, 227, 0.4);
+}
+
+.nx9-app-dark .nx9-skill-lib__item,
+.nx9-app-dark-body .nx9-skill-lib__item {
+  background: #221f1c;
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
+.nx9-app-dark .nx9-skill-lib__item:hover,
+.nx9-app-dark-body .nx9-skill-lib__item:hover {
+  border-color: color-mix(in srgb, var(--brand, #5e9b8a) 55%, transparent);
+  background: #26231f;
+}
+
+.nx9-app-dark .nx9-skill-lib__item.is-on,
+.nx9-app-dark-body .nx9-skill-lib__item.is-on {
+  border-color: var(--brand, #5e9b8a);
+  background: color-mix(in srgb, var(--brand, #5e9b8a) 16%, #221f1c);
+}
+
+.nx9-app-dark .nx9-skill-lib__group-head em,
+.nx9-app-dark-body .nx9-skill-lib__group-head em {
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(232, 230, 227, 0.55);
+}
+
+.nx9-app-dark .nx9-skill-lib__tags span,
+.nx9-app-dark-body .nx9-skill-lib__tags span {
+  border-color: rgba(255, 255, 255, 0.12);
+  color: rgba(232, 230, 227, 0.55);
+}
+
+.nx9-app-dark .nx9-skill-lib__status.is-stable,
+.nx9-app-dark-body .nx9-skill-lib__status.is-stable {
+  background: rgba(21, 128, 61, 0.2);
+  color: #86efac;
+}
+
+.nx9-app-dark .nx9-skill-lib__status.is-deprecated,
+.nx9-app-dark-body .nx9-skill-lib__status.is-deprecated {
+  background: rgba(239, 68, 68, 0.18);
+  color: #fca5a5;
+}
+
+.nx9-app-dark .nx9-skill-lib__tabs button,
+.nx9-app-dark-body .nx9-skill-lib__tabs button,
+.nx9-app-dark .nx9-skill-lib__actions button,
+.nx9-app-dark-body .nx9-skill-lib__actions button {
+  background: #221f1c;
+  border-color: rgba(255, 255, 255, 0.14);
+  color: rgba(232, 230, 227, 0.82);
+}
+
+.nx9-app-dark .nx9-skill-lib__tabs button.is-on,
+.nx9-app-dark-body .nx9-skill-lib__tabs button.is-on {
+  background: #2a2723;
+  color: #f5f2ec;
+  border-color: rgba(255, 255, 255, 0.18);
+}
+
+.nx9-app-dark .nx9-skill-lib__actions button:hover:not(:disabled),
+.nx9-app-dark-body .nx9-skill-lib__actions button:hover:not(:disabled),
+.nx9-app-dark .nx9-skill-lib__tabs button:hover,
+.nx9-app-dark-body .nx9-skill-lib__tabs button:hover {
+  border-color: var(--brand, #5e9b8a);
+  background: #2a2723;
+}
+
+.nx9-app-dark .nx9-skill-lib__actions button.is-danger,
+.nx9-app-dark-body .nx9-skill-lib__actions button.is-danger {
+  color: #fdba74;
+}
+
+.nx9-app-dark .nx9-skill-lib__textarea,
+.nx9-app-dark-body .nx9-skill-lib__textarea {
+  background: #24221f !important;
+  border-color: rgba(255, 255, 255, 0.14);
+  color: #f5f2ec !important;
+}
+
+.nx9-app-dark .nx9-skill-lib__textarea:focus,
+.nx9-app-dark-body .nx9-skill-lib__textarea:focus {
+  border-color: var(--brand, #5e9b8a);
+}
+
+.nx9-app-dark .nx9-skill-lib__feedback.is-ok,
+.nx9-app-dark-body .nx9-skill-lib__feedback.is-ok {
+  background: rgba(21, 128, 61, 0.18);
+  color: #86efac;
+}
+
+.nx9-app-dark .nx9-skill-lib__feedback.is-err,
+.nx9-app-dark-body .nx9-skill-lib__feedback.is-err {
+  background: rgba(239, 68, 68, 0.16);
+  color: #fca5a5;
+}
+
+.nx9-app-dark .nx9-skill-lib .hover\:bg-surface:hover,
+.nx9-app-dark-body .nx9-skill-lib .hover\:bg-surface:hover {
+  background: rgba(255, 255, 255, 0.08) !important;
+}
+
+@media (max-width: 820px) {
+  .nx9-app-dark .nx9-skill-lib__sidebar,
+  .nx9-app-dark-body .nx9-skill-lib__sidebar {
+    border-bottom-color: rgba(255, 255, 255, 0.1);
+  }
+}

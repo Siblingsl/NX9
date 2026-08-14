@@ -586,7 +586,7 @@ export function AssetHealthBar({
       </div>
 
       {impactOpen ? (
-        <div className="absolute inset-y-0 right-0 z-20 flex w-[min(340px,92%)] flex-col border-l border-line bg-surface shadow-xl">
+        <div className="nx9-asset-lib-drawer absolute inset-y-0 right-0 z-20 flex w-[min(340px,92%)] flex-col border-l border-line bg-surface shadow-xl">
           <div className="flex items-center gap-2 border-b border-line px-3 py-2">
             <Network size={14} className="text-brand" />
             <p className="flex-1 text-xs font-semibold text-ink">影响分析</p>

@@ -87,6 +87,35 @@ export function resolveConnectedStoryboardDeskId(
 }
 
 /**
+ * 沿出边找到本分镜台下游的导演台节点 id（SB-D-01）。
+ * 多链并存时只认「从本节点出发可达」的 director-desk，禁止全画布 find 第一个。
+ */
+export function resolveDownstreamDirectorDeskId(
+  sourceId: string,
+  nodes: Node[],
+  edges: Array<{ source: string; target: string }>,
+): string | null {
+  const nodeMap = new Map(nodes.map((n) => [n.id, n]));
+  const visited = new Set<string>();
+  const queue = [sourceId];
+  while (queue.length > 0) {
+    const current = queue.shift();
+    if (!current || visited.has(current)) continue;
+    visited.add(current);
+    const outgoing = edges.filter((e) => e.source === current);
+    for (const edge of outgoing) {
+      const targetNode = nodeMap.get(edge.target);
+      if (!targetNode) continue;
+      if (targetNode.type === 'director-desk') return targetNode.id;
+      if (targetNode.type !== 'storyboard-desk' && targetNode.type !== 'storyboard-preview' && targetNode.type !== 'grid-split') {
+        queue.push(targetNode.id);
+      }
+    }
+  }
+  return null;
+}
+
+/**
  * 从上游 desk 读取链镜表。
  */
 export function readUpstreamChainStoryboard(

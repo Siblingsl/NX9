@@ -39,7 +39,7 @@ describe('SE-01 clip-editor 渲染共用链', () => {
   });
 
   it('flow-runner 不再假成功 / 不再读全局镜表', () => {
-    const src = readFileSync(resolve(webSrc, 'flow-runner.ts'), 'utf8');
+    const src = readFileSync(resolve(webSrc, 'flow-runner-ops/media-ops.ts'), 'utf8');
     const branch = src.slice(src.indexOf("if (kind === 'clip-editor')"), src.indexOf("if (kind === 'asset-bundle')"));
     expect(branch).toContain('renderClipEditorTimeline');
     expect(branch).toContain('resolveUpstreamShotsFromGraph');

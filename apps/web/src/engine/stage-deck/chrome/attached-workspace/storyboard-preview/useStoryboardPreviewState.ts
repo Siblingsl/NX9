@@ -769,10 +769,14 @@ export function useStoryboardPreviewState(blockId: string) {
       }
 
       updateNodeData(blockId, { status: 'running' });
+      const priorAspectRatio = (pictureNode.data?.aspectRatio as string | undefined)?.trim();
       updateNodeData(pictureNode.id, {
         status: 'running',
         pictureGenMode: 'panorama-720',
         aspectRatio: '2:1',
+        ...(priorAspectRatio && priorAspectRatio !== '2:1'
+          ? { nonPanoramaAspectRatio: priorAspectRatio }
+          : {}),
         imageCount: 1,
         panoramaProjection: 'equirectangular',
         content: scenePrompt,

@@ -56,15 +56,18 @@ async function mockProductionApis(page: import('@playwright/test').Page, options
 async function createCanvasProject(page: import('@playwright/test').Page) {
   await page.goto('/');
   await page.getByRole('button', { name: /新建|New/i }).first().click();
+  const projectTitle = (await page.getByRole('textbox', { name: '项目名称' }).inputValue()).trim();
   await page.getByRole('button', { name: /创建并开始制作/i }).click();
   await page.getByRole('button', { name: /前往画布/i }).click();
-  await expect(page.getByRole('button', { name: '打开编剧台' }).first()).toBeVisible();
+  await expect(page.getByRole('button', { name: '打开编剧台' }).first()).toBeVisible({ timeout: 15_000 });
+  return projectTitle;
 }
 
 test.describe('编剧台 → 分镜台 → 导演台 → 视频生成浏览器链路', () => {
   test('多集切换、并发关键帧批出和视频推送', async ({ page }) => {
+    test.setTimeout(120_000);
     await mockProductionApis(page);
-    await createCanvasProject(page);
+    const projectTitle = await createCanvasProject(page);
 
     await page.getByRole('button', { name: '打开编剧台' }).first().click();
     await page.getByRole('button', { name: '上传成稿', exact: true }).click();
@@ -124,9 +127,34 @@ test.describe('编剧台 → 分镜台 → 导演台 → 视频生成浏览器�
     await expect(page.getByText(/本集关键帧已全部批准/)).toBeVisible();
     await page.getByRole('button', { name: '推送关键帧' }).click();
     await expect(page.getByText(/已写入 clip-gen|视频生成/).first()).toBeVisible();
+
+    // DD-D-14：整页刷新后链镜表 / 关键帧批次从服务端回放，导演台仍读得到 4 镜
+    await page.waitForTimeout(800);
+    await page.reload();
+    // 刷新后先回导航页，再显式选中目标项目并等选中生效，避免画布顶部 chip 只显示前 8 个
+    const navButton = page.getByRole('button', { name: '导航', exact: true });
+    try {
+      await navButton.waitFor({ state: 'visible', timeout: 10_000 });
+      await navButton.click();
+    } catch {
+      // 刷新后已在导航页
+    }
+    const projectChip = page.getByRole('button', { name: projectTitle, exact: true }).first();
+    await expect(projectChip).toBeVisible({ timeout: 30_000 });
+    await projectChip.click();
+    await expect(page.getByText(`当前「${projectTitle}」`)).toBeVisible({ timeout: 10_000 });
+    await page.getByRole('button', { name: /进入画布/ }).click();
+    await expect(page.getByRole('button', { name: '打开编剧台' }).first()).toBeVisible({ timeout: 15_000 });
+    const reopenedStoryboard = page.getByRole('dialog', { name: '分镜台' });
+    if (await reopenedStoryboard.count()) {
+      await reopenedStoryboard.getByRole('button', { name: '关闭 (Esc)' }).click();
+    }
+    await page.getByRole('button', { name: '打开导演台', exact: true }).first().click();
+    await expect(page.getByText(/关键帧 4\/4/)).toBeVisible({ timeout: 15_000 });
   });
 
   test('网络中断后保留明确失败状态并可重试', async ({ page }) => {
+    test.setTimeout(120_000);
     await mockProductionApis(page, { delayBreakdown: true, abortImage: true });
     await createCanvasProject(page);
     await page.getByRole('button', { name: '打开编剧台' }).first().click();

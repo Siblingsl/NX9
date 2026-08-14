@@ -12,6 +12,7 @@ export type NodeRunStatus =
   | 'success'
   | 'error'
   | 'waiting'
+  | 'skipped'
   | 'disabled';
 
 export interface NodeInteractionProfile {
@@ -178,6 +179,8 @@ export function normalizeNodeStatus(raw?: string): NodeRunStatus {
       return 'waiting';
     case 'disabled':
       return 'disabled';
+    case 'skipped':
+      return 'skipped';
     case 'ready':
       return 'ready';
     default:

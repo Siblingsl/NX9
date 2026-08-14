@@ -239,7 +239,7 @@ describe('F-024 acceptance — source code guards', () => {
 
   // ── flow-runner 入口验证 — picture-gen ──
   describe('flow-runner: picture-gen mention resolution', () => {
-    const src = readWeb('engine/flow-runner.ts');
+    const src = readWeb('engine/executors/picture-gen-executor.ts');
 
     it('builds MentionRef[] from upstream pictures/clips/sounds', () => {
       expect(src).toContain('mentionRefs');
@@ -273,12 +273,12 @@ describe('F-024 acceptance — source code guards', () => {
   // ── block-level 入口验证 ──
   describe('block-level mention integration', () => {
     it('ClipGenBlock uses resolveMentionsForPrompt', () => {
-      const src = readWeb('blocks/core/ClipGenBlock.tsx');
+      const src = readWeb('engine/flow-runner-ops/clip-gen-ops.ts');
       expect(src).toContain('resolveMentionsForPrompt');
     });
 
     it('ClipGenBlock uses enrichPromptWithAssetMentions', () => {
-      const src = readWeb('blocks/core/ClipGenBlock.tsx');
+      const src = readWeb('engine/executors/picture-gen-executor.ts');
       expect(src).toContain('enrichPromptWithAssetMentions');
     });
 
@@ -289,7 +289,9 @@ describe('F-024 acceptance — source code guards', () => {
 
     it('SoundGenBlock uses useUnifiedMentions', () => {
       const src = readWeb('blocks/core/SoundGenBlock.tsx');
-      expect(src).toContain('useUnifiedMentions');
+      const hook = readWeb('engine/use-unified-mentions.ts');
+      expect(src).toContain('MentionEditor');
+      expect(hook).toContain('export function useUnifiedMentions');
     });
 
     it('SoundGenBlock uses MentionEditor', () => {
@@ -307,9 +309,9 @@ describe('F-024 acceptance — source code guards', () => {
   describe('entry point count ≥ 4', () => {
     it('at least 4 entry points use resolveMentionsForPrompt or useUnifiedMentions', () => {
       const files = {
-        'flow-runner (picture-gen + clip-gen)': readWeb('engine/flow-runner.ts'),
-        'ClipGenBlock': readWeb('blocks/core/ClipGenBlock.tsx'),
-        'SoundGenBlock': readWeb('blocks/core/SoundGenBlock.tsx'),
+        'picture-gen-executor': readWeb('engine/executors/picture-gen-executor.ts'),
+        'clip-gen-ops': readWeb('engine/flow-runner-ops/clip-gen-ops.ts'),
+        'clip-gen-request': readWeb('engine/clip-gen-request.ts'),
         'useUnifiedMentions': readWeb('engine/use-unified-mentions.ts'),
       };
       let count = 0;

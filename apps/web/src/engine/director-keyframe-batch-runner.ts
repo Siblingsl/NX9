@@ -1,9 +1,10 @@
-import type {
-  ChainStoryboardPayload,
-  DirectorKeyframeBatch,
-  DirectorKeyframeBatchReceipt,
-  DirectorKeyframeBatchShot,
-  StoryboardShot,
+import {
+  appendStoryboardVideoVersion,
+  type ChainStoryboardPayload,
+  type DirectorKeyframeBatch,
+  type DirectorKeyframeBatchReceipt,
+  type DirectorKeyframeBatchShot,
+  type StoryboardShot,
 } from '@nx9/shared';
 
 export interface DirectorKeyframeBatchValidationIssue {
@@ -59,6 +60,10 @@ export interface ConsumeDirectorKeyframeBatchOptions {
     currentShot: StoryboardShot,
   ) => Promise<{ videoUrl: string; shotPatch?: Partial<StoryboardShot> }>;
   now?: () => string;
+  /** VG-36: 成片 version 写入用的模型名（与 clip-gen 节点一致） */
+  model?: string;
+  /** DD-D-09: 每镜成功即时回执，中断后已成功镜头不丢。 */
+  onShotProgress?: (shotId: string, patch: Partial<StoryboardShot>) => void;
 }
 
 export interface ConsumeDirectorKeyframeBatchResult {
@@ -106,12 +111,25 @@ export async function consumeDirectorKeyframeBatch(
       if (!generated.videoUrl) throw new Error('视频生成未返回 URL');
       succeeded.add(item.shotId);
       videoUrlsByShotId[item.shotId] = generated.videoUrl;
-      patches.set(item.shotId, {
-        videoAssetId: generated.videoUrl,
-        videoStatus: 'review',
-        status: 'review',
+      const version = {
+        id: `video-${item.shotId}-${item.keyframeRevision}-${Date.now()}`,
+        url: generated.videoUrl,
+        createdAt: options.now?.() ?? new Date().toISOString(),
+        prompt: item.prompt ?? '',
+        model: options.model ?? 'veo',
+        status: 'candidate' as const,
+      };
+      const versionPatch = appendStoryboardVideoVersion(currentShot, version);
+      const shotPatch: Partial<StoryboardShot> = {
+        // VG-36: 导演批次与批量同口径建 videoVersions
+        videoVersions: versionPatch.videoVersions,
+        videoAssetId: versionPatch.videoAssetId,
+        videoStatus: versionPatch.videoStatus,
+        // DD-D-01: 只写视频阶段字段，保留 keyframeStatus/status 不被覆盖。
         ...(generated.shotPatch ?? {}),
-      });
+      };
+      patches.set(item.shotId, shotPatch);
+      options.onShotProgress?.(item.shotId, shotPatch);
     } catch (error) {
       failures.push({
         shotId: item.shotId,

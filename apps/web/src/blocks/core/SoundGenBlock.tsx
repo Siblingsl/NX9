@@ -6,9 +6,7 @@ import { GenUpstreamHint } from '../shared/upstream-hints';
 import { useUpstreamPrompt } from '../shared/use-upstream-prompt';
 import { api } from '../../api/client';
 import { useActivityLog } from '../../stores/activity-log';
-import { runSoundGenBgm, synthesizeTts } from '../../engine/sound-gen-runner';
-import { useUnifiedMentions } from '../../engine/use-unified-mentions';
-import { useCredentialVault } from '../../stores/credential-vault';
+import { runSoundGenCast, synthesizeTts } from '../../engine/sound-gen-runner';
 import { useAllAssetLibraryItems } from '../../hooks/use-asset-library-items';
 import { MentionEditor } from '../../engine/stage-deck/chrome/MentionEditor';
 import { AssetLinkField, assetRefFromData, patchWithAssetRef } from '../shared/AssetLinkField';
@@ -138,39 +136,6 @@ function SoundGenBlock(props: NodeProps) {
     updateNodeData,
   ]);
 
-  // F-014: BGM 生成（真接入，替代占位）
-  const { resolve: resolveMentions } = useUnifiedMentions(props.id);
-  const bgmSettings = useCredentialVault((s) => ({
-    provider: s.settings?.bgmProvider ?? 'suno',
-    apiKey: s.settings?.bgmApiKey ?? '',
-  }));
-
-  const generateBgm = useCallback(async () => {
-    const content = (props.data?.content as string) ?? '';
-    if (!content.trim()) {
-      updateNodeData(props.id, { status: 'error', error: '请输入 BGM 描述' });
-      return;
-    }
-    // F-014: 检查 BGM 配置
-    if (!bgmSettings.apiKey) {
-      updateNodeData(props.id, { status: 'error', error: 'BGM 服务未配置。请先在设置中配置 BGM API Key。' });
-      appendLog('BGM 生成失败：未配置 BGM API Key');
-      return;
-    }
-    updateNodeData(props.id, { status: 'running' });
-    appendLog(`BGM 生成启动 · ${props.id}`);
-    try {
-      const resolvedPrompt = resolveMentions(content);
-      const finalPrompt = resolvedPrompt.resolved || content;
-      const url = await runSoundGenBgm(finalPrompt, 30);
-      updateNodeData(props.id, { status: 'success', audioUrl: url });
-      appendLog(`BGM 生成完成 · ${props.id}`);
-    } catch (e) {
-      updateNodeData(props.id, { status: 'error', error: String(e) });
-      appendLog(`BGM 生成失败 · ${props.id}`);
-    }
-  }, [props.id, props.data, updateNodeData, appendLog, resolveMentions, bgmSettings.apiKey]);
-
   if (soundMode === 'cast') {
     return (
       <BlockShell {...props}>
@@ -218,24 +183,26 @@ function SoundGenBlock(props: NodeProps) {
               </button>
             ))}
           </div>
-          <textarea
-            value={(props.data?.content as string) ?? ''}
-            onChange={(e) => updateNodeData(props.id, { content: e.target.value })}
-            placeholder="BGM 情绪 / 风格描述…"
-            rows={3}
-            className="w-full rounded-lg border border-line px-2 py-1 resize-y"
+          <p className="text-[10px] text-ink/45 bg-surface rounded-lg px-2 py-1">
+            BGM 仅支持导入音频（真生成未接入，禁止假成功）。
+          </p>
+          <AssetLinkField
+            kind="sound"
+            assetRef={soundAssetRef}
+            onChange={(ref) => {
+              const item = ref
+                ? allItems.find((i) => i.id === ref.id && i.scope === ref.scope)
+                : undefined;
+              updateNodeData(props.id, {
+                soundAssetRef: ref,
+                ...patchWithAssetRef(ref),
+                audioUrl: item?.audioUrl ?? '',
+                ...(ref ? { status: 'success' } : {}),
+              });
+            }}
           />
-          <p className="text-[10px] text-ink/45">BGM 生成 · 需在设置中配置 BGM Provider 和 API Key</p>
-          <button
-            type="button"
-            disabled={status === 'running' || !(props.data?.content as string)?.trim()}
-            onClick={() => void generateBgm()}
-            className="w-full rounded-xl bg-brand text-white py-1.5 disabled:opacity-50"
-          >
-            {status === 'running' ? '生成中…' : status === 'done' ? '已生成' : '生成 BGM'}
-          </button>
-          {(props.data?.audioUrl as string) && (
-            <audio src={props.data?.audioUrl as string} controls className="w-full" />
+          {audioUrl && (
+            <audio src={audioUrl} controls className="w-full" style={{ height: 36 }} />
           )}
           {(props.data?.error as string) && (
             <p className="text-[10px] text-red-600">{props.data.error as string}</p>

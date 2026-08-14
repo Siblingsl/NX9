@@ -16,7 +16,7 @@ import {
   type ScriptDeskSkillId,
   summarizePackagePatch,
 } from '@nx9/shared';
-import { SKILL_CHIPS, type EntryMode } from './desk-helpers';
+import { SKILL_CHIPS, SCRIPT_DESK_ERROR_HINTS, type EntryMode } from './desk-helpers';
 
 export interface ChatStageLibItem {
   id: string;
@@ -120,6 +120,7 @@ export function ChatStage({
   const visibleMessages = q
     ? session.messages.filter((m) => m.content.toLowerCase().includes(q) || (m.skillId ?? '').toLowerCase().includes(q))
     : session.messages;
+  const pendingMsgIds = session.messages.filter((m) => m.pendingPatch && !m.applied && !m.discarded).map((m) => m.id);
   const [modelOpen, setModelOpen] = useState(false);
   const modelWrapRef = useRef<HTMLDivElement>(null);
 
@@ -155,6 +156,18 @@ export function ChatStage({
             <button type="button" className="sd2-btn sd2-btn--ghost" onClick={onCollapseApplied}>
               折叠已应用
             </button>
+            {pendingMsgIds.length > 0 && (
+              <button
+                type="button"
+                className="sd2-btn sd2-btn--ghost"
+                onClick={() => {
+                  const lastId = pendingMsgIds[pendingMsgIds.length - 1];
+                  document.getElementById(`sd2-msg-${lastId}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                }}
+              >
+                定位待应用
+              </button>
+            )}
           </div>
         )}
         <div className="sd2-messages" onContextMenu={onChatContextMenu}>
@@ -225,6 +238,7 @@ export function ChatStage({
             const collapsed = collapsedMsgIds.has(m.id);
             return (
               <div key={m.id} className={`sd2-msg sd2-msg--${m.role}${collapsed ? ' is-collapsed' : ''}`}>
+                <div id={`sd2-msg-${m.id}`} />
                 <div className="sd2-msg__meta">
                   {m.role === 'user' ? '你' : m.role === 'assistant' ? '助手' : '系统'}
                   {m.skillId ? ` · ${m.skillId}` : ''}
@@ -243,6 +257,9 @@ export function ChatStage({
                   <div className="sd2-msg__body sd2-msg__body--collapsed">
                     {m.content.slice(0, 80)}{m.content.length > 80 ? '…' : ''}
                   </div>
+                )}
+                {m.errorCode && SCRIPT_DESK_ERROR_HINTS[m.errorCode] && (
+                  <div className="sd2-msg__hint">{SCRIPT_DESK_ERROR_HINTS[m.errorCode]}</div>
                 )}
                 {m.pendingPatch && !m.applied && !m.discarded && (
                   <div className="sd2-msg__patch-sum">

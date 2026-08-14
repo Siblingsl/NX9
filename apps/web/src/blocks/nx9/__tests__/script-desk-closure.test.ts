@@ -9,6 +9,7 @@ import {
   compactAgentSession,
   discardPendingMessagePatch,
   formatScriptDeskError,
+  appendAgentMessage,
 } from '../../../engine/script-desk-runner';
 import {
   findLibraryCharacterForRename,
@@ -92,6 +93,15 @@ describe('runner 错误码与 pending 瘦身', () => {
     expect(classifyScriptDeskError(new Error('429 rate limit')).code).toBe('rate_limit');
     expect(classifyScriptDeskError(new Error('timeout')).code).toBe('timeout');
     expect(formatScriptDeskError(new Error('429 too many'))).toContain('稍后再试');
+  });
+
+  it('appendAgentMessage 保留结构化 errorCode', () => {
+    const session = appendAgentMessage(undefined, {
+      role: 'assistant',
+      content: '失败：429',
+      errorCode: 'rate_limit',
+    });
+    expect(session.messages[0].errorCode).toBe('rate_limit');
   });
 
   it('compactAgentSession / discardPendingMessagePatch 去掉 pendingPatch 全文', () => {

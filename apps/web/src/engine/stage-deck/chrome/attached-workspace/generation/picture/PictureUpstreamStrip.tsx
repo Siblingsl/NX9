@@ -6,15 +6,15 @@ function stop(e: React.SyntheticEvent) {
   e.stopPropagation();
 }
 
-export type PictureRefSource = 'upload' | 'upstream';
+export type PictureRefSource = 'upload' | 'upstream' | 'injected';
 
 export interface PictureRefItem {
   url: string;
   source: PictureRefSource;
   /** 同来源内 0-based 下标（用于标签 / @上游） */
   index: number;
-  /** PG-03: 风格参考图（styleImageUrl）标记 */
-  role?: 'style';
+  /** PG-03: 风格参考图（styleImageUrl）标记；PG-38: 注入参考角色 */
+  role?: 'style' | 'character' | 'environment';
 }
 
 export interface PictureUpstreamStripProps {
@@ -53,25 +53,31 @@ export function PictureUpstreamStrip({
 
   const uploadCount = visible.filter((i) => i.source === 'upload').length;
   const upstreamCount = visible.filter((i) => i.source === 'upstream').length;
+  const injectedCount = visible.filter((i) => i.source === 'injected').length;
+  const hint =
+    injectedCount > 0
+      ? `注入 ${injectedCount} · 定妆/场景 · 可排除`
+      : uploadCount > 0 && upstreamCount > 0
+        ? `上传 ${uploadCount} · 上游 ${upstreamCount} · 点击 @ · 拖出钉板`
+        : uploadCount > 0
+          ? '本节点上传 · 拖出钉板'
+          : '点击 @ · 拖出钉板';
 
   return (
     <div className="min-w-0 flex flex-col gap-1.5 nodrag nopan" onMouseDown={stop}>
-      <div className="flex items-center gap-1.5">
-        <span className="text-[9px] font-medium text-ink/50 tracking-wide">参考图</span>
-        <span className="text-[9px] text-ink/30 tabular-nums">{visible.length}</span>
-        <span className="text-[9px] text-ink/28 truncate">
-          {uploadCount > 0 && upstreamCount > 0
-            ? `上传 ${uploadCount} · 上游 ${upstreamCount} · 点击 @ · 拖出钉板`
-            : uploadCount > 0
-              ? '本节点上传 · 拖出钉板'
-              : '点击 @ · 拖出钉板'}
+      <div className="flex h-5 shrink-0 items-center gap-1.5 min-w-0" title={hint}>
+        <span className="shrink-0 text-[9px] leading-none font-medium text-ink/50 tracking-wide">
+          参考图
+        </span>
+        <span className="shrink-0 text-[9px] leading-none text-ink/30 tabular-nums">
+          {visible.length}
         </span>
         {excludedUrls.length > 0 && onRestoreExcluded && (
           <button
             type="button"
             onMouseDown={stop}
             onClick={onRestoreExcluded}
-            className="ml-auto text-[9px] text-ink/40 hover:text-brand shrink-0"
+            className="ml-auto shrink-0 text-[9px] leading-none text-ink/40 hover:text-brand"
           >
             恢复已排除 ({excludedUrls.length})
           </button>
@@ -87,9 +93,15 @@ export function PictureUpstreamStrip({
             const label =
               item.role === 'style'
                 ? '风格'
-                : source === 'upload'
-                  ? `参考${index + 1}`
-                  : `上游${index + 1}`;
+                : item.role === 'character'
+                  ? '定妆'
+                  : item.role === 'environment'
+                    ? '场景'
+                    : source === 'upload'
+                      ? `参考${index + 1}`
+                      : source === 'injected'
+                        ? '注入'
+                        : `上游${index + 1}`;
             const canSelect = source === 'upstream' && onSelectUpstream;
             return (
               <div
@@ -141,9 +153,15 @@ export function PictureUpstreamStrip({
                 title={
                   item.role === 'style'
                     ? '风格参考图 · 控制画风，不作主体'
-                    : source === 'upload'
-                      ? `${label} · 本节点上传 · 拖出钉到画布`
-                      : `点击插入 @上游:图${index + 1} · 拖出钉到画布`
+                    : item.role === 'character'
+                      ? '注入 · 角色定妆 · 可排除'
+                      : item.role === 'environment'
+                        ? '注入 · 场景参考 · 可排除'
+                        : source === 'upload'
+                          ? `${label} · 本节点上传 · 拖出钉到画布`
+                          : source === 'injected'
+                            ? '注入参考 · 角色/场景 · 可排除'
+                            : `点击插入 @上游:图${index + 1} · 拖出钉到画布`
                 }
               >
                 <img src={url} alt="" className="w-full h-full object-cover pointer-events-none" />
@@ -164,7 +182,7 @@ export function PictureUpstreamStrip({
                     <X size={9} />
                   </button>
                 ) : null}
-                {source === 'upstream' && onExcludeUpstream ? (
+                {(source === 'upstream' || source === 'injected') && onExcludeUpstream ? (
                   <button
                     type="button"
                     onMouseDown={stop}

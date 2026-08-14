@@ -162,4 +162,26 @@ describe('director3d commit adapter', () => {
       error: '候选帧上传失败，请重试后再提交',
     });
   });
+
+  it('DD-D-03 clears captureUrlPendingRepair after a persistent re-upload commit', () => {
+    const h = harness();
+    const chain = h.nodes[0]?.data.chainStoryboard as { shots: Array<Record<string, unknown>> };
+    chain.shots[0]!.director3dGuide = {
+      captureUrl: '',
+      captureUrlPendingRepair: true,
+      commitId: 'quarantined-commit',
+    };
+    const commit = createDirector3dCommitAdapter({
+      blockId: 'director-1',
+      nodes: h.nodes,
+      edges: h.edges,
+      updateNodeData: h.updateNodeData,
+      currentSourceShotRevision: 7,
+    });
+    expect(commit(payload())).toMatchObject({ ok: true });
+    const writtenChain = h.nodes[0]?.data.chainStoryboard as { shots: Array<Record<string, unknown>> };
+    const guide = writtenChain.shots[0]?.director3dGuide as Record<string, unknown>;
+    expect(guide.captureUrl).toBe('https://cdn.example/persistent-frame.png');
+    expect(guide.captureUrlPendingRepair).toBeUndefined();
+  });
 });

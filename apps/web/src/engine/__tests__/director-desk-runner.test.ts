@@ -557,7 +557,7 @@ describe('patchUpstreamShot integration', () => {
     expect(generated.keyframeProvenance?.colorCheck?.verdict).toBe('suspect-monochrome');
   });
 
-  it('unknown color check does not block auto-approve', async () => {
+  it('unknown color check enters review instead of auto-approve (DD-D-12)', async () => {
     const shot = makeShot({ id: 's1', index: 1, firstFrameAssetId: null });
     const chain = { version: 2 as const, activeEpisodeId: 'ep-1', shots: [shot] };
     const nodes: Node[] = [
@@ -584,7 +584,7 @@ describe('patchUpstreamShot integration', () => {
       },
     });
     const generated = (nodes[1].data.chainStoryboard as typeof chain).shots[0];
-    expect(generated.keyframeStatus).toBe('approved');
+    expect(generated.keyframeStatus).toBe('review');
     expect(generated.keyframeProvenance?.colorCheck?.verdict).toBe('unknown');
   });
 
@@ -723,6 +723,8 @@ describe('buildShotPrompt line-art integration', () => {
         forceCharacterRef: false,
         forceSceneRef: true,
         styleLock: true,
+        // DD-D-07: 全局美术方向必须显式 opt-in，默认不注入。
+        useGlobalArtDirection: true,
         globalArtDirection: 'injected-global-style',
         episodeArtDirection: 'injected-episode-style',
         environments: [{ id: 'env-1', name: '测试场景', descriptionZh: '注入场景描述' }],

@@ -8,9 +8,50 @@ import {
   normalizeDataEdgeHandlesAwayFromExec,
   type WorkspacePayload,
   type WorkspacePayloadV3,
+  type SceneGroupRecord,
 } from '@nx9/shared';
 import { useWorkspaceDocument } from '../stores/workspace-document';
 import { normalizeFlowEdgeType } from './flow-edge-types';
+import { autoSplitMixedDirector3dGraph } from './director3d-split';
+
+/** React Flow 要求父节点排在子节点前面，否则拖拽/嵌套会丢 */
+export function orderSceneParentsFirst(nodes: Node[]): Node[] {
+  if (nodes.length < 2) return nodes;
+  const parentIds = new Set(
+    nodes.map((n) => n.parentId).filter((id): id is string => Boolean(id)),
+  );
+  if (parentIds.size === 0 && !nodes.some((n) => n.type === 'scene-group')) return nodes;
+  const parents: Node[] = [];
+  const rest: Node[] = [];
+  for (const n of nodes) {
+    if (parentIds.has(n.id) || n.type === 'scene-group') parents.push(n);
+    else rest.push(n);
+  }
+  return [...parents, ...rest];
+}
+
+function collectSceneGroups(nodes: Node[]): SceneGroupRecord[] {
+  return nodes
+    .filter((n) => n.type === 'scene-group')
+    .map((n) => {
+      const memberIds = nodes.filter((c) => c.parentId === n.id).map((c) => c.id);
+      const width =
+        (typeof n.data?.width === 'number' ? n.data.width : undefined) ||
+        n.width ||
+        (typeof n.style?.width === 'number' ? (n.style.width as number) : 400);
+      const height =
+        (typeof n.data?.height === 'number' ? n.data.height : undefined) ||
+        n.height ||
+        (typeof n.style?.height === 'number' ? (n.style.height as number) : 280);
+      return {
+        id: n.id,
+        label: typeof n.data?.label === 'string' ? n.data.label : '场景组',
+        memberIds,
+        position: { ...n.position },
+        size: { width, height },
+      };
+    });
+}
 
 export function ensureWorkspaceV3(payload: Partial<WorkspacePayload>): WorkspacePayloadV3 {
   const normalized = normalizeWorkspacePayload(payload);
@@ -33,14 +74,19 @@ export function toPayload(
   },
 ): WorkspacePayload {
   const extras = useWorkspaceDocument.getState().getSnapshotForSave();
+  const ordered = orderSceneParentsFirst(nodes);
   const base = {
-    blocks: nodes.map((n) => ({
+    blocks: ordered.map((n) => ({
       id: n.id,
       type: n.type ?? 'prompt',
       position: n.position,
       data: n.data ?? {},
       width: n.width,
       height: n.height,
+      parentId: n.parentId,
+      extent: n.extent === 'parent' ? ('parent' as const) : undefined,
+      hidden: n.hidden || undefined,
+      style: n.style as Record<string, unknown> | undefined,
     })),
     links: edges.map((e) => ({
       id: e.id,
@@ -64,7 +110,7 @@ export function toPayload(
       aliases: options.aliases ?? {},
       viewMode: options.viewMode ?? 'produce',
       takes: options.takes ?? [],
-      groups: options.groups ?? [],
+      groups: options.groups ?? collectSceneGroups(ordered),
       lanes: options.lanes,
     };
   }
@@ -84,6 +130,10 @@ export function fromPayload(
     data: b.data ?? {},
     width: b.width,
     height: b.height,
+    parentId: b.parentId,
+    extent: b.extent === 'parent' ? ('parent' as const) : undefined,
+    hidden: b.hidden,
+    style: b.style,
   }));
   const rawLinks = (v3.links ?? []).map((l) => ({
     id: l.id,
@@ -97,7 +147,7 @@ export function fromPayload(
   const strippedGate = stripAssetGateFromGraph(rawNodes, rawLinks);
   const stripped = stripReviewGateFromGraph(strippedGate.nodes, strippedGate.links);
   const migrated = migrateBlockKinds(stripped.nodes);
-  const nodes: Node[] = migrated.nodes as Node[];
+  const nodes: Node[] = orderSceneParentsFirst(migrated.nodes as Node[]);
   // F-006: 加载时把误挂上下口的数据边改回左右 prompt
   const normalizedLinks = normalizeDataEdgeHandlesAwayFromExec(nodes, stripped.links);
   const edges: Edge[] = normalizedLinks.map((l: (typeof normalizedLinks)[number]) => {
@@ -114,9 +164,11 @@ export function fromPayload(
       },
     };
   });
+  // DD-D-11: hydrate 时对 split-required 混装导演台自动拆出独立 3D 节点（非破坏性）。
+  const autoSplit = autoSplitMixedDirector3dGraph({ nodes, edges });
   return {
-    nodes,
-    edges,
+    nodes: orderSceneParentsFirst(autoSplit.nodes),
+    edges: autoSplit.edges,
     viewport: v3.viewport ?? { x: 0, y: 0, zoom: 1 },
     nextBlockIndex: v3.nextBlockIndex ?? 1,
     v3,

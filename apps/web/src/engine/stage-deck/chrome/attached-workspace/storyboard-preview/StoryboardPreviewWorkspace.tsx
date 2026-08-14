@@ -705,7 +705,7 @@ export function StoryboardPreviewWorkspace({
                title={DIRECTOR_3D_ENABLED ? undefined : '3D 导演台暂未开放'}
              >
                <Box size={12} />
-               3D 暂未开放
+               {DIRECTOR_3D_ENABLED ? '3D 导演台' : '3D 暂未开放'}
              </button>
           )}
           <button

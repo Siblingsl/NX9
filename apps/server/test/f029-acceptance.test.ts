@@ -99,10 +99,10 @@ describe('F-029 acceptance', () => {
 
   // ═══════════ flow-runner: node-local only ═══════════
   describe('flow-runner uses node-local timeline only', () => {
-    const src = readWeb(FLOW_RUNNER);
+    const src = readWeb('engine/flow-runner-ops/media-ops.ts');
 
     it('comment says node-local timeline only', () => {
-      expect(src).toContain('node-local timeline only');
+      expect(src).toContain('节点本地时间线');
     });
 
     it('reads from block.data.timelineDraft', () => {

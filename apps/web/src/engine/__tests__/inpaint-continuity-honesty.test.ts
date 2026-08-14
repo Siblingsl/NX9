@@ -26,10 +26,10 @@ describe('TOOL-05 continuity-check', () => {
   });
 
   it('flow-runner / ContinuityCheckBlock 不再写死 gpt-4o-mini', () => {
-    const runner = readFileSync(resolve(webSrc, 'flow-runner.ts'), 'utf8');
+    const runner = readFileSync(resolve(webSrc, 'flow-runner-ops/story-ops.ts'), 'utf8');
     const branch = runner.slice(
       runner.indexOf("if (kind === 'continuity-check')"),
-      runner.indexOf("if (kind === 'export-pack')"),
+      runner.indexOf("if (kind === 'beat-sync')"),
     );
     expect(branch).toContain('resolveContinuityModel');
     expect(branch).toContain('sliceContinuityImages');
@@ -52,7 +52,7 @@ describe('TOOL-06 inpaint-edit 双路径合一', () => {
   });
 
   it('工作台与画布 Run 都走 runInpaintEdit + shot 写回', () => {
-    const runner = readFileSync(resolve(webSrc, 'flow-runner.ts'), 'utf8');
+    const runner = readFileSync(resolve(webSrc, 'flow-runner-ops/media-ops.ts'), 'utf8');
     const branch = runner.slice(
       runner.indexOf("if (kind === 'inpaint-edit')"),
       runner.indexOf("if (kind === 'thumbnail-maker')"),

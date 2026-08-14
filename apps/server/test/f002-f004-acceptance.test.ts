@@ -179,7 +179,7 @@ describe('F-004 无上游不误批', () => {
     );
 
     expect(batch.includes('禁止回退全局')).toBe(true);
-    expect(clip.includes('禁止写全局')).toBe(true);
+    expect(clip.includes('禁止回退全局镜表批出')).toBe(true);
     expect(playbook.includes('禁止误批全局') || playbook.includes('无链镜表时阻断')).toBe(true);
     expect(videoWs.includes('禁止写全局')).toBe(true);
     expect(upstreamHook.includes('useWorkspaceDocument')).toBe(false);

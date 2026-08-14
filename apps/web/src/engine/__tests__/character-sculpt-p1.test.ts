@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { emptyFaceRig, setFaceRigValue } from '@nx9/shared';
+import { emptyFaceRig, setFaceRigSideValue, setFaceRigValue } from '@nx9/shared';
 import {
   P1_VIEWPORT_PARAM_IDS,
   applyFaceRigToObject,
@@ -26,6 +26,15 @@ describe('捏模 P1 · 代理网格契约', () => {
     const root = createProxyCharacter();
     const report = assertSculptMeshContract(root, 'proxy');
     expect(report.warnings.some((w) => w.includes('表情头'))).toBe(false);
+  });
+
+  it('代理头含左右下颌 morph，契约计数 12', () => {
+    const root = createProxyCharacter();
+    const report = assertSculptMeshContract(root, 'proxy');
+    expect(report.morphTargetCount).toBe(12);
+    applyFaceRigToObject(root, setFaceRigSideValue(emptyFaceRig(), 'jawWidth', 'L', 100));
+    expect(readMorphInfluence(root, 'jawWidth', 'pos', 'L')).toBe(1);
+    expect(readMorphInfluence(root, 'jawWidth', 'pos', 'R')).toBe(0);
   });
 });
 

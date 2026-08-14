@@ -22,7 +22,7 @@ describe('F-002/F-003/F-004 source guards', () => {
       resolve(root, 'apps/web/src/blocks/core/ClipGenBlock.tsx'),
       'utf8',
     );
-    expect(src.includes('禁止写全局')).toBe(true);
+    expect(src.includes('禁止回退全局镜表批出')).toBe(true);
     expect(src.includes('写回全局 storyboard——无上游 desk')).toBe(false);
   });
 

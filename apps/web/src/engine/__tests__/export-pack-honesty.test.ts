@@ -58,8 +58,8 @@ describe('TOOL-02/03 export-pack-runner 源码守卫', () => {
 
 describe('TOOL-01 flow-runner export-pack 链隔离', () => {
   it('不再读全局 activeEpisodeShots', () => {
-    const src = readEngine('flow-runner.ts');
-    const branch = src.slice(src.indexOf("if (kind === 'export-pack')"), src.indexOf("if (kind === 'comfy-workflow')"));
+    const src = readEngine('flow-runner-ops/legacy-honesty-ops.ts');
+    const branch = src.slice(src.indexOf("if (kind === 'export-pack')"), src.indexOf("if (kind === 'audio-mix'"));
     expect(branch).toContain('resolveShotsForBlock');
     expect(branch).not.toContain('useWorkspaceDocument.getState().storyboard');
     expect(branch).toContain('pollMontageTaskUntilDone');

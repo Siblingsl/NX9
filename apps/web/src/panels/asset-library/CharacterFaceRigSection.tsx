@@ -18,6 +18,7 @@ import {
   setFaceRigValue,
 } from '@nx9/shared';
 import { DetailSection, ParamSlider } from './detail-primitives';
+import { assessCharacterFaceRigHealth } from '../../engine/asset-library-health';
 import { FaceSculptModal } from './face-sculpt/FaceSculptModal';
 
 const QUICK_PARAMS = FACE_RIG_PARAMS.filter((p) => p.quick);
@@ -34,6 +35,8 @@ export function CharacterFaceRigSection({
   const [expanded, setExpanded] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
   const [sculptOpen, setSculptOpen] = useState(false);
+
+  const faceRigHealth = useMemo(() => assessCharacterFaceRigHealth(c), [c]);
 
   const patchRig = (next: ReturnType<typeof getFaceRig>) =>
     onChange({ ...c, creative: { ...c.creative, ...ext, faceRig: next } });
@@ -77,6 +80,20 @@ export function CharacterFaceRigSection({
             全部重置
           </button>
         ) : null}
+      </div>
+
+      <div className="space-y-1">
+        {faceRigHealth.length === 0 ? (
+          <p className="rounded-lg border border-ok/30 bg-ok/10 px-2 py-1.5 text-[10px] text-ok">定妆健康：faceLockUrl 与当前参数/契约一致</p>
+        ) : (
+          <ul className="space-y-1">
+            {faceRigHealth.map((h) => (
+              <li key={h.key} className="rounded-lg border border-warn/40 bg-warn/10 px-2 py-1.5 text-[10px] text-warn">
+                {h.label}
+              </li>
+            ))}
+          </ul>
+        )}
       </div>
 
       {locked && deviations > 0 ? (

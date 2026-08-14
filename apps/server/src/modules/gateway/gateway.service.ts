@@ -103,6 +103,31 @@ export class GatewayService {
     return cfg.primaryApiKey || cfg.llmApiKey || '';
   }
 
+  /** OpenAI 兼容图生通道：网络失败时给出可读 503，避免变成笼统 500 Internal server error */
+  private imageUpstreamNetworkError(baseUrl: string, err: unknown): ServiceUnavailableException {
+    const raw = err instanceof Error ? err.message : String(err);
+    const cause =
+      err && typeof err === 'object' && 'cause' in err
+        ? String((err as { cause?: unknown }).cause ?? '')
+        : '';
+    const detail = [raw, cause].filter(Boolean).join(' | ');
+    if (/AbortError|timed out|timeout|aborted/i.test(detail)) {
+      return new ServiceUnavailableException(
+        `图片上游请求超时（${baseUrl}）。请检查 Primary Base URL / 代理，或换可用的图片模型中转。技术细节: ${detail.slice(0, 220)}`,
+      );
+    }
+    return new ServiceUnavailableException(
+      [
+        `无法连接图片上游（网络层失败 · ${baseUrl}）。`,
+        '常见于国内网络无法直连 api.openai.com，或 Primary Base URL 不可达。',
+        '处理：1) 为 Node 服务配置 HTTPS_PROXY/HTTP_PROXY 后重启 server；',
+        '2) 或在设置 → Primary Base URL 填可访问的 OpenAI 兼容中转；',
+        '3) 也可改用已配置代理/中转的 Gemini 图片模型。',
+        `技术细节: ${detail.slice(0, 220)}`,
+      ].join(' '),
+    );
+  }
+
   private baseUrl(override?: string, kind: 'primary' | 'video' | 'llm' = 'primary'): string {
     const cfg = this.settings.getRaw();
     const configured =
@@ -498,24 +523,34 @@ export class GatewayService {
     const truncatedRefs = Math.max(0, uniqueAll.length - uniqueRefs.length);
 
     // gpt-image / 兼容通道：有参考图时走 /images/edits（multipart），纯文生图走 /images/generations
-    const res = uniqueRefs.length
-      ? await this.postOpenAiImageEdits({
-          baseUrl,
-          apiKey,
-          model,
-          prompt,
-          size,
-          n,
-          referenceUrls: uniqueRefs,
-        })
-      : await fetch(`${baseUrl}/images/generations`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${apiKey}`,
-          },
-          body: JSON.stringify({ model, prompt, n, size, response_format: 'b64_json' }),
-        });
+    let res: Response;
+    try {
+      res = uniqueRefs.length
+        ? await this.postOpenAiImageEdits({
+            baseUrl,
+            apiKey,
+            model,
+            prompt,
+            size,
+            n,
+            referenceUrls: uniqueRefs,
+          })
+        : await this.fetchWithTimeout(
+            `${baseUrl}/images/generations`,
+            {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                Authorization: `Bearer ${apiKey}`,
+              },
+              body: JSON.stringify({ model, prompt, n, size, response_format: 'b64_json' }),
+            },
+            180_000,
+          );
+    } catch (err) {
+      if (err instanceof HttpException) throw err;
+      throw this.imageUpstreamNetworkError(baseUrl, err);
+    }
 
     if (!res.ok) {
       const text = await res.text();

@@ -294,7 +294,7 @@ describe('F-027 acceptance', () => {
     const src = readWeb(FLOW_RUNNER);
 
     it('clip-gen multi-shot gatherUpstream call includes upstreamPolicy', () => {
-      const idx = src.indexOf("const chainShots");
+      const idx = src.indexOf('const upstream = gatherUpstream');
       expect(idx).toBeGreaterThan(-1);
       const block = src.slice(idx, idx + 600);
       expect(block).toContain("upstreamPolicy, primarySourceId");

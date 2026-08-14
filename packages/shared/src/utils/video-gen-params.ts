@@ -47,3 +47,27 @@ export function resolveVideoGenParams(data: {
     resolution: res,
   };
 }
+
+/**
+ * VG-42: 校验 Provider 参数文本（JSON 对象或 key=value 列表）。
+ * 与网关 parseModelParams 同口径：无法解析的输入会被静默丢弃，这里提前报错。
+ */
+export function validateVideoModelParams(raw: string): string | null {
+  const text = (raw ?? '').trim();
+  if (!text) return null;
+  if (text.startsWith('{')) {
+    try {
+      const parsed = JSON.parse(text) as unknown;
+      return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+        ? null
+        : 'Provider 参数需为 JSON 对象或 key=value 列表';
+    } catch {
+      return 'Provider 参数 JSON 解析失败';
+    }
+  }
+  for (const pair of text.split(/[,;\n]+/)) {
+    const idx = pair.indexOf('=');
+    if (idx > 0 && pair.slice(0, idx).trim()) return null;
+  }
+  return 'Provider 参数需为 JSON 对象或 key=value 列表';
+}

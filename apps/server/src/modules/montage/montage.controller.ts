@@ -232,4 +232,11 @@ export class MontageController {
     if (!task) return { ok: false, status: 'error', message: 'task not found' };
     return { ok: true, ...task };
   }
+
+  /** SE-DEEP-06: 取消视频级替换；Fal cancel 不可用也停本地任务并记 cancelled */
+  @Delete('video-edit-tasks/:taskId')
+  async cancelVideoEdit(@Param('taskId') taskId: string) {
+    const cancelled = await this.videoEdit.cancel(taskId);
+    return { ok: cancelled, message: cancelled ? '已取消' : '任务未找到或已结束' };
+  }
 }

@@ -219,10 +219,14 @@ function DirectorDeskBlock(props: NodeProps) {
     [clipNode],
   );
 
-  const sortedShots = useMemo(
-    () => [...activeShots].sort((a, b) => a.index - b.index),
-    [activeShots],
-  );
+   const sortedShots = useMemo(
+     () => [...activeShots].sort((a, b) => a.index - b.index),
+     [activeShots],
+   );
+   const pendingRepairShots = useMemo(
+     () => sortedShots.filter((shot) => Boolean(shot.director3dGuide?.captureUrlPendingRepair)),
+     [sortedShots],
+   );
 
   const readiness = useMemo(() => {
     try { return checkAssetReadinessInEdges(props.id, nodes as any, edges as any); }
@@ -265,6 +269,7 @@ function DirectorDeskBlock(props: NodeProps) {
       preferLineArtRef,
        lineArtByShotId,
        styleLock,
+       useGlobalArtDirection: false,
        globalArtDirection: storyboard.globalArtDirection,
        episodeArtDirection,
        stylePrompt,
@@ -446,7 +451,8 @@ function DirectorDeskBlock(props: NodeProps) {
             forceCharacterRef,
             forceSceneRef,
              styleLock,
-             globalArtDirection: storyboard.globalArtDirection,
+             useGlobalArtDirection: false,
+       globalArtDirection: storyboard.globalArtDirection,
              episodeArtDirection,
              prefer3dRef,
             preferLineArtRef,
@@ -505,9 +511,7 @@ function DirectorDeskBlock(props: NodeProps) {
               total,
               failed: failedCountRef.current,
             });
-            if (result.url) {
-              updateNodeData(props.id, { previewUrl: result.url });
-            }
+            // DD-D-06: previewUrl 仅是画布缩略图缓存，不随逐镜批出漂移；代表帧走 currentShot。
           },
         });
 
@@ -515,7 +519,7 @@ function DirectorDeskBlock(props: NodeProps) {
 
         updateNodeData(props.id, {
           status: summary.failed > 0 && summary.done === 0 ? 'error' : 'success',
-          previewUrl: summary.lastUrl ?? previewUrl,
+          lastBatchPreviewUrl: summary.lastUrl ?? undefined,
           error: summary.failed > 0 ? `${summary.failed} 镜失败` : undefined,
           batchSummary: {
             total: summary.total,
@@ -1083,9 +1087,10 @@ function DirectorDeskBlock(props: NodeProps) {
                 第{episodeId ? chain.episodes?.find((e) => e.id === episodeId)?.index ?? '?' : '?'}集{upstreamDeskTitle ? ` · 来自「${upstreamDeskTitle}」` : ''}
                 {episodeConfirmed ? ' · 已确认' : ' · 未确认'}
                 {' · '}线稿 {lineArtCount}/{activeShots.length}
-                 {' · '}关键帧 {stats.withFrame}/{stats.total}
-                 {' · '}3D 构图 {stats.with3d}/{stats.total}
-              </span>
+                  {' · '}关键帧 {stats.withFrame}/{stats.total}
+                  {' · '}3D 构图 {stats.with3d}/{stats.total}
+                  {pendingRepairShots.length > 0 ? ` · 3D 待修复 ${pendingRepairShots.length}` : ''}
+               </span>
             </div>
           )}
           {!immersed3d && (!chain || chain.shots.length === 0) && (
@@ -1114,6 +1119,29 @@ function DirectorDeskBlock(props: NodeProps) {
           )}
           {!immersed3d && (
             <div className="dd2-pipeline" aria-label="导演流程">
+          {!immersed3d && pendingRepairShots.length > 0 && (
+            <div className="dd2-episode-ctx dd2-episode-ctx--warn">
+              <span className="dd2-episode-ctx__info">
+                ⚠ 3D 机位截图已隔离 {pendingRepairShots.length} 镜，重新摆位上传并提交后即可恢复参考
+              </span>
+              <div className="dd2-episode-ctx__repair">
+                {pendingRepairShots.slice(0, 8).map((shot) => (
+                  <button
+                    key={shot.id}
+                    type="button"
+                    className="dd2-btn dd2-btn--ghost"
+                    onClick={() => {
+                      focusShot(shot.id);
+                      setStudioTab('stage3d');
+                    }}
+                  >
+                    去 3D 重拍 #{shot.index}
+                  </button>
+                ))}
+                {pendingRepairShots.length > 8 ? <span>等 {pendingRepairShots.length - 8} 镜</span> : null}
+              </div>
+            </div>
+          )}
               <button
                 type="button"
                 className={`dd2-pipeline__step ${studioTab === 'produce' ? 'is-on' : ''} ${stats.withFrame > 0 ? 'is-done' : ''}`}
@@ -1129,7 +1157,7 @@ function DirectorDeskBlock(props: NodeProps) {
                  disabled={!DIRECTOR_3D_ENABLED}
                  title={DIRECTOR_3D_ENABLED ? undefined : '3D 导演台暂未开放'}
                >
-                  <b>2</b> 3D 构图（暂未开放）
+                  <b>2</b> 3D 构图
                </button>
               <span className="dd2-pipeline__sep" aria-hidden />
               <button
@@ -1171,6 +1199,7 @@ function DirectorDeskBlock(props: NodeProps) {
                    director3dEnabled={DIRECTOR_3D_ENABLED}
                   previewUrl={currentShot?.firstFrameAssetId ?? undefined}
                    guideUrl={guideUrl}
+                   guidePendingRepair={Boolean(currentShot?.director3dGuide?.captureUrlPendingRepair)}
                    lineArtUrl={currentLineArtUrl}
                   currentShotIndex={currentShot?.index != null ? String(currentShot.index) : '—'}
                   currentShotDesc={currentShot?.descriptionZh as string | undefined}

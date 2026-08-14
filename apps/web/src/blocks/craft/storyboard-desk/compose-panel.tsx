@@ -23,6 +23,7 @@ interface ComposePanelProps {
   lastBatchFailures: string[];
   compositionStats: { coverage: number; composed: number; total: number; boundCharacters: number; boundScenes: number };
   contactSheetUrl: string | null | undefined;
+  contactSheetStale: boolean;
   composeViewTab: 'preview' | 'sheet';
   setComposeViewTab: React.Dispatch<React.SetStateAction<'preview' | 'sheet'>>;
   setStudioTab: React.Dispatch<React.SetStateAction<any>>;
@@ -56,6 +57,7 @@ const ComposePanel: React.FC<ComposePanelProps> = ({
   lastBatchFailures,
   compositionStats,
   contactSheetUrl,
+  contactSheetStale,
   composeViewTab,
   setComposeViewTab,
   setStudioTab: _setStudioTab,
@@ -111,7 +113,7 @@ const ComposePanel: React.FC<ComposePanelProps> = ({
                 onClick={() => setComposeViewTab('sheet')}
               >
                 故事板大图
-                {contactSheetUrl ? <em>已有</em> : null}
+                {contactSheetUrl ? <em className={contactSheetStale ? 'is-warn' : undefined}>{contactSheetStale ? '过期' : '已有'}</em> : null}
               </button>
             </div>
 
@@ -262,6 +264,9 @@ const ComposePanel: React.FC<ComposePanelProps> = ({
         <div className="sg3-compose-sheet" role="tabpanel">
           {contactSheetUrl ? (
             <div className="sg3-sheet sg3-sheet--tab">
+              {contactSheetStale ? (
+                <p style={{ fontSize: 11, color: '#b45309', marginBottom: 8 }}>结构/线稿已变更 · 大图已过期，请重新合成</p>
+              ) : null}
               <div className="sg3-sheet__head">
                 <span className="sg3-sheet__title">本集故事板大图</span>
                 <div className="sg3-sheet__acts">

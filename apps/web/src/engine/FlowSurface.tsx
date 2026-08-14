@@ -61,8 +61,13 @@ import {
 } from './chain-storyboard-aggregate';
 import { applyNodeAlignment, type NodeAlignAction } from './node-align';
 import { EdgeContextMenu, PaneContextMenu, SelectionContextMenu } from './FlowContextMenu';
+import { SelectionFloatingBar } from './SelectionFloatingBar';
 import { exactDropPosition, findOpenPosition, relocateNodeGroup } from './spawn-placement';
-import { fromPayload as parseFlowPayload, toPayload as buildFlowPayload } from './flow-payload';
+import {
+  fromPayload as parseFlowPayload,
+  toPayload as buildFlowPayload,
+  orderSceneParentsFirst,
+} from './flow-payload';
 import { channelEdgeTypes } from './stage-deck/canvas/ChannelEdge';
 import { LensMenu } from './stage-deck/canvas/LensMenu';
 import { useStageDeckNodeTypes } from './stage-deck/canvas/stage-deck-node-types';
@@ -101,7 +106,13 @@ import { RecipePickerOverlay } from './stage-deck/chrome/RecipePickerOverlay';
 import { EmptyCanvasGuide } from '../components/canvas/EmptyCanvasGuide';
 import { CanvasFlowRail } from './stage-deck/chrome/CanvasFlowRail';
 import { filterBlocksForWireDrop } from './stage-deck/interaction/wire-drop';
-import { computeGroupBounds } from './stage-deck/canvas/SceneGroup';
+import {
+  buildSceneGroupMemberPreview,
+  computeGroupBounds,
+  SCENE_GROUP_COLLAPSED,
+  SCENE_GROUP_COLLAPSED_VERSION,
+  SCENE_GROUP_PAD_VERSION,
+} from './stage-deck/canvas/SceneGroup';
 import { StageDeckInteractionBridge } from './stage-deck/StageDeckInteractionBridge';
 import { normalizeDirectorProject } from '@nx9/director3d';
 import { useDirector3dUi } from '../stores/director3d-ui';
@@ -486,11 +497,9 @@ const FlowSurfaceInner = memo(function FlowSurfaceInner({
     const pending = consumeSpawn();
     if (!pending) return;
     const id = `blk-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-    // F-003: 从链镜表查找，回退全局
+    // DD-D-08: 只从链镜表查找，禁止回退全局 storyboard.shots。
     const currentNodes = nodesRef.current;
-    const shot = pending.shotId
-      ? (findChainShot(pending.shotId, currentNodes) ?? useWorkspaceDocument.getState().storyboard.shots.find((s: any) => s.id === pending.shotId))
-      : undefined;
+    const shot = pending.shotId ? findChainShot(pending.shotId, currentNodes) : undefined;
     pushFlowSnapshot(nodes, edges);
     const at =
       pending.exact && pending.at
@@ -1215,9 +1224,12 @@ const FlowSurfaceInner = memo(function FlowSurfaceInner({
 
   const handleDeleteSelected = useCallback(
     (ids?: string[]) => {
-      const removeIds = new Set(
-        ids ?? nodesRef.current.filter((n) => n.selected).map((n) => n.id),
-      );
+      const selectedIds = ids ?? nodesRef.current.filter((n) => n.selected).map((n) => n.id);
+      const removeIds = new Set(selectedIds);
+      // 删场景组时一并删掉成员，避免残留 parentId 孤儿节点
+      for (const n of nodesRef.current) {
+        if (n.parentId && removeIds.has(n.parentId)) removeIds.add(n.id);
+      }
       if (removeIds.size === 0) return;
       pushFlowSnapshot(nodesRef.current, edgesRef.current);
       setNodes((prev) => prev.filter((n) => !removeIds.has(n.id)));
@@ -1301,30 +1313,375 @@ const FlowSurfaceInner = memo(function FlowSurfaceInner({
         id: groupId,
         type: 'scene-group',
         position: { x: bounds.x, y: bounds.y },
-        data: { label: '场景组', width: bounds.width, height: bounds.height },
-        style: { width: bounds.width, height: bounds.height, zIndex: -1 },
+        data: {
+          label: '场景组',
+          width: bounds.width,
+          height: bounds.height,
+          collapsed: false,
+          memberCount: selected.length,
+          padVersion: SCENE_GROUP_PAD_VERSION,
+        },
+        style: { width: bounds.width, height: bounds.height },
+        width: bounds.width,
+        height: bounds.height,
         selectable: true,
         draggable: true,
+        connectable: true,
+        selected: true,
       };
-      return [
-        ...prev.map((n) => {
-          if (!selectedIds.has(n.id)) return { ...n, selected: false };
-          return {
-            ...n,
-            parentId: groupId,
-            extent: 'parent' as const,
-            position: {
-              x: n.position.x - bounds.x,
-              y: n.position.y - bounds.y,
-            },
-            selected: false,
-          };
-        }),
-        groupNode,
-      ];
+      const next = prev.map((n) => {
+        if (!selectedIds.has(n.id)) return { ...n, selected: false };
+        return {
+          ...n,
+          parentId: groupId,
+          extent: 'parent' as const,
+          position: {
+            x: n.position.x - bounds.x,
+            y: n.position.y - bounds.y,
+          },
+          selected: false,
+        };
+      });
+      // React Flow：父节点必须排在子节点前面，否则拖拽会丢嵌套
+      return orderSceneParentsFirst([groupNode, ...next]);
     });
     appendLog(`已创建场景组（${selected.length} 个模块）`);
   }, [push, setNodes, appendLog]);
+
+  const resolveTargetGroupIds = useCallback((explicitIds?: string[]) => {
+    if (explicitIds && explicitIds.length > 0) return explicitIds;
+    const selectedGroups = nodesRef.current
+      .filter((n) => n.selected && n.type === 'scene-group')
+      .map((n) => n.id);
+    if (selectedGroups.length > 0) return selectedGroups;
+    const parentIds = new Set(
+      nodesRef.current
+        .filter((n) => n.selected && n.parentId)
+        .map((n) => n.parentId as string),
+    );
+    return [...parentIds];
+  }, []);
+
+  const handleUngroupSceneGroups = useCallback(
+    (explicitIds?: string[]) => {
+      const groupIds = resolveTargetGroupIds(explicitIds);
+      if (groupIds.length === 0) {
+        appendLog('请先选中场景组再解组');
+        return;
+      }
+      const remove = new Set(groupIds);
+      pushFlowSnapshot(nodesRef.current, edgesRef.current);
+      setNodes((prev) => {
+        const parents = new Map(prev.filter((n) => remove.has(n.id)).map((n) => [n.id, n]));
+        return prev
+          .filter((n) => !remove.has(n.id))
+          .map((n) => {
+            if (!n.parentId || !remove.has(n.parentId)) return n;
+            const parent = parents.get(n.parentId);
+            const { parentId: _pid, extent: _ext, ...rest } = n;
+            return {
+              ...rest,
+              hidden: false,
+              position: {
+                x: (parent?.position.x ?? 0) + n.position.x,
+                y: (parent?.position.y ?? 0) + n.position.y,
+              },
+              selected: true,
+            };
+          });
+      });
+      appendLog(`已解组 ${groupIds.length} 个场景组`);
+    },
+    [resolveTargetGroupIds, push, setNodes, appendLog],
+  );
+
+  const handleToggleSceneGroupCollapse = useCallback(
+    (explicitIds?: string[]) => {
+      const groupIds = resolveTargetGroupIds(explicitIds);
+      if (groupIds.length === 0) {
+        appendLog('请先选中场景组再折叠/展开');
+        return;
+      }
+      pushFlowSnapshot(nodesRef.current, edgesRef.current);
+      setNodes((prev) => {
+        const target = new Set(groupIds);
+        const collapseMap = new Map<string, boolean>();
+        for (const id of groupIds) {
+          const g = prev.find((n) => n.id === id);
+          collapseMap.set(id, !Boolean(g?.data?.collapsed));
+        }
+        return prev.map((n) => {
+          if (target.has(n.id) && n.type === 'scene-group') {
+            const collapsed = collapseMap.get(n.id) === true;
+            const members = prev.filter((c) => c.parentId === n.id);
+            const memberCount = members.length;
+            const memberPreview = buildSceneGroupMemberPreview(members);
+            if (collapsed) {
+              const expandWidth =
+                (typeof n.data?.width === 'number' ? n.data.width : undefined) ||
+                n.width ||
+                SCENE_GROUP_COLLAPSED.width;
+              const expandHeight =
+                (typeof n.data?.height === 'number' ? n.data.height : undefined) ||
+                n.height ||
+                SCENE_GROUP_COLLAPSED.height;
+              return {
+                ...n,
+                data: {
+                  ...n.data,
+                  collapsed: true,
+                  expandWidth,
+                  expandHeight,
+                  width: SCENE_GROUP_COLLAPSED.width,
+                  height: SCENE_GROUP_COLLAPSED.height,
+                  memberCount,
+                  memberPreview,
+                  collapsedVersion: SCENE_GROUP_COLLAPSED_VERSION,
+                },
+                style: {
+                  ...(n.style as Record<string, unknown> | undefined),
+                  width: SCENE_GROUP_COLLAPSED.width,
+                  height: SCENE_GROUP_COLLAPSED.height,
+                },
+                width: SCENE_GROUP_COLLAPSED.width,
+                height: SCENE_GROUP_COLLAPSED.height,
+                selected: true,
+              };
+            }
+            // 展开时按成员重算包围盒（含内边距），避免旧组贴边
+            const absMembers = members.map((c) => ({
+              position: {
+                x: n.position.x + c.position.x,
+                y: n.position.y + c.position.y,
+              },
+              width: c.width,
+              height: c.height,
+              measured: (c as { measured?: { width?: number; height?: number } }).measured,
+            }));
+            const bounds =
+              absMembers.length > 0
+                ? computeGroupBounds(absMembers)
+                : {
+                    x: n.position.x,
+                    y: n.position.y,
+                    width:
+                      (typeof n.data?.expandWidth === 'number' ? n.data.expandWidth : undefined) ||
+                      (typeof n.data?.width === 'number' ? n.data.width : undefined) ||
+                      400,
+                    height:
+                      (typeof n.data?.expandHeight === 'number' ? n.data.expandHeight : undefined) ||
+                      (typeof n.data?.height === 'number' ? n.data.height : undefined) ||
+                      280,
+                  };
+            return {
+              ...n,
+              position: { x: bounds.x, y: bounds.y },
+                data: {
+                  ...n.data,
+                  collapsed: false,
+                  width: bounds.width,
+                  height: bounds.height,
+                  memberCount,
+                  memberPreview,
+                  padVersion: SCENE_GROUP_PAD_VERSION,
+                },
+              style: {
+                ...(n.style as Record<string, unknown> | undefined),
+                width: bounds.width,
+                height: bounds.height,
+              },
+              width: bounds.width,
+              height: bounds.height,
+              selected: true,
+            };
+          }
+          if (n.parentId && target.has(n.parentId)) {
+            const collapsed = collapseMap.get(n.parentId) === true;
+            if (collapsed) {
+              return { ...n, hidden: true, selected: false };
+            }
+            // 展开：成员相对坐标按新包围盒重算
+            const parent = prev.find((p) => p.id === n.parentId);
+            if (!parent) return { ...n, hidden: false, selected: false };
+            const siblings = prev.filter((c) => c.parentId === n.parentId);
+            const absMembers = siblings.map((c) => ({
+              position: {
+                x: parent.position.x + c.position.x,
+                y: parent.position.y + c.position.y,
+              },
+              width: c.width,
+              height: c.height,
+              measured: (c as { measured?: { width?: number; height?: number } }).measured,
+            }));
+            const bounds = computeGroupBounds(absMembers);
+            const absX = parent.position.x + n.position.x;
+            const absY = parent.position.y + n.position.y;
+            return {
+              ...n,
+              hidden: false,
+              selected: false,
+              position: {
+                x: absX - bounds.x,
+                y: absY - bounds.y,
+              },
+            };
+          }
+          return n;
+        });
+      });
+      appendLog('已切换场景组折叠状态');
+    },
+    [resolveTargetGroupIds, push, setNodes, appendLog],
+  );
+
+  // 旧场景组缺少内边距版本时，按成员自动重算包围盒
+  useEffect(() => {
+    const stale = nodesRef.current.filter(
+      (n) =>
+        n.type === 'scene-group' &&
+        !n.data?.collapsed &&
+        n.data?.padVersion !== SCENE_GROUP_PAD_VERSION,
+    );
+    if (stale.length === 0) return;
+    setNodes((prev) => {
+      const staleIds = new Set(
+        prev
+          .filter(
+            (n) =>
+              n.type === 'scene-group' &&
+              !n.data?.collapsed &&
+              n.data?.padVersion !== SCENE_GROUP_PAD_VERSION,
+          )
+          .map((n) => n.id),
+      );
+      if (staleIds.size === 0) return prev;
+      const parentBounds = new Map<string, { x: number; y: number; width: number; height: number }>();
+      const readyIds = new Set<string>();
+      for (const id of staleIds) {
+        const parent = prev.find((n) => n.id === id);
+        if (!parent) continue;
+        const members = prev.filter((c) => c.parentId === id);
+        if (members.length === 0) {
+          parentBounds.set(id, {
+            x: parent.position.x,
+            y: parent.position.y,
+            width: (parent.data?.width as number) || parent.width || 400,
+            height: (parent.data?.height as number) || parent.height || 280,
+          });
+          readyIds.add(id);
+          continue;
+        }
+        // 等 RF 量到真实尺寸再定版，避免用默认 220×160 算偏
+        const unmeasured = members.some((c) => {
+          const w = c.width ?? (c as { measured?: { width?: number } }).measured?.width;
+          const h = c.height ?? (c as { measured?: { height?: number } }).measured?.height;
+          return !w || !h;
+        });
+        if (unmeasured) continue;
+        parentBounds.set(
+          id,
+          computeGroupBounds(
+            members.map((c) => ({
+              position: {
+                x: parent.position.x + c.position.x,
+                y: parent.position.y + c.position.y,
+              },
+              width: c.width,
+              height: c.height,
+              measured: (c as { measured?: { width?: number; height?: number } }).measured,
+            })),
+          ),
+        );
+        readyIds.add(id);
+      }
+      if (readyIds.size === 0) return prev;
+      return prev.map((n) => {
+        if (readyIds.has(n.id) && n.type === 'scene-group') {
+          const bounds = parentBounds.get(n.id);
+          if (!bounds) {
+            return {
+              ...n,
+              data: { ...n.data, padVersion: SCENE_GROUP_PAD_VERSION },
+            };
+          }
+          return {
+            ...n,
+            position: { x: bounds.x, y: bounds.y },
+            data: {
+              ...n.data,
+              width: bounds.width,
+              height: bounds.height,
+              padVersion: SCENE_GROUP_PAD_VERSION,
+            },
+            style: {
+              ...(n.style as Record<string, unknown> | undefined),
+              width: bounds.width,
+              height: bounds.height,
+            },
+            width: bounds.width,
+            height: bounds.height,
+          };
+        }
+        if (n.parentId && readyIds.has(n.parentId)) {
+          const parent = prev.find((p) => p.id === n.parentId);
+          const bounds = parentBounds.get(n.parentId);
+          if (!parent || !bounds) return n;
+          return {
+            ...n,
+            position: {
+              x: parent.position.x + n.position.x - bounds.x,
+              y: parent.position.y + n.position.y - bounds.y,
+            },
+          };
+        }
+        return n;
+      });
+    });
+  }, [nodes, setNodes]);
+
+  // 旧折叠卡尺寸过小：升到新卡片尺寸，并补成员预览
+  useEffect(() => {
+    const stale = nodesRef.current.filter(
+      (n) =>
+        n.type === 'scene-group' &&
+        Boolean(n.data?.collapsed) &&
+        n.data?.collapsedVersion !== SCENE_GROUP_COLLAPSED_VERSION,
+    );
+    if (stale.length === 0) return;
+    setNodes((prev) => {
+      let changed = false;
+      const next = prev.map((n) => {
+        if (
+          n.type !== 'scene-group' ||
+          !n.data?.collapsed ||
+          n.data?.collapsedVersion === SCENE_GROUP_COLLAPSED_VERSION
+        ) {
+          return n;
+        }
+        changed = true;
+        const members = prev.filter((c) => c.parentId === n.id);
+        return {
+          ...n,
+          data: {
+            ...n.data,
+            width: SCENE_GROUP_COLLAPSED.width,
+            height: SCENE_GROUP_COLLAPSED.height,
+            memberCount: members.length,
+            memberPreview: buildSceneGroupMemberPreview(members),
+            collapsedVersion: SCENE_GROUP_COLLAPSED_VERSION,
+          },
+          style: {
+            ...(n.style as Record<string, unknown> | undefined),
+            width: SCENE_GROUP_COLLAPSED.width,
+            height: SCENE_GROUP_COLLAPSED.height,
+          },
+          width: SCENE_GROUP_COLLAPSED.width,
+          height: SCENE_GROUP_COLLAPSED.height,
+        };
+      });
+      return changed ? next : prev;
+    });
+  }, [nodes, setNodes]);
 
   const getNodeCenterPositions = useCallback(() => {
     const map = new Map<string, { x: number; y: number }>();
@@ -1668,7 +2025,12 @@ const FlowSurfaceInner = memo(function FlowSurfaceInner({
   const onNodeDrag: OnNodeDrag = useCallback(
     (_event, node) => {
       if (!isStageDeck) return;
-      const others = nodesRef.current.filter((n) => n.id !== node.id && !n.parentId);
+      // 组内子节点坐标是相对父节点的；智能吸附用画布绝对坐标会把子节点「甩出」场景组
+      if (node.parentId) {
+        setSmartGuides([]);
+        return;
+      }
+      const others = nodesRef.current.filter((n) => n.id !== node.id && !n.parentId && n.type !== 'scene-group');
       const snap = computeSmartSnap(node, others);
       setSmartGuides(snap.guides);
       if (snap.guides.length > 0 && (snap.x !== node.position.x || snap.y !== node.position.y)) {
@@ -2227,6 +2589,60 @@ const FlowSurfaceInner = memo(function FlowSurfaceInner({
 
       {isStageDeck && (
         <TakeLightboxHost onPick={(takeId, after) => handlePickTake(takeId, after)} />
+      )}
+
+      {isStageDeck && ready && !contextMenu && !paneMenu && !edgeMenu && (
+        <SelectionFloatingBar
+          nodes={nodes}
+          executableCount={nodes.filter(
+            (n) => n.selected && n.type && n.type !== 'scene-group' && RUNNABLE_BLOCKS.has(n.type),
+          ).length}
+          isRunning={
+            isBatchRunning &&
+            nodes.some((n) => n.selected && activeBatchBlockIds.has(n.id))
+          }
+          canGroup={
+            nodes.filter((n) => n.selected && n.type !== 'scene-group' && !n.parentId).length >= 2
+          }
+          canUngroup={
+            nodes.some((n) => n.selected && n.type === 'scene-group') ||
+            nodes.some((n) => n.selected && n.parentId)
+          }
+          groupCollapsed={(() => {
+            const groups = nodes.filter((n) => n.selected && n.type === 'scene-group');
+            if (groups.length === 0) {
+              const parentIds = [
+                ...new Set(
+                  nodes
+                    .filter((n) => n.selected && n.parentId)
+                    .map((n) => n.parentId as string),
+                ),
+              ];
+              if (parentIds.length !== 1) return null;
+              const g = nodes.find((n) => n.id === parentIds[0] && n.type === 'scene-group');
+              return g ? Boolean(g.data?.collapsed) : null;
+            }
+            if (groups.length !== 1) return null;
+            return Boolean(groups[0].data?.collapsed);
+          })()}
+          onRun={() => {
+            const ids = nodes.filter((n) => n.selected && n.type !== 'scene-group').map((n) => n.id);
+            void runSelected(ids);
+          }}
+          onStop={stopRun}
+          onGroup={handleCreateSceneGroup}
+          onUngroup={() => handleUngroupSceneGroups()}
+          onToggleCollapse={() => handleToggleSceneGroupCollapse()}
+          onCopy={handleCopy}
+          onDuplicate={handleDuplicate}
+          onDelete={() => handleDeleteSelected()}
+          onAlign={(action) => {
+            const ids = nodes
+              .filter((n) => n.selected && n.type !== 'scene-group')
+              .map((n) => n.id);
+            handleAlignSelection(action, ids);
+          }}
+        />
       )}
 
       {isStageDeck && contextMenu && (

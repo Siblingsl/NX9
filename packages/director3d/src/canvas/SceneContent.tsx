@@ -150,6 +150,7 @@ function SceneObject({
             color={object.color}
             bodyType={object.bodyType as CharacterBodyType}
             posePresetId={object.posePresetId}
+            faceRig={object.faceRig}
           />
         ) : object.kind === 'mesh' && object.meshUrl ? (
           <AssetLoadBoundary label={object.name} url={object.meshUrl}><ImportedMesh url={object.meshUrl} /></AssetLoadBoundary>

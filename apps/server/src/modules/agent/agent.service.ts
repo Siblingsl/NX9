@@ -1123,6 +1123,49 @@ export class AgentService {
     };
   }
 
+  /** Script 3.3: 技能轨 SSE——先流式回传正文，最后仍按同一 JSON 契约收敛。 */
+  async scriptSkillStream(
+    body: { skillId: string; userInstruction?: string; package: Record<string, unknown> },
+    userId: string | undefined,
+    onChunk: (text: string) => void,
+  ): Promise<{ ok: true; patch: Record<string, unknown>; explanation: string }> {
+    const chipId = (body.skillId ?? '').trim();
+    const skillName = resolveScriptDeskSkillName(chipId);
+    const title = String((body.package?.brief as Record<string, unknown> | undefined)?.title ?? '').trim();
+    const legacy =
+      DEFAULT_SCRIPT_DESK_SKILL_PROMPTS[chipId as ScriptDeskSkillId]
+      ?? '输出 JSON：{ "patch": {}, "explanation": "" }';
+    const system = [
+      this.systemFrom(skillName, legacy),
+      title ? `当前剧本标题：${title}` : '',
+      '必须输出 JSON 对象，含 patch 与 explanation 字段；patch 仅包含需要更新的 ScreenplayPackage 片段。',
+    ].filter(Boolean).join('\n\n');
+
+    this.logger.debug(`scriptSkillStream chip=${chipId} → skill=${skillName}`);
+
+    const userParts = [
+      body.userInstruction ? `用户指令：${body.userInstruction}` : '',
+      `当前剧本包：${JSON.stringify(body.package, null, 2).slice(0, 8000)}`,
+    ].filter(Boolean).join('\n\n');
+
+    const content = await this.gateway.proxyLlmStream(
+      [
+        { role: 'system', content: system },
+        { role: 'user', content: userParts },
+      ],
+      userId,
+      onChunk,
+    );
+    if (!content.trim()) throw new ServiceUnavailableException('LLM 未返回内容');
+    const jsonText = content.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '');
+    const parsed = JSON.parse(jsonText) as Record<string, unknown>;
+    return {
+      ok: true,
+      patch: (parsed.patch ?? parsed) as Record<string, unknown>,
+      explanation: String(parsed.explanation ?? parsed.assistantText ?? '已生成补丁，请确认后应用。'),
+    };
+  }
+
   async scriptExport(pkg: ScreenplayPackage): Promise<StreamableFile> {
     const episodesMd = pkg.screenplay.episodes.map((ep) => {
       const title = ep.title.trim() || `第${ep.index}集`;

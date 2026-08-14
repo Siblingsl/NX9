@@ -101,7 +101,7 @@ describe('F-020 Remotion 服务端真渲', () => {
   it('processJob 将 status 设为 rendering 后开始处理', () => {
     const src = readServer('modules/montage/remotion.renderer.ts');
 
-    expect(src).toContain("job.status = 'rendering'");
+    expect(src).toContain("commitJob(taskId, { status: 'rendering' })");
   });
 
   it('processJob 动态导入 @remotion/renderer 失败 → error', () => {
@@ -132,8 +132,8 @@ describe('F-020 Remotion 服务端真渲', () => {
     const src = readServer('modules/montage/remotion.renderer.ts');
 
     expect(src).toContain('onProgress');
-    expect(src).toContain('job.progress');
-    expect(src).toContain('job.updatedAt');
+    expect(src).toContain('live.progress = Math.round(progress.progress * 100)');
+    expect(src).toContain('live.updatedAt');
   });
 
   it('processJob 产物验证：不存在 → error', () => {
@@ -154,17 +154,17 @@ describe('F-020 Remotion 服务端真渲', () => {
   it('processJob 成功：done + progress 100 + outputUrl', () => {
     const src = readServer('modules/montage/remotion.renderer.ts');
 
-    expect(src).toContain("job.status = 'done'");
-    expect(src).toContain('job.progress = 100');
-    expect(src).toContain("job.outputUrl = `/media/");
+    expect(src).toContain("status: 'done'");
+    expect(src).toContain('progress: 100');
+    expect(src).toContain('outputUrl: `/media/');
     expect(src).toContain('渲染完成');
   });
 
   it('processJob catch 块：error + 错误信息记录', () => {
     const src = readServer('modules/montage/remotion.renderer.ts');
 
-    expect(src).toContain("job.status = 'error'");
-    expect(src).toContain('job.error = err instanceof Error ? err.message');
+    expect(src).toContain("status: 'error'");
+    expect(src).toContain('error: err instanceof Error ? err.message');
   });
 
   it('processJob 异步包装在 submit 中，catch 设 error', () => {
@@ -172,7 +172,7 @@ describe('F-020 Remotion 服务端真渲', () => {
 
     expect(src).toContain('this.processJob');
     expect(src).toContain(".catch((err) =>");
-    expect(src).toContain("existing.status = 'error'");
+    expect(src).toContain("this.commitJob(taskId, { status: 'error', error: err.message })");
   });
 
   // ═══════════ 控制器接线 ═══════════
@@ -335,8 +335,8 @@ describe('F-020 Remotion 服务端真渲', () => {
 
     const catchIdx = src.indexOf('} catch (err) {');
     // 从 catch 行到 processJob 方法结尾（下一个 private/public 或文件尾）
-    const afterCatch = src.slice(catchIdx, catchIdx + 200);
-    expect(afterCatch).toContain("job.status = 'error'");
+    const afterCatch = src.slice(catchIdx, catchIdx + 220);
+    expect(afterCatch).toContain("status: 'error'");
     // 确认 catch 块内无 done 设置
     expect(afterCatch).not.toContain("status = 'done'");
     expect(afterCatch).not.toContain("status: 'done'");

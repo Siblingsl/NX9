@@ -11,10 +11,12 @@ import {
   emptyFaceRig,
   faceRigHash,
   faceRigSkipBodyIds,
+  faceRigSideValue,
   faceRigValue,
   getFaceRig,
   isFaceRigNeutral,
   resetFaceRigGroup,
+  setFaceRigSideValue,
   setFaceRigValue,
 } from '@nx9/shared';
 
@@ -95,6 +97,44 @@ describe('捏脸参数 · 写入', () => {
     const next = applyFaceRigPreset(base, 'not-exist');
     expect(next.presetId).toBeUndefined();
     expect(faceRigValue(next, 'eyeSize')).toBe(60);
+  });
+});
+
+describe('捏脸参数 · 左右不对称扩展值', () => {
+  it('写单侧值登记 asymmetric，未写一侧回退基础值', () => {
+    let rig = setFaceRigValue(emptyFaceRig(), 'jawWidth', 40);
+    rig = setFaceRigSideValue(rig, 'jawWidth', 'L', 80);
+    expect(rig.asymmetric).toContain('jawWidth');
+    expect(faceRigSideValue(rig, 'jawWidth', 'L')).toBe(80);
+    expect(faceRigSideValue(rig, 'jawWidth', 'R')).toBe(40);
+  });
+
+  it('写基础值清除该 id 的 sideValues', () => {
+    let rig = setFaceRigSideValue(emptyFaceRig(), 'jawWidth', 'L', 80);
+    rig = setFaceRigValue(rig, 'jawWidth', 0);
+    expect(rig.sideValues).toBeUndefined();
+  });
+
+  it('写 0 清单侧，两侧都清则删除 sideValues', () => {
+    let rig = setFaceRigSideValue(emptyFaceRig(), 'jawWidth', 'L', 80);
+    rig = setFaceRigSideValue(rig, 'jawWidth', 'L', 0);
+    expect(rig.sideValues).toBeUndefined();
+  });
+
+  it('重置分组同时清该组 sideValues', () => {
+    let rig = setFaceRigSideValue(emptyFaceRig(), 'jawWidth', 'L', 80);
+    rig = setFaceRigValue(rig, 'eyeSize', 60);
+    rig = resetFaceRigGroup(rig, 'shape');
+    expect(rig.sideValues).toBeUndefined();
+    expect(faceRigValue(rig, 'eyeSize')).toBe(60);
+  });
+
+  it('指纹纳入 sideValues', () => {
+    const a = setFaceRigSideValue(emptyFaceRig(), 'jawWidth', 'L', 80);
+    const b = setFaceRigSideValue(emptyFaceRig(), 'jawWidth', 'L', 81);
+    expect(faceRigHash(a)).not.toBe(faceRigHash(b));
+    const sym = setFaceRigValue(emptyFaceRig(), 'jawWidth', 80);
+    expect(faceRigHash(a)).not.toBe(faceRigHash(sym));
   });
 });
 

@@ -308,6 +308,29 @@ export function enrichPromptWithAssets(
   return trimmed ? `${trimmed}\n\n${suffix}` : suffix;
 }
 
+/** SE-DEEP-04: 解析 @kind:label 提及并收集库条目主图，供图片编辑作为参考附图 */
+export function collectAssetMentionUrls(
+  text: string | undefined,
+  privateItems: AssetLibraryItem[],
+  publicItems: AssetLibraryItem[] = [],
+): string[] {
+  const mentions = parseAssetMentions(text);
+  if (mentions.length === 0) return [];
+  const pool = [...privateItems, ...publicItems];
+  const urls: string[] = [];
+  const seen = new Set<string>();
+  for (const m of mentions) {
+    const item = pool.find(
+      (i) => i.kind === m.kind && i.label.trim().toLowerCase() === m.label.trim().toLowerCase(),
+    );
+    const url = item?.imageUrl?.trim();
+    if (!url || seen.has(url)) continue;
+    seen.add(url);
+    urls.push(url);
+  }
+  return urls;
+}
+
 /** 按文案中的 @服装:名称 / @场景:名称 等引用，把素材 Prompt 注入生成文本 */
 export function enrichPromptWithAssetMentions(
   basePrompt: string,

@@ -100,6 +100,18 @@ vi.mock('../../../stores/dev-prompt-overrides', () => ({
 vi.mock('../../../hooks/use-asset-library-items', () => ({
   useAllAssetLibraryItems: () => ({ privateItems: [], publicItems: [], allItems: [] }),
 }));
+// Mock connected LLM models so the smoke test does not call the settings API
+vi.mock('../../../hooks/use-connected-llm-models', () => ({
+  useConnectedLlmModels: () => ({
+    options: [],
+    connected: [],
+    hasConnections: false,
+    activeOption: undefined,
+    llmModelLabel: '',
+    selectModel: vi.fn(),
+    openConnectionsSettings: vi.fn(),
+  }),
+}));
 
 // Mock activity log store
 vi.mock('../../../stores/activity-log', () => ({

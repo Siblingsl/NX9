@@ -124,6 +124,31 @@ export class AgentController {
     return this.agent.scriptSkill(body, userId);
   }
 
+  /** Script 3.3: Agent 技能轨 SSE（chunk 回传 + done/error 事件） */
+  @Post('script-desk/chat-stream')
+  async scriptDeskChatStream(
+    @Body() body: {
+      skillId: string;
+      userInstruction?: string;
+      package: Record<string, unknown>;
+    },
+    @Headers('x-nx9-user-id') userId: string | undefined,
+    @Res() res: Response,
+  ) {
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    try {
+      await this.agent.scriptSkillStream(body, userId, (chunk: string) => {
+        res.write(`data: ${JSON.stringify({ text: chunk })}\n\n`);
+      });
+      res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
+    } catch (e) {
+      res.write(`data: ${JSON.stringify({ error: (e as Error).message })}\n\n`);
+    }
+    res.end();
+  }
+
   @Post('script/chat')
   async scriptChat(
     @Body() body: { message: string; history?: { role: string; content: string }[] },

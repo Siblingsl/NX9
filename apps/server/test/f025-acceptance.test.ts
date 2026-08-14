@@ -57,53 +57,56 @@ describe('F-025 acceptance', () => {
   // ═══════════ ScriptDeskBlock: 送到分镜台 ═══════════
   describe('ScriptDeskBlock handoff button', () => {
     const src = readWeb(SCRIPT_DESK_BLOCK);
+    const actions = readWeb('blocks/nx9/script-desk/use-script-desk-actions.ts');
+    const header = readWeb('blocks/nx9/script-desk/DeskHeader.tsx');
 
     it('imports useFlowRuntime', () => {
-      expect(src).toContain("from '../../stores/flow-runtime'");
+      expect(actions).toContain("from '../../../stores/flow-runtime'");
     });
 
     it('imports useFlowCommands', () => {
-      expect(src).toContain("from '../../stores/flow-commands'");
+      expect(actions).toContain("from '../../../stores/flow-commands'");
     });
 
     it('imports Send icon', () => {
-      expect(src).toMatch(/\bSend\b/);
+      expect(header).toMatch(/\bSend\b/);
     });
 
     it('has handleHandoffToStoryboard callback', () => {
-      expect(src).toContain('const handleHandoffToStoryboard = useCallback(');
+      expect(actions).toContain('const handleHandoffToStoryboard = useCallback(');
     });
 
     it('handleHandoffToStoryboard searches for storyboard-desk node', () => {
-      expect(src).toContain('resolveConnectedStoryboardDeskId');
-      expect(src).toContain("to: 'storyboard-desk'");
+      expect(actions).toContain('resolveConnectedStoryboardDeskId');
+      expect(actions).toContain("to: 'storyboard-desk'");
     });
 
     it('handleHandoffToStoryboard calls requestSpawn with connectToSource', () => {
-      expect(src).toContain('connectToSource: props.id');
+      expect(actions).toContain('connectToSource: propsId');
     });
 
     it('handleHandoffToStoryboard passes handoff payload', () => {
-      expect(src).toContain("from: 'script-desk'");
-      expect(src).toContain("to: 'storyboard-desk'");
-      expect(src).toContain('at: new Date().toISOString()');
+      expect(actions).toContain("from: 'script-desk'");
+      expect(actions).toContain("to: 'storyboard-desk'");
+      expect(actions).toContain('at: new Date().toISOString()');
     });
 
     it('handleHandoffToStoryboard calls focusBlock if storyboard exists', () => {
-      expect(src).toContain('runtime?.focusBlock(storyboardDesk.id)');
+      expect(actions).toContain('runtime?.focusBlock(storyboardDesk.id)');
     });
 
     it('renders 送到分镜台 button when pkg.status === \'confirmed\'', () => {
-      expect(src).toContain('送到分镜台');
-      expect(src).toMatch(/pkg\.status === 'confirmed'/);
+      expect(header).toContain('送到分镜台');
+      expect(header).toMatch(/pkg\.status === 'confirmed'/);
     });
 
     it('送到分镜台 button uses handleHandoffToStoryboard onClick', () => {
-      expect(src).toMatch(/onClick=\{handleHandoffToStoryboard\}/);
+      expect(header).toMatch(/onClick=\{onHandoff\}/);
+      expect(src).toContain('onHandoff={actions.handleHandoffToStoryboard}');
     });
 
     it('确认成稿 button still renders when confirmed (ghost style)', () => {
-      const confirmedBlock = src.slice(src.indexOf("pkg.status === 'confirmed'"));
+      const confirmedBlock = header.slice(header.indexOf("pkg.status === 'confirmed'"));
       expect(confirmedBlock).toContain('确认成稿');
     });
 
@@ -185,8 +188,9 @@ describe('F-025 acceptance', () => {
     const src = readWeb(STORYBOARD_DESK);
 
     it('has handoff as pipeline step 4', () => {
-      expect(src).toContain("'handoff'");
-      expect(src).toContain("'交接'");
+      const pipeline = readWeb('blocks/craft/storyboard-desk/pipeline-bar.tsx');
+      expect(pipeline).toContain("'handoff'");
+      expect(pipeline).toContain("'交接'");
     });
 
     it('renders handoff checklist', () => {

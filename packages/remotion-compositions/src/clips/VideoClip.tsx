@@ -40,11 +40,25 @@ export const VideoClip: React.FC<VideoClipProps> = ({ clip }) => {
   }
 
   if (clip.type === 'image' || clip.type === 'overlay') {
+    const overlay = clip.overlay ?? { x: 50, y: 50, scale: 1, rotation: 0 };
+    const transform = `translate(-50%, -50%) scale(${overlay.scale})${overlay.rotation ? ` rotate(${overlay.rotation}deg)` : ''}`;
     return (
       <AbsoluteFill style={{ opacity }}>
         <Img
           src={clip.assetUrl}
-          style={{ width: '100%', height: '100%', objectFit: 'contain' }}
+          style={{
+            width: '100%',
+            height: '100%',
+            objectFit: 'contain',
+            ...(clip.type === 'overlay'
+              ? {
+                  position: 'absolute',
+                  left: `${overlay.x}%`,
+                  top: `${overlay.y}%`,
+                  transform,
+                }
+              : {}),
+          }}
         />
       </AbsoluteFill>
     );

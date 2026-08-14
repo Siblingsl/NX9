@@ -18,6 +18,7 @@ import {
   SCLASS_MAX_REF_VIDEOS,
   type GenPromptPack,
   type MentionRef,
+  validateVideoModelParams,
   type ReferencePack,
   type UpstreamPolicy,
 } from '@nx9/shared';
@@ -235,7 +236,10 @@ export async function buildClipGenVideoRequest(
   let lastFrameUrl: string | undefined;
   const extraRefImages: string[] = [];
   if (applyModeDispatch) {
-    if (mode === 'keyframe') {
+    if (mode === 'text-to-video') {
+      // VG-40: 文生视频模式不带首帧；上游图只进参考数组
+      imageUrl = undefined;
+    } else if (mode === 'keyframe') {
       // VG-15: 批量按镜取首帧，禁止节点级 startFrameUrl 盖掉每镜 imageUrl
       if (input.keyframeSource === 'shot') {
         imageUrl = input.imageUrl;
@@ -252,6 +256,17 @@ export async function buildClipGenVideoRequest(
           body: {},
           prompt,
           blocked: '首尾帧模式需要先上传首图',
+          playbookId: activePack?.playbookId,
+          referenceImages: [],
+          referenceVideos: [],
+        };
+      }
+      // VG-41: 首尾帧模式缺尾帧禁止静默退化成图生视频
+      if (!lastFrameUrl) {
+        return {
+          body: {},
+          prompt,
+          blocked: '首尾帧模式需要上传尾图',
           playbookId: activePack?.playbookId,
           referenceImages: [],
           referenceVideos: [],
@@ -286,6 +301,27 @@ export async function buildClipGenVideoRequest(
     activePack?.depthVideoUrl,
     ...(input.upstreamClips ?? []),
   ]);
+  // VG-41: 图片参考无图、全能参考无图无视频时阻断，禁止伪装成文生/图生
+  if (mode === 'image-ref' && referenceImagesAll.length === 0) {
+    return {
+      body: {},
+      prompt,
+      blocked: '图片参考模式需要至少一张参考图',
+      playbookId: activePack?.playbookId,
+      referenceImages: [],
+      referenceVideos: [],
+    };
+  }
+  if (mode === 'omni-ref' && referenceImagesAll.length === 0 && referenceVideosAll.length === 0) {
+    return {
+      body: {},
+      prompt,
+      blocked: '全能参考模式需要至少一张参考图或一段参考视频',
+      playbookId: activePack?.playbookId,
+      referenceImages: [],
+      referenceVideos: [],
+    };
+  }
   if (model === 'seedance') {
     const refError = validateSClassReferences(
       referenceImagesAll.length,
@@ -332,11 +368,24 @@ export async function buildClipGenVideoRequest(
       : Number(seedRaw);
   const negativePrompt = ((d.negativePrompt as string) ?? '').trim() || undefined;
   const modelParams = ((d.modelParams as string) ?? '').trim() || undefined;
+  if (modelParams) {
+    const modelParamsError = validateVideoModelParams(modelParams);
+    if (modelParamsError) {
+      return {
+        body: {},
+        prompt,
+        blocked: modelParamsError,
+        playbookId: activePack?.playbookId,
+        referenceImages,
+        referenceVideos,
+      };
+    }
+  }
 
   const body: Record<string, unknown> = {
     prompt,
     model,
-    imageUrl,
+    ...(imageUrl ? { imageUrl } : {}),
     duration: videoParams.durationSec,
     aspect_ratio: videoParams.aspect,
     size: videoParams.size,

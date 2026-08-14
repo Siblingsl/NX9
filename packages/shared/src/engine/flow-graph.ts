@@ -218,6 +218,11 @@ export function gatherUpstream(
         out.shotIds = [...new Set([...(out.shotIds ?? []), ...chain.shots.map((s) => s.id)])];
         const prompts = chain.shots.map((s) => s.imagePrompt).filter(Boolean) as string[];
         out.prompts.push(...prompts);
+        // VG-35/45: 链镜首帧与已生成成片直接进上游媒体，级联/导演不再坍缩成单镜
+        for (const chainShot of chain.shots as Array<{ firstFrameAssetId?: string; videoAssetId?: string }>) {
+          if (chainShot.firstFrameAssetId) out.pictures.push(chainShot.firstFrameAssetId);
+          if (chainShot.videoAssetId) out.clips.push(chainShot.videoAssetId);
+        }
       }
       const payload = d.scriptBreakdown as ScriptBreakdownPayload | undefined;
       if (payload?.version === 1) {
@@ -376,6 +381,16 @@ export function gatherUpstream(
       if (typeof picked === 'string' && picked.trim()) out.prompts.push(picked.trim());
     }
     if (kind === 'director-desk' || kind === 'story-grid' || kind === 'motion-story') {
+      // VG-35/45: 导演台同样展开链镜首帧/成片，直连 clip-gen 时参考可达
+      const deskChain = d.chainStoryboard as
+        | { shots?: Array<{ firstFrameAssetId?: string; videoAssetId?: string }> }
+        | undefined;
+      if (deskChain?.shots) {
+        for (const deskShot of deskChain.shots) {
+          if (deskShot.firstFrameAssetId) out.pictures.push(deskShot.firstFrameAssetId);
+          if (deskShot.videoAssetId) out.clips.push(deskShot.videoAssetId);
+        }
+      }
       const url = (d.previewUrl as string) || (d.lastFrameUrl as string);
       if (url) out.pictures.push(url);
       const clip = d.videoUrl as string;

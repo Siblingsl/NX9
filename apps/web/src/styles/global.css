@@ -51,6 +51,7 @@ body {
   --nx9-lane-scene: rgba(161, 61, 99, 0.04);
   --nx9-lane-gen: rgba(217, 119, 6, 0.04);
   --nx9-lane-output: rgba(46, 139, 87, 0.035);
+  color-scheme: dark;
 }
 
 /* React Flow performance overrides */
@@ -74,6 +75,275 @@ body {
 .nx9-socket:hover,
 .react-flow__node.selected .nx9-socket {
   opacity: 1;
+}
+
+/* 场景组整体连接点：挂在虚线框左右边中点，始终可见可拖 */
+.nx9-scene-group {
+  --sc-socket: 12px;
+  --sc-socket-border: 2px;
+  position: relative;
+  overflow: visible;
+  box-sizing: border-box;
+  border-radius: 1rem;
+  border: 2px dashed color-mix(in srgb, var(--nx9-brand) 30%, transparent);
+  background: color-mix(in srgb, var(--nx9-brand) 4%, transparent);
+}
+
+.nx9-scene-group.is-selected {
+  border-color: var(--nx9-brand);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--nx9-brand) 20%, transparent);
+}
+
+.nx9-scene-group.is-collapsed {
+  border-style: solid;
+  border-color: color-mix(in srgb, var(--nx9-line, #3a3f4a) 70%, var(--nx9-brand));
+  background: transparent;
+  border-radius: 18px;
+}
+
+.nx9-scene-group.is-collapsed.is-selected {
+  border-color: var(--nx9-brand);
+  box-shadow:
+    0 0 0 2px color-mix(in srgb, var(--nx9-brand) 22%, transparent),
+    0 12px 28px rgba(8, 10, 14, 0.35);
+}
+
+.nx9-scene-group__header {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.625rem 0.75rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: color-mix(in srgb, var(--nx9-brand) 80%, transparent);
+  cursor: grab;
+}
+
+.nx9-scene-group__header:active {
+  cursor: grabbing;
+}
+
+.nx9-scene-group__title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: text;
+  border-radius: 4px;
+  padding: 1px 4px;
+  margin: -1px -4px;
+}
+
+.nx9-scene-group__title:hover {
+  background: color-mix(in srgb, var(--nx9-brand) 12%, transparent);
+}
+
+.nx9-scene-group__rename {
+  flex: 1;
+  min-width: 72px;
+  max-width: 220px;
+  height: 22px;
+  margin: -2px 0;
+  padding: 0 6px;
+  border-radius: 6px;
+  border: 1px solid color-mix(in srgb, var(--nx9-brand) 55%, transparent);
+  background: color-mix(in srgb, var(--nx9-bg, #12141a) 92%, var(--nx9-brand));
+  color: var(--nx9-ink, #e8eaef);
+  font-size: 0.75rem;
+  font-weight: 600;
+  line-height: 20px;
+  outline: none;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--nx9-brand) 22%, transparent);
+}
+
+.nx9-scene-group__meta {
+  flex-shrink: 0;
+  font-size: 10px;
+  font-weight: 500;
+  color: color-mix(in srgb, var(--nx9-brand) 55%, transparent);
+}
+
+/* —— 折叠卡 —— */
+.nx9-scene-group__card {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  height: 100%;
+  padding: 6px;
+  box-sizing: border-box;
+  cursor: grab;
+}
+
+.nx9-scene-group__card:active {
+  cursor: grabbing;
+}
+
+.nx9-scene-group__stack {
+  position: absolute;
+  left: 14px;
+  right: 14px;
+  top: 10px;
+  height: calc(100% - 18px);
+  border-radius: 14px;
+  border: 1px solid color-mix(in srgb, var(--nx9-line, #3a3f4a) 55%, transparent);
+  background: color-mix(in srgb, var(--nx9-bg, #12141a) 88%, var(--nx9-brand));
+  transform: translateY(6px) scale(0.97);
+  opacity: 0.55;
+  pointer-events: none;
+}
+
+.nx9-scene-group__stack--2 {
+  transform: translateY(11px) scale(0.94);
+  opacity: 0.32;
+}
+
+.nx9-scene-group__card-surface {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 100%;
+  height: 100%;
+  padding: 12px 14px 12px;
+  box-sizing: border-box;
+  border-radius: 14px;
+  border: 1px solid color-mix(in srgb, var(--nx9-line, #3a3f4a) 75%, var(--nx9-brand));
+  background: color-mix(in srgb, var(--nx9-bg, #16181e) 96%, var(--nx9-brand));
+  box-shadow: 0 10px 22px rgba(8, 10, 14, 0.28);
+}
+
+.nx9-scene-group__card-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.nx9-scene-group__badge {
+  flex-shrink: 0;
+  width: 22px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 7px;
+  color: var(--nx9-brand);
+  background: color-mix(in srgb, var(--nx9-brand) 16%, transparent);
+  border: 1px solid color-mix(in srgb, var(--nx9-brand) 28%, transparent);
+}
+
+.nx9-scene-group.is-collapsed .nx9-scene-group__title {
+  flex: 1;
+  min-width: 0;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--nx9-ink, #e8eaef);
+  letter-spacing: 0.01em;
+}
+
+.nx9-scene-group.is-collapsed .nx9-scene-group__rename {
+  max-width: none;
+  height: 24px;
+  line-height: 22px;
+  font-size: 0.8125rem;
+}
+
+.nx9-scene-group__pill {
+  flex-shrink: 0;
+  padding: 2px 7px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: color-mix(in srgb, var(--nx9-brand) 88%, var(--nx9-ink));
+  background: color-mix(in srgb, var(--nx9-brand) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--nx9-brand) 28%, transparent);
+}
+
+.nx9-scene-group__chips {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 6px;
+  min-height: 28px;
+  align-items: center;
+  overflow: hidden;
+}
+
+.nx9-scene-group__chip {
+  max-width: 92px;
+  padding: 5px 8px;
+  border-radius: 8px;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.2;
+  color: color-mix(in srgb, var(--nx9-ink, #e8eaef) 88%, transparent);
+  background: color-mix(in srgb, var(--nx9-bg, #0f1116) 70%, var(--nx9-line, #3a3f4a));
+  border: 1px solid color-mix(in srgb, var(--nx9-line, #3a3f4a) 70%, transparent);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.nx9-scene-group__chip--more {
+  color: color-mix(in srgb, var(--nx9-brand) 90%, var(--nx9-ink));
+  background: color-mix(in srgb, var(--nx9-brand) 12%, transparent);
+  border-color: color-mix(in srgb, var(--nx9-brand) 30%, transparent);
+}
+
+.nx9-scene-group__chips-empty {
+  font-size: 11px;
+  color: color-mix(in srgb, var(--nx9-ink, #e8eaef) 45%, transparent);
+}
+
+.nx9-scene-group__card-foot {
+  margin-top: 2px;
+  padding-top: 8px;
+  border-top: 1px solid color-mix(in srgb, var(--nx9-line, #3a3f4a) 45%, transparent);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 10px;
+  font-weight: 500;
+  color: color-mix(in srgb, var(--nx9-ink, #e8eaef) 55%, transparent);
+}
+
+.nx9-scene-group__hint {
+  color: color-mix(in srgb, var(--nx9-brand) 70%, transparent);
+}
+
+.react-flow__node-scene-group {
+  overflow: visible !important;
+}
+
+.nx9-scene-group__socket {
+  width: 12px !important;
+  height: 12px !important;
+  min-width: 12px !important;
+  min-height: 12px !important;
+  border: 2px solid color-mix(in srgb, var(--nx9-bg, #0b0d12) 88%, transparent) !important;
+  border-radius: 999px !important;
+  box-sizing: border-box !important;
+  opacity: 1 !important;
+  z-index: 1002 !important;
+  pointer-events: all !important;
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, #000 35%, transparent),
+    0 0 0 3px color-mix(in srgb, var(--nx9-brand) 18%, transparent);
+}
+
+.nx9-scene-group__socket:hover {
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, #000 35%, transparent),
+    0 0 0 4px color-mix(in srgb, var(--nx9-brand) 32%, transparent);
+}
+
+/* 组口不受「隐藏连接点」设置影响，始终露在虚线框上 */
+[data-socket-style='hidden'] .nx9-scene-group__socket {
+  opacity: 1 !important;
+  pointer-events: all !important;
 }
 
 .nx9-socket-exec {
@@ -225,6 +495,411 @@ body {
   background: var(--nx9-line);
 }
 
+/* 画布多选浮条：框选 ≥2 后浮于选区上方 */
+.nx9-selection-bar {
+  position: fixed;
+  z-index: 55;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 8px;
+  border-radius: 14px;
+  border: 1px solid var(--nx9-line);
+  background: var(--nx9-bg);
+  box-shadow: 0 12px 32px rgba(34, 34, 34, 0.16);
+  color: var(--nx9-ink);
+  pointer-events: auto;
+  white-space: nowrap;
+}
+
+.nx9-selection-bar__count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 22px;
+  margin-right: 2px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--nx9-brand) 16%, var(--nx9-bg));
+  color: var(--nx9-brand);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.nx9-selection-bar__btn,
+.nx9-selection-bar__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  height: 30px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--nx9-ink);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.nx9-selection-bar__btn {
+  padding: 0 10px;
+}
+
+.nx9-selection-bar__icon {
+  width: 30px;
+  padding: 0;
+}
+
+.nx9-selection-bar__btn:hover:not(:disabled),
+.nx9-selection-bar__icon:hover:not(:disabled),
+.nx9-selection-bar__btn:focus-visible:not(:disabled),
+.nx9-selection-bar__icon:focus-visible:not(:disabled) {
+  background: color-mix(in srgb, var(--nx9-brand) 12%, var(--nx9-bg));
+  border-color: color-mix(in srgb, var(--nx9-brand) 28%, transparent);
+}
+
+.nx9-selection-bar__btn--primary {
+  background: color-mix(in srgb, var(--nx9-brand) 18%, var(--nx9-bg));
+  border-color: color-mix(in srgb, var(--nx9-brand) 35%, transparent);
+  color: var(--nx9-brand);
+}
+
+.nx9-selection-bar__btn:disabled,
+.nx9-selection-bar__icon:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.nx9-selection-bar__icon--danger {
+  color: #b42318;
+}
+
+.nx9-selection-bar__icon--danger:hover:not(:disabled) {
+  background: color-mix(in srgb, #b42318 10%, var(--nx9-bg));
+  border-color: color-mix(in srgb, #b42318 22%, transparent);
+}
+
+.nx9-selection-bar__sep {
+  width: 1px;
+  height: 18px;
+  margin: 0 2px;
+  background: var(--nx9-line);
+}
+
+.nx9-selection-bar__align {
+  position: relative;
+}
+
+.nx9-selection-bar__menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 56;
+  width: 236px;
+  padding: 8px;
+  border-radius: 12px;
+  border: 1px solid var(--nx9-line);
+  background: var(--nx9-bg);
+  box-shadow: 0 16px 40px rgba(34, 34, 34, 0.16);
+}
+
+.nx9-selection-bar__menu-label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 4px;
+  padding: 0 4px;
+  font-size: 10px;
+  font-weight: 700;
+  color: color-mix(in srgb, var(--nx9-ink) 55%, transparent);
+}
+
+.nx9-selection-bar__menu-grid {
+  display: grid;
+  gap: 4px;
+}
+
+.nx9-selection-bar__menu-grid.cols-3 {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.nx9-selection-bar__menu-grid.cols-2 {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.nx9-selection-bar__menu-item {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  min-height: 28px;
+  padding: 4px 6px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--nx9-ink);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.nx9-selection-bar__menu-item:hover:not(:disabled),
+.nx9-selection-bar__menu-item:focus-visible:not(:disabled) {
+  background: color-mix(in srgb, var(--nx9-brand) 12%, var(--nx9-bg));
+}
+
+.nx9-selection-bar__menu-item:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.nx9-selection-bar__menu-sep {
+  height: 1px;
+  margin: 8px 0;
+  background: var(--nx9-line);
+}
+
+/* 画布快速创建（Lens）：方案 C · 弧轨扇形 */
+.nx9-lens-menu__scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  cursor: default;
+  border: 0;
+  padding: 0;
+  margin: 0;
+  background: color-mix(in srgb, var(--nx9-bg, #0b0d12) 12%, transparent);
+}
+
+.nx9-lens-fan {
+  position: fixed;
+  z-index: 92;
+  pointer-events: none;
+  transform: translate(-50%, -50%);
+  outline: none;
+}
+
+.nx9-lens-fan__pin {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 8px;
+  height: 8px;
+  margin: -4px 0 0 -4px;
+  border-radius: 999px;
+  background: var(--nx9-brand);
+  box-shadow:
+    0 0 0 3px color-mix(in srgb, var(--nx9-brand) 30%, transparent),
+    0 0 0 9px color-mix(in srgb, var(--nx9-brand) 10%, transparent);
+  animation: nx9-lens-pin 420ms ease-out;
+}
+
+@keyframes nx9-lens-pin {
+  from {
+    transform: scale(0.35);
+    opacity: 0;
+  }
+  to {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+.nx9-lens-fan__rail {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.nx9-lens-fan__rail-path {
+  fill: none;
+  stroke: color-mix(in srgb, var(--nx9-brand) 42%, transparent);
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-dasharray: 3 5;
+  opacity: 0.85;
+  animation: nx9-lens-rail 280ms ease-out both;
+}
+
+@keyframes nx9-lens-rail {
+  from {
+    opacity: 0;
+    stroke-dashoffset: 24;
+  }
+  to {
+    opacity: 0.85;
+    stroke-dashoffset: 0;
+  }
+}
+
+.nx9-lens-fan__hub {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 28px;
+  height: 28px;
+  margin: -14px 0 0 -14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--nx9-brand) 40%, transparent);
+  background: color-mix(in srgb, var(--nx9-bg, #12141a) 88%, var(--nx9-brand));
+  color: var(--nx9-brand);
+  font-size: 11px;
+  font-weight: 700;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.28);
+  animation: nx9-lens-pin 360ms ease-out;
+}
+
+.nx9-lens-fan__tile {
+  --ox: 0px;
+  --oy: 0px;
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 52px;
+  min-height: 58px;
+  padding: 7px 4px 6px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  border-radius: 14px;
+  border: 1px solid color-mix(in srgb, var(--nx9-line) 80%, var(--nx9-brand));
+  background: color-mix(in srgb, var(--nx9-bg, #16181e) 94%, var(--nx9-brand));
+  color: var(--nx9-ink);
+  box-shadow: 0 8px 20px rgba(12, 12, 14, 0.28);
+  cursor: pointer;
+  pointer-events: auto;
+  transform: translate(calc(-50% + var(--ox)), calc(-50% + var(--oy)));
+  animation: nx9-lens-fan-tile 220ms cubic-bezier(0.2, 0.85, 0.25, 1) both;
+}
+
+@keyframes nx9-lens-fan-tile {
+  from {
+    opacity: 0;
+    transform: translate(calc(-50% + var(--ox)), calc(-50% + var(--oy))) scale(0.78);
+  }
+  to {
+    opacity: 1;
+    transform: translate(calc(-50% + var(--ox)), calc(-50% + var(--oy))) scale(1);
+  }
+}
+
+.nx9-lens-fan__tile:hover,
+.nx9-lens-fan__tile:focus-visible {
+  border-color: color-mix(in srgb, var(--nx9-brand) 55%, transparent);
+  background: color-mix(in srgb, var(--nx9-brand) 12%, var(--nx9-bg, #16181e));
+  outline: none;
+  z-index: 2;
+}
+
+.nx9-lens-fan__tile:hover .nx9-lens-fan__tile-icon,
+.nx9-lens-fan__tile:focus-visible .nx9-lens-fan__tile-icon {
+  color: var(--lens-accent, var(--nx9-brand));
+  background: color-mix(in srgb, var(--lens-accent, var(--nx9-brand)) 18%, transparent);
+}
+
+.nx9-lens-fan__tile-index {
+  position: absolute;
+  top: 4px;
+  left: 6px;
+  font-size: 8px;
+  font-weight: 650;
+  color: color-mix(in srgb, var(--nx9-ink) 34%, transparent);
+}
+
+.nx9-lens-fan__tile-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 9px;
+  color: color-mix(in srgb, var(--nx9-ink) 75%, transparent);
+  background: color-mix(in srgb, var(--nx9-ink) 5%, transparent);
+}
+
+.nx9-lens-fan__tile-label {
+  max-width: 48px;
+  font-size: 9px;
+  font-weight: 650;
+  line-height: 1.15;
+  text-align: center;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: color-mix(in srgb, var(--nx9-ink) 78%, transparent);
+}
+
+.nx9-lens-fan__caption {
+  position: absolute;
+  left: 50%;
+  top: calc(50% + 36px);
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--nx9-line) 70%, transparent);
+  background: color-mix(in srgb, var(--nx9-bg, #16181e) 92%, transparent);
+  pointer-events: none;
+  white-space: nowrap;
+  animation: nx9-lens-pin 420ms ease-out;
+}
+
+.nx9-lens-fan[data-fan='down'] .nx9-lens-fan__caption {
+  top: auto;
+  bottom: calc(50% + 36px);
+}
+
+.nx9-lens-fan[data-fan='left'] .nx9-lens-fan__caption {
+  left: calc(50% + 40px);
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+.nx9-lens-fan[data-fan='right'] .nx9-lens-fan__caption {
+  left: auto;
+  right: calc(50% + 40px);
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+.nx9-lens-fan__caption strong {
+  font-size: 10px;
+  font-weight: 650;
+  color: var(--nx9-ink);
+}
+
+.nx9-lens-fan__caption span {
+  font-size: 9px;
+  color: color-mix(in srgb, var(--nx9-ink) 45%, transparent);
+}
+
+.nx9-lens-fan__empty {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -120%);
+  padding: 8px 12px;
+  border-radius: 10px;
+  font-size: 11px;
+  color: color-mix(in srgb, var(--nx9-ink) 55%, transparent);
+  background: var(--nx9-bg);
+  border: 1px solid var(--nx9-line);
+  pointer-events: none;
+}
+
 .nx9-menu-icon {
   display: inline-flex;
   align-items: center;
@@ -319,7 +994,7 @@ body {
 
 .nx9-rail-dark .bg-surface,
 .nx9-rail-dark .bg-white {
-  background: rgba(255,255,255,0.05) !important;
+  background: #221f1c !important;
 }
 
 /* CardShell / BlockShell 深色适配 */
@@ -332,7 +1007,17 @@ body {
 
 .nx9-theme-dark .bg-surface,
 .nx9-theme-dark .bg-surface\/80 {
-  background: rgba(255,255,255,0.075) !important;
+  background: #221f1c !important;
+}
+
+.nx9-theme-dark .bg-surface\/30,
+.nx9-theme-dark .bg-surface\/35,
+.nx9-theme-dark .bg-surface\/40,
+.nx9-theme-dark .bg-surface\/50,
+.nx9-theme-dark .bg-surface\/70,
+.nx9-theme-dark .bg-surface\/90,
+.nx9-theme-dark .bg-surface\/95 {
+  background: #1e1c1a !important;
 }
 
 /* 深色舞台：非卡片区用暖白字；卡片区走 desk 变量（炭黑卡 + 暖白字） */
@@ -378,9 +1063,28 @@ body {
 .nx9-theme-dark.nx9-stage-deck input,
 .nx9-theme-dark.nx9-stage-deck select,
 .nx9-theme-dark.nx9-stage-deck .bg-black\/5 {
-  background: rgba(255,255,255,0.08) !important;
+  background: #24221f !important;
   border-color: rgba(255,255,255,0.14) !important;
   color: rgba(245,242,236,0.9) !important;
+  color-scheme: dark;
+}
+
+.nx9-theme-dark.nx9-stage-deck select option,
+.nx9-theme-dark.nx9-stage-deck select optgroup {
+  background: #24221f;
+  color: #f5f2ec;
+}
+
+.nx9-theme-dark.nx9-stage-deck input[type='range'] {
+  accent-color: var(--nx9-brand, #5e9b8a);
+  color-scheme: dark;
+}
+
+.nx9-theme-dark.nx9-stage-deck .bg-surface\/30,
+.nx9-theme-dark.nx9-stage-deck .bg-surface\/35,
+.nx9-theme-dark.nx9-stage-deck .bg-surface\/40,
+.nx9-theme-dark.nx9-stage-deck .bg-surface\/50 {
+  background: #1e1c1a !important;
 }
 
 .nx9-theme-dark.nx9-stage-deck textarea::placeholder,
@@ -488,9 +1192,11 @@ body {
 }
 
 /* Full studio shell follows dark canvas theme */
-.nx9-app-dark {
+.nx9-app-dark,
+.nx9-app-dark-body {
   background: #11100e;
   color: #e8e6e3;
+  color-scheme: dark;
 }
 
 .nx9-app-dark .nx9-topbar {
@@ -712,20 +1418,217 @@ body {
   background: rgba(255, 255, 255, 0.08) !important;
 }
 
+.nx9-app-dark .nx9-selection-bar,
+.nx9-app-dark-body .nx9-selection-bar,
+.nx9-theme-dark .nx9-selection-bar,
+.nx9-app-dark .nx9-selection-bar__menu,
+.nx9-app-dark-body .nx9-selection-bar__menu,
+.nx9-theme-dark .nx9-selection-bar__menu {
+  background: #1e1c1a !important;
+  border-color: rgba(255, 255, 255, 0.14) !important;
+  color: #e8e6e3 !important;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.5);
+}
+
+.nx9-app-dark .nx9-selection-bar__count,
+.nx9-app-dark-body .nx9-selection-bar__count,
+.nx9-theme-dark .nx9-selection-bar__count {
+  background: rgba(94, 155, 138, 0.22) !important;
+  color: #8fc4b5 !important;
+}
+
+.nx9-app-dark .nx9-selection-bar__btn,
+.nx9-app-dark .nx9-selection-bar__icon,
+.nx9-app-dark .nx9-selection-bar__menu-item,
+.nx9-app-dark-body .nx9-selection-bar__btn,
+.nx9-app-dark-body .nx9-selection-bar__icon,
+.nx9-app-dark-body .nx9-selection-bar__menu-item,
+.nx9-theme-dark .nx9-selection-bar__btn,
+.nx9-theme-dark .nx9-selection-bar__icon,
+.nx9-theme-dark .nx9-selection-bar__menu-item {
+  color: rgba(232, 230, 227, 0.88) !important;
+}
+
+.nx9-app-dark .nx9-selection-bar__btn:hover:not(:disabled),
+.nx9-app-dark .nx9-selection-bar__icon:hover:not(:disabled),
+.nx9-app-dark .nx9-selection-bar__menu-item:hover:not(:disabled),
+.nx9-app-dark-body .nx9-selection-bar__btn:hover:not(:disabled),
+.nx9-app-dark-body .nx9-selection-bar__icon:hover:not(:disabled),
+.nx9-app-dark-body .nx9-selection-bar__menu-item:hover:not(:disabled),
+.nx9-theme-dark .nx9-selection-bar__btn:hover:not(:disabled),
+.nx9-theme-dark .nx9-selection-bar__icon:hover:not(:disabled),
+.nx9-theme-dark .nx9-selection-bar__menu-item:hover:not(:disabled) {
+  background: rgba(15, 118, 110, 0.18) !important;
+  border-color: rgba(94, 155, 138, 0.35) !important;
+  color: #f5f2ec !important;
+}
+
+.nx9-app-dark .nx9-selection-bar__btn--primary,
+.nx9-app-dark-body .nx9-selection-bar__btn--primary,
+.nx9-theme-dark .nx9-selection-bar__btn--primary {
+  background: rgba(94, 155, 138, 0.22) !important;
+  border-color: rgba(94, 155, 138, 0.4) !important;
+  color: #8fc4b5 !important;
+}
+
+.nx9-app-dark .nx9-selection-bar__icon--danger,
+.nx9-app-dark-body .nx9-selection-bar__icon--danger,
+.nx9-theme-dark .nx9-selection-bar__icon--danger {
+  color: #f87171 !important;
+}
+
+.nx9-app-dark .nx9-selection-bar__icon--danger:hover:not(:disabled),
+.nx9-app-dark-body .nx9-selection-bar__icon--danger:hover:not(:disabled),
+.nx9-theme-dark .nx9-selection-bar__icon--danger:hover:not(:disabled) {
+  background: rgba(248, 113, 113, 0.14) !important;
+  border-color: rgba(248, 113, 113, 0.28) !important;
+  color: #fecaca !important;
+}
+
+.nx9-app-dark .nx9-selection-bar__sep,
+.nx9-app-dark .nx9-selection-bar__menu-sep,
+.nx9-app-dark-body .nx9-selection-bar__sep,
+.nx9-app-dark-body .nx9-selection-bar__menu-sep,
+.nx9-theme-dark .nx9-selection-bar__sep,
+.nx9-theme-dark .nx9-selection-bar__menu-sep {
+  background: rgba(255, 255, 255, 0.12) !important;
+}
+
+.nx9-app-dark .nx9-selection-bar__menu-label,
+.nx9-app-dark-body .nx9-selection-bar__menu-label,
+.nx9-theme-dark .nx9-selection-bar__menu-label {
+  color: rgba(232, 230, 227, 0.5) !important;
+}
+
+.nx9-app-dark .nx9-lens-menu__scrim,
+.nx9-app-dark-body .nx9-lens-menu__scrim,
+.nx9-theme-dark .nx9-lens-menu__scrim {
+  background: rgba(8, 9, 12, 0.22) !important;
+}
+
+.nx9-app-dark .nx9-lens-fan__hub,
+.nx9-app-dark-body .nx9-lens-fan__hub,
+.nx9-theme-dark .nx9-lens-fan__hub {
+  background: #1e1c1a !important;
+  border-color: rgba(94, 155, 138, 0.45) !important;
+  color: #8fc4b5 !important;
+}
+
+.nx9-app-dark .nx9-lens-fan__rail-path,
+.nx9-app-dark-body .nx9-lens-fan__rail-path,
+.nx9-theme-dark .nx9-lens-fan__rail-path {
+  stroke: rgba(94, 155, 138, 0.45) !important;
+}
+
+.nx9-app-dark .nx9-lens-fan__tile,
+.nx9-app-dark-body .nx9-lens-fan__tile,
+.nx9-theme-dark .nx9-lens-fan__tile {
+  background: #1e1c1a !important;
+  border-color: rgba(255, 255, 255, 0.12) !important;
+  color: #e8e6e3 !important;
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.4) !important;
+}
+
+.nx9-app-dark .nx9-lens-fan__tile:hover,
+.nx9-app-dark .nx9-lens-fan__tile:focus-visible,
+.nx9-app-dark-body .nx9-lens-fan__tile:hover,
+.nx9-app-dark-body .nx9-lens-fan__tile:focus-visible,
+.nx9-theme-dark .nx9-lens-fan__tile:hover,
+.nx9-theme-dark .nx9-lens-fan__tile:focus-visible {
+  background: rgba(15, 118, 110, 0.18) !important;
+  border-color: rgba(94, 155, 138, 0.48) !important;
+}
+
+.nx9-app-dark .nx9-lens-fan__tile-icon,
+.nx9-app-dark-body .nx9-lens-fan__tile-icon,
+.nx9-theme-dark .nx9-lens-fan__tile-icon {
+  background: rgba(255, 255, 255, 0.05) !important;
+  color: rgba(232, 230, 227, 0.82) !important;
+}
+
+.nx9-app-dark .nx9-lens-fan__tile:hover .nx9-lens-fan__tile-icon,
+.nx9-app-dark .nx9-lens-fan__tile:focus-visible .nx9-lens-fan__tile-icon,
+.nx9-app-dark-body .nx9-lens-fan__tile:hover .nx9-lens-fan__tile-icon,
+.nx9-app-dark-body .nx9-lens-fan__tile:focus-visible .nx9-lens-fan__tile-icon,
+.nx9-theme-dark .nx9-lens-fan__tile:hover .nx9-lens-fan__tile-icon,
+.nx9-theme-dark .nx9-lens-fan__tile:focus-visible .nx9-lens-fan__tile-icon {
+  background: color-mix(in srgb, var(--lens-accent, #5e9b8a) 22%, transparent) !important;
+  color: var(--lens-accent, #8fc4b5) !important;
+}
+
+.nx9-app-dark .nx9-lens-fan__tile-label,
+.nx9-app-dark-body .nx9-lens-fan__tile-label,
+.nx9-theme-dark .nx9-lens-fan__tile-label {
+  color: rgba(245, 242, 236, 0.88) !important;
+}
+
+.nx9-app-dark .nx9-lens-fan__tile-index,
+.nx9-app-dark-body .nx9-lens-fan__tile-index,
+.nx9-theme-dark .nx9-lens-fan__tile-index {
+  color: rgba(232, 230, 227, 0.38) !important;
+}
+
+.nx9-app-dark .nx9-lens-fan__caption,
+.nx9-app-dark-body .nx9-lens-fan__caption,
+.nx9-theme-dark .nx9-lens-fan__caption {
+  background: rgba(30, 28, 26, 0.94) !important;
+  border-color: rgba(255, 255, 255, 0.12) !important;
+}
+
+.nx9-app-dark .nx9-lens-fan__caption strong,
+.nx9-app-dark-body .nx9-lens-fan__caption strong,
+.nx9-theme-dark .nx9-lens-fan__caption strong {
+  color: #f5f2ec !important;
+}
+
+.nx9-app-dark .nx9-lens-fan__caption span,
+.nx9-app-dark .nx9-lens-fan__empty,
+.nx9-app-dark-body .nx9-lens-fan__caption span,
+.nx9-app-dark-body .nx9-lens-fan__empty,
+.nx9-theme-dark .nx9-lens-fan__caption span,
+.nx9-theme-dark .nx9-lens-fan__empty {
+  color: rgba(232, 230, 227, 0.48) !important;
+}
+
 .nx9-theme-dark input,
 .nx9-theme-dark textarea,
 .nx9-theme-dark select {
-  background: rgba(255,255,255,0.05) !important;
-  border-color: rgba(255,255,255,0.1) !important;
+  background: #24221f !important;
+  border-color: rgba(255,255,255,0.12) !important;
   color: #e8e6e3 !important;
+  color-scheme: dark;
+}
+
+.nx9-theme-dark select option,
+.nx9-theme-dark select optgroup,
+.nx9-app-dark select option,
+.nx9-app-dark select optgroup,
+.nx9-app-dark-body select option,
+.nx9-app-dark-body select optgroup {
+  background: #24221f;
+  color: #f5f2ec;
+}
+
+.nx9-theme-dark input[type='range'],
+.nx9-app-dark input[type='range'],
+.nx9-app-dark-body input[type='range'] {
+  accent-color: var(--nx9-brand, #5e9b8a);
+  color-scheme: dark;
 }
 
 .nx9-rail-dark input,
 .nx9-rail-dark textarea,
 .nx9-rail-dark select {
-  background: rgba(255,255,255,0.05) !important;
-  border-color: rgba(255,255,255,0.1) !important;
+  background: #24221f !important;
+  border-color: rgba(255,255,255,0.12) !important;
   color: #e8e6e3 !important;
+  color-scheme: dark;
+}
+
+.nx9-rail-dark select option,
+.nx9-rail-dark select optgroup {
+  background: #24221f;
+  color: #f5f2ec;
 }
 
 .nx9-pipeline-capsule button:focus-visible {
@@ -1023,26 +1926,37 @@ body {
   border-color: rgba(255, 255, 255, 0.12) !important;
   color: #e8e6e3 !important;
   box-shadow: 0 28px 80px rgba(0, 0, 0, 0.55) !important;
+  color-scheme: dark;
 }
 
 .nx9-app-dark .nx9-asset-library-modal .bg-white,
 .nx9-app-dark-body .nx9-asset-library-modal .bg-white {
-  background: rgba(255, 255, 255, 0.06) !important;
+  background: #221f1c !important;
 }
 
+/* 面板/卡片：实色抬升，禁止玻璃半透明透底 */
 .nx9-app-dark .nx9-asset-library-modal .bg-surface,
-.nx9-app-dark .nx9-asset-library-modal .bg-surface\/35,
-.nx9-app-dark .nx9-asset-library-modal .bg-surface\/50,
 .nx9-app-dark .nx9-asset-library-modal .bg-surface\/80,
 .nx9-app-dark .nx9-asset-library-modal .bg-surface\/90,
 .nx9-app-dark .nx9-asset-library-modal .bg-surface\/95,
 .nx9-app-dark-body .nx9-asset-library-modal .bg-surface,
-.nx9-app-dark-body .nx9-asset-library-modal .bg-surface\/35,
-.nx9-app-dark-body .nx9-asset-library-modal .bg-surface\/50,
 .nx9-app-dark-body .nx9-asset-library-modal .bg-surface\/80,
 .nx9-app-dark-body .nx9-asset-library-modal .bg-surface\/90,
 .nx9-app-dark-body .nx9-asset-library-modal .bg-surface\/95 {
-  background: rgba(255, 255, 255, 0.06) !important;
+  background: #221f1c !important;
+}
+
+.nx9-app-dark .nx9-asset-library-modal .bg-surface\/30,
+.nx9-app-dark .nx9-asset-library-modal .bg-surface\/35,
+.nx9-app-dark .nx9-asset-library-modal .bg-surface\/40,
+.nx9-app-dark .nx9-asset-library-modal .bg-surface\/50,
+.nx9-app-dark .nx9-asset-library-modal .bg-surface\/70,
+.nx9-app-dark-body .nx9-asset-library-modal .bg-surface\/30,
+.nx9-app-dark-body .nx9-asset-library-modal .bg-surface\/35,
+.nx9-app-dark-body .nx9-asset-library-modal .bg-surface\/40,
+.nx9-app-dark-body .nx9-asset-library-modal .bg-surface\/50,
+.nx9-app-dark-body .nx9-asset-library-modal .bg-surface\/70 {
+  background: #1e1c1a !important;
 }
 
 /* 粘性操作条需不透底，避免滚动时露白 / 字色反相看不见 */
@@ -1056,6 +1970,14 @@ body {
 .nx9-app-dark-body .nx9-asset-library-modal .nx9-asset-lib-menu {
   background: #1a1816 !important;
   box-shadow: 0 10px 28px rgba(0, 0, 0, 0.45);
+}
+
+/* 回收站侧栏：与 modal 同色实底，避免透出主列表「+ 新建」等控件 */
+.nx9-app-dark .nx9-asset-library-modal .nx9-asset-lib-drawer,
+.nx9-app-dark-body .nx9-asset-library-modal .nx9-asset-lib-drawer {
+  background: #1a1816 !important;
+  border-color: rgba(255, 255, 255, 0.12) !important;
+  box-shadow: -16px 0 40px rgba(0, 0, 0, 0.45);
 }
 
 /* 镜头库筛选条：隐藏滚动条，仍可横向滑动 / 触控板 / 拖拽 */
@@ -1125,9 +2047,113 @@ body {
 .nx9-app-dark-body .nx9-asset-library-modal input,
 .nx9-app-dark-body .nx9-asset-library-modal textarea,
 .nx9-app-dark-body .nx9-asset-library-modal select {
-  background: rgba(255, 255, 255, 0.06) !important;
+  background: #24221f !important;
   border-color: rgba(255, 255, 255, 0.14) !important;
   color: #f5f2ec !important;
+  color-scheme: dark;
+}
+
+.nx9-app-dark .nx9-asset-library-modal select option,
+.nx9-app-dark .nx9-asset-library-modal select optgroup,
+.nx9-app-dark-body .nx9-asset-library-modal select option,
+.nx9-app-dark-body .nx9-asset-library-modal select optgroup {
+  background: #24221f;
+  color: #f5f2ec;
+}
+
+.nx9-app-dark .nx9-asset-library-modal input[type='range'],
+.nx9-app-dark-body .nx9-asset-library-modal input[type='range'] {
+  accent-color: var(--nx9-brand, #5e9b8a);
+  color-scheme: dark;
+}
+
+/* 捏模台 portal：与素材库同套暗色实底（挂在 body，不在 modal 内） */
+.nx9-app-dark .nx9-face-sculpt-modal,
+.nx9-app-dark-body .nx9-face-sculpt-modal {
+  background: #1a1816 !important;
+  color: #e8e6e3 !important;
+  color-scheme: dark;
+}
+
+.nx9-app-dark .nx9-face-sculpt-modal .bg-surface,
+.nx9-app-dark .nx9-face-sculpt-modal .bg-surface\/80,
+.nx9-app-dark .nx9-face-sculpt-modal .bg-surface\/90,
+.nx9-app-dark .nx9-face-sculpt-modal .bg-surface\/95,
+.nx9-app-dark-body .nx9-face-sculpt-modal .bg-surface,
+.nx9-app-dark-body .nx9-face-sculpt-modal .bg-surface\/80,
+.nx9-app-dark-body .nx9-face-sculpt-modal .bg-surface\/90,
+.nx9-app-dark-body .nx9-face-sculpt-modal .bg-surface\/95 {
+  background: #221f1c !important;
+}
+
+.nx9-app-dark .nx9-face-sculpt-modal .bg-surface\/30,
+.nx9-app-dark .nx9-face-sculpt-modal .bg-surface\/35,
+.nx9-app-dark .nx9-face-sculpt-modal .bg-surface\/40,
+.nx9-app-dark .nx9-face-sculpt-modal .bg-surface\/50,
+.nx9-app-dark-body .nx9-face-sculpt-modal .bg-surface\/30,
+.nx9-app-dark-body .nx9-face-sculpt-modal .bg-surface\/35,
+.nx9-app-dark-body .nx9-face-sculpt-modal .bg-surface\/40,
+.nx9-app-dark-body .nx9-face-sculpt-modal .bg-surface\/50 {
+  background: #1e1c1a !important;
+}
+
+.nx9-app-dark .nx9-face-sculpt-modal .bg-white\/90,
+.nx9-app-dark-body .nx9-face-sculpt-modal .bg-white\/90 {
+  background: #24221f !important;
+  border-color: rgba(255, 255, 255, 0.14) !important;
+  color: rgba(232, 230, 227, 0.78) !important;
+}
+
+.nx9-app-dark .nx9-face-sculpt-modal input,
+.nx9-app-dark .nx9-face-sculpt-modal textarea,
+.nx9-app-dark .nx9-face-sculpt-modal select,
+.nx9-app-dark-body .nx9-face-sculpt-modal input,
+.nx9-app-dark-body .nx9-face-sculpt-modal textarea,
+.nx9-app-dark-body .nx9-face-sculpt-modal select {
+  background: #24221f !important;
+  border-color: rgba(255, 255, 255, 0.14) !important;
+  color: #f5f2ec !important;
+  color-scheme: dark;
+}
+
+.nx9-app-dark .nx9-face-sculpt-modal select option,
+.nx9-app-dark-body .nx9-face-sculpt-modal select option {
+  background: #24221f;
+  color: #f5f2ec;
+}
+
+.nx9-app-dark .nx9-face-sculpt-modal .border-line,
+.nx9-app-dark-body .nx9-face-sculpt-modal .border-line {
+  border-color: rgba(255, 255, 255, 0.1) !important;
+}
+
+.nx9-app-dark .nx9-face-sculpt-modal .text-ink,
+.nx9-app-dark-body .nx9-face-sculpt-modal .text-ink {
+  color: #e8e6e3 !important;
+}
+
+.nx9-app-dark .nx9-face-sculpt-modal .text-ink\/30,
+.nx9-app-dark .nx9-face-sculpt-modal .text-ink\/35,
+.nx9-app-dark .nx9-face-sculpt-modal .text-ink\/40,
+.nx9-app-dark .nx9-face-sculpt-modal .text-ink\/45,
+.nx9-app-dark-body .nx9-face-sculpt-modal .text-ink\/30,
+.nx9-app-dark-body .nx9-face-sculpt-modal .text-ink\/35,
+.nx9-app-dark-body .nx9-face-sculpt-modal .text-ink\/40,
+.nx9-app-dark-body .nx9-face-sculpt-modal .text-ink\/45 {
+  color: rgba(232, 230, 227, 0.48) !important;
+}
+
+.nx9-app-dark .nx9-face-sculpt-modal .text-ink\/50,
+.nx9-app-dark .nx9-face-sculpt-modal .text-ink\/55,
+.nx9-app-dark .nx9-face-sculpt-modal .text-ink\/60,
+.nx9-app-dark .nx9-face-sculpt-modal .text-ink\/65,
+.nx9-app-dark .nx9-face-sculpt-modal .text-ink\/70,
+.nx9-app-dark-body .nx9-face-sculpt-modal .text-ink\/50,
+.nx9-app-dark-body .nx9-face-sculpt-modal .text-ink\/55,
+.nx9-app-dark-body .nx9-face-sculpt-modal .text-ink\/60,
+.nx9-app-dark-body .nx9-face-sculpt-modal .text-ink\/65,
+.nx9-app-dark-body .nx9-face-sculpt-modal .text-ink\/70 {
+  color: rgba(232, 230, 227, 0.68) !important;
 }
 
 .nx9-app-dark .nx9-asset-library-modal input::placeholder,

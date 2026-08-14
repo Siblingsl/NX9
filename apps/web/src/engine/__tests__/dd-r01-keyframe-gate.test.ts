@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
-const flowRunner = readFileSync(resolve(__dirname, '../flow-runner.ts'), 'utf8');
+const flowRunner = readFileSync(resolve(__dirname, '../flow-runner-ops/clip-gen-ops.ts'), 'utf8');
 
 describe('DD-R-01 clip-gen 关键帧门禁链隔离', () => {
   it('无批次门禁读连接链，不读全局 storyboard', () => {

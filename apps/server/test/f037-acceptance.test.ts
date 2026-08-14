@@ -120,9 +120,10 @@ describe('F-037 acceptance', () => {
 
   // ═══════════ G1.4: AssetLibraryModal 入口 ═══════════
   describe('AssetLibraryModal UI 入口', () => {
-    const src = readWeb(ASSET_LIBRARY_MODAL);
     const details = readWeb('panels/asset-library/AssetDetailFields.tsx');
     const hook = readWeb(BIBLE_IMAGE_GEN);
+    const generation = readWeb('panels/asset-library/modal/use-asset-library-generation.ts');
+    const actionsCore = readWeb('panels/asset-library/modal/use-asset-library-actions-core.ts');
 
     it('导入 useBibleImageGen', () => {
       expect(hook).toContain('export function useBibleImageGen');
@@ -134,50 +135,53 @@ describe('F-037 acceptance', () => {
     });
 
     it('有角色定妆图按钮', () => {
-      expect(src).toContain('generateCharacterMasterSheet');
+      expect(generation).toContain('generateCharacterMasterSheet');
       expect(details).toContain('主生成·设定板');
-      expect(src).toContain("kind: 'character'");
+      expect(actionsCore).toContain("kind: 'character'");
     });
 
     it('有场景图按钮（F-037 补全）', () => {
-      expect(src).toContain('generateSceneSheet');
+      expect(generation).toContain('generateSceneSheet');
       expect(details).toContain('主生成·场景设定板');
-      expect(src).toContain("item.kind !== 'scene'");
+      expect(generation).toContain("item.kind !== 'scene'");
     });
   });
 
   // ═══════════ 源码门禁：场景图按钮结构完整 ═══════════
   describe('源码门禁：场景图按钮结构', () => {
-    const src = readWeb(ASSET_LIBRARY_MODAL);
     const details = readWeb('panels/asset-library/AssetDetailFields.tsx');
+    const entityView = readWeb('panels/asset-library/modal/AssetDetailEntityView.tsx');
+    const generation = readWeb('panels/asset-library/modal/use-asset-library-generation.ts');
+    const controller = readWeb('panels/asset-library/modal/use-asset-library-modal-controller.ts');
+    const statusRail = readWeb('panels/asset-library/modal/AssetLibraryStatusRail.tsx');
 
     it('scene 分支含 getSceneCreative', () => {
-      expect(src).toContain('getSceneCreative');
+      expect(entityView).toContain('getSceneCreative');
     });
 
     it('scene 名称取自 selectedWorkspaceItem.label', () => {
-      expect(src).toContain('selectedWorkspaceItem.label');
-      expect(src).toContain('generateSceneSheet(selectedWorkspaceItem)');
+      expect(entityView).toContain('selectedWorkspaceItem.label');
+      expect(entityView).toContain('generateSceneSheet(selectedWorkspaceItem)');
     });
 
     it('scene description 来自 creative.description + promptZh + promptEn', () => {
-      expect(src).toContain('buildSceneSheetGenerationPrompt');
-      expect(src).toContain('getSceneCreative');
+      expect(generation).toContain('buildSceneSheetGenerationPrompt');
+      expect(entityView).toContain('getSceneCreative');
     });
 
     it('scene 写回 referenceUrls', () => {
-      expect(src).toContain("handleUploadWorkspaceMedia(f, selectedWorkspaceItem, 'referenceUrls')");
-      expect(src).toContain('sheetUrl: imageUrl');
+      expect(entityView).toContain("handleUploadWorkspaceMedia(f, selectedWorkspaceItem, 'referenceUrls')");
+      expect(generation).toContain('sheetUrl: imageUrl');
     });
 
     it('生成中显示 Loader2 和 生成中…', () => {
-      expect(src).toContain('Loader2');
+      expect(statusRail).toContain('Loader2');
       expect(details).toContain('生成中…');
     });
 
     it('错误显示 bibleImg.error', () => {
-      expect(src).toContain('setEntityGenError');
-      expect(src).toContain('generateSheetError={entityGenError}');
+      expect(controller).toContain('setEntityGenError');
+      expect(entityView).toContain('generateSheetError={entityGenError}');
     });
 
     it('disabled 在生成中', () => {
@@ -187,17 +191,18 @@ describe('F-037 acceptance', () => {
 
   // ═══════════ 角色按钮未退化 ═══════════
   describe('角色定妆图按钮未退化', () => {
-    const src = readWeb(ASSET_LIBRARY_MODAL);
     const details = readWeb('panels/asset-library/AssetDetailFields.tsx');
+    const generation = readWeb('panels/asset-library/modal/use-asset-library-generation.ts');
+    const actionsCore = readWeb('panels/asset-library/modal/use-asset-library-actions-core.ts');
 
     it('仍含 character 分支', () => {
-      expect(src).toContain("kind: 'character'");
+      expect(actionsCore).toContain("kind: 'character'");
     });
 
     it('写回 referenceImageUrl 给 character', () => {
-      expect(src).toContain('referenceImageUrl');
-      expect(src).toContain('saveCharacter');
-      expect(src).toContain('generateCharacterMasterSheet');
+      expect(generation).toContain('referenceImageUrl');
+      expect(generation).toContain('saveCharacter');
+      expect(generation).toContain('generateCharacterMasterSheet');
     });
 
     it('description 从 bible.appearance + personality', () => {

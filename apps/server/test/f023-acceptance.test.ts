@@ -142,7 +142,8 @@ describe('F-023 acceptance', () => {
 
     it('imports runConsistencyCheck and applyConsistencyFixes', () => {
       expect(src).toContain('runConsistencyCheck');
-      expect(src).toContain('applyConsistencyFixes');
+      const actions = readWeb('blocks/nx9/script-desk/use-script-desk-actions.ts');
+      expect(actions).toContain('applyConsistencyFixes');
     });
 
     it('has 运行手动一致性检查 button', () => {
@@ -175,16 +176,16 @@ describe('F-023 acceptance', () => {
       expect(diag).toContain('sd2-diag--clickable');
       expect(diag).toContain('onClick={() => onDiagClick(d)}');
       expect(diag).toContain('点击定位到设定');
-      expect(src).toContain('onDiagClick={handleDiagClick}');
+      expect(src).toContain('onDiagClick={edits.handleDiagClick}');
     });
 
     it('Bible character cards use highlightedBibleId', () => {
-      expect(bible).toContain('highlightedBibleId === c.name');
+      expect(bible).toContain('isBibleCardHighlighted(highlightedBibleId, c)');
       expect(bible).toContain('sd2-bible-card--highlight');
     });
 
     it('Bible scene cards use highlightedBibleId', () => {
-      expect(bible).toContain('highlightedBibleId === s.name');
+      expect(bible).toContain('isBibleCardHighlighted(highlightedBibleId, s)');
     });
   });
 

@@ -1,15 +1,16 @@
 import { useCallback, useMemo } from 'react';
 import {
-  activeEpisodeShots,
   resolveActiveEpisodeId,
   type EpisodeExportRecord,
 } from '@nx9/shared';
+import { useEdges, useNodes } from '@xyflow/react';
 import { ComposerWorkspaceShell } from '../composer/ComposerWorkspaceShell';
 import { useAttachedNodeData } from '../generation/use-attached-node-data';
 import { useDeckUi } from '../../../stores/deck-ui';
 import { useFlowRuntime } from '../../../../../stores/flow-runtime';
 import { useWorkspaceDocument } from '../../../../../stores/workspace-document';
 import { simpleConcatExport } from '../../../../core-pipeline-runner';
+import { resolveShotsForBlock } from '../../../../../engine/chain-storyboard-utils';
 
 export interface ExportWorkspaceProps {
   blockId: string;
@@ -21,7 +22,9 @@ export function ExportWorkspace({ blockId, kind, onCollapse }: ExportWorkspacePr
   const data = useAttachedNodeData(blockId);
   const runtime = useFlowRuntime((state) => state.runtime);
   const storyboard = useWorkspaceDocument((state) => state.storyboard);
-  const shots = useMemo(() => activeEpisodeShots(storyboard), [storyboard]);
+  const nodes = useNodes();
+  const edges = useEdges();
+  const shots = useMemo(() => resolveShotsForBlock(blockId, nodes, edges), [blockId, nodes, edges]);
   const collapsePromptBar = useDeckUi((state) => state.collapsePromptBar);
   const status = (data.status as string | undefined) ?? 'idle';
   const episodeUrl = data.episodeUrl as string | undefined;
@@ -68,10 +71,11 @@ export function ExportWorkspace({ blockId, kind, onCollapse }: ExportWorkspacePr
     >
       <div className="space-y-2.5 text-[10px]">
         <div className="grid grid-cols-3 gap-2">
-          <div className="rounded-lg bg-surface/50 p-2"><p className="text-ink/35">当前集镜头</p><p className="mt-0.5 text-sm font-medium text-ink">{shots.length}</p></div>
+          <div className="rounded-lg bg-surface/50 p-2"><p className="text-ink/35">连接链镜头</p><p className="mt-0.5 text-sm font-medium text-ink">{shots.length}</p></div>
           <div className="rounded-lg bg-surface/50 p-2"><p className="text-ink/35">总时长</p><p className="mt-0.5 text-sm font-medium text-ink">{totalDuration.toFixed(0)}s</p></div>
           <div className="rounded-lg bg-surface/50 p-2"><p className="text-ink/35">输出</p><p className="mt-0.5 text-sm font-medium text-ink">MP4</p></div>
         </div>
+        <p className="text-[9px] text-ink/40">仅导出连接链中已采用的视频，不读全局镜表。</p>
         <label className="block space-y-1">
           <span className="text-ink/45">文件名</span>
           <input

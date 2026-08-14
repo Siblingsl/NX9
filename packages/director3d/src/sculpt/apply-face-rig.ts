@@ -1,6 +1,7 @@
 import {
   FACE_RIG_PARAMS,
   FACE_RIG_PARAMS_BY_ID,
+  faceRigSideValue,
   faceRigValue,
   getFaceRig,
   type CharacterFaceRig,
@@ -13,6 +14,7 @@ import {
   lookupMorphIndex,
   type BoneAxis,
 } from './sculpt-contract';
+import { applyMaterialDriver } from './material-drivers';
 
 function unit(v: number): number {
   if (!Number.isFinite(v)) return 0;
@@ -34,22 +36,30 @@ function clearContractMorphs(mesh: Mesh): void {
   }
 }
 
-function writeMorph(mesh: Mesh, paramId: string, u: number): void {
+function writeMorph(mesh: Mesh, paramId: string, u: number, side?: 'L' | 'R'): void {
   const dict = mesh.morphTargetDictionary;
   const inf = mesh.morphTargetInfluences;
   if (!dict || !inf) return;
   const pos = Math.max(0, u);
   const neg = Math.max(0, -u);
 
-  const write = (pole: 'pos' | 'neg', value: number, side?: 'L' | 'R') => {
-    const idx = lookupMorphIndex(dict, paramId, pole, side);
+  const write = (pole: 'pos' | 'neg', value: number, targetSide?: 'L' | 'R') => {
+    const idx = lookupMorphIndex(dict, paramId, pole, targetSide);
     if (idx == null || idx >= inf.length) return;
     inf[idx] = value;
   };
 
+  if (side) {
+    write('pos', pos, side);
+    write('neg', neg, side);
+    return;
+  }
+
   const hasL = lookupMorphIndex(dict, paramId, 'pos', 'L') != null;
   const hasR = lookupMorphIndex(dict, paramId, 'pos', 'R') != null;
   if (hasL || hasR) {
+    write('pos', pos);
+    write('neg', neg);
     write('pos', pos, 'L');
     write('pos', pos, 'R');
     write('neg', neg, 'L');
@@ -71,7 +81,7 @@ function applyBoneScale(obj: Object3D, axis: BoneAxis, s: number): void {
 }
 
 /**
- * 把 faceRig 打到网格上。缺 morph / 骨静默跳过，不抛。
+ * 把 faceRig 打到网格上。缺 morph / 骨 / 材质通道不抛；材质缺失由兼容报告标 missing。
  * 只改 influence 与 scale，禁止 clone 几何。
  */
 export function applyFaceRigToObject(root: Object3D, rig: CharacterFaceRig | undefined): void {
@@ -89,31 +99,49 @@ export function applyFaceRigToObject(root: Object3D, rig: CharacterFaceRig | und
 
   for (const def of FACE_RIG_PARAMS) {
     const driver = def.driver ?? 'morph';
-    if (driver === 'prompt' || driver === 'material') continue;
+    if (driver === 'prompt') continue;
+    if (driver === 'material') {
+      applyMaterialDriver(root, def.id, unit(faceRigValue(normalized, def.id)));
+      continue;
+    }
     const v = faceRigValue(normalized, def.id);
     const u = unit(v);
 
     if (driver === 'bone') {
       const boneDef = BONE_DRIVERS[def.id];
       if (!boneDef) continue;
-      const s = 1 + u * boneDef.k;
       for (const boneName of boneDef.bones) {
         const bone = named.get(boneName);
         if (!bone) continue;
+        const side = boneName.endsWith('.L') ? 'L' : boneName.endsWith('.R') ? 'R' : undefined;
+        const sideValue = side ? faceRigSideValue(normalized, def.id, side) : v;
+        const s = 1 + unit(sideValue) * boneDef.k;
         applyBoneScale(bone, boneDef.axis, s);
       }
       continue;
     }
 
-    if (u === 0) continue;
+    const sideL = faceRigSideValue(normalized, def.id, 'L');
+    const sideR = faceRigSideValue(normalized, def.id, 'R');
+    if (u === 0 && unit(sideL) === 0 && unit(sideR) === 0) continue;
+    if (unit(sideL) !== u || unit(sideR) !== u) {
+      for (const mesh of meshes) writeMorph(mesh, def.id, unit(sideL), 'L');
+      for (const mesh of meshes) writeMorph(mesh, def.id, unit(sideR), 'R');
+      continue;
+    }
     for (const mesh of meshes) writeMorph(mesh, def.id, u);
   }
 }
 
 /** 测试辅助：读取某 morph influence，找不到返回 undefined。 */
-export function readMorphInfluence(root: Object3D, paramId: string, pole: 'pos' | 'neg'): number | undefined {
+export function readMorphInfluence(
+  root: Object3D,
+  paramId: string,
+  pole: 'pos' | 'neg',
+  side?: 'L' | 'R',
+): number | undefined {
   for (const mesh of collectMorphMeshes(root)) {
-    const idx = lookupMorphIndex(mesh.morphTargetDictionary, paramId, pole);
+    const idx = lookupMorphIndex(mesh.morphTargetDictionary, paramId, pole, side);
     if (idx != null && mesh.morphTargetInfluences) return mesh.morphTargetInfluences[idx];
   }
   return undefined;

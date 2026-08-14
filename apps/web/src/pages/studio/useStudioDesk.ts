@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  activeEpisodeShots,
   applyStudioPromptsToShot,
   createEpisodeMeta,
   extractReferenceConstraints,
@@ -638,10 +637,14 @@ export function useStudioDesk() {
   );
 
   const runApproveAll = useCallback(() => {
-    const n = approveAllKeyframes();
-    if (n === 0) toastError('没有可批准的分镜预览图');
+    const res = approveAllKeyframes();
+    if (res.blocked === 'no-chain') {
+      toastError('未连接分镜台，已禁止全局批审');
+      return;
+    }
+    if (res.ok === 0) toastError('没有可批准的分镜预览图');
     else {
-      toastSuccess(`已批准 ${n} 镜预览图`);
+      toastSuccess(`已批准 ${res.ok} 镜预览图`);
       setStep('video');
     }
   }, []);
@@ -685,7 +688,9 @@ export function useStudioDesk() {
         undefined,
         shots as any,
       );
-      toastSuccess(`镜头视频 · 成功 ${res.ok} · 失败 ${res.fail}`);
+      toastSuccess(
+        `镜头视频 · 成功 ${res.ok} · 失败 ${res.fail}${res.skipped ? ` · 跳过 ${res.skipped}` : ''}`,
+      );
       if (res.ok > 0) setStep('voice');
     } catch (e) {
       toastError(String(e));
@@ -811,27 +816,13 @@ export function useStudioDesk() {
         flash(`导出: ${res.url}`);
         return;
       }
-      const { api } = await import('../../api/client');
-      const list = activeEpisodeShots(useWorkspaceDocument.getState().storyboard);
-      const r = await api.concatEpisode({
-        shots: list,
-        requireApproved: false,
-        title: activeEpisode?.title || storyboard.title || 'nx9-episode',
-      });
-      if (r.ok && r.url) {
-        setExportUrl(r.url);
-        setProjectStatus('exported');
-        toastSuccess('成片已导出');
-        flash(`导出: ${r.url}`);
-      } else {
-        toastError(res.message || r.message || '导出失败');
-      }
+      toastError(res.message || '导出失败');
     } catch (e) {
       toastError(String(e));
     } finally {
       setBusy(null);
     }
-  }, [setProjectStatus, flash, activeEpisode, storyboard.title]);
+  }, [setProjectStatus, flash]);
 
   const saveCharacter = useCallback(
     (c: CharacterProfile) => {

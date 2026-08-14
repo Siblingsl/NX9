@@ -172,7 +172,11 @@ export function ComposerWorkspaceToolbar({
       {showRun && running && onStop ? (
         <button
           type="button"
-          onClick={onStop}
+          onMouseDown={stop}
+          onClick={(e) => {
+            stop(e);
+            onStop();
+          }}
           className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-rose-600 text-white text-[11px] font-medium hover:bg-rose-500 ml-0.5"
           title="停止生成（中断在途请求）"
         >

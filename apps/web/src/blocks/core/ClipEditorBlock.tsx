@@ -7,10 +7,12 @@ import {
   parseTimelineDraft,
   buildVoiceDramaTimeline,
   appendStoryboardVideoVersion,
+  adoptStoryboardVideoVersion,
   type SmartEditEngine,
   type SmartEditProfile,
   type SmartSuggestion,
   type TimelinePayload,
+  type StoryboardShot,
 } from '@nx9/shared';
 import { BlockShell } from '../shared/BlockShell';
 import { ScreenModal } from '../../components/ui/ScreenModal';
@@ -99,6 +101,7 @@ function ClipEditorBlock(props: NodeProps) {
             status: s.status,
             durationSec: s.durationSec,
             videoAssetId: s.videoAssetId,
+            videoStatus: s.videoStatus,
             firstFrameAssetId: s.firstFrameAssetId,
             audioAssetId: s.audioAssetId,
             descriptionZh: s.descriptionZh,
@@ -259,7 +262,12 @@ function ClipEditorBlock(props: NodeProps) {
 
   /** 智能替换采纳 → 上游镜 videoVersions（take） */
   const handleWritebackShotVersion = useCallback(
-    (shotId: string, url: string, meta?: { prompt?: string; model?: string }): string | undefined => {
+    (
+      shotId: string,
+      url: string,
+      meta?: { prompt?: string; model?: string },
+      adopt = false,
+    ): string | undefined => {
       const shot = upstreamShots.find((s) => s.id === shotId);
       if (!shot) return undefined;
       const takeId = `take-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
@@ -271,7 +279,13 @@ function ClipEditorBlock(props: NodeProps) {
         model: meta?.model,
         status: 'candidate',
       });
-      const ok = patchUpstreamShot(updateNodeData, props.id, nodes, edges, shotId, patch);
+      // SE-DEEP-05: 用户可把新 take 直接 adopt，导演台无需二次审片
+      let finalPatch: Partial<StoryboardShot> = patch;
+      if (adopt) {
+        const adopted = adoptStoryboardVideoVersion({ ...shot, ...patch }, takeId);
+        if (adopted) finalPatch = { ...patch, ...adopted };
+      }
+      const ok = patchUpstreamShot(updateNodeData, props.id, nodes, edges, shotId, finalPatch);
       if (!ok) return undefined;
       return takeId;
     },

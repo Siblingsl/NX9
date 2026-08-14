@@ -9,7 +9,7 @@ interface Shot {
   firstFrameAssetId?: string | null;
   keyframeStatus?: string;
   status: string;
-  director3dGuide?: { captureUrl?: string } | null;
+  director3dGuide?: { captureUrl?: string; captureUrlPendingRepair?: boolean } | null;
 }
 
 interface DirectorFilmstripProps {
@@ -128,7 +128,7 @@ export function DirectorFilmstrip({
                   ) : (
                     <span>#{shot.index}</span>
                   )}
-                  {shot.director3dGuide?.captureUrl ? <i className="dd2-frame__3d" title="有 3D 参考" /> : null}
+                  {shot.director3dGuide?.captureUrl ? <i className="dd2-frame__3d" title="有 3D 参考" /> : shot.director3dGuide?.captureUrlPendingRepair ? <i className="dd2-frame__3d is-repair" title="3D 待修复" /> : null}
                 </div>
                 <div className="dd2-frame__meta">
                   <strong>#{shot.index}</strong>

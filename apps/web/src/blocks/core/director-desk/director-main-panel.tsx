@@ -6,6 +6,7 @@ interface DirectorMainPanelProps {
   previewUrl: string | undefined;
   lineArtUrl: string | undefined;
   guideUrl: string | undefined;
+  guidePendingRepair: boolean;
   currentShotIndex: string;
   currentShotDesc: string | undefined;
   previewMode: 'keyframe' | 'lineart' | 'guide3d' | 'compare';
@@ -54,6 +55,7 @@ export function DirectorMainPanel({
   previewUrl,
   lineArtUrl,
   guideUrl,
+  guidePendingRepair,
   currentShotIndex,
   currentShotDesc,
   previewMode,
@@ -145,7 +147,10 @@ export function DirectorMainPanel({
               <Box size={28} strokeWidth={1.25} />
               <strong>无 3D 参考</strong>
               <span>可切到「3D 舞台」摆机位后截图</span>
-               <button type="button" className="dd2-btn dd2-btn--ghost" onClick={() => setStudioTab('stage3d')} disabled={!director3dEnabled} title={director3dEnabled ? undefined : '3D 导演台暂未开放'}>3D 舞台暂未开放</button>
+               <button type="button" className="dd2-btn dd2-btn--ghost" onClick={() => setStudioTab('stage3d')} disabled={!director3dEnabled} title={director3dEnabled ? undefined : '3D 导演台暂未开放'}>{director3dEnabled ? '打开 3D 舞台' : '3D 舞台暂未开放'}</button>
+              <strong>{guidePendingRepair ? '3D 截图待修复' : '无 3D 参考'}</strong>
+              <span>{guidePendingRepair ? '原截图已隔离清空，请重新摆位上传并提交' : '可切到「3D 舞台」摆机位后截图'}</span>
+               <button type="button" className="dd2-btn dd2-btn--ghost" onClick={() => setStudioTab('stage3d')} disabled={!director3dEnabled} title={director3dEnabled ? undefined : '3D 导演台暂未开放'}>{director3dEnabled ? (guidePendingRepair ? '去 3D 重拍' : '打开 3D 舞台') : '3D 舞台暂未开放'}</button>
             </div>
           ))}
           {previewMode === 'compare' && (
@@ -174,7 +179,7 @@ export function DirectorMainPanel({
           disabled={!director3dEnabled}
           title={director3dEnabled ? undefined : '3D 导演台暂未开放'}
         >
-          <Box size={13} /> 3D 机位暂未开放
+          <Box size={13} /> {director3dEnabled ? '3D 机位' : '3D 机位暂未开放'}
         </button>
         {!running && stats.failed > 0 && (
           <button type="button" className="dd2-btn dd2-btn--ghost" onClick={() => void runBatch('failed')}>

@@ -105,7 +105,12 @@ export function executeStepAction(action: PlaybookStepAction, ctx: PlaybookReadi
       switch (action.action) {
         case 'approve_all_pending':
         case 'approve_all_keyframes':
-          approveAllKeyframes();
+          {
+            const res = approveAllKeyframes();
+            if (res.blocked === 'no-chain') {
+              useActivityLog.getState().append('未连接分镜台，已禁止全局批审（F-003）');
+            }
+          }
           break;
         case 'batch_line_art':
           void batchGenerateKeyframesFromShots();
@@ -125,7 +130,9 @@ export function executeStepAction(action: PlaybookStepAction, ctx: PlaybookReadi
           syncPreviewFromStoryboard();
           break;
         case 'simple_export':
-          void simpleConcatExport();
+          void simpleConcatExport().then((res) => {
+            if (!res.ok) useActivityLog.getState().append(res.message ?? '导出失败');
+          });
           break;
         default:
           break;

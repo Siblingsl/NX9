@@ -66,13 +66,27 @@ export function getFaceRig(source: CharacterProfile | CharacterFaceRig | undefin
 
   const asymmetric = (raw.asymmetric ?? []).filter((id) => FACE_RIG_PARAMS_BY_ID.has(id));
 
+  const sideValues: NonNullable<CharacterFaceRig['sideValues']> = {};
+  for (const [id, sides] of Object.entries(raw.sideValues ?? {})) {
+    if (!FACE_RIG_PARAMS_BY_ID.has(id)) continue;
+    const next: { L?: number; R?: number } = {};
+    const l = clampValue(sides?.L);
+    const r = clampValue(sides?.R);
+    if (l != null) next.L = l;
+    if (r != null) next.R = r;
+    if (Object.keys(next).length > 0) sideValues[id] = next;
+  }
+
   return {
     version: 1,
     values,
     ...(asymmetric.length > 0 ? { asymmetric } : {}),
+    ...(Object.keys(sideValues).length > 0 ? { sideValues } : {}),
     ...(raw.presetId ? { presetId: raw.presetId } : {}),
     ...(raw.updatedAt ? { updatedAt: raw.updatedAt } : {}),
     ...(raw.renderedAt ? { renderedAt: raw.renderedAt } : {}),
+    ...(raw.meshContractVersion ? { meshContractVersion: raw.meshContractVersion } : {}),
+    ...(raw.faceLockHash ? { faceLockHash: raw.faceLockHash } : {}),
   };
 }
 
@@ -101,7 +115,55 @@ export function setFaceRigValue(
   if (Object.keys(bucket).length > 0) values[def.group] = bucket;
   else delete values[def.group];
 
-  return { ...base, values, updatedAt: Date.now() };
+  const sideValues = { ...(base.sideValues ?? {}) };
+  delete sideValues[id];
+
+  const next = { ...base, values };
+  if (Object.keys(sideValues).length > 0) next.sideValues = sideValues;
+  else delete next.sideValues;
+  return { ...next, updatedAt: Date.now() };
+}
+
+/** 读单侧扩展值：sideValues 优先，未写的一侧回退基础值 */
+export function faceRigSideValue(
+  rig: CharacterFaceRig | undefined,
+  id: string,
+  side: 'L' | 'R',
+): number {
+  const def = FACE_RIG_PARAMS_BY_ID.get(id);
+  if (!def) return 0;
+  const base = getFaceRig(rig);
+  return base.sideValues?.[id]?.[side] ?? faceRigValue(base, id);
+}
+
+/** 写单侧扩展值：0 值不落库；同时登记 asymmetric，未写的一侧仍回退基础值 */
+export function setFaceRigSideValue(
+  rig: CharacterFaceRig | undefined,
+  id: string,
+  side: 'L' | 'R',
+  value: number,
+): CharacterFaceRig {
+  const def = FACE_RIG_PARAMS_BY_ID.get(id);
+  const base = getFaceRig(rig);
+  if (!def) return base;
+  const clamped = clampValue(value);
+  const sides = { ...(base.sideValues?.[id] ?? {}) };
+  if (clamped == null) delete sides[side];
+  else sides[side] = clamped;
+  const sideValues = { ...(base.sideValues ?? {}), [id]: sides };
+  if (Object.keys(sides).length === 0) delete sideValues[id];
+  const asymmetric = Array.from(new Set([...(base.asymmetric ?? []), id]));
+  const next = { ...base };
+  if (asymmetric.length > 0) next.asymmetric = asymmetric;
+  else delete next.asymmetric;
+  if (Object.keys(sideValues).length > 0) next.sideValues = sideValues;
+  else delete next.sideValues;
+  return { ...next, updatedAt: Date.now() };
+}
+
+/** 某分组下的全部参数定义（UI 展开分组用） */
+export function faceRigParamsOfGroup(group: FaceRigGroupId): FaceRigParamDef[] {
+  return FACE_RIG_PARAMS.filter((p) => p.group === group);
 }
 
 export function resetFaceRigGroup(
@@ -111,7 +173,12 @@ export function resetFaceRigGroup(
   const base = getFaceRig(rig);
   const values = { ...(base.values ?? {}) };
   delete values[group];
-  return { ...base, values, updatedAt: Date.now() };
+  const sideValues = { ...(base.sideValues ?? {}) };
+  for (const p of faceRigParamsOfGroup(group)) delete sideValues[p.id];
+  const next = { ...base, values };
+  if (Object.keys(sideValues).length > 0) next.sideValues = sideValues;
+  else delete next.sideValues;
+  return { ...next, updatedAt: Date.now() };
 }
 
 /** 应用内置预设：只覆盖预设写到的项，其余保留 */
@@ -269,6 +336,11 @@ export function faceRigHash(rig: CharacterFaceRig | undefined): string {
     if (v) parts.push(`${def.id}=${v}`);
   }
   for (const id of [...(normalized.asymmetric ?? [])].sort()) parts.push(`asym:${id}`);
+  for (const [id, sides] of Object.entries(normalized.sideValues ?? {}).sort((a, b) => a[0].localeCompare(b[0]))) {
+    if (!sides) continue;
+    if (sides.L != null) parts.push(`${id}.L=${sides.L}`);
+    if (sides.R != null) parts.push(`${id}.R=${sides.R}`);
+  }
   if (parts.length === 0) return '0';
 
   // FNV-1a 32bit

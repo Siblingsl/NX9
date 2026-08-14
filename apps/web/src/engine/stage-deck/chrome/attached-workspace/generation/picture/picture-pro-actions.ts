@@ -3,6 +3,13 @@
  * 选中动作后：注入 prompt 模板 + 推荐比例/质量/模式，再走统一 picture-gen 执行链。
  */
 
+import {
+  inferBasicPictureGenMode,
+  patchPictureGenMode,
+  readPictureGenMode,
+  resolveUploadedReferenceUrls,
+} from './picture-gen-modes';
+
 export type PictureProCategoryId =
   | 'quick'
   | 'storyboard'
@@ -367,6 +374,7 @@ export function pictureProActionsByCategory(
 /** 应用专业动作 → 节点 data patch（不含用户 prompt 正文） */
 export function buildPictureProActionPatch(
   action: PictureProActionDef,
+  current?: Record<string, unknown>,
 ): Record<string, unknown> {
   const patch: Record<string, unknown> = {
     pictureProAction: action.id,
@@ -386,6 +394,8 @@ export function buildPictureProActionPatch(
   if (action.imageCount != null) patch.imageCount = action.imageCount;
   if (action.pictureGenMode === 'panorama-720') {
     patch.aspectRatio = '2:1';
+    const currentRatio = (current?.aspectRatio as string | undefined)?.trim();
+    if (currentRatio && currentRatio !== '2:1') patch.nonPanoramaAspectRatio = currentRatio;
     patch.imageCount = 1;
     patch.panoramaProjection = 'equirectangular';
     patch.width = 2048;
@@ -397,6 +407,30 @@ export function buildPictureProActionPatch(
   // 宫格类默认高画质
   if (action.id === 'grid-25' || action.id === 'multi-cam-9') {
     patch.quality = action.quality ?? 'high';
+  }
+  return patch;
+}
+
+/**
+ * 退出专业工具：清动作标记；若模式被专业玩法锁死（放大 / 全景），
+ * 按当前参考图数量回落文生图 / 图生图 / 多参考。
+ * 风格参考（style-ref）由风格图入口单独管理，此处不强制改掉。
+ */
+export function buildClearPictureProActionPatch(
+  data: Record<string, unknown>,
+  effectiveRefCount?: number,
+): Record<string, unknown> {
+  const mode = readPictureGenMode(data);
+  const patch: Record<string, unknown> = {
+    pictureProAction: undefined,
+    pictureProActionLabel: undefined,
+  };
+  if (mode === 'upscale-hd' || mode === 'panorama-720') {
+    const refCount =
+      effectiveRefCount ??
+      resolveUploadedReferenceUrls(data).length +
+        ((data.styleImageUrl as string | undefined)?.trim() ? 1 : 0);
+    Object.assign(patch, patchPictureGenMode(inferBasicPictureGenMode(refCount), data));
   }
   return patch;
 }

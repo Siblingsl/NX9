@@ -56,7 +56,7 @@ describe('F-022 acceptance', () => {
     it('each desk entrypoint imports extracted modules', () => {
       expect(readWeb(DESK_PATHS.storyboard)).toContain('./storyboard-desk/use-storyboard-desk');
       expect(readWeb(DESK_PATHS.director)).toContain('./director-desk/director-main-panel');
-      expect(readWeb(DESK_PATHS.script)).toContain('./script-desk/script-desk-dev-pack-overlay');
+      expect(readWeb('blocks/nx9/script-desk/DeskHeader.tsx')).toContain('./script-desk-dev-pack-overlay');
     });
   });
 
@@ -177,7 +177,8 @@ describe('F-022 acceptance', () => {
     const src = readWeb(DESK_PATHS.script);
 
     it('imports ScriptDeskDevPackOverlay', () => {
-      expect(src).toContain("import { ScriptDeskDevPackOverlay } from './script-desk/script-desk-dev-pack-overlay'");
+      const header = readWeb('blocks/nx9/script-desk/DeskHeader.tsx');
+      expect(header).toContain("import { ScriptDeskDevPackOverlay } from './script-desk-dev-pack-overlay'");
     });
     it('no longer contains inline ScriptDeskDevPackOverlay', () => {
       expect(src).not.toContain('function ScriptDeskDevPackOverlay');

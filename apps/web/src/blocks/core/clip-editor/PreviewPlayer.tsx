@@ -3,6 +3,7 @@ import { Player, type PlayerRef } from '@remotion/player';
 import { Nx9Episode } from '@nx9/remotion-compositions';
 import { Pause, Play, SkipBack, SkipForward } from 'lucide-react';
 import type { TimelinePayload } from '@nx9/shared';
+import type { SmartEditEngine, SmartEditProfile } from '@nx9/shared';
 
 export interface PreviewPlayerProps {
   timeline: TimelinePayload;
@@ -11,6 +12,9 @@ export interface PreviewPlayerProps {
   /** 播放中由 Player 驱动播放头 */
   onFrameUpdate: (sec: number) => void;
   playerRef: React.MutableRefObject<PlayerRef | null>;
+  /** 当前解析后的渲染引擎，用于明示预览与成片是否同引擎 */
+  engine: SmartEditEngine;
+  profile: SmartEditProfile;
 }
 
 function formatTime(sec: number): string {
@@ -30,6 +34,8 @@ export function PreviewPlayer({
   onSeek,
   onFrameUpdate,
   playerRef,
+  engine,
+  profile,
 }: PreviewPlayerProps) {
   const fps = timeline.fps || 30;
   const durationInFrames = Math.max(1, Math.ceil((timeline.durationSec || 1) * fps));
@@ -83,6 +89,13 @@ export function PreviewPlayer({
 
   return (
     <div className="ed-preview">
+      {(engine === 'hyperframes' || engine === 'ffmpeg') && (
+        <p className="ed-preview__warn">
+          {engine === 'hyperframes'
+            ? `预览为 Remotion 合成；HyperFrames 成片（${profile === 'viral' ? '爆款' : '漫剧'}）转场/音量与预览可能不一致，请以「预览渲染」后的成片验收。`
+            : '预览为 Remotion 合成；FFmpeg 仅诊断拼接，不能代表成片，正式出片请用 Remotion / HyperFrames。'}
+        </p>
+      )}
       <div className="ed-preview__stage">
         <Player
           ref={attachRef}

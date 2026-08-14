@@ -117,6 +117,8 @@ export interface ScriptDeskAgentMessage {
   applied?: boolean;
   /** C-02: 标记为已丢弃 */
   discarded?: boolean;
+  /** Q-04: 结构化错误码（rate_limit / timeout / content_filter 等） */
+  errorCode?: string;
 }
 
 export interface ScriptDeskAgentSession {
@@ -129,6 +131,8 @@ export interface ScriptDeskNodeData {
   status?: 'idle' | 'running' | 'success' | 'error';
   content?: string;
   error?: string;
+  /** Q-04: 结构化错误码（rate_limit / timeout / content_filter 等） */
+  errorCode?: string;
   entryMode?: 'agent' | 'ingest';
   package?: ScreenplayPackage;
   agentSession?: ScriptDeskAgentSession;
@@ -1194,10 +1198,15 @@ export function applyPackagePatch(
           : pkg.bible.scenes,
       }
     : pkg.bible;
+  const rawPatch = patch as Record<string, unknown>;
   const nextScreenplay = p.screenplay
     ? {
         sourceType: p.screenplay.sourceType ?? pkg.screenplay.sourceType,
-        episodes: p.screenplay.episodes ?? pkg.screenplay.episodes,
+        episodes: p.screenplay.episodes == null
+          ? pkg.screenplay.episodes
+          : rawPatch.episodesMergeMode === 'upsert'
+            ? upsertScreenplayEpisodes(pkg.screenplay.episodes, p.screenplay.episodes)
+            : p.screenplay.episodes,
       }
     : pkg.screenplay;
   let next = touchScreenplayPackage(pkg, {
@@ -1210,6 +1219,31 @@ export function applyPackagePatch(
     next = unconfirmIfEdited(next);
   }
   return next;
+}
+
+/** 1.1: 按 id/index upsert 单集增量，避免整表覆盖擦掉并发编辑 */
+function upsertScreenplayEpisodes(
+  base: ScreenplayEpisode[],
+  incoming: ScreenplayEpisode[],
+): ScreenplayEpisode[] {
+  const result = [...base];
+  for (const patchEp of incoming) {
+    const baseIdx = result.findIndex(
+      (ep) => ep.id === patchEp.id || ep.index === patchEp.index,
+    );
+    if (baseIdx >= 0) {
+      result[baseIdx] = {
+        ...result[baseIdx],
+        ...patchEp,
+        id: result[baseIdx].id,
+        index: result[baseIdx].index,
+        updatedAt: patchEp.updatedAt ?? result[baseIdx].updatedAt,
+      };
+    } else {
+      result.push({ ...patchEp });
+    }
+  }
+  return result.sort((a, b) => a.index - b.index);
 }
 
 /** F-03: 对比 package 与 patch，生成供用户确认的变更摘要列表 */

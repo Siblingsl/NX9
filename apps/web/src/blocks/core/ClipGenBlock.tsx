@@ -224,7 +224,7 @@ function ClipGenBlock(props: NodeProps) {
               if (chain) {
                 const newShots = chain.shots.map((s) =>
                   s.id === linkedShot.id
-                    ? { ...s, videoAssetId: res.url, videoStatus: 'review' as const, status: 'review' as const }
+                    ? { ...s, videoAssetId: res.url, videoStatus: 'review' as const }
                     : s,
                 );
                 updateNodeData(deskId, { chainStoryboard: { ...chain, shots: newShots } } as Record<string, unknown>);
@@ -288,6 +288,24 @@ function ClipGenBlock(props: NodeProps) {
               ?? `导演关键帧批次 · ${directorKeyframeBatch.shots.length} 镜 · ${directorKeyframeBatch.status}`}
           </p>
         )}
+        {directorKeyframeBatch?.receipt?.failed.length ? (
+          <div className="rounded-lg border border-warn/30 bg-warn/5 px-2 py-1.5 text-[10px] text-warn/90">
+            <div>失败镜 {directorKeyframeBatch.receipt.failed.map((f) => `#${f.index}`).join('、')}</div>
+            {directorKeyframeBatch.receipt.failed.map((f) => (
+              <div key={f.shotId} className="truncate text-[9px] text-warn/60" title={f.error}>#{f.index} · {f.error}</div>
+            ))}
+            {directorKeyframeBatch.status === 'partial' && (
+              <button
+                type="button"
+                disabled={status === 'running'}
+                onClick={() => void run()}
+                className="mt-1 rounded-md border border-warn/40 px-2 py-0.5 text-[10px] text-warn hover:bg-warn/10 disabled:opacity-45"
+              >
+                重试失败 {directorKeyframeBatch.receipt.failed.length} 镜
+              </button>
+            )}
+          </div>
+        ) : null}
         <GenUpstreamHint hasUpstream={hasUpstream} />
         {shots.length === 0 && (
           <p className="text-[10px] text-warn/80 rounded-lg border border-warn/30 bg-warn/5 px-2 py-1.5">
@@ -304,7 +322,7 @@ function ClipGenBlock(props: NodeProps) {
         )}
         {hasAudioUpstream && (
           <p className="text-[10px] text-brand/70">
-            已连接上游音频 · 已传入音画对齐
+            已连接上游音频 · 音画对齐能力未定，仅透传参考
             <span className="text-ink/40 ml-1">({upstreamMedia.sounds?.length ?? 0} 条)</span>
           </p>
         )}

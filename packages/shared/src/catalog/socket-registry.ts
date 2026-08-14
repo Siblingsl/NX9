@@ -125,6 +125,11 @@ export const SOCKET_REGISTRY: Record<string, SocketProfile> = {
   },
   'preview-sink': { accepts: ['prompt', 'picture', 'clip', 'sound', 'mesh', 'wildcard'], emits: ['wildcard'] },
   'group-frame': { accepts: [], emits: ['wildcard'] },
+  /** 场景组：左右数据口，兼容常见媒体/文本连线 */
+  'scene-group': {
+    accepts: ['prompt', 'picture', 'clip', 'sound', 'mesh', 'wildcard'],
+    emits: ['picture', 'prompt', 'clip', 'sound', 'mesh', 'wildcard'],
+  },
   'codex-picture': { accepts: ['prompt', 'picture'], emits: ['picture', 'prompt'] },
 };
 

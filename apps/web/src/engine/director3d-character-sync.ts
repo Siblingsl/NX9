@@ -66,6 +66,7 @@ export function prepareDirectorProjectForShot(
         transform,
         bodyType: (placement?.bodyType as DirectorObject['bodyType']) ?? existing.bodyType ?? 'neutral',
         posePresetId: placement?.posePresetId ?? existing.posePresetId ?? 'stand',
+        faceRig: profile?.creative?.faceRig ?? existing.faceRig,
       };
       continue;
     }
@@ -81,6 +82,7 @@ export function prepareDirectorProjectForShot(
       bodyType: (placement?.bodyType as DirectorObject['bodyType']) ?? 'neutral',
       posePresetId: placement?.posePresetId ?? 'stand',
       transform,
+      faceRig: profile?.creative?.faceRig,
     });
   }
 

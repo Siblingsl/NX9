@@ -1,4 +1,5 @@
 import { api } from '../api/client';
+import { sleepUntilAborted } from './block-run-abort';
 
 export interface PollOptions {
   attempts?: number;
@@ -50,7 +51,8 @@ export async function pollVideoUntilDone(taskId: string, opts: PollOptions = {})
       throw new Error(res.message ?? (opts.mediaKind === 'image' ? '图片生成任务失败' : '视频生成任务失败'));
     }
     lastMessage = res.message;
-    await new Promise((r) => setTimeout(r, intervalMs));
+    // 停止须立刻打断间隔等待，不能干等到下一轮才感知 abort
+    await sleepUntilAborted(intervalMs, opts.signal);
   }
   throw new VideoPollTimeoutError(taskId, lastMessage, opts.mediaKind ?? 'video', opts.baseUrl);
 }

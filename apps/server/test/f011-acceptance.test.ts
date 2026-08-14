@@ -116,7 +116,7 @@ describe('F-011 文案区隔与防假成功（源码门禁）', () => {
   });
 
   it('flow-runner：export-pack 失败不得标 success', () => {
-    const src = readWeb('engine/flow-runner.ts');
+    const src = readWeb('engine/flow-runner-ops/legacy-honesty-ops.ts');
     expect(src).toContain("kind === 'export-pack'");
     expect(src).toContain('if (!res.ok)');
     expect(src).toContain("status: 'error'");

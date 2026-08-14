@@ -2,7 +2,7 @@
  * VG-19/27/29/30/31/32/33/34 接线锁定（R2 收口）
  */
 import { describe, expect, it } from 'vitest';
-import { readFileSync, existsSync } from 'node:fs';
+import { readFileSync, existsSync, readdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { CLIP_GEN_MODE_CONFIGS, migrateBlockKind } from '@nx9/shared';
 
@@ -15,7 +15,15 @@ describe('VG-19/31 旁路下线', () => {
   });
 
   it('flow-runner 无旁路分支，clip-chain-runner 已删', () => {
-    const flow = readFileSync(resolve(webSrc, 'flow-runner.ts'), 'utf8');
+    const flowFiles = [
+      'flow-runner.ts',
+      ...readdirSync(resolve(webSrc, 'flow-runner-ops'))
+        .filter((f) => f.endsWith('.ts'))
+        .map((f) => `flow-runner-ops/${f}`),
+    ];
+    const flow = flowFiles
+      .map((f) => readFileSync(resolve(webSrc, f), 'utf8'))
+      .join('\n');
     expect(flow).not.toContain("kind === 'motion-story'");
     expect(flow).not.toContain("kind === 'seedance-chain'");
     expect(flow).not.toContain('runClipChain');

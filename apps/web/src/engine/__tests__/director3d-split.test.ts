@@ -4,6 +4,7 @@ import {
   needsDirector3dSplit,
   splitMixedDirector3dNode,
 } from '../director3d-split';
+import { autoSplitMixedDirector3dGraph } from '../director3d-split';
 
 describe('director3d-split', () => {
   it('detects mixed production + 3d state that needs a split', () => {
@@ -146,5 +147,42 @@ describe('director3d-split', () => {
     });
     expect(result.newNode).toBeUndefined();
     expect(result.newEdge).toBeUndefined();
+  });
+
+  it('DD-D-11 auto-split moves every split-required desk onto an independent 3D node', () => {
+    const input = {
+      nodes: [
+        {
+          id: 'desk-a',
+          type: 'director-desk',
+          position: { x: 0, y: 0 },
+          data: {
+            director3dMigrationDecision: 'split-required',
+            lastResults: [{ shotId: 'shotA', ok: true }],
+            sceneByShot: { shotA: { version: 2, shotId: 'shotA', candidates: [] } },
+          },
+        },
+        {
+          id: 'desk-b',
+          type: 'director-desk',
+          position: { x: 200, y: 0 },
+          data: {
+            director3dMigrationDecision: 'split-required',
+            lastResults: [{ shotId: 'shotB', ok: true }],
+            sceneByShot: { shotB: { version: 2, shotId: 'shotB', candidates: [] } },
+          },
+        },
+      ] as any,
+      edges: [] as any,
+    };
+    const result = autoSplitMixedDirector3dGraph(input);
+    expect(result.splitCount).toBe(2);
+    expect(result.nodes.filter((node) => node.type === 'director-3d')).toHaveLength(2);
+    expect(result.nodes.filter((node) => node.type === 'director-desk')).toHaveLength(2);
+    for (const node of result.nodes.filter((node) => node.type === 'director-desk')) {
+      expect((node.data as Record<string, unknown>).director3dMigrationDecision).toBe('split-done');
+      expect((node.data as Record<string, unknown>).sceneByShot).toBeUndefined();
+    }
+    expect(result.edges).toHaveLength(2);
   });
 });

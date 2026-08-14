@@ -44,11 +44,13 @@ import { runPictureGenJob } from '../picture-gen-runner';
 import { VideoPollTimeoutError } from '../poll-task';
 import { packPictureRefs, resolvePictureSendRefs } from '../picture-gen-refs';
 import {
-  archivePictureGeneration,
   readPictureGenerationHistory,
+  recordPictureGenerationRound,
 } from '../picture-gen-history';
 import {
   buildPictureGenSuccessPatch,
+  mergePicturePreviewUrls,
+  readPictureCompiledPrompts,
   writePictureShotPatch,
 } from '../picture-gen-commit';
 import { useWorkspaceDocument } from '../../stores/workspace-document';
@@ -353,6 +355,7 @@ export async function runPictureGenExecutor(ctx: BlockExecutorContext): Promise<
   }
 
   const reportBatchProgress = (done: number, total: number) => {
+    if (abortSignal?.aborted) return;
     updateNodeData(block.id, {
       status: 'running',
       batchProgress: { done, total },
@@ -511,6 +514,7 @@ export async function runPictureGenExecutor(ctx: BlockExecutorContext): Promise<
           seed: d.seed as number | undefined,
           signal: abortSignal,
           onMeta: (meta) => {
+            if (abortSignal?.aborted) return;
             if (meta.truncatedRefs && meta.truncatedRefs > packed.truncatedCount) {
               truncatedRefsTotal += meta.truncatedRefs - packed.truncatedCount;
             }
@@ -552,6 +556,7 @@ export async function runPictureGenExecutor(ctx: BlockExecutorContext): Promise<
   }
 
   if (urls.length === 0 && pendingImageTasks.length > 0) {
+    if (abortSignal?.aborted) throw new Error('已取消');
     updateNodeData(block.id, {
       status: 'running',
       pendingImageTasks,
@@ -608,19 +613,39 @@ export async function runPictureGenExecutor(ctx: BlockExecutorContext): Promise<
     });
   }
 
-  const previousUrls = existingGenerated;
-  const previousPrompt = typeof d.content === 'string' ? d.content : '';
-  const generationHistory = archivePictureGeneration(
-    previousUrls,
-    previousPrompt,
+  const userPrompt = typeof d.content === 'string' ? d.content : '';
+  // 追加模式：只记录本轮新图 + 本轮发送稿，避免旧图绑上最新稿
+  const generationHistory = recordPictureGenerationRound(
+    urls,
     readPictureGenerationHistory(d),
+    undefined,
+    { userPrompt, compiledPrompt: lastPrompt, prompt: userPrompt },
   );
+  // 新图置顶追加，不覆盖已有生成结果（删除仍可手动清）
+  const mergedUrls = mergePicturePreviewUrls(existingGenerated, urls, 'prepend');
 
   // PG-25: 绝不覆盖用户 content；警告走 message / lastResult
+  if (abortSignal?.aborted) throw new Error('已取消');
   updateNodeData(
     block.id,
     buildPictureGenSuccessPatch({
-      urls,
+      urls: mergedUrls,
+      incomingUrls: urls,
+      existingUrls: (() => {
+        const lastBatch = Math.max(
+          1,
+          Number(d.batchCount) ||
+            (d.lastResult && typeof d.lastResult === 'object' && 'count' in d.lastResult
+              ? Number((d.lastResult as { count?: number }).count)
+              : 0) ||
+            1,
+        );
+        // prepend 后上一轮新图在现有条的前缀；只回填这一段，避免旧图吃到上一轮稿
+        return existingGenerated.slice(0, Math.min(lastBatch, existingGenerated.length));
+      })(),
+      previousCompiledPrompts: readPictureCompiledPrompts(d),
+      previousLastCompiledPrompt:
+        typeof d.lastCompiledPrompt === 'string' ? d.lastCompiledPrompt : undefined,
       compiledPrompt: lastPrompt,
       failures,
       truncatedRefs: truncatedRefsTotal,
@@ -632,6 +657,7 @@ export async function runPictureGenExecutor(ctx: BlockExecutorContext): Promise<
       characterInjected: enhancedCtx.characters.map((c) => c.id),
       injectedRefs: lastInjectedRefs,
       modelFallbackNote,
+      pictureGenMode,
     }),
   );
 }

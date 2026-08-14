@@ -7,6 +7,7 @@ import { PATHS } from '../../config/app.config';
 
 export const HF_TASKS_FILE = join(PATHS.data, 'render-tasks', 'hyperframes.json');
 export const REMOTION_TASKS_FILE = join(PATHS.data, 'render-tasks', 'remotion.json');
+export const VIDEO_EDIT_TASKS_FILE = join(PATHS.data, 'render-tasks', 'video-edit.json');
 
 const MAX_TASKS = 200;
 

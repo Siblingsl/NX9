@@ -128,8 +128,16 @@ describe('F-010 接线与入口', () => {
     expect(pictureWs).toContain('已移入资产回收站');
 
     const modal = readFileSync(resolve(webSrc, 'panels/AssetLibraryModal.tsx'), 'utf8');
-    expect(modal).toContain('移入回收站');
-    expect(modal).toContain('AssetTrashPanel');
+    const modalActions = readFileSync(
+      resolve(webSrc, 'panels/asset-library/modal/use-asset-library-actions-core.ts'),
+      'utf8',
+    );
+    const modalShell = readFileSync(
+      resolve(webSrc, 'panels/asset-library/modal/AssetLibraryModalShell.tsx'),
+      'utf8',
+    );
+    expect(modalActions).toContain('移入回收站');
+    expect(modalShell).toContain('AssetTrashPanel');
 
     const trash = readFileSync(resolve(webSrc, 'panels/AssetTrashPanel.tsx'), 'utf8');
     expect(trash).toContain('资产回收站');

@@ -14,6 +14,10 @@ export interface FlowBlock {
     width?: number;
     height?: number;
     selected?: boolean;
+    parentId?: string;
+    extent?: 'parent';
+    hidden?: boolean;
+    style?: Record<string, unknown>;
 }
 export interface FlowLink {
     id: string;

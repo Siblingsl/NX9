@@ -132,8 +132,16 @@ export function resolvePictureSendRefs(opts: {
   const upstreamPics = uniqueUrls(opts.upstreamPics ?? []);
   const mentionRefs = uniqueUrls(opts.mentionRefs ?? []);
   const jobImageUrls = uniqueUrls(opts.jobImageUrls ?? []);
-  const characterRef = opts.characterRef?.trim() || undefined;
-  const envRef = opts.envRef?.trim() || undefined;
+  const rawCharacterRef = opts.characterRef?.trim() || undefined;
+  const rawEnvRef = opts.envRef?.trim() || undefined;
+  const excludedRefs = new Set(
+    Array.isArray(opts.data.excludedRefUrls)
+      ? (opts.data.excludedRefUrls as string[]).filter(Boolean)
+      : [],
+  );
+  // PG-38: 用户显式排除的注入参考不再进发送集合
+  const characterRef = rawCharacterRef && !excludedRefs.has(rawCharacterRef) ? rawCharacterRef : undefined;
+  const envRef = rawEnvRef && !excludedRefs.has(rawEnvRef) ? rawEnvRef : undefined;
   const proActionId = opts.data.pictureProAction as string | undefined;
 
   const userSubject = uniqueUrls([

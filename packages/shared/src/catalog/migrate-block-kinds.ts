@@ -121,13 +121,13 @@ export const BLOCK_KIND_MIGRATIONS: Record<string, string> = {
 
 /** 迁移时写入 data 的模式补丁，让主节点打开对应能力 */
 export const BLOCK_KIND_MIGRATION_PATCHES: Record<string, Record<string, unknown>> = {
-  'motion-story': { videoMode: 'motion' },
-  'seedance-chain': { videoMode: 'chain', model: 'seedance' },
-  'bridge-clip': { videoMode: 'bridge' },
-  'lipsync-pass': { videoMode: 'lipsync' },
-  'photo-speak': { videoMode: 'photo-speak' },
-  'frame-endpoints': { videoMode: 'frame-endpoints' },
-  'frame-sampler': { videoMode: 'frame-endpoints' },
+  'motion-story': { videoMode: 'single', videoGenMode: 'image-to-video' },
+  'seedance-chain': { videoMode: 'single', videoGenMode: 'image-to-video', model: 'seedance' },
+  'bridge-clip': { videoMode: 'bridge', videoGenMode: 'bridge' },
+  'lipsync-pass': { videoMode: 'single', videoGenMode: 'text-to-video' },
+  'photo-speak': { videoMode: 'single', videoGenMode: 'image-to-video' },
+  'frame-endpoints': { videoMode: 'single', videoGenMode: 'keyframe', useKeyframePair: true },
+  'frame-sampler': { videoMode: 'single', videoGenMode: 'keyframe', useKeyframePair: true },
 
   // F-005: asset-gate → 由 migrateBlockKinds 动态注入（根据原 gate.passed 决定 readiness）
 
@@ -257,6 +257,23 @@ function migrateScriptDeskNodeData(data: Record<string, unknown>): Record<string
   return next;
 }
 
+/** VG-47: 旧迁移补丁遗留的孤儿 videoMode（chain/motion/lipsync…）在加载时归一为 single/bridge。 */
+const LEGACY_CLIP_GEN_VIDEO_MODE_NORMALIZE: Record<string, Record<string, unknown>> = {
+  'motion': { videoMode: 'single', videoGenMode: 'image-to-video' },
+  'chain': { videoMode: 'single', videoGenMode: 'image-to-video' },
+  'lipsync': { videoMode: 'single', videoGenMode: 'text-to-video' },
+  'photo-speak': { videoMode: 'single', videoGenMode: 'image-to-video' },
+  'frame-endpoints': { videoMode: 'single', videoGenMode: 'keyframe', useKeyframePair: true },
+};
+
+function normalizeLegacyClipGenVideoMode(data: Record<string, unknown>): Record<string, unknown> {
+  const videoMode = data.videoMode as string | undefined;
+  if (!videoMode || videoMode === 'single' || videoMode === 'bridge') return data;
+  const patch = LEGACY_CLIP_GEN_VIDEO_MODE_NORMALIZE[videoMode];
+  if (!patch || data.videoGenMode) return data;
+  return { ...data, ...patch };
+}
+
 export function migrateBlockKinds<T extends MigratableNode>(
   nodes: T[],
 ): { nodes: T[]; migratedCount: number } {
@@ -317,6 +334,16 @@ export function migrateBlockKinds<T extends MigratableNode>(
     // 已是 script-desk：补 package / legacy 字段
     if (kind === 'script-desk') {
       const nextData = migrateScriptDeskNodeData(data);
+      if (nextData !== data) {
+        migratedCount += 1;
+        return { ...node, data: nextData } as T;
+      }
+      return node;
+    }
+
+    // VG-47: 已迁移为 clip-gen 的旧节点，清扫孤儿 videoMode
+    if (kind === 'clip-gen') {
+      const nextData = normalizeLegacyClipGenVideoMode(data);
       if (nextData !== data) {
         migratedCount += 1;
         return { ...node, data: nextData } as T;

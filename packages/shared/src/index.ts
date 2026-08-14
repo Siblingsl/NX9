@@ -354,6 +354,7 @@ export {
   removeVolumeKeyframe,
   splitVolumeKeyframes,
   clampClipVolume,
+  sortVolumeKeyframes,
 } from './utils/timeline-volume';
 export { FIXTURE_TIMELINE_V2, FIXTURE_SHOTS_FOR_TIMELINE } from './utils/fixtures-timeline';
 export {
@@ -589,6 +590,7 @@ export {
   touchStructuredPrompt,
   DEFAULT_SCENE_VARIANTS,
   DEFAULT_PROP_VARIANTS,
+  NX9_SCULPT_MESH_CONTRACT_VERSION,
 } from './types/creative-asset-center';
 export {
   COMMON_PROP_KEYWORDS,
@@ -642,6 +644,8 @@ export {
   getFaceRig,
   faceRigValue,
   setFaceRigValue,
+  faceRigSideValue,
+  setFaceRigSideValue,
   resetFaceRigGroup,
   applyFaceRigPreset,
   listFaceRigDeviations,
@@ -798,6 +802,7 @@ export {
   preferPrivateAssetByLabel,
   enrichPromptWithAssets,
   enrichPromptWithAssetMentions,
+  collectAssetMentionUrls,
   type AssetLibraryKind,
   type AssetScope,
   type AssetRef,
@@ -1199,6 +1204,7 @@ export {
   VIDEO_SIZE_PRESETS,
   orientationFromAspect,
   resolveVideoGenParams,
+  validateVideoModelParams,
 } from './utils/video-gen-params';
 export {
   AUDIO_FORMAT_OPTIONS,

@@ -108,10 +108,14 @@ describe('F-005 soft/hard 预检与接线源码守卫', () => {
       resolve(root, 'apps/web/src/blocks/nx9/ScriptDeskBlock.tsx'),
       'utf8',
     );
+    const actions = readFileSync(
+      resolve(root, 'apps/web/src/blocks/nx9/script-desk/use-script-desk-actions.ts'),
+      'utf8',
+    );
     expect(src.includes('AssetReadinessPanel')).toBe(true);
     expect(src.includes("'readiness'")).toBe(true);
     expect(src.includes('设定就绪')).toBe(true);
-    expect(src.includes('assetReadiness')).toBe(true);
+    expect(actions.includes('assetReadiness')).toBe(true);
     expect(src.includes('inspectBibleAssets')).toBe(true);
   });
 

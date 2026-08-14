@@ -34,10 +34,16 @@ export interface SmartSuggestion {
   targetClipIds: string[];
   message: string;
   /** @deprecated 遗留自由格式补丁；新建议一律走 ops */
-  patch: Record<string, unknown>;
+  patch?: Record<string, unknown>;
   /** 结构化时间线操作（applyTimelineOps 执行，可撤销）；空数组 = 纯提示型建议 */
   ops?: TimelineOp[];
   confidence: number;
+  /** 结构化能力元数据（如 beat-cut 的算法与是否做过音频听感） */
+  meta?: {
+    algorithm?: 'reference-shot-durations' | 'bpm-interval' | 'audio-onset';
+    source?: string;
+    audioAnalyzed?: boolean;
+  };
 }
 
 export function resolveEngine(profile: SmartEditProfile, engine: SmartEditEngine): SmartEditEngine {

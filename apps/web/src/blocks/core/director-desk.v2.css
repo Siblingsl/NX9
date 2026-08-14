@@ -1435,3 +1435,10 @@
 .dd2-episode-ctx--warn .dd2-episode-ctx__info {
   color: var(--desk-warn);
 }
+
+.dd2-episode-ctx__repair {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}

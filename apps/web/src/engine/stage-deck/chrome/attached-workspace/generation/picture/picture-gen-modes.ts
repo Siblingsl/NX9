@@ -73,6 +73,20 @@ export function readPictureGenMode(data: Record<string, unknown>): PictureGenMod
   return 'text-to-image';
 }
 
+/**
+ * PG-37: 工作区运行只写 runPrompt，不污染用户 content。
+ * flow-runner 对 picture-gen 优先取 runPrompt，缺失时才回退 content。
+ */
+export function resolvePictureGenRunPrompt(
+  data: Record<string, unknown>,
+): string | undefined {
+  const run = data.runPrompt;
+  if (typeof run === 'string' && run.trim()) return run;
+  const content = data.content;
+  return typeof content === 'string' ? content : undefined;
+}
+
+
 /** 不锁定模式的专业动作（仍按参考图自动文生/图生/多参考） */
 const BASIC_PRO_ACTION_IDS = new Set(['text-to-image', 'image-to-image', 'multi-prompt']);
 
@@ -132,7 +146,15 @@ export function lookupPictureGenModeDef(mode: PictureGenMode): PictureGenModeDef
   return PICTURE_GEN_MODES.find((m) => m.id === mode) ?? PICTURE_GEN_MODES[0];
 }
 
-export function patchPictureGenMode(mode: PictureGenMode): Record<string, unknown> {
+export function patchPictureGenMode(
+  mode: PictureGenMode,
+  current?: Record<string, unknown>,
+): Record<string, unknown> {
+  const currentAspectRatio = (current?.aspectRatio as string | undefined) || undefined;
+  const rememberedRatio = (current?.nonPanoramaAspectRatio as string | undefined) || undefined;
+  const leavingPanorama =
+    mode !== 'panorama-720' &&
+    (current?.pictureGenMode === 'panorama-720' || currentAspectRatio === '2:1');
   return {
     pictureGenMode: mode,
     useImageReference:
@@ -143,12 +165,17 @@ export function patchPictureGenMode(mode: PictureGenMode): Record<string, unknow
     ...(mode === 'panorama-720'
       ? {
           aspectRatio: '2:1',
+          ...(currentAspectRatio && currentAspectRatio !== '2:1'
+            ? { nonPanoramaAspectRatio: currentAspectRatio }
+            : {}),
           imageCount: 1,
           panoramaProjection: 'equirectangular',
           width: 2048,
           height: 1024,
         }
-      : {}),
+      : leavingPanorama
+        ? { aspectRatio: rememberedRatio || '1:1' }
+        : {}),
     ...(mode === 'upscale-hd' ? { imageCount: 1 } : {}),
   };
 }

@@ -46,7 +46,7 @@ describe('VG-22/23/25 执行路径接线', () => {
     expect(poll).toContain('export async function awaitProxyVideo');
     expect(poll).toContain('VideoPollTimeoutError');
 
-    const flow = readFileSync(resolve(webSrc, 'flow-runner.ts'), 'utf8');
+    const flow = readFileSync(resolve(webSrc, 'flow-runner-ops/clip-gen-ops.ts'), 'utf8');
     expect(flow).toContain('awaitProxyVideo');
     expect(flow).toContain('VideoPollTimeoutError');
     expect(flow).toContain('pendingVideoTasks');

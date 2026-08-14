@@ -473,6 +473,16 @@ export function ScreenplayPanel({
                   return next;
                 });
               }}
+              onKeyDown={(e) => {
+                if (e.key !== 'Enter' && e.key !== ' ') return;
+                e.preventDefault();
+                setOpenEpIds((prev) => {
+                  const next = new Set(prev);
+                  if (next.has(ep.id)) next.delete(ep.id);
+                  else next.add(ep.id);
+                  return next;
+                });
+              }}
               onDragStart={(e) => {
                 setDragEpId(ep.id);
                 (e.currentTarget as HTMLElement).closest('.sd2-ep')?.classList.add('is-dragging');

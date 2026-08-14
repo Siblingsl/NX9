@@ -54,13 +54,51 @@ export {
   type SculptCompatibilityReport,
   type SculptModelSource,
 } from './sculpt/sculpt-contract';
+export {
+  NX9_CHARACTER_BASE_GLB_URL,
+  NX9_CHARACTER_BASE_MANIFEST_URL,
+  loadCharacterModel,
+  validateCharacterAssetManifest,
+  type CharacterModelLoadResult,
+  type LoadCharacterModelOptions,
+  type Nx9CharacterAssetManifest,
+} from './sculpt/character-model-loader';
+export {
+  MATERIAL_DRIVERS,
+  MATERIAL_DRIVER_PARAM_IDS,
+  applyMaterialDriver,
+  collectMaterialChannels,
+  hasMaterialChannel,
+  type MaterialDriverDef,
+} from './sculpt/material-drivers';
+export { computeStageBodyScales, type StageBodyScales } from './runtime/stage-body-bridge';
 export { applyFaceRigToObject, readBoneScale, readMorphInfluence } from './sculpt/apply-face-rig';
 export { createBareSculptRoot, createProxyCharacter } from './sculpt/procedural-body';
 export { createProxyHeadMesh } from './sculpt/procedural-head';
+export {
+  CANONICAL_FACE_VIEW_WIDTH,
+  CANONICAL_FACE_VIEW_HEIGHT,
+  SCULPT_CAMERA_PRESETS,
+  applyCameraPreset,
+  createCanonicalFaceCamera,
+  type SculptCameraPresetId,
+} from './sculpt/sculpt-cameras';
+export {
+  SCULPT_HANDLES,
+  applyHandleDrag,
+  clampFaceRigValue,
+  handleDefById,
+  handleDefByName,
+  type SculptHandleDef,
+  type SculptHandleDragAxis,
+  type SculptHandleSide,
+} from './sculpt/sculpt-handles';
+export { createSculptLights } from './sculpt/sculpt-lights';
 export { CharacterSculptViewport } from './sculpt/CharacterSculptViewport';
 export type { CharacterSculptViewportHandle } from './sculpt/CharacterSculptViewport';
 export { CharacterSculptScene } from './sculpt/CharacterSculptScene';
 export type { SculptViewState } from './sculpt/CharacterSculptScene';
+export type { CharacterModelLoadOutcome } from './sculpt/CharacterSculptScene';
 export {
   exportProjectJson,
   importProjectJson,

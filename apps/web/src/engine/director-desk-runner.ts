@@ -29,6 +29,7 @@ import {
   type GenPromptPack,
   type KeyframeColorCheck,
   readChainStoryboard,
+  hasDirector3dGuide,
   emptyKeyframeColorCheck,
   normalizeKeyframeColorCheck,
 } from '@nx9/shared';
@@ -79,6 +80,8 @@ export interface DirectorDeskBatchOptions {
   forceSceneRef?: boolean;
   /** P2：统一风格锁：显式 global/episode direction + stylePrompt + seed */
   styleLock?: boolean;
+  /** DD-D-07: 默认 false；为 true 时才允许工作区全局美术方向进入风格锁。 */
+  useGlobalArtDirection?: boolean;
   globalArtDirection?: string;
   episodeArtDirection?: string;
   /** P2：全局风格补充文案 */
@@ -599,7 +602,7 @@ export function summarizeDirectorQueue(shots: StoryboardShot[]) {
   let approved = 0;
   let with3d = 0;
   for (const s of shots) {
-    if (s.director3dGuide?.captureUrl) with3d += 1;
+    if (hasDirector3dGuide(s)) with3d += 1;
     if (isShotKeyframeFailed(s)) failed += 1;
     else if (isShotKeyframeApproved(s) && s.firstFrameAssetId) approved += 1;
     else if (s.firstFrameAssetId && (s.keyframeStatus === 'review' || s.status === 'review')) review += 1;
@@ -792,7 +795,7 @@ export function resolveDirectorQueueShots(
   } else if (filter === 'failed') {
     list = allActive.filter(isShotKeyframeFailed);
   } else if (filter === '3donly') {
-    list = allActive.filter((s) => s.director3dGuide?.captureUrl);
+    list = allActive.filter(hasDirector3dGuide);
   } else if (filter === 'all') {
     list = [...allActive];
   } else {
@@ -933,7 +936,7 @@ export function buildShotPrompt(
 
   // P2 风格锁
   if (styleLock) {
-    const globalStyle = opts.globalArtDirection?.trim();
+    const globalStyle = opts.useGlobalArtDirection === true ? opts.globalArtDirection?.trim() : undefined;
     const epStyle = opts.episodeArtDirection?.trim();
     const custom = opts.stylePrompt?.trim() || (opts.blockData?.stylePrompt as string | undefined)?.trim();
     const styleBits = [globalStyle, epStyle, custom].filter(Boolean);
@@ -947,7 +950,11 @@ export function buildShotPrompt(
   // D-03/R-01: 线稿构图参考（preferLineArtRef 默认 true）
   const preferLineArt = opts.preferLineArtRef ?? true;
   const lineArtUrl = opts.lineArtByShotId?.[shot.id]?.trim();
-  const d3 = shot.director3dGuide?.captureUrl?.trim();
+  const guide3d = shot.director3dGuide;
+  const d3 = guide3d?.captureUrl?.trim();
+  if (guide3d?.captureUrlPendingRepair && !d3) {
+    craft.push('note: 3D capture is pending repair, do not infer a camera screenshot');
+  }
   const charRef = pickReferenceImage(characters, []);
   const envRef = env?.referenceImageUrl?.trim() || env?.referenceUrls?.[0]?.trim();
   const upstream = opts.upstreamPictures?.find((u) => u?.trim());
@@ -1114,13 +1121,13 @@ async function attemptGenerate(
     };
   }
 
-  if (opts.allowWithout3d === false && !shot.director3dGuide?.captureUrl) {
+  if (opts.allowWithout3d === false && !hasDirector3dGuide(shot)) {
     opts.patchShot(shot.id, { status: 'failed', keyframeStatus: 'failed' });
     return {
       shotId: shot.id,
       index: shot.index,
       ok: false,
-      error: '需要 3D 机位截图',
+      error: shot.director3dGuide?.captureUrlPendingRepair ? '3D 机位截图待修复，请重新上传' : '需要 3D 机位截图',
       prompt: built.prompt,
       attempts: attempt,
       phase: 'failed',
@@ -1154,6 +1161,9 @@ async function attemptGenerate(
   opts.onShotPhase?.(shot, attempt > 1 ? 'retrying' : 'generating', `attempt ${attempt}`);
 
   try {
+    // PG-44: 导演域直调 runPictureGenJob，账本以 keyframeProvenance 为准
+    // （usedRefs/model/promptHash/batchId）；不写 picture-gen 节点 usedAssetIds，
+    // 避免把导演批关键帧误当节点 result，两套账本边界明确。
     const urls = await runPictureGenJob({
       prompt: built.prompt,
       modelId,
@@ -1171,9 +1181,9 @@ async function attemptGenerate(
 
     const colorCheck = await inspectDirectorKeyframeColor(url, opts.inspectKeyframeColor);
     const reviewMode = opts.reviewMode ?? (opts.blockData?.reviewMode as 'manual' | 'auto' | undefined) ?? 'manual';
-    // 疑似黑白强制进审阅；未知/彩色才允许 auto 直接批准。禁止因质检标失败。
+    // DD-D-12: 疑似黑白与质检失败(unknown)都进审阅；只有明确彩色才允许 auto 批准。禁止因质检标失败。
     const nextStatus =
-      colorCheck.verdict === 'suspect-monochrome'
+      colorCheck.verdict === 'suspect-monochrome' || colorCheck.verdict === 'unknown'
         ? 'review'
         : reviewMode === 'manual'
           ? 'review'
@@ -1207,7 +1217,7 @@ async function attemptGenerate(
     opts.onShotPhase?.(
       shot,
       phase,
-      colorCheck.verdict === 'suspect-monochrome'
+      colorCheck.verdict === 'suspect-monochrome' || colorCheck.verdict === 'unknown'
         ? '结果疑似线稿/黑白，已保留关键帧，请人工确认'
         : undefined,
     );
@@ -1479,7 +1489,7 @@ export function pushKeyframesToClipGen(args: {
       first.promptEn ||
       first.descriptionZh ||
       '',
-    previewUrl: first.firstFrameAssetId,
+    // DD-D-06: 交接代表帧走链镜表 firstFrameAssetId；节点 previewUrl 不承担业务语义。
     directorDeskRefs: pictures,
     directorKeyframeBatch: batch,
     requireKeyframeGate: true,

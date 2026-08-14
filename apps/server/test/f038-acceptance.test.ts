@@ -163,28 +163,35 @@ describe('F-038 acceptance', () => {
 
   // ═══════════ 前端 UI 权限门面 ═══════════
   describe('前端 UI 权限门面', () => {
-    const src = read(MODAL_FILE);
+    const controller = read(resolve(WEB_ROOT, 'panels/asset-library/modal/use-asset-library-modal-controller.ts'));
+    const catalog = read(resolve(WEB_ROOT, 'panels/asset-library/modal/use-asset-library-catalog.ts'));
+    const charView = read(resolve(WEB_ROOT, 'panels/asset-library/modal/AssetDetailCharacterView.tsx'));
+    const entityView = read(resolve(WEB_ROOT, 'panels/asset-library/modal/AssetDetailEntityView.tsx'));
+    const actionsCore = read(resolve(WEB_ROOT, 'panels/asset-library/modal/use-asset-library-actions-core.ts'));
     const chars = read(resolve(WEB_ROOT, 'panels/asset-library/CharacterCardGrid.tsx'));
     const entities = read(resolve(WEB_ROOT, 'panels/asset-library/EntityCardGrid.tsx'));
 
     it('导入 useLibraryAcl', () => {
-      expect(src).toContain('useLibraryAcl');
+      expect(controller).toContain('useLibraryAcl');
+      expect(catalog).toContain('useLibraryAcl');
     });
 
     it('解构 canRead/canWrite/canDelete 为布尔', () => {
-      expect(src).toContain('const { canRead, canWrite, canDelete: canDeleteItem } = acl;');
+      expect(controller).toContain('const { canRead, canWrite, canDelete: canDeleteItem } = acl;');
     });
 
     it('canWrite 守卫角色定妆图按钮', () => {
-      expect(src).toContain('canWrite &&');
+      expect(charView).toContain('canWrite ?');
+      expect(charView).toContain('generateCharacterMasterSheet');
     });
 
     it('canWrite 守卫场景图按钮', () => {
-      expect(src).toContain('canWrite &&');
+      expect(entityView).toContain('canEditCurrent ?');
+      expect(entityView).toContain('generateSceneSheet');
     });
 
     it('canDeleteItem 守卫删除按钮 onClick', () => {
-      expect(src).toMatch(/canDeleteItem[\s\S]{0,120}handleDelete/);
+      expect(charView).toMatch(/canDeleteItem[\s\S]{0,120}handleDelete/);
     });
 
     it('复制到项目按钮存在', () => {
@@ -193,10 +200,10 @@ describe('F-038 acceptance', () => {
     });
 
     it('handleCopyPublicToWorkspace 回调存在', () => {
-      expect(src).toContain('handleCopyPublicToWorkspace');
-      expect(src).toContain('publicTemplates.find');
-      expect(src).toContain('templateToWorkspaceItem');
-      expect(src).toContain('refreshWorkspacePrompts');
+      expect(actionsCore).toContain('handleCopyPublicToWorkspace');
+      expect(actionsCore).toContain('publicTemplates.find');
+      expect(actionsCore).toContain('templateToWorkspaceItem');
+      expect(actionsCore).toContain('refreshWorkspacePrompts');
     });
 
     it('公共非内置条目显示复制到项目而非删除', () => {

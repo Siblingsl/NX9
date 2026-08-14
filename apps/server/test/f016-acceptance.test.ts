@@ -229,15 +229,16 @@ describe('F-016 分镜多集批量拆镜队列', () => {
 
   // ─── StoryboardDeskBlock 集成源码守卫 ───
   it('StoryboardDeskBlock 接入 runQueueForEpisodes', () => {
-    const src = readWeb('blocks/craft/storyboard-desk/use-storyboard-desk.tsx');
+    const hook = readWeb('blocks/craft/storyboard-desk/use-storyboard-desk.tsx');
+    const ops = readWeb('blocks/craft/storyboard-desk/breakdown-queue-ops.ts');
 
-    expect(src).toContain('runQueueForEpisodes');
-    expect(src).toContain('createEpisodeQueue');
-    expect(src).toContain('EpisodeQueueBar');
-    expect(src).toContain('handleQueuePause');
-    expect(src).toContain('handleQueueResume');
-    expect(src).toContain('handleQueueSkip');
-    expect(src).toContain('handleQueueCancel');
+    expect(ops).toContain('runQueueForEpisodes');
+    expect(hook).toContain('createEpisodeQueue');
+    expect(hook).toContain('EpisodeQueueBar');
+    expect(ops).toContain('handleQueuePause');
+    expect(ops).toContain('handleQueueResume');
+    expect(ops).toContain('handleQueueSkip');
+    expect(ops).toContain('handleQueueCancel');
   });
 
   it('StoryboardDeskBlock 多处拆镜按钮全量拆镜走队列', () => {

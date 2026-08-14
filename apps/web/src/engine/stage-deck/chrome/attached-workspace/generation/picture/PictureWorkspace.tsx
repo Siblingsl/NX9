@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { AssetLibraryKind } from '@nx9/shared';
 import {
   IMAGE_ASPECT_OPTIONS,
+  buildCharacterContext,
   lookupBlock,
   resolveImageRequestSize,
   resolvePictureModelForRequest,
@@ -41,6 +42,7 @@ import {
 import { PictureMultiPromptEditor } from './PictureMultiPromptEditor';
 import { PictureProActionMenu } from './PictureProActionMenu';
 import {
+  buildClearPictureProActionPatch,
   buildPictureProActionPatch,
   composePictureProPrompt,
   filledMultiPrompts,
@@ -64,9 +66,14 @@ import {
   readPictureGenerationHistory,
   restorePictureGeneration,
 } from '../../../../../picture-gen-history';
-import { uniqueLibraryLabel } from '../../../../../picture-gen-refs';
-import { commitPicturePreviewUrls } from '../../../../../picture-gen-commit';
+import { resolvePictureSendRefs, uniqueLibraryLabel, type PictureInjectedRef } from '../../../../../picture-gen-refs';
+import { commitPicturePreviewUrls, mergePicturePreviewUrls, prunePictureCompiledPrompts, readPictureCompiledPrompts, rebuildPictureCompiledPromptsFromHistory, resolvePictureCompiledPrompt, writePictureShotPatch } from '../../../../../picture-gen-commit';
 import { resumePendingImageTasks, type PendingImageTask } from '../../../../../picture-gen-runner';
+import {
+  abortBlockRun,
+  beginBlockRunAbort,
+  endBlockRunAbort,
+} from '../../../../../block-run-abort';
 
 const EMPTY_HISTORY: { id: string; blockId: string; text: string; savedAt: number }[] = [];
 const PICTURE_MENTION_KINDS: AssetLibraryKind[] = ['character', 'scene', 'costume', 'prop'];
@@ -99,6 +106,7 @@ export function PictureWorkspace({ blockId, kind, onCollapse }: PictureWorkspace
   const { pictures: upstreamPictures } = useUpstreamMedia(blockId);
   const { hasUpstream, shotIds, shots } = useUpstreamShots(blockId);
   const libraryCharacters = useWorkspaceDocument((s) => s.characters.characters);
+  const environments = useWorkspaceDocument((s) => s.environments);
   const handleAiAction = useWorkspaceAiLog();
   const [selectedResult, setSelectedResult] = useState(0);
   const [refBusy, setRefBusy] = useState(false);
@@ -125,8 +133,14 @@ export function PictureWorkspace({ blockId, kind, onCollapse }: PictureWorkspace
       return;
     }
     const prev = Array.isArray(data.linkedShotIds) ? (data.linkedShotIds as string[]) : [];
-    const nextId = shotIds[0] ?? undefined;
+    // PG-39: spawn/用户已指定的 linkedShotId 若仍在上游集合内则保留，禁止强改成第一镜
+    const explicitId = (data.linkedShotId as string | undefined)?.trim() ?? undefined;
+    const nextId =
+      explicitId && shotIds.includes(explicitId)
+        ? explicitId
+        : (shotIds[0] ?? undefined);
     const prevSingle = (data.linkedShotId as string | undefined) ?? undefined;
+    const selectedShot = shots.find((s) => s.id === nextId) ?? shots[0];
     if (
       prev.length === shotIds.length &&
       prev.every((id, i) => id === shotIds[i]) &&
@@ -138,10 +152,10 @@ export function PictureWorkspace({ blockId, kind, onCollapse }: PictureWorkspace
       linkedShotIds: shotIds,
       linkedShotId: nextId,
       linkedShotLabel:
-        shots.length > 1
-          ? `写回第 1 / ${shots.length} 镜（#${(shots[0]?.index ?? 0) + 1}）`
-          : shots[0]
-            ? `写回镜头 #${(shots[0].index ?? 0) + 1}`
+        shots.length > 1 && selectedShot
+          ? `写回第 ${shots.indexOf(selectedShot) + 1} / ${shots.length} 镜（#${(selectedShot.index ?? 0) + 1}）`
+          : selectedShot
+            ? `写回镜头 #${(selectedShot.index ?? 0) + 1}`
             : undefined,
     });
   }, [
@@ -204,6 +218,51 @@ export function PictureWorkspace({ blockId, kind, onCollapse }: PictureWorkspace
     return single ? [single] : [];
   }, [data.previewUrl, data.previewUrls]);
 
+  /** 每张生成图自己的发送稿；缺账时从历史重建 + 最新一张回退 lastCompiledPrompt */
+  const compiledPromptsByUrl = useMemo(() => {
+    const stored = { ...readPictureCompiledPrompts(data) };
+    const fromHistory = rebuildPictureCompiledPromptsFromHistory(data);
+    const last =
+      typeof data.lastCompiledPrompt === 'string' ? data.lastCompiledPrompt.trim() : '';
+    // 旧图若账本/历史只是在复读「最新一轮」，视为污染，宁可不展示也不误导
+    if (last) {
+      for (const url of previewUrls.slice(1)) {
+        const key = url?.trim();
+        if (!key) continue;
+        if (stored[key] === last) delete stored[key];
+        if (fromHistory[key] === last) delete fromHistory[key];
+      }
+    }
+    const out: Record<string, string> = { ...fromHistory, ...stored };
+    if (last && previewUrls[0] && !out[previewUrls[0]]) {
+      out[previewUrls[0]] = last;
+    }
+    return out;
+  }, [data, previewUrls]);
+
+  // 把重建后的 per-url 发送稿写回节点，避免下次再误读「最新一轮」
+  useEffect(() => {
+    if (previewUrls.length === 0) return;
+    const stored = readPictureCompiledPrompts(data);
+    let dirty = false;
+    const next = { ...stored };
+    for (const url of previewUrls) {
+      const key = url?.trim();
+      if (!key) continue;
+      const want = compiledPromptsByUrl[key];
+      if (want && stored[key] !== want) {
+        next[key] = want;
+        dirty = true;
+      }
+    }
+    if (!dirty) return;
+    handlePatch({
+      previewCompiledPrompts: prunePictureCompiledPrompts(next, previewUrls),
+    });
+    // 仅在账本缺口时回写；故意不依赖 handlePatch 引用
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [blockId, compiledPromptsByUrl, previewUrls]);
+
   const modelDef = resolvePictureModelForRequest(model);
   /** PG-05: Seed 仅 fal 系模型真实生效 */
   const seedSupported = modelDef.provider === 'fal';
@@ -224,9 +283,31 @@ export function PictureWorkspace({ blockId, kind, onCollapse }: PictureWorkspace
     ta?.focus();
   }, [blockId, focusNonce]);
 
+  const handleClearProAction = useCallback(() => {
+    const excluded = new Set(
+      ((data.excludedRefUrls as string[] | undefined) ?? []).filter(Boolean),
+    );
+    const effectiveRefCount = [
+      ...resolveUploadedReferenceUrls(data),
+      ...upstreamPictures,
+      (data.styleImageUrl as string | undefined)?.trim(),
+    ].filter((u): u is string => typeof u === 'string' && Boolean(u.trim()) && !excluded.has(u)).length;
+    handlePatch(buildClearPictureProActionPatch(data, effectiveRefCount));
+    appendLog('图像专业工具 · 已退出');
+  }, [appendLog, data, handlePatch, upstreamPictures]);
+
   const handleSelectProAction = useCallback(
     (action: PictureProActionDef) => {
-      const patch = buildPictureProActionPatch(action);
+      // 再次点同一专业动作 / 已锁死的放大·全景 → 退出，避免只清标记、模式卡住
+      const alreadyActive =
+        proActionId === action.id ||
+        (action.pictureGenMode === 'upscale-hd' && pictureGenMode === 'upscale-hd') ||
+        (action.pictureGenMode === 'panorama-720' && pictureGenMode === 'panorama-720');
+      if (alreadyActive) {
+        handleClearProAction();
+        return;
+      }
+      const patch = buildPictureProActionPatch(action, data);
       // 图生图类自动切支持参考的模型
       if (
         action.needsReference &&
@@ -242,14 +323,22 @@ export function PictureWorkspace({ blockId, kind, onCollapse }: PictureWorkspace
         const seeded = seedMultiPrompts(data.multiPrompts, draft);
         patch.multiPrompts = seeded;
         patch.imageCount = Math.max(1, filledMultiPrompts(seeded).length || seeded.length);
-        const first = filledMultiPrompts(seeded)[0];
-        if (first) patch.content = first;
       }
       // 空 prompt 时用动作 hint 作 placeholder 引导；不强制覆盖已有正文
       handlePatch(patch);
       appendLog(`图像专业工具 · ${action.label}`);
     },
-    [appendLog, data.multiPrompts, draft, handlePatch, model],
+    [
+      appendLog,
+      data.multiPrompts,
+      data,
+      draft,
+      handleClearProAction,
+      handlePatch,
+      model,
+      pictureGenMode,
+      proActionId,
+    ],
   );
 
   const handleMultiPromptsChange = useCallback(
@@ -259,7 +348,6 @@ export function PictureWorkspace({ blockId, kind, onCollapse }: PictureWorkspace
       handlePatch({
         multiPrompts: normalized,
         imageCount: Math.max(1, filled.length || normalized.length),
-        content: filled[0] ?? '',
       });
     },
     [handlePatch],
@@ -272,6 +360,10 @@ export function PictureWorkspace({ blockId, kind, onCollapse }: PictureWorkspace
       handlePatch({
         previewUrls: next,
         previewUrl: next[0] ?? undefined,
+        previewCompiledPrompts: prunePictureCompiledPrompts(
+          readPictureCompiledPrompts(data),
+          next,
+        ),
       });
       setSelectedResult((prev) => {
         if (next.length === 0) return 0;
@@ -286,17 +378,48 @@ export function PictureWorkspace({ blockId, kind, onCollapse }: PictureWorkspace
           label: `生成图 ${index + 1}`,
           sourceBlockId: blockId,
         });
+        // PG-40: 删除的是绑定镜 firstFrame 时同步镜表，避免分镜/预览裂图
+        const linkedShotId = (data.linkedShotId as string | undefined)?.trim();
+        const linkedShot = linkedShotId ? shots.find((s) => s.id === linkedShotId) : undefined;
+        if (linkedShot && linkedShot.firstFrameAssetId === removed) {
+          writePictureShotPatch({
+            blockId,
+            shotId: linkedShot.id,
+            patch: next[0]
+              ? {
+                  firstFrameAssetId: next[0],
+                  keyframeStatus: 'review' as const,
+                  status: 'review' as const,
+                }
+              : {
+                  firstFrameAssetId: null,
+                  keyframeStatus: 'draft' as const,
+                  status: 'draft' as const,
+                },
+            updateNodeData: (id, patch) => updateNodeData(id, patch),
+            nodes: nodes.map((n) => ({
+              id: n.id,
+              type: n.type,
+              data: (n.data ?? {}) as Record<string, unknown>,
+            })),
+            edges,
+          });
+          appendLog('已同步绑定镜头 firstFrame');
+        }
         toastSuccess('已移入资产回收站');
       }
       appendLog(`已移入回收站 · 生成图 ${index + 1}`);
     },
-    [appendLog, blockId, handlePatch, previewUrls],
+    [appendLog, blockId, data, edges, handlePatch, nodes, previewUrls, shots, updateNodeData],
   );
 
   /** PG-10/PG-23: 把选中生成图入库为场景 / 道具参考（封面 + 参考图带图入库，label 去重） */
   const handleSaveToLibrary = useCallback(
     (url: string, kindTarget: 'scene' | 'prop') => {
-      const promptText = ((data.content as string) || draft || '').trim();
+      const selectedPrompt =
+        resolvePictureCompiledPrompt(data, url) ||
+        ((data.content as string) || draft || '').trim();
+      const promptText = selectedPrompt.trim();
       const base =
         promptText.split('\n')[0]?.slice(0, 20).trim() ||
         `生成图 ${new Date().toLocaleDateString()}`;
@@ -360,6 +483,13 @@ export function PictureWorkspace({ blockId, kind, onCollapse }: PictureWorkspace
         readPictureGenerationHistory(data),
       );
       if (!restored) return;
+      const restoredPrompt = (restored.compiledPrompt ?? restored.userPrompt ?? '').trim();
+      const restoredPromptMap = Object.fromEntries(
+        restored.urls
+          .map((u) => u?.trim())
+          .filter((u): u is string => Boolean(u))
+          .map((u) => [u, restoredPrompt || resolvePictureCompiledPrompt(data, u) || '']),
+      );
       // PG-27: 恢复历史同步镜表 firstFrame + 归档当前
       commitPicturePreviewUrls({
         blockId,
@@ -373,14 +503,27 @@ export function PictureWorkspace({ blockId, kind, onCollapse }: PictureWorkspace
         })),
         edges,
         archiveCurrent: false,
+        previewCompiledPrompts: prunePictureCompiledPrompts(restoredPromptMap, restored.urls),
         extraPatch: {
           generationHistory: restored.history,
           status: 'success',
+          ...(restoredPrompt ? { lastCompiledPrompt: restoredPrompt } : {}),
         },
       });
       appendLog('已恢复上一轮生成结果');
     },
     [appendLog, blockId, data, draft, edges, nodes, previewUrls, updateNodeData],
+  );
+
+  /** PG-45: 单独恢复历史条目的用户原稿，不替换当前生成图 */
+  const handleRestorePrompt = useCallback(
+    (entryId: string) => {
+      const entry = readPictureGenerationHistory(data).find((h) => h.id === entryId);
+      if (!entry) return;
+      applyText(entry.userPrompt ?? entry.prompt);
+      appendLog('已恢复该轮用户提示词');
+    },
+    [appendLog, applyText, data],
   );
 
   const handleResumePending = useCallback(async () => {
@@ -393,18 +536,23 @@ export function PictureWorkspace({ blockId, kind, onCollapse }: PictureWorkspace
           ? [{ taskId: single }]
           : [];
     if (tasks.length === 0) return;
-    const controller = new AbortController();
+    const controller = beginBlockRunAbort(blockId);
     runAbortRef.current = controller;
     handlePatch({ status: 'running' });
     try {
       const result = await resumePendingImageTasks(tasks, controller.signal);
-      const nextUrls = [...previewUrls, ...result.urls];
+      const nextUrls = mergePicturePreviewUrls(previewUrls, result.urls, 'append');
       // PG-27: 继续查询写回预览 + 镜表 firstFrame + 历史归档
       if (result.urls.length) {
         commitPicturePreviewUrls({
           blockId,
           data,
           urls: nextUrls,
+          incomingUrls: result.urls,
+          compiledPromptForIncoming:
+            typeof data.lastCompiledPrompt === 'string'
+              ? data.lastCompiledPrompt
+              : undefined,
           updateNodeData: (id, patch) => updateNodeData(id, patch),
           nodes: nodes.map((n) => ({
             id: n.id,
@@ -447,6 +595,7 @@ export function PictureWorkspace({ blockId, kind, onCollapse }: PictureWorkspace
       if (controller.signal.aborted) appendLog('已停止查询');
       else toastError(String(e));
     } finally {
+      endBlockRunAbort(blockId, controller);
       if (runAbortRef.current === controller) runAbortRef.current = null;
     }
   }, [appendLog, blockId, data, edges, handlePatch, nodes, previewUrls, updateNodeData]);
@@ -566,10 +715,11 @@ export function PictureWorkspace({ blockId, kind, onCollapse }: PictureWorkspace
     const effectiveRefs = [
       ...resolvePictureReferenceUrls(data),
       ...upstreamPictures.filter((u) => u && !excluded.has(u)),
+      ...predictedSend.injected.map((i) => i.url).filter((u) => !excluded.has(u)),
     ];
     const runtimeMode = resolveRuntimePictureGenMode(data, effectiveRefs);
     const prePatch: Record<string, unknown> = {
-      ...patchPictureGenMode(runtimeMode),
+      ...patchPictureGenMode(runtimeMode, data),
     };
     if (proActionId === 'text-to-image' || proActionId === 'image-to-image') {
       prePatch.pictureProAction = undefined;
@@ -585,7 +735,7 @@ export function PictureWorkspace({ blockId, kind, onCollapse }: PictureWorkspace
       }
       prePatch.multiPrompts = slots;
       prePatch.imageCount = filled.length;
-      prePatch.content = filled[0];
+      prePatch.runPrompt = filled[0];
     } else {
       // 底栏已去掉「N张」：普通路径固定 1 张；多张走「生成多图」
       prePatch.imageCount = 1;
@@ -616,14 +766,14 @@ export function PictureWorkspace({ blockId, kind, onCollapse }: PictureWorkspace
     if (proAction?.promptSuffix && !isPictureMultiPromptAction(proActionId)) {
       const composed = composePictureProPrompt(draft, proAction);
       if (composed !== draft) {
-        prePatch.content = composed;
+        prePatch.runPrompt = composed;
       }
     }
     updateNodeData(blockId, prePatch);
 
-    // PG-04: 每次运行持有可中断的控制器
+    // PG-04: 每次运行持有可中断的控制器（按 blockId 登记，防 remount 丢 ref）
     runAbortRef.current?.abort();
-    const controller = new AbortController();
+    const controller = beginBlockRunAbort(blockId);
     runAbortRef.current = controller;
 
     try {
@@ -676,7 +826,9 @@ export function PictureWorkspace({ blockId, kind, onCollapse }: PictureWorkspace
         appendLog(`运行失败: ${String(e)}`);
       }
     } finally {
+      endBlockRunAbort(blockId, controller);
       if (runAbortRef.current === controller) runAbortRef.current = null;
+      updateNodeData(blockId, { runPrompt: undefined });
     }
   }, [
     flushNow,
@@ -697,14 +849,21 @@ export function PictureWorkspace({ blockId, kind, onCollapse }: PictureWorkspace
     imageCount,
   ]);
 
-  /** PG-04: 停止生成 — 中断在途请求并把节点状态收回 idle */
+  /** PG-04: 停止生成 — 中断在途请求并把节点状态收回 idle（即使 remount 丢了 ref 也要能停） */
   const handleStop = useCallback(() => {
-    const controller = runAbortRef.current;
-    if (!controller) return;
-    controller.abort();
-    runAbortRef.current = null;
-    updateNodeData(blockId, { status: 'idle', error: undefined });
-    appendLog('已停止生成');
+    const hadController = abortBlockRun(blockId) || Boolean(runAbortRef.current);
+    if (runAbortRef.current) {
+      runAbortRef.current.abort();
+      runAbortRef.current = null;
+    }
+    // 无控制器时也必须收回 idle：否则 Stop 按钮会一直显示且点击无任何反馈
+    updateNodeData(blockId, {
+      status: 'idle',
+      error: undefined,
+      message: undefined,
+      batchProgress: undefined,
+    });
+    appendLog(hadController ? '已停止生成' : '已停止（收回空闲）');
   }, [appendLog, blockId, updateNodeData]);
 
   useEffect(() => {
@@ -730,6 +889,48 @@ export function PictureWorkspace({ blockId, kind, onCollapse }: PictureWorkspace
   const excludedRefUrls = (data.excludedRefUrls as string[]) ?? [];
   const uploadRefUrls = useMemo(() => resolveUploadedReferenceUrls(data), [data]);
   const allRefUrls = useMemo(() => resolvePictureReferenceUrls(data), [data]);
+  const linkedShotForPreview = useMemo(() => {
+    const id = (data.linkedShotId as string | undefined)?.trim();
+    return (id ? shots.find((s) => s.id === id) : undefined) ?? shots[0];
+  }, [data.linkedShotId, shots]);
+
+  /** PG-38: 与执行器同源的发送参考预判（含定妆/场景注入），UI 据此展示真实模式与注入图 */
+  const predictedSend = useMemo(() => {
+    const charCtx = buildCharacterContext(data, linkedShotForPreview, libraryCharacters, upstreamPictures);
+    const env = (environments?.environments ?? []).find(
+      (e) =>
+        (linkedShotForPreview?.sceneCode && e.sceneCode === linkedShotForPreview.sceneCode) ||
+        (linkedShotForPreview?.sceneAssetId && e.id === linkedShotForPreview.sceneAssetId),
+    ) as { referenceUrls?: string[]; referenceImageUrl?: string } | undefined;
+    const envRef = env
+      ? (env.referenceUrls?.[0] ?? env.referenceImageUrl)?.trim() || undefined
+      : undefined;
+    return resolvePictureSendRefs({
+      data,
+      nodeRef: (data.referenceImageUrl as string | undefined)?.trim(),
+      multiRefs: Array.isArray(data.referenceImageUrls)
+        ? (data.referenceImageUrls as string[])
+        : [],
+      styleImageUrl: (data.styleImageUrl as string | undefined)?.trim(),
+      upstreamPics: upstreamPictures.filter((u) => u && !excludedRefUrls.includes(u)),
+      mentionRefs: resolveLocalMediaMentionUrls(
+        draft,
+        previewUrls,
+        upstreamPictures.filter((u) => u && !excludedRefUrls.includes(u)),
+      ),
+      characterRef: charCtx.referenceImageUrl,
+      envRef,
+    });
+  }, [
+    data,
+    draft,
+    environments,
+    libraryCharacters,
+    linkedShotForPreview,
+    previewUrls,
+    upstreamPictures,
+  ]);
+
   const refStripItems = useMemo((): PictureRefItem[] => {
     const items: PictureRefItem[] = [];
     const seen = new Set<string>();
@@ -749,8 +950,18 @@ export function PictureWorkspace({ blockId, kind, onCollapse }: PictureWorkspace
       seen.add(url);
       items.push({ url, source: 'upstream', index });
     });
+    const excludedSet = new Set(excludedRefUrls.filter(Boolean));
+    const injected = [
+      ...((data.injectedRefs as PictureInjectedRef[] | undefined) ?? []),
+      ...predictedSend.injected,
+    ];
+    injected.forEach((item, index) => {
+      if (!item?.url || seen.has(item.url) || excludedSet.has(item.url)) return;
+      seen.add(item.url);
+      items.push({ url: item.url, source: 'injected', index, role: item.role });
+    });
     return items;
-  }, [allRefUrls, styleImageUrl, upstreamPictures]);
+  }, [allRefUrls, data.injectedRefs, excludedRefUrls, predictedSend, styleImageUrl, upstreamPictures]);
 
   // PG-11: 上游断开后清掉残留的排除项，避免节点 data 无限增长。
   // 仅在仍有上游图时清理，防止图迁移/断连瞬间把合法排除项误清空。
@@ -765,12 +976,11 @@ export function PictureWorkspace({ blockId, kind, onCollapse }: PictureWorkspace
   // 参考图变化时自动同步基础模式（专业玩法锁定时不改）
   useEffect(() => {
     const excluded = new Set(excludedRefUrls.filter(Boolean));
-    const effective = refStripItems
-      .map((i) => i.url)
-      .filter((u) => u && !excluded.has(u));
+    // PG-38: 与发送预判同源（含当前定妆/场景注入），历史 injectedRefs 不参与模式计算
+    const effective = predictedSend.visibleForMode.filter((u) => u && !excluded.has(u));
     const nextMode = resolveRuntimePictureGenMode(data, effective);
     if (nextMode === pictureGenMode) return;
-    const patch: Record<string, unknown> = patchPictureGenMode(nextMode);
+    const patch: Record<string, unknown> = patchPictureGenMode(nextMode, data);
     // 清掉已无意义的「文生图/图生图」专业标记，避免 UI 仍显示旧工具名
     if (proActionId === 'text-to-image' || proActionId === 'image-to-image') {
       patch.pictureProAction = undefined;
@@ -783,13 +993,15 @@ export function PictureWorkspace({ blockId, kind, onCollapse }: PictureWorkspace
     handlePatch,
     pictureGenMode,
     proActionId,
-    refStripItems,
+    predictedSend,
   ]);
 
   const localMedia = useMemo(
     () => buildLocalMediaItems(previewUrls, upstreamPictures),
     [previewUrls, upstreamPictures],
   );
+  const runtimeDisplayMode = predictedSend.mode;
+
   const mentionedUpstreamUrls = useMemo(
     () => resolveLocalMediaMentionUrls(draft, previewUrls, upstreamPictures).filter((u) =>
       upstreamPictures.includes(u),
@@ -799,13 +1011,13 @@ export function PictureWorkspace({ blockId, kind, onCollapse }: PictureWorkspace
 
   const placeholder = proAction?.defaultPromptHint
     ? proAction.defaultPromptHint
-    : pictureGenMode === 'style-ref'
+    : runtimeDisplayMode === 'style-ref'
       ? '描述主体内容… 风格由参考图控制 · 输入 @ 或点击上游图插入引用'
-      : pictureGenMode === 'multi-ref'
+      : runtimeDisplayMode === 'multi-ref'
         ? '描述如何融合多张参考… 输入 @ 或点击上游/生成图插入'
-        : pictureGenMode === 'image-to-image'
+        : runtimeDisplayMode === 'image-to-image'
           ? '描述想改成什么样… 输入 @ 或点击上游图插入引用'
-          : pictureGenMode === 'upscale-hd'
+          : runtimeDisplayMode === 'upscale-hd'
             ? '放大不使用提示词，可留空'
             : '描述你想生成的图像… 输入 @ 引用角色/场景，或点击上游图插入';
 
@@ -915,7 +1127,13 @@ export function PictureWorkspace({ blockId, kind, onCollapse }: PictureWorkspace
             {proAction.hint}
           </>
         ) : (
-          '标准文生图'
+          runtimeDisplayMode === 'style-ref'
+            ? '风格参考'
+            : runtimeDisplayMode === 'multi-ref'
+              ? '多参考'
+              : runtimeDisplayMode === 'image-to-image'
+                ? '图生图'
+                : '文生图'
         )}
         {' · '}
         {modelDef.label} · {resolvedSize.size}
@@ -1056,9 +1274,35 @@ export function PictureWorkspace({ blockId, kind, onCollapse }: PictureWorkspace
 
   const topSlot = (
     <>
-      {linkedShotLabel && hasUpstream && (
+      {hasUpstream && shots.length > 1 ? (
+        <div className="mx-3 mt-2 flex items-center gap-2 text-[10px] text-ink/45">
+          <span>写回镜头</span>
+          <select
+            value={(data.linkedShotId as string | undefined) ?? shotIds[0] ?? ''}
+            onMouseDown={stop}
+            onChange={(e) => {
+              const id = e.target.value;
+              const s = shots.find((shot) => shot.id === id);
+              updateNodeData(blockId, {
+                linkedShotId: id,
+                linkedShotLabel: s
+                  ? `写回第 ${shots.indexOf(s) + 1} / ${shots.length} 镜（#${(s.index ?? 0) + 1}）`
+                  : undefined,
+              });
+            }}
+            className="rounded-md border border-line/40 bg-surface px-1.5 py-0.5 text-[10px] text-ink/80 focus:outline-none"
+          >
+            {shots.map((s, i) => (
+              <option key={s.id} value={s.id}>
+                第 {i + 1} / {shots.length} 镜 · #{((s.index ?? 0) + 1)}
+              </option>
+            ))}
+          </select>
+          {linkedShotLabel ? <span>{linkedShotLabel}</span> : null}
+        </div>
+      ) : linkedShotLabel && hasUpstream ? (
         <div className="mx-3 mt-2 text-[10px] text-ink/45">{linkedShotLabel}</div>
-      )}
+      ) : null}
       {hasPendingImage && (
         <div className="mx-3 mt-2 flex items-center gap-2 rounded-lg border border-amber-500/25 bg-amber-500/8 px-2.5 py-1.5">
           <span className="text-[10px] text-amber-800 flex-1">
@@ -1074,6 +1318,11 @@ export function PictureWorkspace({ blockId, kind, onCollapse }: PictureWorkspace
           </button>
         </div>
       )}
+      {(data.message as string | undefined)?.trim() ? (
+        <div className="mx-3 mt-2 rounded-lg border border-amber-500/20 bg-amber-500/5 px-2.5 py-1.5 text-[10px] text-amber-800">
+          {String(data.message)}
+        </div>
+      ) : null}
       {/* 一排两列：左生成结果 · 右参考图（本节点上传 + 上游传入）；单侧有内容则全宽 */}
       {showMediaRow && (
         <div
@@ -1094,8 +1343,15 @@ export function PictureWorkspace({ blockId, kind, onCollapse }: PictureWorkspace
                   .map((c) => ({ id: c.id, name: c.name }))}
                 history={readPictureGenerationHistory(data)}
                 onRestoreHistory={handleRestoreHistory}
+                onRestorePrompt={handleRestorePrompt}
                 failures={batchFailures}
                 sourceBlockId={blockId}
+                compiledPromptsByUrl={compiledPromptsByUrl}
+                compiledPrompt={
+                  typeof data.lastCompiledPrompt === 'string'
+                    ? data.lastCompiledPrompt
+                    : undefined
+                }
               />
             </div>
           )}
@@ -1135,12 +1391,7 @@ export function PictureWorkspace({ blockId, kind, onCollapse }: PictureWorkspace
             <button
               type="button"
               onMouseDown={stop}
-              onClick={() =>
-                handlePatch({
-                  pictureProAction: undefined,
-                  pictureProActionLabel: undefined,
-                })
-              }
+              onClick={handleClearProAction}
               className="opacity-60 hover:opacity-100"
               title="清除专业工具"
             >
@@ -1148,6 +1399,24 @@ export function PictureWorkspace({ blockId, kind, onCollapse }: PictureWorkspace
             </button>
           </span>
           <span className="text-[9px] text-ink/40 truncate">{proAction.hint}</span>
+        </div>
+      )}
+
+      {/* 放大/全景可能只锁 mode 而无专业芯片：给退出入口，避免卡在「本地插值放大」 */}
+      {!proAction && (pictureGenMode === 'upscale-hd' || pictureGenMode === 'panorama-720') && (
+        <div className="mx-3 mt-1.5 flex items-center gap-2">
+          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-violet-500/10 text-violet-700 text-[10px] font-medium border border-violet-500/20">
+            {pictureGenMode === 'upscale-hd' ? '图片放大' : '720° 全景'}
+            <button
+              type="button"
+              onMouseDown={stop}
+              onClick={handleClearProAction}
+              className="opacity-60 hover:opacity-100"
+              title="退出专业模式"
+            >
+              <X size={10} />
+            </button>
+          </span>
         </div>
       )}
 
@@ -1167,9 +1436,13 @@ export function PictureWorkspace({ blockId, kind, onCollapse }: PictureWorkspace
             onClick={() => {
               const a = lookupPictureProAction('upscale-hd');
               if (a) handleSelectProAction(a);
-              refInputRef.current?.click();
+              if (pictureGenMode !== 'upscale-hd') refInputRef.current?.click();
             }}
-            className="text-ink/55 hover:text-brand"
+            className={
+              pictureGenMode === 'upscale-hd'
+                ? 'text-brand font-medium'
+                : 'text-ink/55 hover:text-brand'
+            }
           >
             图片放大
           </button>

@@ -165,6 +165,20 @@ export const api = {
     }),
   proxyImage: (body: Record<string, unknown>, options?: { signal?: AbortSignal }) =>
     request<unknown>('/api/gateway/image', { method: 'POST', body: JSON.stringify(body), signal: options?.signal }),
+
+  /** SE-SPEC-01: 蒙版编辑专用契约（mask + prompt + engine） */
+  pictureEditMasked: (body: {
+    imageUrl: string;
+    maskUrl: string;
+    prompt: string;
+    engine?: 'gemini-edit' | 'fal-inpaint';
+    referenceImageUrls?: string[];
+  }, options?: { signal?: AbortSignal }) =>
+    request<{ ok: boolean; url?: string; message?: string }>('/api/picture/edit-masked', {
+      method: 'POST',
+      body: JSON.stringify(body),
+      signal: options?.signal,
+    }),
   proxyVideo: (body: Record<string, unknown>, options?: { signal?: AbortSignal }) =>
     request<{
       ok: boolean;
@@ -208,7 +222,6 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(body),
     }),
-
   listSkills: () => request<SkillSummary[]>('/api/skills'),
   readSkill: (id: string) => request<SkillDetail>(`/api/skills/${id}`),
   listGenPacks: (ids?: string[]) =>
@@ -788,6 +801,56 @@ export const api = {
       signal: options?.signal,
     }),
 
+  scriptDeskChatStream: async (
+    body: { skillId: string; userInstruction?: string; package: Record<string, unknown> },
+    options?: { signal?: AbortSignal; onChunk?: (text: string) => void },
+  ): Promise<{ ok: boolean; full: string }> => {
+    const res = await fetch('/api/agent/script-desk/chat-stream', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...userHeaders(),
+      },
+      body: JSON.stringify(body),
+      signal: options?.signal,
+    });
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(readErrorMessage(text) || res.statusText);
+    }
+    const reader = res.body?.getReader();
+    if (!reader) throw new Error('技能流式通道不可用');
+    const decoder = new TextDecoder();
+    let pending = '';
+    let full = '';
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      pending += decoder.decode(value, { stream: true });
+      const lines = pending.split('\n');
+      pending = lines.pop() ?? '';
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed.startsWith('data:')) continue;
+        const json = trimmed.slice(5).trim();
+        if (!json) continue;
+        let parsed: { text?: string; done?: boolean; error?: string };
+        try {
+          parsed = JSON.parse(json) as { text?: string; done?: boolean; error?: string };
+        } catch {
+          continue;
+        }
+        if (parsed.error) throw new Error(parsed.error);
+        if (parsed.text) {
+          full += parsed.text;
+          options?.onChunk?.(parsed.text);
+        }
+      }
+    }
+    if (!full.trim()) throw new Error('技能生成未返回内容');
+    return { ok: true, full };
+  },
+
   scriptExport: async (pkg: import('@nx9/shared').ScreenplayPackage) => {
     const res = await fetch('/api/agent/script/export', {
       method: 'POST',
@@ -944,9 +1007,14 @@ export const api = {
     }),
 
   videoEditStatus: (taskId: string) =>
-    request<{ ok: boolean; status: 'queued' | 'running' | 'done' | 'error'; progress?: number; url?: string; message?: string }>(
+    request<{ ok: boolean; status: 'queued' | 'running' | 'done' | 'error' | 'cancelled'; progress?: number; url?: string; message?: string }>(
       `/api/montage/video-edit-tasks/${taskId}`,
     ),
+
+  videoEditCancel: (taskId: string) =>
+    request<{ ok: boolean; message?: string }>(`/api/montage/video-edit-tasks/${taskId}`, {
+      method: 'DELETE',
+    }),
 
   storageMode: () => request<{ mode: string }>('/api/admin/storage'),
   migrateToPrisma: (ownerId?: string) =>

@@ -45,6 +45,7 @@ describe('buildClipGenVideoRequest', () => {
     const req = await buildClipGenVideoRequest({
       data: {
         model: 'veo',
+        videoGenMode: 'image-to-video',
         seed: 42,
         negativePrompt: 'blurry, low quality',
         modelParams: 'cfg_scale=7.5',
@@ -298,6 +299,60 @@ describe('resolveClipGenPromptMentions', () => {
     });
     expect(resolved).toContain('black bob hair, raincoat');
     expect(resolved).not.toMatch(/@林小雨/);
+  });
+});
+
+describe('VG-40/41/42 R3 组装器诚实性', () => {
+  it('文生视频模式不带首帧（VG-40）', async () => {
+    const req = await buildClipGenVideoRequest({
+      data: { model: 'veo', videoGenMode: 'text-to-video' },
+      prompt: 'x',
+      imageUrl: 'https://media/first.png',
+      upstreamPictures: ['https://media/ref.png'],
+    });
+    expect(req.blocked).toBeUndefined();
+    expect(req.body.imageUrl).toBeUndefined();
+    expect(req.body.referenceImages).toEqual(['https://media/ref.png']);
+  });
+
+  it('首尾帧缺尾帧 → 阻断（VG-41）', async () => {
+    const req = await buildClipGenVideoRequest({
+      data: { model: 'veo', videoGenMode: 'keyframe' },
+      prompt: 'transition',
+      imageUrl: 'https://media/start.png',
+    });
+    expect(req.blocked).toContain('尾图');
+  });
+
+  it('图片参考无参考 → 阻断；有上游图则通过（VG-41）', async () => {
+    const blocked = await buildClipGenVideoRequest({
+      data: { model: 'veo', videoGenMode: 'image-ref' },
+      prompt: 'x',
+    });
+    expect(blocked.blocked).toContain('参考图');
+
+    const ok = await buildClipGenVideoRequest({
+      data: { model: 'veo', videoGenMode: 'image-ref' },
+      prompt: 'x',
+      upstreamPictures: ['https://media/up.png'],
+    });
+    expect(ok.blocked).toBeUndefined();
+  });
+
+  it('全能参考无图无视频 → 阻断（VG-41）', async () => {
+    const req = await buildClipGenVideoRequest({
+      data: { model: 'veo', videoGenMode: 'omni-ref' },
+      prompt: 'x',
+    });
+    expect(req.blocked).toContain('参考');
+  });
+
+  it('非法 Provider 参数 → 阻断，不再静默丢弃（VG-42）', async () => {
+    const req = await buildClipGenVideoRequest({
+      data: { model: 'veo', modelParams: '{broken' },
+      prompt: 'x',
+    });
+    expect(req.blocked).toContain('Provider 参数');
   });
 });
 

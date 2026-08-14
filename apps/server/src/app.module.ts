@@ -17,6 +17,7 @@ import { UsageModule } from './modules/usage/usage.module';
 import { AdminModule } from './modules/admin/admin.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { ImageOpsModule } from './modules/image-ops/image-ops.module';
+import { PictureModule } from './modules/picture/picture.module';
 import { ToolsModule } from './modules/tools/tools.module';
 import { TopazModule } from './modules/topaz/topaz.module';
 import { WorkspaceModule } from './modules/workspace/workspace.module';
@@ -41,6 +42,7 @@ import { ExportModule } from './modules/export/export.module';
     UsageModule,
     AdminModule,
     ImageOpsModule,
+    PictureModule,
     ToolsModule,
     TopazModule,
     ExportModule,

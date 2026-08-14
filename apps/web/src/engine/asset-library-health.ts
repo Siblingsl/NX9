@@ -12,10 +12,14 @@ import type {
 import {
   expandUsedAssetIdSet,
   findLegacyBareMentions,
+  getCharacterCreative,
   getCostumeCreative,
   getEmotionCreative,
   getHookCreative,
   getPropCreative,
+  faceRigHash,
+  getFaceRig,
+  NX9_SCULPT_MESH_CONTRACT_VERSION,
   getSceneCreative,
   getShotCreative,
   isBuiltinSoundAsset,
@@ -34,7 +38,38 @@ export type HealthIssueKey =
   | 'unbound'
   | 'promptDrift'
   | 'legacyMention'
-  | 'pollution';
+  | 'pollution'
+  | 'faceRigNotRendered'
+  | 'faceRigMetricConflict'
+  | 'faceRigMeshStale';
+
+export type FaceRigHealthIssueKey =
+  | 'faceRigNotRendered'
+  | 'faceRigMetricConflict'
+  | 'faceRigMeshStale';
+
+export interface FaceRigHealthIssue {
+  key: FaceRigHealthIssueKey;
+  label: string;
+}
+
+/** FACE-P3 健康条：定妆图缺失 / 参数指纹不一致 / 网格契约版本过期 */
+export function assessCharacterFaceRigHealth(c: CharacterProfile): FaceRigHealthIssue[] {
+  const ext = getCharacterCreative(c);
+  const rig = getFaceRig(c);
+  const url = ext.faceLockUrl?.trim();
+  if (!url) {
+    return [{ key: 'faceRigNotRendered', label: '未定妆：尚无 faceLockUrl' }];
+  }
+  const issues: FaceRigHealthIssue[] = [];
+  if (!rig.faceLockHash || rig.faceLockHash !== faceRigHash(rig)) {
+    issues.push({ key: 'faceRigMetricConflict', label: '定妆过期：参数指纹与当前不一致，需重新定妆' });
+  }
+  if (rig.meshContractVersion == null || rig.meshContractVersion !== NX9_SCULPT_MESH_CONTRACT_VERSION) {
+    issues.push({ key: 'faceRigMeshStale', label: '定妆契约过期：网格契约版本不匹配，需重新定妆' });
+  }
+  return issues;
+}
 
 export interface HealthIssueMetric {
   key: HealthIssueKey;
@@ -645,6 +680,21 @@ export function analyzeAssetLibraryHealth(input: {
       pollutionIdsBySharedMedia(
         characters.map((c) => ({ id: c.id, urls: characterMediaUrls(c) })),
       ),
+    ),
+    metric(
+      'faceRigNotRendered',
+      '捏模未定妆',
+      characters.filter((c) => assessCharacterFaceRigHealth(c).some((i) => i.key === 'faceRigNotRendered')).map((c) => c.id),
+    ),
+    metric(
+      'faceRigMetricConflict',
+      '捏模定妆过期',
+      characters.filter((c) => assessCharacterFaceRigHealth(c).some((i) => i.key === 'faceRigMetricConflict')).map((c) => c.id),
+    ),
+    metric(
+      'faceRigMeshStale',
+      '捏模定妆契约过期',
+      characters.filter((c) => assessCharacterFaceRigHealth(c).some((i) => i.key === 'faceRigMeshStale')).map((c) => c.id),
     ),
   ];
 

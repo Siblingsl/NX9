@@ -7,6 +7,7 @@ interface HandoffPanelProps {
   updateNodeData: (id: string, data: Record<string, unknown>) => void;
   blockId: string;
   contactSheetUrl: string | null | undefined;
+  contactSheetStale: boolean;
   currentEpisodeConfirmed: boolean;
   downloadContactSheet: () => void;
   sheetComposing: boolean;
@@ -27,6 +28,7 @@ const HandoffPanel: React.FC<HandoffPanelProps> = ({
   updateNodeData,
   blockId,
   contactSheetUrl,
+  contactSheetStale,
   currentEpisodeConfirmed,
   downloadContactSheet,
   sheetComposing,
@@ -44,7 +46,7 @@ const HandoffPanel: React.FC<HandoffPanelProps> = ({
       <div className="sg3-hero">
         <p className="sg3-hero__eyebrow">步骤 4 · 交接</p>
         <h3 className="sg3-hero__title">本集就绪检查</h3>
-        <p className="sg3-hero__desc">确认后导演台可按本集批出关键帧。</p>
+        <p className="sg3-hero__desc">确认后自动同步交接至已连接导演台；导演台可按本集批出关键帧。</p>
       </div>
       <ul className="sg3-checklist">
         <li>
@@ -83,8 +85,8 @@ const HandoffPanel: React.FC<HandoffPanelProps> = ({
         </li>
         <li>
           <span>故事板大图（合并预览）</span>
-          <em className={contactSheetUrl ? 'is-ok' : 'is-warn'}>
-            {contactSheetUrl ? '已生成' : '未生成'}
+          <em className={contactSheetStale ? 'is-warn' : contactSheetUrl ? 'is-ok' : 'is-warn'}>
+            {contactSheetStale ? '已过期 · 需重出' : contactSheetUrl ? '已生成' : '未生成'}
           </em>
         </li>
         <li>

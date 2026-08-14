@@ -2,10 +2,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { AssetLibraryKind, StoryboardShot } from '@nx9/shared';
 import {
   adoptStoryboardVideoVersion,
+  appendStoryboardVideoVersion,
   approveStoryboardVideoShot,
   CLIP_GEN_MODELS,
   lookupBlock,
   rejectStoryboardVideoShot,
+  validateVideoModelParams,
 } from '@nx9/shared';
 import { useReactFlow, useNodes, useEdges } from '@xyflow/react';
 import { AssetMentionInput } from '../../../asset-mention/AssetMentionInput';
@@ -135,7 +137,8 @@ export function VideoWorkspace({ blockId, kind, onCollapse }: VideoWorkspaceProp
       return;
     }
     const prev = Array.isArray(data.linkedShotIds) ? (data.linkedShotIds as string[]) : [];
-    if (prev.length === shotIds.length && prev.every((id, i) => id === shotIds[i])) return;
+    // VG-44: 仅在空/未定义时默认全选，保留导演台推送或用户编辑的子集
+    if (prev.length > 0) return;
     updateNodeData(blockId, {
       linkedShotIds: shotIds,
       linkedShotId: shotIds[0] ?? undefined,
@@ -171,6 +174,7 @@ export function VideoWorkspace({ blockId, kind, onCollapse }: VideoWorkspaceProp
   const frameSlots = videoFrameStripSlots(videoGenMode);
   const showSource = showVideoSourceStrip(videoGenMode);
   const sourceClipUrl = (data.sourceClipUrl as string | undefined) || undefined;
+  const modelParamsError = validateVideoModelParams((data.modelParams as string) ?? '');
   const playbookState = useMemo(
     () => readClipGenPlaybook(data as Record<string, unknown>),
     [data],
@@ -231,10 +235,15 @@ export function VideoWorkspace({ blockId, kind, onCollapse }: VideoWorkspaceProp
     try {
       // VG-07: Bridge 续拍走级联（上游视频抽尾帧），不进批量
       if (hasUpstream && shotIds.length > 0 && videoGenMode !== 'bridge') {
-        await batchGenerateVideosFromShots(shotIds, false, blockId, shots as any, {
+        const res = await batchGenerateVideosFromShots(shotIds, false, blockId, shots as any, {
           signal: controller.signal,
         });
-        appendLog(`上游镜头视频生成完成 · ${shotIds.length} 镜`);
+        // VG-43: 未批审 / 无分镜图镜头上报跳过，不再静默
+        appendLog(
+          res.skipped > 0
+            ? `上游镜头视频生成完成 · 成功 ${res.ok} · 失败 ${res.fail} · 跳过 ${res.skipped}（关键帧未批审或无分镜图）`
+            : `上游镜头视频生成完成 · ${res.ok}/${shotIds.length} 镜`,
+        );
         return;
       }
       const { runCascadeFromBlock } = await import('../../../../execution/cascade-runner');
@@ -281,11 +290,18 @@ export function VideoWorkspace({ blockId, kind, onCollapse }: VideoWorkspaceProp
   }, [appendLog]);
 
   const retryShot = useCallback(async (shotId: string) => {
+    // VG-44: 单镜重试纳入 runAbortRef，可被工作台「停止」打断
+    runAbortRef.current?.abort();
+    const controller = new AbortController();
+    runAbortRef.current = controller;
     setRetryingShotId(shotId);
     try {
       // F-004: 传入链镜表避免回退全局
-      await batchGenerateVideosFromShots([shotId], true, blockId, shots as any);
+      await batchGenerateVideosFromShots([shotId], true, blockId, shots as any, {
+        signal: controller.signal,
+      });
     } finally {
+      if (runAbortRef.current === controller) runAbortRef.current = null;
       setRetryingShotId(null);
     }
   }, [blockId, shots]);
@@ -306,7 +322,32 @@ export function VideoWorkspace({ blockId, kind, onCollapse }: VideoWorkspaceProp
         const providerBaseUrl = data.providerBaseUrl as string | undefined;
         const res = await api.pollVideo(singleTaskId, providerBaseUrl);
         if (res.status === 'success' && res.url) {
-          updateNodeData(blockId, { status: 'success', videoUrl: res.url, error: undefined });
+          // VG-38: 单镜恢复成功也写回链镜表 + videoVersions，并清脏字段
+          const linkedShotId = data.linkedShotId as string | undefined;
+          const shot = linkedShotId
+            ? shots.find((s) => s.id === linkedShotId)
+            : shots.length === 1
+              ? shots[0]
+              : undefined;
+          if (shot) {
+            const version = {
+              id: `video-${shot.id}-${Date.now()}`,
+              url: res.url,
+              createdAt: new Date().toISOString(),
+              prompt: (data.lastCompiledPrompt as string | undefined) ?? '',
+              model,
+              status: 'candidate' as const,
+            };
+            patchChainShotLocal(shot.id, appendStoryboardVideoVersion(shot, version));
+          }
+          updateNodeData(blockId, {
+            status: 'success',
+            videoUrl: res.url,
+            error: undefined,
+            taskId: undefined,
+            providerBaseUrl: undefined,
+            message: undefined,
+          });
           appendLog('视频任务已完成');
         } else if (res.status === 'failed') {
           updateNodeData(blockId, { status: 'error', error: res.message ?? '视频生成任务失败' });
@@ -321,7 +362,7 @@ export function VideoWorkspace({ blockId, kind, onCollapse }: VideoWorkspaceProp
     } finally {
       setResuming(false);
     }
-  }, [blockId, pendingTaskCount, hasSinglePending, singleTaskId, data.providerBaseUrl, updateNodeData, appendLog]);
+  }, [blockId, pendingTaskCount, hasSinglePending, singleTaskId, data, shots, model, patchChainShotLocal, updateNodeData, appendLog]);
 
   const approveAllVideos = useCallback(() => {
     for (const shot of shots) {
@@ -414,8 +455,15 @@ export function VideoWorkspace({ blockId, kind, onCollapse }: VideoWorkspaceProp
           onChange={(e) => handlePatch({ modelParams: e.target.value || undefined })}
           onMouseDown={stop}
           placeholder="JSON 或 key=value"
-          className="w-full rounded-lg border border-line/50 px-2 py-1 text-[11px] focus:outline-none focus:border-brand/40"
+          className={`w-full rounded-lg border px-2 py-1 text-[11px] focus:outline-none ${
+            modelParamsError
+              ? 'border-error/60 focus:border-error/60'
+              : 'border-line/50 focus:border-brand/40'
+          }`}
         />
+        {modelParamsError && (
+          <span className="text-[9px] text-error">{modelParamsError}</span>
+        )}
       </label>
       {/* F-048: 并发/重试配置单轨 UI */}
       <div className="border-t border-line/20 pt-2 mt-1 space-y-1.5">
@@ -512,6 +560,16 @@ export function VideoWorkspace({ blockId, kind, onCollapse }: VideoWorkspaceProp
       topSlot={
         <>
           {playbookTop}
+          {videoGenMode === 'text-to-video' && hasUpstream && (
+            <div
+              className="shrink-0 px-3 py-1.5 border-b border-line/25 nodrag nopan"
+              onMouseDown={stop}
+            >
+              <p className="text-[9px] text-warn/75">
+                文生视频模式不会携带分镜首帧；需要首帧约束请切换「图生视频」。
+              </p>
+            </div>
+          )}
           {(pendingTaskCount > 0 || hasSinglePending) && (
             <div
               className="shrink-0 flex items-center gap-2 px-3 py-1.5 border-b border-line/25 nodrag nopan"

@@ -115,6 +115,27 @@ describe('PG-19 生成历史', () => {
     expect(restored?.history[0].id).toBe(history[0].id);
     expect(restored?.history.some((h) => h.urls[0] === 'new.png')).toBe(true);
   });
+
+  it('PG-45 归档存用户原稿与发送稿，恢复可回读', () => {
+    const history = archivePictureGeneration(
+      ['old.png'],
+      'polluted prompt',
+      [],
+      1000,
+      { userPrompt: 'a cat', compiledPrompt: 'a cat, cinematic [Composition]' },
+    );
+    expect(history[0].userPrompt).toBe('a cat');
+    expect(history[0].compiledPrompt).toContain('[Composition]');
+    const restored = restorePictureGeneration(
+      history[0].id,
+      ['new.png'],
+      'new',
+      history,
+      2000,
+    );
+    expect(restored?.userPrompt).toBe('a cat');
+    expect(restored?.compiledPrompt).toContain('[Composition]');
+  });
 });
 
 describe('PG-26 发送参考与模式同源', () => {
@@ -149,6 +170,30 @@ describe('PG-26 发送参考与模式同源', () => {
     expect(send.extras).toContain('https://char/look.png');
     expect(send.extras).toContain('https://env/bg.png');
   });
+
+  it('PG-38 排除的注入参考不再进发送集合，也不升模式', () => {
+    const send = resolvePictureSendRefs({
+      data: { excludedRefUrls: ['https://char/look.png'] },
+      characterRef: 'https://char/look.png',
+      envRef: 'https://env/bg.png',
+    });
+    expect(send.mode).toBe('image-to-image');
+    expect(send.primary).toBe('https://env/bg.png');
+    expect(send.injected).toEqual([{ url: 'https://env/bg.png', role: 'environment' }]);
+  });
+
+  it('PG-38 全部注入被排除时回落文生图', () => {
+    const send = resolvePictureSendRefs({
+      data: {
+        excludedRefUrls: ['https://char/look.png', 'https://env/bg.png'],
+      },
+      characterRef: 'https://char/look.png',
+      envRef: 'https://env/bg.png',
+    });
+    expect(send.mode).toBe('text-to-image');
+    expect(send.primary).toBeUndefined();
+    expect(send.injected).toEqual([]);
+  });
 });
 
 describe('PG-25 成功写回不污染 content', () => {
@@ -164,5 +209,14 @@ describe('PG-25 成功写回不污染 content', () => {
     expect(String(patch.message)).toContain('成功');
     expect(String(patch.message)).toContain('裁掉');
     expect(patch.previewUrls).toEqual(['/media/a.png']);
+  });
+
+  it('PG-38 成功 patch 回写实际发送模式', () => {
+    const patch = buildPictureGenSuccessPatch({
+      urls: ['/media/a.png'],
+      pictureGenMode: 'image-to-image',
+    });
+    expect(patch.pictureGenMode).toBe('image-to-image');
+    expect(patch.useImageReference).toBe(true);
   });
 });

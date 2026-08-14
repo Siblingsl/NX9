@@ -635,7 +635,10 @@ function ServicesSettings({
         {luxStatus && <p className="nx9-settings__hint">{luxStatus}</p>}
       </SettingCard>
 
-      <SettingCard title="BGM" badge="配乐" description="背景音乐生成供应商；缺 Key 时 BGM 模式会明确报错。">
+      <SettingCard title="BGM" badge="预留" description="真实 BGM 生成 API 未接入；当前 BGM 模式仅支持导入音频，禁止假装可生成。">
+        <p className="nx9-settings__hint">
+          BGM 生成 provider 预留字段。服务端未接真实 provider 前，BGM 节点只导入音频；接入后按 REAL-PROVIDER-VALIDATION.md 验收再开放。
+        </p>
         <div className="nx9-settings__field-grid">
           <Field label="Provider" value={draft.bgmProvider ?? 'suno'} onChange={(v) => setDraft({ ...draft, bgmProvider: v })} plain />
           <Field label="API Key" value={draft.bgmApiKey ?? ''} onChange={(v) => setDraft({ ...draft, bgmApiKey: v })} />

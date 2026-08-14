@@ -501,6 +501,12 @@ body.sd2-splitting * {
   font-weight: 650;
 }
 
+.sd2-msg__hint {
+  margin-top: 6px;
+  font-size: 11px;
+  color: var(--sd2-muted);
+}
+
 /* ── 输入条：一体式 composer（上写 · 下模型/发送） ── */
 
 .sd2-input-bar {
