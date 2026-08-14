@@ -8,12 +8,28 @@ datasource db {
 }
 
 model User {
-  id         String      @id @default(cuid())
-  name       String
-  email      String?     @unique
-  createdAt  DateTime    @default(now())
-  workspaces Workspace[]
-  usage      UsageEvent[]
+  id           String        @id @default(cuid())
+  name         String        @unique
+  email        String?       @unique
+  /** scrypt 哈希（格式 salt:hash，hex）；为 null 表示旧「默认用户」尚未设置密码 */
+  passwordHash String?
+  createdAt    DateTime      @default(now())
+  workspaces   Workspace[]
+  usage        UsageEvent[]
+  sessions     AuthSession[]
+}
+
+model AuthSession {
+  id        String   @id @default(cuid())
+  /** sha256(token) 存库，token 明文只下发前端 */
+  tokenHash String   @unique
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+  /** 记住本机：90 天 */
+  expiresAt DateTime
+
+  @@index([userId])
 }
 
 model Workspace {

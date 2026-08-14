@@ -1,0 +1,19 @@
+{
+  "name": "@nx9/desktop",
+  "version": "0.1.0",
+  "private": true,
+  "description": "NX9 Studio — Electron 桌面壳（打包 Web + NestJS 为 Windows .exe）",
+  "main": "dist/main.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "stage": "node scripts/stage.mjs",
+    "pack": "set ELECTRON_BUILDER_BINARIES_MIRROR=https://npmmirror.com/mirrors/electron-builder-binaries/&& pnpm run build && pnpm run stage && electron-builder --win",
+    "pack:dir": "set ELECTRON_BUILDER_BINARIES_MIRROR=https://npmmirror.com/mirrors/electron-builder-binaries/&& pnpm run build && pnpm run stage && electron-builder --win --dir"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "electron": "^43.4.0",
+    "electron-builder": "^26.15.3",
+    "typescript": "^5.7.0"
+  }
+}

@@ -31,6 +31,7 @@ import type {
 import { FLOW_EDGE_TYPES } from '../engine/flow-edge-types';
 import { perfTierLabel, resolvePerfTier, translate, BUILTIN_CONNECTION_PRESETS } from '@nx9/shared';
 import { useCredentialVault } from '../stores/credential-vault';
+import { useUserSession } from '../stores/user-session';
 import { confirmDelete } from '../stores/confirm-dialog';
 import { useStageDeckFlag } from '../stores/stage-deck-flag';
 import { useWorkspaceDocument } from '../stores/workspace-document';
@@ -1161,6 +1162,23 @@ function PrefsSettings({
   const nodeCount = useFlowGraphMirror((s) => s.nodes.length);
   const edgeCount = useFlowGraphMirror((s) => s.edges.length);
   const tier = resolvePerfTier(nodeCount, edgeCount);
+  const user = useUserSession((s) => s.user);
+  const logout = useUserSession((s) => s.logout);
+  const [loggingOut, setLoggingOut] = useState(false);
+
+  const handleLogout = async () => {
+    const ok = await confirmDelete({
+      title: '退出登录？',
+      description: '退出后需重新输入密码才能进入；本机项目数据不会丢失。',
+    });
+    if (!ok) return;
+    setLoggingOut(true);
+    try {
+      await logout();
+    } finally {
+      setLoggingOut(false);
+    }
+  };
 
   return (
     <div className="space-y-4">
@@ -1168,6 +1186,31 @@ function PrefsSettings({
         <p className="nx9-settings__hero-title">创作偏好</p>
         <p className="nx9-settings__hero-desc">控制流程节奏、动效与调试信息，保存后在本机生效。</p>
       </div>
+
+      <SettingCard
+        title="账户与会话"
+        badge="登录"
+        description="当前登录的工作室账户；退出后可切换其他账户。"
+      >
+        <div className="nx9-settings__pref-row" style={{ cursor: 'default' }}>
+          <div className="flex-1 min-w-0">
+            <span className="nx9-settings__pref-label">{user?.name ?? '未登录'}</span>
+            <p className="nx9-settings__pref-desc">
+              {user
+                ? `账户 ID ${user.id.slice(0, 8)}… · 已记住本机，下次启动免登录`
+                : '会话已失效，请重新登录'}
+            </p>
+          </div>
+          <button
+            type="button"
+            className="nx9-settings__link-btn is-danger"
+            disabled={loggingOut}
+            onClick={() => void handleLogout()}
+          >
+            {loggingOut ? '退出中…' : '退出登录'}
+          </button>
+        </div>
+      </SettingCard>
 
       <div className="nx9-settings__pref-row" style={{ cursor: 'default' }}>
         <div className="flex-1 min-w-0">

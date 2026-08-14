@@ -75,6 +75,7 @@ export { computeStageBodyScales, type StageBodyScales } from './runtime/stage-bo
 export { applyFaceRigToObject, readBoneScale, readMorphInfluence } from './sculpt/apply-face-rig';
 export { createBareSculptRoot, createProxyCharacter } from './sculpt/procedural-body';
 export { createProxyHeadMesh } from './sculpt/procedural-head';
+export { createCharacterBaseModel } from './sculpt/procedural-base-model';
 export {
   CANONICAL_FACE_VIEW_WIDTH,
   CANONICAL_FACE_VIEW_HEIGHT,

@@ -1,0 +1,422 @@
+/* ═══════════════════════════════════════════════════════════════
+   NX9 Studio 登录页
+   明暗双套：浅色 = 古铜金 × 暖纸白；深色 = 古铜金 × 深夜炭黑
+   容器自带主题变量，不依赖 body 全局 class，登录前也能独立生效。
+   ═══════════════════════════════════════════════════════════════ */
+
+.nx9-login {
+  --lg-bg: #f4f1ea;
+  --lg-bg-deep: #ece6da;
+  --lg-ink: #1a1814;
+  --lg-muted: rgba(26, 24, 20, 0.6);
+  --lg-faint: rgba(26, 24, 20, 0.38);
+  --lg-line: rgba(26, 24, 20, 0.1);
+  --lg-card: rgba(255, 253, 248, 0.86);
+  --lg-card-border: rgba(26, 24, 20, 0.08);
+  --lg-brand: #a67c4a;
+  --lg-brand-soft: rgba(166, 124, 74, 0.14);
+  --lg-brand-line: rgba(166, 124, 74, 0.45);
+  --lg-input-bg: rgba(255, 255, 255, 0.72);
+  --lg-input-border: rgba(26, 24, 20, 0.12);
+  --lg-submit-ink: #fffaf3;
+  --lg-brand-panel: linear-gradient(160deg, #8a6a3c 0%, #a67c4a 34%, #c8a878 62%, #8a6a3c 100%);
+  --lg-brand-panel-2: radial-gradient(120% 90% at 82% 8%, rgba(232, 205, 150, 0.55) 0%, rgba(166, 124, 74, 0.18) 46%, transparent 70%);
+  --lg-brand-panel-3: radial-gradient(100% 80% at 12% 96%, rgba(70, 50, 26, 0.5) 0%, transparent 62%);
+  --lg-brand-ink: #fff7e8;
+  --lg-brand-muted: rgba(255, 247, 232, 0.72);
+  --lg-shade: rgba(60, 44, 24, 0.06);
+}
+
+.nx9-login.is-dark {
+  --lg-bg: #12100c;
+  --lg-bg-deep: #191612;
+  --lg-ink: #ece4d4;
+  --lg-muted: rgba(236, 228, 212, 0.58);
+  --lg-faint: rgba(236, 228, 212, 0.34);
+  --lg-line: rgba(236, 228, 212, 0.09);
+  --lg-card: rgba(28, 25, 20, 0.82);
+  --lg-card-border: rgba(236, 228, 212, 0.09);
+  --lg-brand: #c4a574;
+  --lg-brand-soft: rgba(196, 165, 116, 0.16);
+  --lg-brand-line: rgba(196, 165, 116, 0.5);
+  --lg-input-bg: rgba(255, 255, 255, 0.04);
+  --lg-input-border: rgba(236, 228, 212, 0.14);
+  --lg-submit-ink: #1a1610;
+  --lg-brand-panel: linear-gradient(160deg, #2a2014 0%, #4a3a24 30%, #6b5330 58%, #3d2f1c 100%);
+  --lg-brand-panel-2: radial-gradient(120% 90% at 82% 8%, rgba(196, 165, 116, 0.34) 0%, rgba(166, 124, 74, 0.1) 46%, transparent 70%);
+  --lg-brand-panel-3: radial-gradient(100% 80% at 12% 96%, rgba(0, 0, 0, 0.55) 0%, transparent 62%);
+  --lg-brand-ink: #f5ead2;
+  --lg-brand-muted: rgba(245, 234, 210, 0.66);
+  --lg-shade: rgba(0, 0, 0, 0.18);
+}
+
+.nx9-login {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  background: var(--lg-bg);
+  color: var(--lg-ink);
+  font-family: 'Source Sans 3', 'Segoe UI', system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;
+}
+
+@keyframes nx9-login-shake {
+  0%, 100% { transform: translateX(0); }
+  20% { transform: translateX(-7px); }
+  40% { transform: translateX(6px); }
+  60% { transform: translateX(-4px); }
+  80% { transform: translateX(3px); }
+}
+
+/* ── 左：品牌区 ── */
+.nx9-login__brand {
+  position: relative;
+  flex: 1.18;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: 56px 64px 40px;
+  background: var(--lg-brand-panel);
+  overflow: hidden;
+  isolation: isolate;
+}
+
+.nx9-login__brand-glow {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background: var(--lg-brand-panel-2), var(--lg-brand-panel-3);
+  mix-blend-mode: screen;
+}
+
+.nx9-login__brand-noise {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  opacity: 0.16;
+  mix-blend-mode: overlay;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.5'/%3E%3C/svg%3E");
+}
+
+/* 胶片刻度线：呼应影视制作 */
+.nx9-login__brand-frame {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  opacity: 0.5;
+  background-image: repeating-linear-gradient(
+    90deg,
+    transparent 0 26px,
+    rgba(255, 247, 232, 0.09) 26px 30px
+  );
+  mask-image: linear-gradient(180deg, transparent 0%, black 30%, black 100%);
+  -webkit-mask-image: linear-gradient(180deg, transparent 0%, black 30%, black 100%);
+}
+
+.nx9-login__brand-content {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 18px;
+  animation: nx9-login-rise 700ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+@keyframes nx9-login-rise {
+  from { opacity: 0; transform: translateY(16px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.nx9-login__brand-badge {
+  filter: drop-shadow(0 6px 24px rgba(0, 0, 0, 0.35));
+  animation: nx9-login-breathe 5.2s ease-in-out infinite;
+}
+
+@keyframes nx9-login-breathe {
+  0%, 100% { transform: translateY(0); filter: drop-shadow(0 6px 24px rgba(0, 0, 0, 0.35)); }
+  50% { transform: translateY(-5px); filter: drop-shadow(0 14px 34px rgba(0, 0, 0, 0.42)); }
+}
+
+.nx9-login__brand-title {
+  margin: 0;
+  font-size: 46px;
+  font-weight: 750;
+  letter-spacing: 0.02em;
+  color: var(--lg-brand-ink);
+  text-shadow: 0 3px 26px rgba(0, 0, 0, 0.35);
+}
+
+.nx9-login__brand-tagline {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 600;
+  color: var(--lg-brand-ink);
+  opacity: 0.92;
+  letter-spacing: 0.06em;
+}
+
+.nx9-login__brand-sub {
+  margin: 0;
+  max-width: 380px;
+  font-size: 14px;
+  line-height: 1.7;
+  color: var(--lg-brand-muted);
+}
+
+.nx9-login__brand-foot {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 11.5px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--lg-brand-muted);
+  animation: nx9-login-rise 700ms 200ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+.nx9-login__brand-dot {
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: var(--lg-brand-muted);
+}
+
+/* ── 右：表单区 ── */
+.nx9-login__panel {
+  flex: 1;
+  min-width: 420px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 48px;
+  background:
+    radial-gradient(90% 70% at 90% 0%, var(--lg-shade) 0%, transparent 55%),
+    var(--lg-bg);
+}
+
+.nx9-login__card {
+  width: min(400px, 100%);
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  padding: 40px 42px 34px;
+  border-radius: 22px;
+  background: var(--lg-card);
+  border: 1px solid var(--lg-card-border);
+  box-shadow: 0 24px 70px rgba(40, 30, 16, 0.14), 0 2px 8px rgba(40, 30, 16, 0.06);
+  backdrop-filter: blur(18px);
+  animation: nx9-login-rise 600ms 120ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+.nx9-login__card-mark {
+  margin-bottom: 18px;
+  opacity: 0.92;
+}
+
+.nx9-login__heading {
+  margin: 0;
+  font-size: 26px;
+  font-weight: 720;
+  letter-spacing: 0.01em;
+  color: var(--lg-ink);
+}
+
+.nx9-login__lead {
+  margin: 6px 0 0;
+  font-size: 13.5px;
+  color: var(--lg-muted);
+}
+
+/* 登录/注册切换 */
+.nx9-login__seg {
+  display: flex;
+  gap: 4px;
+  margin: 26px 0 22px;
+  padding: 4px;
+  border-radius: 12px;
+  background: var(--lg-shade);
+  border: 1px solid var(--lg-line);
+}
+
+.nx9-login__seg-btn {
+  flex: 1;
+  height: 34px;
+  border: none;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--lg-muted);
+  font-size: 13.5px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background 180ms ease, color 180ms ease, box-shadow 180ms ease;
+}
+
+.nx9-login__seg-btn.is-on {
+  background: var(--lg-card);
+  color: var(--lg-brand);
+  box-shadow: 0 1px 5px rgba(40, 30, 16, 0.1);
+}
+
+.nx9-login__seg-btn:not(.is-on):hover {
+  color: var(--lg-ink);
+}
+
+/* 表单 */
+.nx9-login__form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.nx9-login__field {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.nx9-login__field--fade {
+  animation: nx9-login-fade 220ms ease both;
+}
+
+@keyframes nx9-login-fade {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.nx9-login__label {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--lg-muted);
+}
+
+.nx9-login__input {
+  height: 46px;
+  padding: 0 14px;
+  border-radius: 12px;
+  border: 1px solid var(--lg-input-border);
+  background: var(--lg-input-bg);
+  color: var(--lg-ink);
+  font-size: 14.5px;
+  font-family: inherit;
+  outline: none;
+  transition: border-color 160ms ease, box-shadow 160ms ease, background 160ms ease;
+}
+
+.nx9-login__input::placeholder {
+  color: var(--lg-faint);
+}
+
+.nx9-login__input:focus {
+  border-color: var(--lg-brand-line);
+  box-shadow: 0 0 0 3.5px var(--lg-brand-soft);
+  background: var(--lg-card);
+}
+
+.nx9-login__error {
+  margin: 0;
+  padding: 9px 12px;
+  border-radius: 10px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: #b3261e;
+  background: rgba(179, 38, 30, 0.09);
+  border: 1px solid rgba(179, 38, 30, 0.22);
+}
+
+.nx9-login__legacy-hint {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--lg-faint);
+}
+
+.nx9-login__submit {
+  position: relative;
+  height: 46px;
+  margin-top: 4px;
+  border: none;
+  border-radius: 12px;
+  background: linear-gradient(135deg, #b08a52 0%, #a67c4a 45%, #8f6a3a 100%);
+  color: var(--lg-submit-ink);
+  font-size: 14.5px;
+  font-weight: 650;
+  font-family: inherit;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  transition: transform 120ms ease, box-shadow 180ms ease, filter 180ms ease;
+  box-shadow: 0 10px 26px rgba(166, 124, 74, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.25);
+}
+
+.nx9-login__submit:hover:not(:disabled) {
+  filter: brightness(1.06);
+  transform: translateY(-1px);
+  box-shadow: 0 14px 32px rgba(166, 124, 74, 0.42), inset 0 1px 0 rgba(255, 255, 255, 0.25);
+}
+
+.nx9-login__submit:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.nx9-login__submit:disabled {
+  opacity: 0.72;
+  cursor: progress;
+}
+
+.nx9-login__spinner {
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 250, 243, 0.35);
+  border-top-color: var(--lg-submit-ink);
+  animation: nx9-login-spin 700ms linear infinite;
+}
+
+@keyframes nx9-login-spin {
+  to { transform: rotate(360deg); }
+}
+
+.nx9-login__foot {
+  margin: 24px 0 0;
+  text-align: center;
+  font-size: 13px;
+  color: var(--lg-muted);
+}
+
+.nx9-login__switch {
+  border: none;
+  background: none;
+  padding: 0;
+  margin-left: 4px;
+  color: var(--lg-brand);
+  font-size: 13px;
+  font-weight: 650;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.nx9-login__switch:hover {
+  text-decoration: underline;
+}
+
+.nx9-login-mark {
+  display: block;
+}
+
+/* ── 窄屏适配 ── */
+@media (max-width: 900px) {
+  .nx9-login__brand {
+    display: none;
+  }
+  .nx9-login__panel {
+    min-width: 0;
+    padding: 24px;
+  }
+}

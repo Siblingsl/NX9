@@ -30,11 +30,11 @@ export interface RemotionRenderJob {
   updatedAt: number;
 }
 
-/** Remotion 组合包的 serve URL（生产环境下为构建产物路径） */
-const REMOTION_BUNDLE_DIR = path.resolve(
-  __dirname,
-  '../../../../packages/remotion-compositions/dist',
-);
+/** Remotion 组合包的 serve URL（生产环境下为构建产物路径）
+ *  NX9_REMOTION_BUNDLE_DIR 可在桌面打包等部署形态下显式指定组合包构建产物目录。 */
+const REMOTION_BUNDLE_DIR = process.env.NX9_REMOTION_BUNDLE_DIR
+  ? path.resolve(process.env.NX9_REMOTION_BUNDLE_DIR)
+  : path.resolve(__dirname, '../../../../packages/remotion-compositions/dist');
 
 @Injectable()
 export class RemotionRenderer {

@@ -12,7 +12,11 @@
     "typecheck": "pnpm --filter @nx9/shared typecheck && pnpm --filter @nx9/server typecheck && pnpm --filter @nx9/web typecheck",
     "verify:main-flow": "pnpm run typecheck && pnpm run build && pnpm --filter @nx9/server test -- test/f022-acceptance.test.ts test/gateway-upstream-error.test.ts --reporter=dot && pnpm --filter @nx9/web exec playwright test e2e-script-storyboard-director.spec.ts --reporter=line",
     "luxtts:install": "powershell -ExecutionPolicy Bypass -File services/luxtts/install.ps1",
-    "luxtts:start": "powershell -ExecutionPolicy Bypass -File services/luxtts/start.ps1"
+    "luxtts:start": "powershell -ExecutionPolicy Bypass -File services/luxtts/start.ps1",
+    "desktop:build": "pnpm --filter @nx9/desktop build",
+    "desktop:stage": "pnpm --filter @nx9/desktop stage",
+    "desktop:pack": "node apps/desktop/scripts/pack.mjs",
+    "desktop:pack:dir": "node apps/desktop/scripts/pack.mjs --dir"
   },
   "devDependencies": {
     "concurrently": "^9.1.0",
@@ -34,7 +38,8 @@
       "esbuild",
       "prisma",
       "puppeteer",
-      "sharp"
+      "sharp",
+      "electron"
     ]
   }
 }

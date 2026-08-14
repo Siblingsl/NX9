@@ -1,0 +1,73 @@
+# NX9 Studio — electron-builder 配置
+# 打包布局：
+#   app.asar        → dist/（main + preload）
+#   resources/server       → NestJS 服务端（dist + prod node_modules，避开 asar 原生模块限制）
+#   resources/web          → vite 构建产物（由服务端 NX9_SERVE_WEB 同源托管）
+#   resources/compositions → remotion-compositions 构建产物
+appId: com.nx9.studio
+productName: NX9 Studio
+copyright: Copyright © 2026 NX9 Studio
+
+directories:
+  output: release
+  buildResources: build
+
+files:
+  - dist/**/*
+  - package.json
+
+extraResources:
+  # 注意：electron-builder 的复制过滤器会剔除源目录根部的 node_modules，
+  # 因此 server 按子目录逐条复制，node_modules 单独一条。
+  - from: stage/server/dist
+    to: server/dist
+  - from: stage/server/node_modules
+    to: server/node_modules
+  - from: stage/server/prisma
+    to: server/prisma
+  - from: stage/server/templates
+    to: server/templates
+  - from: stage/server/package.json
+    to: server/package.json
+  - from: ../../apps/web/dist
+    to: web
+  - from: ../../packages/remotion-compositions/dist
+    to: compositions
+  - from: build/icon.png
+    to: icon.png
+
+asar: true
+
+win:
+  icon: build/icon.png
+  # 无代码签名证书：显式禁用签名，避免 electron-builder 26 默认对 extraResources
+  # 内 .exe 逐个走 signtool 工具集网络解析（离线/受限网络下会 ETIMEDOUT 导致打包失败）。
+  # 图标与版本资源仍会正常写入（signAndEditExecutable 保持默认）。
+  signExecutable: false
+  target:
+    - target: nsis
+      arch:
+        - x64
+    - target: portable
+      arch:
+        - x64
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  artifactName: NX9-Studio-Setup-${version}.${ext}
+
+portable:
+  artifactName: NX9-Studio-Portable-${version}.${ext}
+  # 解压期间显示的启动画面（NSIS BgImage 只认 BMP，见 scripts/gen-splash.ps1）
+  splashImage: build/splash.bmp
+
+electronDownload:
+  cache: ../../.electron-cache
+  # 直连 GitHub 不可达时使用 npmmirror 镜像（npmmirror 与官方发布同步）
+  mirror: https://npmmirror.com/mirrors/electron/
+
+npmRebuild: false

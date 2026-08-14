@@ -25,6 +25,7 @@ import { useAppSurface } from '../stores/app-surface';
 import { HomeNavPage } from '../pages/HomeNavPage';
 import { ProductionStudioPage } from '../pages/ProductionStudioPage';
 import { CanvasStageShell } from './canvas-stage/CanvasStageShell';
+import { LoginPage } from '../pages/LoginPage';
 
 const StageDeckSurface = lazy(() =>
   import('../engine/stage-deck/StageDeckSurface').then((m) => ({ default: m.StageDeckSurface })),
@@ -77,12 +78,22 @@ export default function AppShell() {
   const openCreateDialog = useCreateWorkspaceDialogUi((s) => s.openDialog);
   const closeCreateDialog = useCreateWorkspaceDialogUi((s) => s.closeDialog);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
-  const bootstrapUser = useUserSession((s) => s.bootstrap);
+  const restoreSession = useUserSession((s) => s.restore);
+  const sessionStatus = useUserSession((s) => s.status);
   const user = useUserSession((s) => s.user);
   const bootstrapped = useRef(false);
-  const userBootstrapped = useRef(false);
+  const sessionRestored = useRef(false);
   const canvasTheme = useWorkspaceDocument((s) => s.canvasAppearance.theme);
   const requestBootstrapCorePipeline = useFlowCommands((s) => s.requestBootstrapCorePipeline);
+
+  useEffect(() => {
+    if (sessionRestored.current) return;
+    sessionRestored.current = true;
+    void restoreSession().catch((err) => {
+      appendLog(`会话恢复失败: ${String(err)}`);
+      toastError('会话恢复失败，请检查 NX9 服务端日志');
+    });
+  }, [restoreSession, appendLog]);
 
   useEffect(() => {
     document.body.classList.toggle('nx9-app-dark-body', canvasTheme === 'dark');
@@ -94,20 +105,16 @@ export default function AppShell() {
   }, [canvasTheme]);
 
   useEffect(() => {
-    if (userBootstrapped.current) return;
-    userBootstrapped.current = true;
-    void bootstrapUser();
-  }, [bootstrapUser]);
-
-  useEffect(() => {
+    if (sessionStatus !== 'signed-in') return;
     void useCredentialVault.getState().load();
-  }, []);
+  }, [sessionStatus]);
 
   useEffect(() => {
+    if (sessionStatus !== 'signed-in') return;
     void (async () => {
       await fetchAll();
       const current = useWorkspaceCatalog.getState().items.filter(isPrivateWorkspace);
-      // StrictMode / HMR 下用模块级锁，避免空列表时连建多个默认项目
+      // 每个账户独立判断；StrictMode / HMR 下用模块级锁，避免空列表时连建多个默认项目
       if (current.length === 0 && !bootstrapped.current && !defaultWorkspaceBootstrapLock) {
         bootstrapped.current = true;
         defaultWorkspaceBootstrapLock = true;
@@ -119,7 +126,18 @@ export default function AppShell() {
         }
       }
     })();
-  }, [fetchAll, create]);
+  }, [sessionStatus, fetchAll, create]);
+
+  // 账户切换时释放默认项目引导锁（新账户空列表仍可自动建默认项目）
+  const sessionUserId = useUserSession((s) => s.userId);
+  const prevUserIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (prevUserIdRef.current !== null && prevUserIdRef.current !== sessionUserId) {
+      bootstrapped.current = false;
+      defaultWorkspaceBootstrapLock = false;
+    }
+    prevUserIdRef.current = sessionUserId;
+  }, [sessionUserId]);
 
   const onPickBlock = useCallback(
     (def: BlockDefinition) => {
@@ -204,6 +222,31 @@ export default function AppShell() {
   const isCanvas = surface === 'canvas';
   const isStudio = surface === 'studio';
   const isHome = surface === 'home';
+
+  if (sessionStatus === 'signed-out') {
+    return (
+      <>
+        <LoginPage />
+        <ToastHost />
+      </>
+    );
+  }
+
+  if (sessionStatus === 'restoring') {
+    return (
+      <div className="h-full w-full flex flex-col items-center justify-center gap-5 bg-surface text-ink/60">
+        <div className="nx9-session-loading-mark" aria-hidden="true">
+          <svg width="52" height="52" viewBox="0 0 48 48" fill="none">
+            <rect x="4" y="4" width="40" height="40" rx="8" stroke="var(--nx9-brand)" strokeWidth="2.4" />
+            <rect x="12" y="12" width="24" height="24" rx="3" stroke="var(--nx9-brand)" strokeWidth="1.4" opacity="0.7" />
+            <path d="M15 31 L22 20 L27 27 L31 23 L35 31 Z" fill="var(--nx9-brand)" opacity="0.5" />
+          </svg>
+        </div>
+        <p className="text-sm font-medium tracking-wide">正在进入 NX9 Studio…</p>
+        <ToastHost />
+      </div>
+    );
+  }
 
   return (
     <div className={`h-full flex flex-col ${canvasTheme === 'dark' ? 'nx9-app-dark' : ''}`}>

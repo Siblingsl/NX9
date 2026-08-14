@@ -16,22 +16,22 @@
     "prisma:push": "prisma db push"
   },
   "dependencies": {
+    "@hyperframes/core": "^0.7.64",
+    "@hyperframes/producer": "^0.7.64",
     "@nestjs/common": "^11.0.0",
     "@nestjs/core": "^11.0.0",
     "@nestjs/platform-express": "^11.0.0",
     "@nestjs/serve-static": "^5.0.0",
     "@nx9/shared": "workspace:*",
     "@prisma/client": "^6.0.0",
+    "@remotion/renderer": "4.0.499",
     "class-transformer": "^0.5.1",
     "class-validator": "^0.14.1",
     "express": "^5.1.0",
     "multer": "^2.0.2",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1",
-    "sharp": "^0.34.5",
-    "@hyperframes/producer": "^0.7.64",
-    "@hyperframes/core": "^0.7.64",
-    "@remotion/renderer": "4.0.499"
+    "sharp": "^0.34.5"
   },
   "devDependencies": {
     "@nestjs/cli": "^11.0.0",
@@ -41,6 +41,7 @@
     "@types/multer": "^1.4.12",
     "@types/node": "^22.10.0",
     "@types/supertest": "^7.2.0",
+    "esbuild": "0.25.12",
     "prisma": "^6.0.0",
     "supertest": "^7.2.2",
     "typescript": "^5.7.0",

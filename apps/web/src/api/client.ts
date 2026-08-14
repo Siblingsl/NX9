@@ -19,10 +19,14 @@ function userHeaders(): Record<string, string> {
   try {
     const raw = localStorage.getItem('nx9-user-session');
     if (!raw) return {};
-    const parsed = JSON.parse(raw) as { state?: { userId?: string } };
+    const parsed = JSON.parse(raw) as {
+      state?: { userId?: string; token?: string | null };
+    };
     const id = parsed?.state?.userId;
+    const token = parsed?.state?.token;
     const headers: Record<string, string> = {};
     if (id) headers['X-NX9-User-Id'] = id;
+    if (token) headers['X-NX9-Auth-Token'] = token;
     // F-009: 传递当前 workspaceId 供用量事件标记
     const wsId = getCurrentWorkspaceId();
     if (wsId) headers['X-NX9-Workspace-Id'] = wsId;
@@ -950,6 +954,20 @@ export const api = {
   bootstrapUser: () => request<UserSummary>('/api/users/bootstrap'),
   createUser: (name: string, email?: string) =>
     request<UserSummary>('/api/users', { method: 'POST', body: JSON.stringify({ name, email }) }),
+
+  /** 登录 / 注册 / 会话（AuthModule） */
+  authRegister: (name: string, password: string) =>
+    request<{ token: string; user: UserSummary; adoptedLegacy: boolean }>('/api/auth/register', {
+      method: 'POST',
+      body: JSON.stringify({ name, password }),
+    }),
+  authLogin: (name: string, password: string) =>
+    request<{ token: string; user: UserSummary; adoptedLegacy: boolean }>('/api/auth/login', {
+      method: 'POST',
+      body: JSON.stringify({ name, password }),
+    }),
+  authMe: () => request<UserSummary>('/api/auth/me'),
+  authLogout: () => request<{ ok: boolean }>('/api/auth/logout', { method: 'POST' }),
 
   usageSummary: (days = 7, userId?: string, workspaceId?: string) =>
     request<UsageSummary>(

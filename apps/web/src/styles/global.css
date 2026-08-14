@@ -54,6 +54,16 @@ body {
   color-scheme: dark;
 }
 
+/* 登录会话恢复加载屏的品牌 Mark 呼吸动效 */
+.nx9-session-loading-mark {
+  animation: nx9-session-breathe 2.6s ease-in-out infinite;
+}
+
+@keyframes nx9-session-breathe {
+  0%, 100% { transform: translateY(0); opacity: 0.85; }
+  50% { transform: translateY(-6px); opacity: 1; }
+}
+
 /* React Flow performance overrides */
 .nx9-flow.intensive .react-flow__edge-path {
   animation: none !important;

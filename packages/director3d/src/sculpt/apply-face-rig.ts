@@ -12,6 +12,7 @@ import {
   collectMorphMeshes,
   collectNamed,
   lookupMorphIndex,
+  normalizeNodeName,
   type BoneAxis,
 } from './sculpt-contract';
 import { applyMaterialDriver } from './material-drivers';
@@ -92,7 +93,7 @@ export function applyFaceRigToObject(root: Object3D, rig: CharacterFaceRig | und
   const named = collectNamed(root);
   for (const def of Object.values(BONE_DRIVERS)) {
     for (const boneName of def.bones) {
-      const bone = named.get(boneName);
+      const bone = named.get(normalizeNodeName(boneName));
       if (bone) bone.scale.set(1, 1, 1);
     }
   }
@@ -111,7 +112,7 @@ export function applyFaceRigToObject(root: Object3D, rig: CharacterFaceRig | und
       const boneDef = BONE_DRIVERS[def.id];
       if (!boneDef) continue;
       for (const boneName of boneDef.bones) {
-        const bone = named.get(boneName);
+        const bone = named.get(normalizeNodeName(boneName));
         if (!bone) continue;
         const side = boneName.endsWith('.L') ? 'L' : boneName.endsWith('.R') ? 'R' : undefined;
         const sideValue = side ? faceRigSideValue(normalized, def.id, side) : v;
@@ -148,7 +149,7 @@ export function readMorphInfluence(
 }
 
 export function readBoneScale(root: Object3D, name: string): Vector3 | undefined {
-  const obj = collectNamed(root).get(name);
+  const obj = collectNamed(root).get(normalizeNodeName(name));
   return obj ? obj.scale.clone() : undefined;
 }
 

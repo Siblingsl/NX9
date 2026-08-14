@@ -611,6 +611,14 @@
   text-decoration: underline;
 }
 
+.nx9-settings__link-btn.is-danger {
+  color: #d05850;
+}
+
+.nx9-settings__link-btn.is-danger:hover {
+  color: #b3261e;
+}
+
 .nx9-settings__link-btn:disabled {
   opacity: 0.45;
   cursor: default;

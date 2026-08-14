@@ -100,10 +100,20 @@ export function morphNamesForParam(paramId: string): string[] {
   ];
 }
 
+/**
+ * 节点名归一化：与 three.js `PropertyBinding.sanitizeNodeName` 一致（删 `. : / [ ]`，
+ * 空格换下划线）。GLTFLoader 加载 GLB 时会按此规则清洗节点名（如 `Clavicle.L` → `ClavicleL`），
+ * 契约里带点的骨名/Handle 名在比对前必须走同一归一化，否则真实 GLB 永远匹配不上。
+ */
+export function normalizeNodeName(name: string): string {
+  return name.replace(/\s+/g, '_').replace(/[\[\].:\/]/g, '');
+}
+
 export function findObjectByName(root: Object3D, name: string): Object3D | undefined {
   let found: Object3D | undefined;
+  const want = normalizeNodeName(name);
   root.traverse((obj) => {
-    if (!found && obj.name === name) found = obj;
+    if (!found && obj.name && normalizeNodeName(obj.name) === want) found = obj;
   });
   return found;
 }
@@ -111,7 +121,9 @@ export function findObjectByName(root: Object3D, name: string): Object3D | undef
 export function collectNamed(root: Object3D): Map<string, Object3D> {
   const map = new Map<string, Object3D>();
   root.traverse((obj) => {
-    if (obj.name && !map.has(obj.name)) map.set(obj.name, obj);
+    if (!obj.name) return;
+    const key = normalizeNodeName(obj.name);
+    if (!map.has(key)) map.set(key, obj);
   });
   return map;
 }
@@ -199,7 +211,7 @@ export function assertSculptMeshContract(
         missingParamIds.push(def.id);
         continue;
       }
-      const missing = boneDef.bones.filter((b) => !named.has(b));
+      const missing = boneDef.bones.filter((b) => !named.has(normalizeNodeName(b)));
       if (missing.length === 0) mappedParamIds.push(def.id);
       else missingParamIds.push(def.id);
       continue;
@@ -208,11 +220,11 @@ export function assertSculptMeshContract(
     else missingParamIds.push(def.id);
   }
 
-  const missingBones = FULL_ARMATURE_BONES.filter((b) => !named.has(b));
-  const hasArmature = named.has(MESH_NAMES.armature) || named.has('Root');
+  const missingBones = FULL_ARMATURE_BONES.filter((b) => !named.has(normalizeNodeName(b)));
+  const hasArmature = named.has(normalizeNodeName(MESH_NAMES.armature)) || named.has(normalizeNodeName('Root'));
 
-  if (!named.has(MESH_NAMES.head)) warnings.push('缺少 HeadMesh');
-  if (!named.has(MESH_NAMES.body)) warnings.push('缺少 BodyMesh');
+  if (!named.has(normalizeNodeName(MESH_NAMES.head))) warnings.push('缺少 HeadMesh');
+  if (!named.has(normalizeNodeName(MESH_NAMES.body))) warnings.push('缺少 BodyMesh');
 
   const tri = countTriangles(root);
   if (tri > SCULPT_TRI_WARN) warnings.push(`三角面 ${tri} 超过警告阈值 ${SCULPT_TRI_WARN}`);
@@ -228,7 +240,7 @@ export function assertSculptMeshContract(
 
   let handleCount = 0;
   named.forEach((_, name) => {
-    if (name.startsWith('Handle.')) handleCount += 1;
+    if (name.startsWith('Handle')) handleCount += 1;
   });
 
   const viewportSliceMapped = P1_VIEWPORT_PARAM_IDS.every((id) => mappedParamIds.includes(id));
