@@ -8,6 +8,7 @@ import { useWorkspaceAiLog } from '../composer/useWorkspaceAiLog';
 import { useDeckUi } from '../../../stores/deck-ui';
 import { useFlowRuntime } from '../../../../../stores/flow-runtime';
 import { useActivityLog } from '../../../../../stores/activity-log';
+import { toastError } from '../../../../../stores/toast';
 import { usePromptHistory } from '../../../stores/prompt-history';
 import { useAttachedNodeData } from './use-attached-node-data';
 import { useLocalNodePrompt } from './use-local-node-prompt';
@@ -79,7 +80,9 @@ export function GenerationWorkspace({ blockId, kind, onCollapse }: GenerationWor
       });
       appendLog(`运行 · ${meta?.label ?? kind}`);
     } catch (e) {
-      appendLog(`运行失败: ${String(e)}`);
+      const msg = `运行失败: ${String(e)}`;
+      appendLog(msg);
+      toastError(msg);
     }
   }, [blockId, runtime, meta, kind, appendLog, flushNow]);
 

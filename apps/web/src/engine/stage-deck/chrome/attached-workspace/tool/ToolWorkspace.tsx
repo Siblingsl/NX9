@@ -3,6 +3,7 @@ import { lookupBlock } from '@nx9/shared';
 import { ComposerWorkspaceShell } from '../composer/ComposerWorkspaceShell';
 import { useFlowRuntime } from '../../../../../stores/flow-runtime';
 import { useActivityLog } from '../../../../../stores/activity-log';
+import { toastError } from '../../../../../stores/toast';
 import { useDeckUi } from '../../../stores/deck-ui';
 import { useAttachedNodeData } from '../generation/use-attached-node-data';
 
@@ -36,7 +37,9 @@ export function ToolWorkspace({ blockId, kind, onCollapse }: ToolWorkspaceProps)
       });
       appendLog(`运行工具 · ${meta?.label ?? kind}`);
     } catch (e) {
-      appendLog(`运行失败: ${String(e)}`);
+      const msg = `运行失败: ${String(e)}`;
+      appendLog(msg);
+      toastError(msg);
     }
   }, [blockId, runtime, meta, kind, appendLog]);
 

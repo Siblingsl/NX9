@@ -19,7 +19,7 @@ export async function applyLocalClarityToBlob(
   canvas.width = outW;
   canvas.height = outH;
   const ctx = canvas.getContext('2d', { willReadFrequently: true });
-  if (!ctx) throw new Error('Canvas 不可用');
+  if (!ctx) throw new Error('Canvas 不可用，禁止空成功');
 
   ctx.imageSmoothingEnabled = true;
   ctx.imageSmoothingQuality = 'high';

@@ -10,6 +10,58 @@ export interface TranscribeCue {
   text: string;
 }
 
+export interface SubtitleBuildResult {
+  /** 生成的字幕片段（时间线秒，已换算 trimIn/speed） */
+  clips: TimelineClip[];
+  /** 被丢弃的 cue 数（空文本 / 非正时长 / 全部在入点之前） */
+  dropped: number;
+}
+
+/**
+ * SE-EDIT-03：把一段素材的转写 cue 换成时间线字幕片段。
+ * - 素材相对时间 → 时间线绝对时间：考虑 trimInSec（入点前丢弃）与 speed（变速缩放）。
+ * - 与 buildTimelineFromShotsV2 的全局 cues 不同，本函数绑定单个 clip，供剪辑台内
+ *   「选中片段 → AI 字幕」一键生成字幕轨使用。
+ */
+export function buildSubtitleClipsFromCues(
+  clip: Pick<TimelineClip, 'startSec' | 'trimInSec' | 'speed'>,
+  cues: TranscribeCue[],
+): SubtitleBuildResult {
+  const trimIn = clip.trimInSec ?? 0;
+  const speed = Math.max(0.25, Math.min(4, clip.speed ?? 1));
+  const clips: TimelineClip[] = [];
+  let dropped = 0;
+  cues.forEach((cue, i) => {
+    const text = (cue.text ?? '').trim();
+    if (!text) {
+      dropped += 1;
+      return;
+    }
+    const startIn = Math.max(cue.startSec, trimIn);
+    const endIn = cue.endSec;
+    const relStart = (startIn - trimIn) / speed;
+    const dur = (endIn - startIn) / speed;
+    if (dur <= 0) {
+      dropped += 1;
+      return;
+    }
+    clips.push({
+      id: `sub-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 5)}-${i}`,
+      label: `字幕 ${clips.length + 1}`,
+      startSec: round3(clip.startSec + relStart),
+      durationSec: round3(dur),
+      assetUrl: '',
+      type: 'subtitle',
+      text,
+    });
+  });
+  return { clips, dropped };
+}
+
+function round3(n: number): number {
+  return Math.round(n * 1000) / 1000;
+}
+
 /** 原始镜头数据类型 */
 export interface ShotInput {
   id: string;

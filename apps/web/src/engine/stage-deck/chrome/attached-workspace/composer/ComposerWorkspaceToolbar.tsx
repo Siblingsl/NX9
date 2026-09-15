@@ -43,7 +43,7 @@ export function ComposerWorkspaceToolbar({
   onRun,
   onStop,
   running,
-  runLabel = '运行',
+  runLabel = '运行本节点',
   runDisabled,
   showRun = true,
   showAi = true,

@@ -6,8 +6,10 @@
   "packageManager": "pnpm@10.32.0",
   "scripts": {
     "dev": "pnpm --filter @nx9/shared build && concurrently -n server,web -c magenta,cyan \"pnpm --filter @nx9/server dev\" \"pnpm --filter @nx9/web dev\"",
-    "dev:server": "pnpm --filter @nx9/server dev",
+    "predev:server": "node scripts/ensure-shared-dist.mjs",
+    "dev:server": "pnpm run predev:server && pnpm --filter @nx9/server dev",
     "dev:web": "pnpm --filter @nx9/web dev",
+    "check:dist-dx": "node scripts/check-dist-dx.mjs",
     "build": "pnpm --filter @nx9/shared build && pnpm --filter @nx9/server build && pnpm --filter @nx9/web build",
     "typecheck": "pnpm --filter @nx9/shared typecheck && pnpm --filter @nx9/server typecheck && pnpm --filter @nx9/web typecheck",
     "verify:main-flow": "pnpm run typecheck && pnpm run build && pnpm --filter @nx9/server test -- test/f022-acceptance.test.ts test/gateway-upstream-error.test.ts --reporter=dot && pnpm --filter @nx9/web exec playwright test e2e-script-storyboard-director.spec.ts --reporter=line",

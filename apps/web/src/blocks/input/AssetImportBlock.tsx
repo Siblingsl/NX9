@@ -14,6 +14,7 @@ import { ImageEditModal } from '../shared/ImageEditModal';
 import { useImageEditProduce } from '../shared/use-image-edit-produce';
 import { useFlowRuntime } from '../../stores/flow-runtime';
 import { api } from '../../api/client';
+import { toastError } from '../../stores/toast';
 
 const FILE_ACCEPT = 'image/*,video/*,audio/*,.glb,.gltf,.obj,.fbx';
 
@@ -268,6 +269,10 @@ function AssetImportBlock(props: NodeProps) {
                 prev.map((t) => (t.id === taskId ? { ...t, progress: Math.round(pct * 100) } : t)),
               );
             });
+            if (!res.url?.trim()) {
+              errors.push(`${file.name}: 上传失败或未返回 URL，禁止空成功`);
+              return;
+            }
             uploaded.push({
               id: taskId,
               url: res.url,
@@ -291,6 +296,7 @@ function AssetImportBlock(props: NodeProps) {
         const msg = errors.join('；');
         setUploadError(msg);
         updateNode({ status: 'error', error: msg });
+        toastError(msg);
       } else if (uploaded.length > 0) {
         setUploadError(null);
       } else {

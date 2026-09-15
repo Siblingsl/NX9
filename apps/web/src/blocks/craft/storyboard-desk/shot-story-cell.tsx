@@ -3,6 +3,7 @@ import { Ellipsis, ImagePlus, Loader2, Pencil, Sparkles, Trash2 } from 'lucide-r
 import type { ScriptBreakdownShot } from '@nx9/shared';
 import { api } from '../../../api/client';
 import { confirmDelete } from '../../../stores/confirm-dialog';
+import { toastError } from '../../../stores/toast';
 import { shotDialogueLine } from './helpers';
 
 export function ShotStoryCell({
@@ -64,7 +65,13 @@ export function ShotStoryCell({
       setUploading(true);
       try {
         const res = await api.uploadAsset(file);
+        if (!res.url?.trim()) {
+          toastError('分镜图上传失败或未返回 URL，禁止空成功');
+          return;
+        }
         onUpload(res.url);
+      } catch (e) {
+        toastError(e instanceof Error ? e.message : '分镜图上传失败，禁止空成功');
       } finally {
         setUploading(false);
         if (inputRef.current) inputRef.current.value = '';

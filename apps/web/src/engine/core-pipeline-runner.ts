@@ -445,6 +445,11 @@ export async function resumePendingVideoTasks(
         }
         delete pendingMap[shotId];
         done++;
+      } else if (res.status === 'success' && !res.url) {
+        patchShotOnChainGraph(shotId, { videoStatus: 'failed', status: 'failed' }, graphNodes);
+        delete pendingMap[shotId];
+        failed++;
+        log(`视频任务空成功已拒绝，禁止空成功 · ${shotId}`);
       } else if (res.status === 'failed') {
         patchShotOnChainGraph(shotId, { videoStatus: 'failed', status: 'failed' }, graphNodes);
         delete pendingMap[shotId];
@@ -618,11 +623,11 @@ export async function batchGenerateVideosFromShots(
     return { ok: 0, fail: 0, skipped: 0 };
   }
 
-  // VG-06: 并发/重试单轨（兼容旧 maxRetry 字段名）
-  const concurrency = Math.max(1, Math.min(8, Number(clipData.concurrency ?? 2) || 2));
+  // VG-06 / F-048: 并发/重试单轨（兼容旧 maxRetry；并发上限 4）
+  const concurrency = Math.max(1, Math.min(4, Number(clipData.concurrency ?? 2) || 2));
   const maxRetries = Math.max(
     0,
-    Math.min(5, Number(clipData.maxRetries ?? clipData.maxRetry ?? 1) || 0),
+    Math.min(3, Number(clipData.maxRetries ?? clipData.maxRetry ?? 1) || 0),
   );
   const modelId = (clipData.model as string | undefined) || 'veo';
   // VG-11: 工作台输入的补句作为全局附加句拼入每镜
@@ -748,7 +753,7 @@ export async function batchGenerateVideosFromShots(
       }
       throw e;
     }
-    if (!videoUrl) throw new Error('视频生成失败');
+    if (!videoUrl) throw new Error('视频生成失败，禁止空成功');
 
     // 本轮出片成功：清掉该镜历史待恢复任务，避免旧任务结果日后覆盖新版本
     delete pendingTasks[shot.id];
@@ -924,8 +929,8 @@ export async function simpleConcatExport(): Promise<{ ok: boolean; url?: string;
       shots: exportShots,
     });
 
-    if (!res.ok) {
-      return reject(`导出失败：${res.message ?? '未知错误'}`);
+    if (!res.ok || !res.url) {
+      return reject(`导出失败：${res.message ?? '成片未返回 URL，禁止空成功'}`);
     }
 
     // 标记 export-pack 节点完成
@@ -937,7 +942,7 @@ export async function simpleConcatExport(): Promise<{ ok: boolean; url?: string;
         const episodeTitle = shots.find((shot) => shot.episodeId === episodeId)?.episodeTitle ?? null;
         const exportName = (exportData.exportPrefix as string | undefined) || doc.storyboard.title || 'nx9-episode';
         const fileName = exportName.toLowerCase().endsWith('.mp4') ? exportName : `${exportName}.mp4`;
-        const exportRecord = res.url ? {
+        const exportRecord = {
           id: `export-${Date.now()}`,
           episodeId,
           episodeTitle,
@@ -947,18 +952,16 @@ export async function simpleConcatExport(): Promise<{ ok: boolean; url?: string;
           shotCount: exportShots.length,
           durationSec: exportShots.reduce((sum, shot) => sum + Math.max(0, shot.durationSec), 0),
           createdAt: now,
-        } : undefined;
+        };
         runtime.updateNodeData?.(pack.id, {
           status: 'success',
           episodeUrl: res.url,
           lastExportAt: now,
           exportMode: 'ffmpeg-episode',
-          exportHistory: exportRecord
-            ? appendEpisodeExportRecord(
-                exportData.exportHistory as import('@nx9/shared').EpisodeExportRecord[] | undefined,
-                exportRecord,
-              )
-            : exportData.exportHistory,
+          exportHistory: appendEpisodeExportRecord(
+            exportData.exportHistory as import('@nx9/shared').EpisodeExportRecord[] | undefined,
+            exportRecord,
+          ),
         });
       }
     }

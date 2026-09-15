@@ -112,6 +112,12 @@ export class TasksService {
             result: { url: res.url },
           });
         }
+        if (res.done && !res.url) {
+          return this.patch(taskId, {
+            status: 'failed',
+            message: '视频任务完成但无输出地址，禁止空成功',
+          });
+        }
         if (res.error) {
           return this.patch(taskId, {
             status: 'failed',

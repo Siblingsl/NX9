@@ -1,5 +1,6 @@
 import type { Node, Edge } from '@xyflow/react';
-import type { CharacterProfile, EnvironmentProfile } from '@nx9/shared';
+import type { CharacterProfile, EnvironmentProfile, ReferenceConstraint } from '@nx9/shared';
+import { collectUpstreamReferenceConstraint } from '../../../engine/reference-board-upstream';
 
 interface BatchOptsParams {
   blockId: string;
@@ -36,6 +37,11 @@ export function buildBatchOpts(params: BatchOptsParams) {
       break;
     }
   }
+  const referenceConstraint: ReferenceConstraint | null = collectUpstreamReferenceConstraint(
+    params.blockId,
+    params.nodes,
+    params.edges,
+  );
   return {
     sourceDirectorDeskId: params.blockId,
     skipExisting: params.skipExisting,
@@ -58,6 +64,7 @@ export function buildBatchOpts(params: BatchOptsParams) {
     characters: params.characters,
     environments: params.environments,
     enforceComposition: enforceComp,
+    referenceConstraint,
   };
 }
 

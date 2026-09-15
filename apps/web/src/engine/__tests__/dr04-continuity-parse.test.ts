@@ -60,4 +60,14 @@ describe('DR-04 flow-runner continuity 写回降级', () => {
     expect(branch).not.toContain("status: 'failed'");
     expect(branch).not.toContain('JSON.parse(typeof raw');
   });
+
+  it('卡面 ContinuityCheckBlock 与 runner 共用 parseContinuityLlmJson，禁止裸 JSON.parse', () => {
+    const src = readFileSync(
+      resolve(__dirname, '../../blocks/nx9/ContinuityCheckBlock.tsx'),
+      'utf8',
+    );
+    expect(src).toContain('parseContinuityLlmJson');
+    expect(src).toContain('continuityParseFailed');
+    expect(src).not.toContain('JSON.parse(raw)');
+  });
 });

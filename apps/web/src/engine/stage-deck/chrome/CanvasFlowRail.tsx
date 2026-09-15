@@ -23,6 +23,9 @@ interface TooltipData {
   onFix: () => void;
 }
 
+/** 点击步骤条会直接打开全屏工作台的节点 kind（其余步骤仅定位节点） */
+const STEP_DESK_KINDS = new Set(['script-desk', 'storyboard-desk', 'director-desk', 'clip-editor']);
+
 export function CanvasFlowRail() {
   const session = useWorkspaceDocument((s) => s.playbookSession);
   const storyboard = useWorkspaceDocument((s) => s.storyboard);
@@ -230,26 +233,27 @@ export function CanvasFlowRail() {
     const step = playbook.steps.find((s) => s.id === stepId);
     if (!step) return;
 
-    if (state === 'done') {
+    // 步骤条即导航：定位到该步骤节点；有全屏工作台的步骤直接打开工作台（P1-4）
+    const kinds = step.canvasNodeKinds ?? [];
+    const nodes = runtime.getNodes();
+    const deskNode = nodes.find(
+      (n) => kinds.includes(n.type ?? '') && STEP_DESK_KINDS.has(n.type ?? ''),
+    );
+    if (deskNode) {
+      runtime.focusBlock(deskNode.id);
+      runtime.updateNodeData(deskNode.id, { openDeskAt: Date.now() });
+    } else {
       focusStepNodes(step, runtime);
+    }
+
+    if (state === 'done') {
       return;
     }
     if (state === 'current' && currentStep) {
       const action = currentStep.primaryAction;
       if (action.type === 'open_rail') {
         openLegacyRailTab(action.tab);
-      } else if (action.type === 'open_panel') {
-        const nodes = runtime.getNodes();
-        const desk = nodes.find((n) => n.type === 'storyboard-desk');
-        if (desk) {
-          runtime.focusBlock(desk.id);
-        } else {
-          useFlowCommands.getState().requestSpawn('storyboard-desk');
-        }
       }
-      return;
-    }
-    if (state === 'error') {
       return;
     }
     if (state === 'blocked') {

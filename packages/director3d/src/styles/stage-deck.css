@@ -231,6 +231,10 @@
 }
 
 .nx9-stage-drawer-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
   padding: 12px 14px;
   border-bottom: 1px solid var(--stage-line);
   font-weight: 600;
@@ -368,6 +372,35 @@
   font-size: 12px;
 }
 
+.nx9-stage-joint-block {
+  margin-bottom: 12px;
+}
+
+.nx9-stage-joint-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+  font-size: 11px;
+  color: var(--stage-muted);
+}
+
+.nx9-stage-joint-row {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 10px;
+  color: var(--stage-muted);
+}
+
+.nx9-stage-joint-row input[type='range'] {
+  display: block;
+  width: 100%;
+  margin-top: 2px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
 .nx9-stage-btn-row { display: flex; flex-wrap: wrap; gap: 6px; }
 
 .nx9-stage-mini-btn {
@@ -430,3 +463,206 @@
 
 .nx9-stage-empty { align-items: center; justify-content: center; gap: 10px; padding: 32px; text-align: center; }
 .nx9-stage-empty span { color: var(--stage-muted); font-size: 12px; }
+
+/* Stage Composer v2 */
+.nx9-stage-v2 .nx9-stage-header { flex-wrap: wrap; height: auto; min-height: 52px; padding: 8px 16px; gap: 8px; }
+.nx9-stage-mode-group { display: inline-flex; gap: 4px; }
+.nx9-stage-right-rail {
+  width: 280px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  overflow: auto;
+  padding: 8px 8px 8px 0;
+}
+.nx9-stage-right-rail .nx9-stage-inspector { width: 100%; border: 0; padding: 0; }
+.nx9-stage-rig, .nx9-stage-dolly {
+  background: var(--stage-panel);
+  border: 1px solid var(--stage-line);
+  border-radius: 12px;
+  padding: 10px;
+  display: grid;
+  gap: 8px;
+}
+.nx9-stage-rig-head, .nx9-stage-dolly-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+}
+.nx9-stage-rig-body { display: grid; gap: 8px; }
+.nx9-stage-rig-presets { display: flex; flex-wrap: wrap; gap: 4px; }
+.nx9-stage-dolly-actions { display: flex; flex-wrap: wrap; gap: 4px; }
+.nx9-stage-prompt-box {
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--stage-ink);
+  background: var(--desk-soft, #f3f4f6);
+  border-radius: 8px;
+  padding: 8px;
+}
+.nx9-stage-canvas-wrap.is-quad {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: 1fr 1fr;
+  gap: 2px;
+  background: #000;
+}
+.nx9-stage-view-track {
+  position: relative;
+  min-height: 120px;
+  height: 100%;
+  background: #0f1115;
+  touch-action: none;
+}
+.nx9-stage-view-track.is-active {
+  outline: 2px solid var(--stage-brand, #a13d63);
+  outline-offset: -2px;
+  z-index: 1;
+}
+.nx9-stage-view-track::after {
+  content: attr(data-label);
+  position: absolute;
+  left: 8px;
+  top: 8px;
+  z-index: 2;
+  font-size: 10px;
+  color: #fff;
+  background: rgba(0,0,0,.45);
+  padding: 2px 6px;
+  border-radius: 999px;
+  pointer-events: none;
+}
+.nx9-stage-canvas-wrap.is-quad .nx9-stage-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100% !important;
+  height: 100% !important;
+  pointer-events: none;
+}
+.nx9-stage-canvas-wrap.is-paused {
+  opacity: 0.92;
+}
+.nx9-stage-nav-hint {
+  position: absolute;
+  left: 12px;
+  bottom: 12px;
+  z-index: 3;
+  font-size: 11px;
+  color: #e5e7eb;
+  background: rgba(15,17,21,.72);
+  border-radius: 8px;
+  padding: 6px 10px;
+  pointer-events: none;
+}
+.nx9-stage-shot-list .nx9-stage-dolly { margin: 8px; }
+.nx9-stage-prompt-toggles {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px 8px;
+}
+.nx9-stage-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--stage-ink);
+  cursor: pointer;
+}
+.nx9-stage-toggle input { margin: 0; }
+.nx9-stage-timeline .nx9-stage-chip { margin-left: auto; }
+.nx9-stage-context-compact { min-height: 34px; }
+.nx9-stage-mobile-dock { display: none; }
+.nx9-stage-mobile-only { display: none !important; }
+
+@media (max-width: 900px) {
+  .nx9-stage-v2 .nx9-stage-desk-only { display: none !important; }
+  .nx9-stage-v2 .nx9-stage-mobile-only { display: inline-flex !important; }
+  .nx9-stage-v2 .nx9-stage-header .nx9-stage-mode-group,
+  .nx9-stage-v2 .nx9-stage-header .nx9-stage-cta { display: none; }
+  .nx9-stage-v2 .nx9-stage-shot-list,
+  .nx9-stage-v2 .nx9-stage-right-rail,
+  .nx9-stage-v2 .nx9-stage-rail {
+    display: none;
+  }
+  .nx9-stage-v2 .nx9-stage-shot-list.is-mobile-open,
+  .nx9-stage-v2 .nx9-stage-right-rail.is-mobile-open {
+    display: flex;
+    position: absolute;
+    left: 8px;
+    right: 8px;
+    bottom: 72px;
+    top: auto;
+    max-height: 55%;
+    z-index: 30;
+    width: auto;
+    border: 1px solid var(--stage-line);
+    border-radius: 16px;
+    box-shadow: 0 12px 40px rgb(0 0 0 / 0.18);
+    overflow: auto;
+  }
+  .nx9-stage-v2 .nx9-stage-film-wrap {
+    display: none;
+  }
+  .nx9-stage-v2 .nx9-stage-film-wrap.is-mobile-open {
+    display: block;
+    position: absolute;
+    left: 8px;
+    right: 8px;
+    bottom: 72px;
+    z-index: 30;
+    max-height: 40%;
+    overflow: auto;
+    background: var(--stage-panel);
+    border: 1px solid var(--stage-line);
+    border-radius: 16px;
+    padding: 8px;
+  }
+  .nx9-stage-v2 .nx9-stage-workspace {
+    padding: 8px;
+    padding-bottom: 4px;
+  }
+  .nx9-stage-v2 .nx9-stage-preset-bar { display: none; }
+  .nx9-stage-mobile-dock {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    flex-shrink: 0;
+    padding: 8px 10px calc(8px + env(safe-area-inset-bottom, 0px));
+    background: var(--stage-panel);
+    border-top: 1px solid var(--stage-line);
+  }
+  .nx9-stage-mobile-dock__modes,
+  .nx9-stage-mobile-dock__sheets,
+  .nx9-stage-mobile-dock__actions {
+    display: flex;
+    gap: 6px;
+    overflow-x: auto;
+    align-items: center;
+  }
+  .nx9-stage-mobile-dock__btn {
+    border: 1px solid var(--stage-line);
+    background: var(--desk-panel, #fff);
+    color: var(--stage-ink);
+    border-radius: 10px;
+    padding: 8px 12px;
+    font-size: 12px;
+    white-space: nowrap;
+  }
+  .nx9-stage-mobile-dock__btn.is-on {
+    background: var(--desk-accent-soft, rgb(161 61 99 / 0.1));
+    border-color: var(--desk-accent-line, rgb(161 61 99 / 0.35));
+    color: var(--stage-brand);
+    font-weight: 600;
+  }
+  .nx9-stage-v2 .nx9-stage-drawer {
+    left: 8px;
+    right: 8px;
+    width: auto;
+    bottom: 72px;
+    top: auto;
+    max-height: 50%;
+  }
+}

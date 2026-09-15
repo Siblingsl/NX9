@@ -1,8 +1,10 @@
 import { memo, useCallback } from 'react';
 import { type NodeProps, useReactFlow } from '@xyflow/react';
+import { resolveRunLabel } from '@nx9/shared';
 import { BlockShell } from '../../shared/BlockShell';
 import { api } from '../../../api/client';
 import { useActivityLog } from '../../../stores/activity-log';
+import { toastError } from '../../../stores/toast';
 
 function UpscaleLiteBlock(props: NodeProps) {
   const { updateNodeData } = useReactFlow();
@@ -12,15 +14,20 @@ function UpscaleLiteBlock(props: NodeProps) {
   const scale = (props.data?.scale as number) ?? 2;
   const outputUrl = (props.data?.previewUrl as string) || (props.data?.outputUrl as string);
   const status = props.data?.status as string | undefined;
+  const runLabel = resolveRunLabel('upscale-lite', status).primary;
 
   const run = useCallback(async () => {
     if (!sourceUrl) {
-      appendLog('放大：请连接上游图片');
+      const msg = '放大：请连接上游图片，禁止空成功';
+      updateNodeData(props.id, { status: 'error', error: msg });
+      appendLog(msg);
+      toastError(msg);
       return;
     }
     updateNodeData(props.id, { status: 'running' });
     try {
       const res = await api.upscaleImage({ sourceUrl, scale });
+      if (!res.ok || !res.url) throw new Error('放大失败，禁止空成功');
       updateNodeData(props.id, {
         status: 'success',
         previewUrl: res.url,
@@ -29,7 +36,9 @@ function UpscaleLiteBlock(props: NodeProps) {
       appendLog(`放大完成 · ${res.width}×${res.height}`);
     } catch (e) {
       updateNodeData(props.id, { status: 'error', error: String(e) });
-      appendLog(`放大失败: ${String(e)}`);
+      const msg = `放大失败: ${String(e)}`;
+      appendLog(msg);
+      toastError(msg);
     }
   }, [sourceUrl, scale, props.id, updateNodeData, appendLog]);
 
@@ -58,7 +67,7 @@ function UpscaleLiteBlock(props: NodeProps) {
           disabled={status === 'running' || !sourceUrl}
           className="w-full rounded-xl bg-brand text-white py-2 disabled:opacity-50"
         >
-          {status === 'running' ? '放大中…' : '运行放大'}
+          {runLabel}
         </button>
       </div>
     </BlockShell>

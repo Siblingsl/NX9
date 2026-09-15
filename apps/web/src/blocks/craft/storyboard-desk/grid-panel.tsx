@@ -9,6 +9,8 @@ import {
 } from '../../../engine/asset-library-drag';
 import { askConfirm } from '../../../stores/confirm-dialog';
 import { toastError, toastSuccess } from '../../../stores/toast';
+import { useCredentialVault } from '../../../stores/credential-vault';
+import { isProviderConnectionError } from '../../../engine/provider-error';
 import { ShotStoryCell } from './shot-story-cell';
 import { patchShotInPayload } from './helpers';
 
@@ -153,9 +155,9 @@ const GridPanel: React.FC<GridPanelProps> = ({
           const applied = applyAssetDragToShot(shot, asset as Nx9AssetDragPayload);
           if (!applied) {
             if (asset.kind === 'costume' && !(shot.characters?.length > 0)) {
-              toastError('请先为本镜绑定角色，再拖入服装');
+              toastError('请先为本镜绑定角色，再拖入服装，禁止空成功');
             } else {
-              toastError('该素材已绑定或无法应用到本镜');
+              toastError('该素材已绑定或无法应用到本镜，禁止空成功');
             }
             return;
           }
@@ -199,7 +201,27 @@ const GridPanel: React.FC<GridPanelProps> = ({
       {!payload || visibleShots.length === 0 ? (
         <div className="sg3-empty-hero">
           <h3>本集暂无镜头</h3>
-          <p>请先完成拆镜，或导入旧镜表。</p>
+          {typeof blockData?.lastBreakdownError === 'string' && blockData.lastBreakdownError.trim() ? (
+            <>
+              <p className="sg3-empty-hero__fail" data-testid="grid-breakdown-error">
+                上次拆镜失败：{blockData.lastBreakdownError.trim()}
+              </p>
+              <p>请回到拆镜页查看队列详情并重试，勿只看空镜表。</p>
+              {isProviderConnectionError(blockData.lastBreakdownError) ? (
+                <button
+                  type="button"
+                  className="sg3-btn sg3-btn--ghost"
+                  data-testid="grid-open-settings-connection"
+                  onClick={() => useCredentialVault.getState().openSettingsTo('connection')}
+                  style={{ marginRight: 8 }}
+                >
+                  去设置修复连接
+                </button>
+              ) : null}
+            </>
+          ) : (
+            <p>请先完成拆镜，或导入旧镜表。</p>
+          )}
           {!payload ? (
             <div className="sg3-onboard" style={{ marginTop: 20, padding: 16, background: 'rgba(0,0,0,0.15)', borderRadius: 12, fontSize: 13, lineHeight: 1.8, textAlign: 'left', maxWidth: 400, marginLeft: 'auto', marginRight: 'auto' }}>
               <p className="sg3-onboard__hint">三步完成分镜准备：</p>

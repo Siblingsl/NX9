@@ -19,7 +19,9 @@ export function StageRail({
   const setDrawer = useDirectorStore((s) => s.setActiveDrawer);
 
   const toggle = (key: 'layers' | 'add' | 'env') => {
-    setDrawer(drawer === key ? null : key);
+    const next = drawer === key ? null : key;
+    setDrawer(next);
+    useDirectorStore.getState().setMobileSheet(next);
   };
 
   return (

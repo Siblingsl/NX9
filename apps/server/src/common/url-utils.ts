@@ -8,7 +8,7 @@ function cleanUrlToken(raw: string): string {
 /** Extract the first http(s) URL from plain text or share copy (e.g. Douyin). */
 export function extractUrlFromText(input: string): string {
   const trimmed = input.trim();
-  if (!trimmed) throw new Error('URL 为空');
+  if (!trimmed) throw new Error('URL 为空，禁止空成功');
 
   try {
     return new URL(trimmed).href;
@@ -17,7 +17,7 @@ export function extractUrlFromText(input: string): string {
   }
 
   const match = trimmed.match(URL_IN_TEXT_RE);
-  if (!match?.[0]) throw new Error('未在文本中找到有效链接，请粘贴 http(s) 链接');
+  if (!match?.[0]) throw new Error('未在文本中找到有效链接，禁止空成功');
 
   return cleanUrlToken(match[0]);
 }

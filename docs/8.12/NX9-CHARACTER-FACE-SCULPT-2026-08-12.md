@@ -4,7 +4,8 @@
 > **存放**：`docs/8.12/`（本轮整理专档）  
 > **原档**：`docs/NX9-CHARACTER-FACE-SCULPT-DESIGN.md` 已改为跳转 stub  
 > **范围**：素材库角色 Tab · `creative.faceRig` · `@nx9/director3d` sculpt · 出图锁身份  
-> **原则**：以代码可证伪为准；P1 代理丑 ≠ bug；终局是正式身份 GLB + 定妆截图，不是表情播放器
+> **原则**：以代码可证伪为准；P1 代理丑 ≠ bug；终局是正式身份 GLB + 定妆截图，不是表情播放器  
+> **2026-09-11 复核**：P0～P4 主链与 FACE-02～06/09 已闭环（见实施日志）；§3.4 已按现行改写。剩 FACE-10 产品后置、FACE-08 材质加深（非假成功）。
 
 ---
 
@@ -33,9 +34,9 @@ P1 已用 **代理粘土人 + 6 个高信号项**打穿「数 → 网格」。�
 |------|------|------|
 | **P0** | `faceRig` 字典 / 读写 / Prompt 编译 / 左栏滑块 | ✅ |
 | **P1** | 代理网格 + 切片 6 项真变形 + 全屏捏模台 | ✅ |
-| **P2** | 控制点拖拽 / 对称解锁 / 机位键 / 台内 undo | ❌ |
-| **P3** | 规范机位离屏截图 → `faceLockUrl` + 健康条 | ❌ |
-| **P4** | 正式 `nx9-character-base.glb` + 铺 morph + 材质 | ❌ |
+| **P2** | 控制点拖拽 / 对称解锁 / 机位键 / 台内 undo | ✅（见实施日志） |
+| **P3** | 规范机位离屏截图 → `faceLockUrl` + 健康条 | ✅（见实施日志） |
+| **P4** | 正式 `nx9-character-base.glb` + 铺 morph + 材质 | ✅ 捏模台加载；导演台 `StageActor` 已接 `loadCharacterModel` + 摆姿骨（加载前胶囊占位） |
 
 三步价值：
 
@@ -43,7 +44,7 @@ P1 已用 **代理粘土人 + 6 个高信号项**打穿「数 → 网格」。�
 faceRig（SSOT，-100~+100）
   ├─ applyFaceRigToObject()  → 视口网格     ✅ P1（切片 6 项）
   ├─ buildFaceRigPrompt()    → 出图文本锁   ✅ P0
-  └─ captureCanonicalViews() → faceLockUrl  ❌ P3
+  └─ captureCanonicalViews() → faceLockUrl  ✅ P3
 ```
 
 硬规则：
@@ -101,15 +102,15 @@ faceRig（SSOT，-100~+100）
 
 | ID | 判定 | 缺口 | 影响 | 收口阶段 |
 |----|------|------|------|----------|
-| FACE-01 | ❌ | 视口永远是代理粘土人；无 GLB 加载器接入 Scene | 用户以为「3D 捏脸坏了/太丑」 | P4（可先做 DEV 加载 custom 调试口） |
-| FACE-02 | ❌ | 无 `Handle.*` 拾取与轴向拖拽 | 不像游戏捏人，只能拧滑块 | P2 |
-| FACE-03 | ❌ | 对称锁 UI / `asymmetric` 左右扩展键未驱动网格 | 解锁不对称无真左右差 | P2 |
-| FACE-04 | ❌ | 台内 undo / 机位快捷键（F/S/Q/B） | 误拧难回；构图靠手转 | P2 |
-| FACE-05 | ❌ | `exportImage` + 规范机位写 `faceLockUrl` | 捏完不能锁生图身份 | P3（对出图价值最大） |
-| FACE-06 | ❌ | 健康条 `face-rig-not-rendered` / `face-rig-metric-conflict` / `face-rig-mesh-stale` | 参数改了无提示重截 | P3 |
-| FACE-07 | ❌ | `nx9-character-base.glb` + manifest + LICENSE | 无成品身份基模 | P4 + 美术并行 |
-| FACE-08 | ❌ | `driver: material`（虹膜/眉/肤/雀斑）运行时未写 | 字典有类型，视口无效果 | P4 |
-| FACE-09 | ⏸ | 导演台 `StageActor` 仍球头胶囊；未桥接 `faceRig.body` | 舞台比例 ≠ 捏模比例 | P4 可选 |
+| FACE-01 | ✅ | 视口加载正式/自定义 GLB（见实施日志 P4） | — | P4 |
+| FACE-02 | ✅ | Handle 拾取与轴向拖拽 | — | P2 |
+| FACE-03 | ✅ | 对称锁 / 左右扩展键驱动网格 | — | P2 |
+| FACE-04 | ✅ | 台内 undo / 机位快捷键 | — | P2 |
+| FACE-05 | ✅ | 规范机位截图写 `faceLockUrl` | — | P3 |
+| FACE-06 | ✅ | 健康条 face-rig-* 三项 | — | P3 |
+| FACE-07 | ✅ | `nx9-character-base.glb` + manifest + LICENSE | — | P4 |
+| FACE-08 | ⚠ | `driver: material` 部分已接（虹膜等）；全量材质通道仍可加深 | 字典有类型，视口效果未齐 | P4 |
+| FACE-09 | ✅ | 导演台 `StageActor`→`loadCharacterModel` + 体型/摆姿 | — | P4 |
 | FACE-10 | ⏸ | 3D 表情 / 发型服装 / 照片拟合 | 身份未锁前做了会变成「同一张脸演戏」 | P3 后另开 |
 
 ### 3.2 文档 ↔ 代码漂移（整理时发现）
@@ -135,19 +136,21 @@ faceRig（SSOT，-100~+100）
 
 ### 3.4 闭环判定（一眼）
 
+> **2026-09-11**：以实施日志与 §1 总表为准；下列为现行判定（历史 ❌ 叙述已作废）。
+
 | 链路 | 闭环？ |
 |------|--------|
 | 改滑块 → `faceRig` 落库 → 刷新复现 | ✅ |
 | `faceRig` → Prompt → Bible/设定板 | ✅ |
-| `faceRig` → 视口网格（切片 6） | ✅（代理） |
-| `faceRig` → 视口网格（其余 39） | ❌（等 morph/骨） |
-| 控制点拖 → 同一份 `faceRig` | ❌ |
-| 捏完 → 规范截图 → `faceLockUrl` → 生图 ID LOCK | ❌ |
-| 正式好看基模 → 同一驱动器 | ❌（无 GLB） |
-| 捏模比例 → 导演台人偶 | ❌ |
+| `faceRig` → 视口网格（切片 6） | ✅（代理 / 正式 GLB） |
+| `faceRig` → 视口网格（其余项） | ⚠ 随基模 morph 铺齐加深（字典已齐） |
+| 控制点拖 → 同一份 `faceRig` | ✅ |
+| 捏完 → 规范截图 → `faceLockUrl` → 生图 ID LOCK | ✅ |
+| 正式基模 → 同一驱动器 | ✅（`nx9-character-base.glb` + loader） |
+| 捏模比例 → 导演台人偶 | ✅（`StageActor` + `loadCharacterModel`） |
 
-**最大未闭环（产品）**：FACE-05 定妆写出图 + FACE-07 正式基模。  
-**最大未闭环（体感）**：FACE-01 代理丑 + FACE-02 无拖点。
+**产品后置（非本轮代码断环）**：FACE-10 3D 表情 / 发型服装 / 照片拟合。  
+**诚实加深（非假成功）**：FACE-08 全量材质通道视口效果仍可随基模加深。
 
 ---
 

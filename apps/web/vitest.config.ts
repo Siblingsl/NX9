@@ -21,7 +21,10 @@ export default defineConfig({
     include: [
       'src/blocks/craft/__tests__/**/*.test.tsx',
       'src/blocks/core/__tests__/**/*.test.tsx',
+      'src/blocks/utility/__tests__/**/*.test.{ts,tsx}',
       'src/blocks/nx9/__tests__/**/*.test.{ts,tsx}',
+      'src/blocks/shared/__tests__/**/*.test.{ts,tsx}',
+      'src/components/**/__tests__/**/*.test.{ts,tsx}',
       'src/engine/__tests__/**/*.test.ts',
     ],
     testTimeout: 30000,

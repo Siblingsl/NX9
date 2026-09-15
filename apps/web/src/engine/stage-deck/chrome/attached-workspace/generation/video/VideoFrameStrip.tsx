@@ -1,6 +1,7 @@
 import { useCallback, useRef, useState } from 'react';
 import { ImagePlus, X } from 'lucide-react';
 import { api } from '../../../../../../api/client';
+import { toastError } from '../../../../../../stores/toast';
 
 function stop(e: React.SyntheticEvent) {
   e.stopPropagation();
@@ -23,7 +24,13 @@ function FrameSlot({
       setBusy(true);
       try {
         const res = await api.uploadAsset(file);
+        if (!res.url?.trim()) {
+          toastError('首尾帧上传失败或未返回 URL，禁止空成功');
+          return;
+        }
         onChange(res.url);
+      } catch (e) {
+        toastError(e instanceof Error ? e.message : '首尾帧上传失败，禁止空成功');
       } finally {
         setBusy(false);
       }
@@ -129,7 +136,13 @@ function ClipSlot({
       setBusy(true);
       try {
         const res = await api.uploadAsset(file);
+        if (!res.url?.trim()) {
+          toastError('参考视频上传失败或未返回 URL，禁止空成功');
+          return;
+        }
         onChange(res.url);
+      } catch (e) {
+        toastError(e instanceof Error ? e.message : '参考视频上传失败，禁止空成功');
       } finally {
         setBusy(false);
       }

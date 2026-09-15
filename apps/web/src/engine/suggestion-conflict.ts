@@ -24,6 +24,8 @@ export function timelineOpTargets(op: TimelineOp): string[] {
     case 'set-track':
     case 'duck-audio':
       return [`track:${op.trackId}`];
+    case 'set-timeline-meta':
+      return ['timeline'];
     default:
       return [];
   }

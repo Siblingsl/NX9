@@ -432,7 +432,9 @@ export function CharacterDetailFields({
       </aside>
 
       {/* 右栏：设定板与参考格 — 独立滚动 */}
-      <main className="flex min-h-0 min-w-0 flex-1 flex-col">
+      <main
+        className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden"
+      >
         <div className="min-h-0 flex-1 space-y-4 overflow-y-auto nx9-scroll p-4">
         <DetailSection id="char-visual" title="视觉 · 设定板与参考">
           <p className="text-[10px] text-ink/45">

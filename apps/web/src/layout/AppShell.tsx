@@ -274,8 +274,15 @@ export default function AppShell() {
                 onUndo={() => runtime?.undo()}
                 onRedo={() => runtime?.redo()}
                 onBatchRun={() => void handleBatchRun()}
-                onOpenAssets={() => toggleAssetLibModal()}
-                onOpenSkills={() => toggleSkillLibModal()}
+                onOpenAssets={() => {
+                  // 面板互斥：打开素材库时收起技能库，避免两个全屏面板互相叠压
+                  useSkillLibraryModalUi.getState().setOpen(false);
+                  toggleAssetLibModal();
+                }}
+                onOpenSkills={() => {
+                  useAssetLibraryModalUi.getState().setOpen(false);
+                  toggleSkillLibModal();
+                }}
                 onOpenTrash={() => openAssetTrash(true)}
                 onOpenSettings={() => toggleSettings(true)}
               >

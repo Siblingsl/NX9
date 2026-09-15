@@ -827,6 +827,38 @@
   /* ensure readable on paper */
 }
 
+/* P2-4: Atelier 侧栏/面板不在 .studio-desk 作用域内，--sd-* 缺失会让主按钮
+   渐变失效成「白字浅底」。用 Atelier 自有变量显式兜底，保证可读可点。 */
+.atelier .studio-desk__btn-primary {
+  background: linear-gradient(135deg, var(--at-brand), color-mix(in srgb, var(--at-brand) 72%, var(--at-accent)));
+  color: #fff;
+  box-shadow: 0 2px 8px rgba(61, 107, 99, 0.28);
+}
+.atelier .studio-desk__btn-primary:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.atelier .studio-desk__btn-accent {
+  background: var(--at-brand);
+  color: #fff;
+}
+.atelier .studio-desk__btn {
+  background: var(--at-paper-2);
+  border: 1px solid var(--at-line);
+  color: var(--at-ink);
+}
+.atelier .studio-desk__btn:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--at-brand) 35%, var(--at-line));
+  background: var(--at-paper);
+}
+.atelier .studio-desk__ghost {
+  color: var(--at-muted);
+}
+.atelier .studio-desk__ghost:hover {
+  background: rgba(42, 36, 28, 0.05);
+  color: var(--at-ink);
+}
+
 /* Float props (decorative, non-interactive) */
 .atelier__prop {
   position: absolute;

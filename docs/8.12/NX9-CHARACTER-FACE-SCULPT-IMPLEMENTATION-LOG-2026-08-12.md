@@ -16,7 +16,7 @@
 | FACE-06 | ❌ | 已闭环 | 健康条三项：未定妆 / 定妆过期 / 契约过期 |
 | FACE-07 | ❌ | 工程子集已闭环（资产后置） | 加载路径/manifest 校验/契约回退已齐（B2）；`apps/web/public/director3d/models/README.md` 已补资产契约；GLB/LICENSE 仍待美术交付 |
 | FACE-08 | ❌ | 已闭环 | `material-drivers.ts` 真驱动命名材质通道；无通道由 `sculpt-contract.ts` 标 missing（B3） |
-| FACE-09 | ⏸ | 已闭环 | `stage-body-bridge.ts` + `StageActor` 已桥接 `faceRig.body`（身高/肩/躯干/腿/颈/手，B4） |
+| FACE-09 | ⏸ | 已闭环 | `stage-body-bridge` + `StageActor` 接 `loadCharacterModel`（正式/代理）+ `applyPoseToArmature`；加载前胶囊占位 |
 | FACE-10 | ⏸ | 记档 | 3D 表情 / 发型服装 / 照片拟合后置 |
 | DRIFT-01 | ⚠ | 已闭环 | `meshContractVersion` / `faceLockHash` 入类型与归一化 |
 | DRIFT-02 | ⚠ | 已闭环 | 补 `sculpt-cameras.ts` / `sculpt-lights.ts` / `sculpt-handles.ts` |

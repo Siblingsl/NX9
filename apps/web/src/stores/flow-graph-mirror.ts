@@ -13,8 +13,15 @@ interface FlowGraphMirrorState {
   edges: Edge[];
   lastFocusedStoryboardDeskId: string | null;
   revision: number;
+  /** SE-DUAL-WRITE-FIX: 工作区是否为 stage-deck v3（镜像保存据此携带 v3 extras，不靠读旧档） */
+  stageDeck: boolean;
   /** FlowSurface 同步全量图 */
-  syncGraph: (workspaceId: string | null, nodes: Node[], edges: Edge[]) => void;
+  syncGraph: (
+    workspaceId: string | null,
+    nodes: Node[],
+    edges: Edge[],
+    meta?: { stageDeck?: boolean },
+  ) => void;
   setLastFocusedStoryboardDeskId: (id: string | null) => void;
   /** 制作台/批出写回：就地更新节点 data */
   updateNodeData: (id: string, patch: Record<string, unknown>) => void;
@@ -29,12 +36,14 @@ export const useFlowGraphMirror = create<FlowGraphMirrorState>((set, get) => ({
   edges: [],
   lastFocusedStoryboardDeskId: null,
   revision: 0,
+  stageDeck: false,
 
-  syncGraph: (workspaceId, nodes, edges) => {
+  syncGraph: (workspaceId, nodes, edges, meta) => {
     set({
       workspaceId,
       nodes: nodes.map((n) => ({ ...n, data: { ...(n.data ?? {}) } })),
       edges: edges.map((e) => ({ ...e })),
+      ...(meta?.stageDeck !== undefined ? { stageDeck: meta.stageDeck } : {}),
       revision: get().revision + 1,
     });
   },
@@ -62,6 +71,7 @@ export const useFlowGraphMirror = create<FlowGraphMirrorState>((set, get) => ({
       edges: [],
       lastFocusedStoryboardDeskId: null,
       revision: 0,
+      stageDeck: false,
     }),
 }));
 

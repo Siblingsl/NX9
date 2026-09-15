@@ -7,6 +7,7 @@ import {
   isScreenplayPackage,
   migrateDialogueSheetDataToPackage,
 } from '../types/screenplay-package';
+import { normalizeClipGenVideoModeData } from '../utils/seedance-bridge';
 
 export const BLOCK_KIND_MIGRATIONS: Record<string, string> = {
   // ── Hub / Agent → 生成或素材 ──
@@ -267,11 +268,13 @@ const LEGACY_CLIP_GEN_VIDEO_MODE_NORMALIZE: Record<string, Record<string, unknow
 };
 
 function normalizeLegacyClipGenVideoMode(data: Record<string, unknown>): Record<string, unknown> {
-  const videoMode = data.videoMode as string | undefined;
-  if (!videoMode || videoMode === 'single' || videoMode === 'bridge') return data;
+  // F-035: videoMode=seedance 空开关 → single + model=seedance
+  let next = normalizeClipGenVideoModeData(data);
+  const videoMode = next.videoMode as string | undefined;
+  if (!videoMode || videoMode === 'single' || videoMode === 'bridge') return next;
   const patch = LEGACY_CLIP_GEN_VIDEO_MODE_NORMALIZE[videoMode];
-  if (!patch || data.videoGenMode) return data;
-  return { ...data, ...patch };
+  if (!patch || next.videoGenMode) return next;
+  return { ...next, ...patch };
 }
 
 export function migrateBlockKinds<T extends MigratableNode>(

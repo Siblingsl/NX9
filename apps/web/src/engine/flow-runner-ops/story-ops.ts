@@ -197,7 +197,7 @@ export async function executeStoryOps(deps: FlowExecuteDeps): Promise<void> {
 
   if (kind === 'continuity-check') {
     const images = upstream.pictures ?? [];
-    if (images.length < 2) throw new Error('至少需要 2 张上游图像');
+    if (images.length < 2) throw new Error('至少需要 2 张上游图像，禁止空成功');
 
     const {
       CONTINUITY_SYSTEM_PROMPT,
@@ -255,25 +255,52 @@ export async function executeStoryOps(deps: FlowExecuteDeps): Promise<void> {
     }
 
     updateNodeData(block.id, {
-      status: 'success',
+      // 解析失败禁止假绿：保留原文报告，节点 status=error
+      status: parsed.parseFailed ? 'error' : 'success',
       continuityReport: raw,
       content: raw,
       continuityIssues: issues.map((issue) => issue.message),
       ...(issues.length > 0 ? { continuityIssueRefs: issues } : { continuityIssueRefs: undefined }),
       ...(parsed.parseFailed ? { continuityParseFailed: true } : { continuityParseFailed: undefined }),
+      ...(parsed.parseFailed
+        ? { error: '连贯性检查解析失败，禁止空成功' }
+        : { error: undefined }),
       imagesChecked: images.length,
       imagesOmitted: sliced.omitted,
       ...(sliced.note ? { continuityCapNote: sliced.note } : { continuityCapNote: undefined }),
     });
     if (parsed.parseFailed) {
       useActivityLog.getState().append('连续性检查：LLM 返回无法解析为 JSON，已保留原文报告，未改写镜状态');
+      throw new Error('连贯性检查解析失败，禁止空成功');
     }
     return;
   }
 
   if (kind === 'beat-sync') {
     const sound = upstream.sounds?.[0];
-    if (!sound) throw new Error('需要上游音频');
+    if (!sound) throw new Error('需要上游音频，禁止空成功');
+    const analyzed = await api.beatAnalyze(sound);
+    if (analyzed.ok && analyzed.beats && analyzed.beats.length > 0) {
+      const beats = analyzed.beats;
+      updateNodeData(block.id, {
+        status: 'success',
+        cutPoints: beats,
+        meta: {
+          bpm: analyzed.tempo ?? null,
+          durationSec: beats[beats.length - 1] ?? 0,
+          cutPoints: beats,
+          algorithm: 'energy-onset',
+          listenedToAudio: true,
+        },
+        message: analyzed.tempo
+          ? `听音节拍分析 · 约 ${analyzed.tempo} BPM · ${beats.length} 点`
+          : `听音节拍分析 · ${beats.length} 点`,
+        clips: upstream.clips?.length ? upstream.clips : undefined,
+        content: `听音分析 · ${beats.length} cuts`,
+      });
+      return;
+    }
+    // 听音失败时回退 BPM 估切，并明示未听音（禁止伪装成听音成功）
     const bpm = (d.bpm as number) ?? 120;
     const probe = await api.probeMediaDuration(sound);
     const durationSec = probe.durationSec > 0 ? probe.durationSec : 30;
@@ -290,8 +317,9 @@ export async function executeStoryOps(deps: FlowExecuteDeps): Promise<void> {
         beatIntervalSec: interval,
         algorithm: 'bpm-interval',
         listenedToAudio: false,
+        beatAnalyzeError: analyzed.message ?? '未检测到节拍',
       },
-      message: '按 BPM 估切，未做听音分析',
+      message: `听音失败（${analyzed.message ?? '未检测到节拍'}），回退按 BPM 估切`,
       clips: upstream.clips?.length ? upstream.clips : undefined,
       content: `按 BPM ${bpm} 估切 · ${cutPoints.length} cuts（未听音分析）`,
     });

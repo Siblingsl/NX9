@@ -1,5 +1,6 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { type NodeProps, useEdges, useNodes, useReactFlow } from '@xyflow/react';
+import { useOpenDeskSignal } from '../../../engine/use-open-desk-signal';
 import {
   type AssetLibraryKind,
   type BacklotWorkspaceItem,
@@ -20,6 +21,7 @@ import {
 } from '@nx9/shared';
 import { usePublicAssetLibrary } from '../../../stores/public-asset-library';
 import { BlockShell } from '../../shared/BlockShell';
+import { DeskUtilityToolsMenu } from '../../shared/DeskUtilityToolsMenu';
 import { ScreenModal } from '../../../components/ui/ScreenModal';
 import { useActivityLog } from '../../../stores/activity-log';
 import { useWorkspaceDocument } from '../../../stores/workspace-document';
@@ -71,6 +73,12 @@ import { api } from '../../../api/client';
 import { toastSuccess } from '../../../stores/toast';
 import { useFlowRuntime } from '../../../stores/flow-runtime';
 import { useFlowCommands } from '../../../stores/flow-commands';
+import { useCredentialVault } from '../../../stores/credential-vault';
+import { isProviderConnectionError } from '../../../engine/provider-error';
+import {
+  breakdownBusyLabel,
+  breakdownPrimaryLabel,
+} from '../../../engine/breakdown-labels';
 import '../storyboard-desk.css';
 import '../storyboard-desk.v2.css';
 
@@ -200,11 +208,16 @@ export function useStoryboardDesk(props: NodeProps) {
   });
   useEffect(() => {
     const prev = prevConfirmedRef.current;
+    // P2-6: 本地还没有任何镜头时不存在「镜表已变更」，不弹确认撤销横幅
+    if (shots.length === 0) {
+      prevConfirmedRef.current = { episodeId: currentEpisodeId, confirmed: currentEpisodeConfirmed };
+      return;
+    }
     if (prev.confirmed && !currentEpisodeConfirmed && prev.episodeId === currentEpisodeId && currentEpisodeId) {
       setUnconfirmBannerEpisodeId(currentEpisodeId);
     }
     prevConfirmedRef.current = { episodeId: currentEpisodeId, confirmed: currentEpisodeConfirmed };
-  }, [currentEpisodeConfirmed, currentEpisodeId]);
+  }, [currentEpisodeConfirmed, currentEpisodeId, shots.length]);
 
   /** S-01: 分镜台会话草稿（镜表 + 预览帧 + 确认态） */
   const draftKey = `nx9-sb-draft-${props.id}`;
@@ -364,8 +377,29 @@ export function useStoryboardDesk(props: NodeProps) {
 
   /** 拆镜结束后：若弹窗已关，询问是否回到分镜台 */
   const offerReturnAfterBreakdown = useCallback(async (result: 'ok' | 'fail', detail?: string) => {
+    if (result === 'ok') {
+      updateNodeData(props.id, { lastBreakdownError: null });
+    } else if (detail?.trim()) {
+      updateNodeData(props.id, { lastBreakdownError: detail.trim().slice(0, 500) });
+    }
+    if (result === 'fail') {
+      const msg = detail?.trim() || '拆镜失败';
+      const conn = isProviderConnectionError(msg);
+      useToast.getState().push({
+        id: 'sb-breakdown-fail',
+        message: msg.slice(0, 180),
+        variant: 'error',
+        ...(conn
+          ? {
+              actionLabel: '去设置修复连接',
+              onAction: () => useCredentialVault.getState().openSettingsTo('connection'),
+            }
+          : {}),
+      });
+    }
     if (studioOpenRef.current) {
-      if (result === 'ok') setStudioTab('grid');
+      // UX P0-2：失败必须停在拆镜页看队列错误，禁止甩到空镜表
+      setStudioTab(result === 'ok' ? 'grid' : 'breakdown');
       return;
     }
     if (result === 'ok') {
@@ -385,6 +419,7 @@ export function useStoryboardDesk(props: NodeProps) {
       }
       return;
     }
+    setStudioTab('breakdown');
     const go = await askConfirm({
       title: '拆镜失败',
       description: detail?.trim()
@@ -398,7 +433,7 @@ export function useStoryboardDesk(props: NodeProps) {
       setStudioOpen(true);
       focusBlock?.(props.id);
     }
-  }, [focusBlock, props.id]);
+  }, [focusBlock, props.id, updateNodeData]);
 
   const handleCloseStudio = useCallback(async () => {
     // 拆镜中：可后台继续，不中止请求（节点组件仍挂载，任务不受弹窗关闭影响）
@@ -498,13 +533,17 @@ export function useStoryboardDesk(props: NodeProps) {
   const [handoffHighlight, setHandoffHighlight] = useState(false);
   const [staleBannerDismissed, setStaleBannerDismissed] = useState(false);
   const [staleBannerShowDiff, setStaleBannerShowDiff] = useState(false);
+  /** 挂载时刻：handoff.at 早于挂载说明是重载残留的 handoff，不得再自动开台 */
+  const mountAtRef = useRef(Date.now());
   useEffect(() => {
     if (!handoffData?.autoOpenBreakdown) return;
+    if (Date.parse(handoffData.at ?? '') <= mountAtRef.current) return;
     setHandoffHighlight(true);
     setStudioTab('breakdown');
     setStudioOpen(true);
     setStaleBannerDismissed(false);
   }, [handoffData?.autoOpenBreakdown, handoffData?.at]);
+  useOpenDeskSignal((props.data as Record<string, unknown>)?.openDeskAt, () => setStudioOpen(true));
   const studioBreakdownDefault = handoffData?.autoOpenBreakdown ? 'breakdown' : undefined;
   const packageStale = Boolean(
     payload
@@ -525,7 +564,7 @@ export function useStoryboardDesk(props: NodeProps) {
       return !localEps.some((e) => e.id === ep.id || e.id === stableId);
     });
   }, [local?.episodes, upstreamPackage]);
-  /** 本地已有镜表时，才把 missing 当成「只拆新增」；空台一律走「从成稿拆镜」 */
+  /** 本地已有镜表时，才把 missing 当成「拆镜 · 新增」；空台一律走「拆镜」 */
   const hasLocalBreakdownEpisodes = (local?.episodes?.length ?? 0) > 0;
   const incrementalNewEpisodeCount = hasLocalBreakdownEpisodes ? missingUpstreamEpisodes.length : 0;
   const sceneNameSet = useMemo(
@@ -878,6 +917,28 @@ export function useStoryboardDesk(props: NodeProps) {
     missingUpstreamEpisodes,
   });
 
+  /** UX 一条主干：交接后空台 + 预检通过 → 免确认自动拆镜 */
+  const autoBreakdownTokenRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!handoffData?.autoOpenBreakdown || !handoffData.at) return;
+    if (Date.parse(handoffData.at) <= mountAtRef.current) return;
+    if (autoBreakdownTokenRef.current === handoffData.at) return;
+    if (!canBreakdownFromPackage || breakdownBlocked || breakingDown) return;
+    if (hasLocalBreakdownEpisodes) return;
+    autoBreakdownTokenRef.current = handoffData.at;
+    appendLog('分镜台：交接后自动拆镜（预检通过 · 空台免确认）');
+    void breakdownFromPackage(undefined, undefined, { skipOverwriteConfirm: true });
+  }, [
+    appendLog,
+    breakdownBlocked,
+    breakdownFromPackage,
+    breakingDown,
+    canBreakdownFromPackage,
+    handoffData?.at,
+    handoffData?.autoOpenBreakdown,
+    hasLocalBreakdownEpisodes,
+  ]);
+
   const {
     exportReviewPackage,
     generateStoryboardSheet,
@@ -942,7 +1003,7 @@ export function useStoryboardDesk(props: NodeProps) {
               {payload
                 ? compact(visibleEpisodes[0]?.title || payload.title || '本集', 22)
                 : canBreakdownFromPackage
-                  ? '从成稿拆镜'
+                  ? '拆镜'
                   : '分镜台'}
             </div>
             <div className="sg3-card__meta">
@@ -958,13 +1019,13 @@ export function useStoryboardDesk(props: NodeProps) {
               {breakingDown && !studioOpen
                 ? '后台拆镜进行中 · 点开可查看进度或取消'
                 : packageStale
-                  ? '成稿已更新，建议重拆'
+                  ? '成稿已更新，建议拆镜 · 同步'
                   : hasSource && !ready
                     ? '上游设定未就绪（请在编剧台标记设定就绪）'
                     : payload
                       ? '点击打开分镜台 · 镜表与构图'
                       : canBreakdownFromPackage
-                        ? '点开台即可从成稿拆镜'
+                        ? '点开台即可拆镜'
                         : '连接编剧台确认成稿后拆镜'}
             </div>
             <div className="sg3-card__actions">
@@ -1039,10 +1100,12 @@ export function useStoryboardDesk(props: NodeProps) {
                   )}
                 >
                   {breakingDown
-                    ? '同步中…'
-                    : incrementalNewEpisodeCount > 0
-                      ? `只拆新增 ${incrementalNewEpisodeCount} 集`
-                      : '同步最新成稿'}
+                    ? breakdownBusyLabel()
+                    : breakdownPrimaryLabel({
+                        stale: true,
+                        newEpisodeCount: incrementalNewEpisodeCount,
+                        hasLocalShots: true,
+                      })}
                 </button>
               ) : (
                 <button
@@ -1137,6 +1200,11 @@ export function useStoryboardDesk(props: NodeProps) {
           >
             {enforceComposition ? '构图约束:开' : '构图约束:关'}
           </button>
+          <DeskUtilityToolsMenu
+            deskId={props.id}
+            shotId={selectedShotIds.size === 1 ? [...selectedShotIds][0] : null}
+            buttonClassName="sg3-readiness-bar__mode is-off"
+          />
         </div>
         {packageStale && upstreamPackage && !staleBannerDismissed ? (
           <StoryboardStaleBanner
@@ -1188,7 +1256,7 @@ export function useStoryboardDesk(props: NodeProps) {
             queueProgress={queueProgress}
           />
 
-          {unconfirmBannerEpisodeId === currentEpisodeId ? (
+          {unconfirmBannerEpisodeId === currentEpisodeId && shots.length > 0 ? (
             <div className="sg3-unconfirm-banner">
               <span className="sg3-unconfirm-banner__msg">
                 本集镜表/线稿已变更，确认状态已撤销
@@ -1323,6 +1391,11 @@ export function useStoryboardDesk(props: NodeProps) {
                   upstreamNeedsConfirm={upstreamNeedsConfirm}
                   upstreamTitleShort={upstreamTitleShort}
                   openUpstreamScriptDeskForConfirm={openUpstreamScriptDeskForConfirm}
+                  lastBreakdownError={
+                    typeof (props.data as Record<string, unknown> | undefined)?.lastBreakdownError === 'string'
+                      ? String((props.data as Record<string, unknown>).lastBreakdownError)
+                      : null
+                  }
                 />
               )}
 

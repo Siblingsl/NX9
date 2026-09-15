@@ -23,7 +23,7 @@ export class PictureController {
     const maskUrl = String(body?.maskUrl ?? '').trim();
     const prompt = String(body?.prompt ?? '').trim();
     if (!imageUrl || !maskUrl || !prompt) {
-      throw new BadRequestException('edit-masked 需要 imageUrl、maskUrl 与 prompt');
+      throw new BadRequestException('edit-masked 需要 imageUrl、maskUrl 与 prompt，禁止空成功');
     }
     const engine = body?.engine === 'fal-inpaint' ? 'fal-inpaint' : 'gemini-edit';
     const refs = Array.isArray(body?.referenceImageUrls)

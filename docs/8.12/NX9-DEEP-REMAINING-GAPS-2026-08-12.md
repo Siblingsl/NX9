@@ -4,7 +4,9 @@
 > **方法**：对照已销票审计文档，**重读现行代码**找「文档已绿、行为仍脏」与「主链外仍在撒谎」的项。  
 > **范围**：全画布执行层、审阅/批审、导出、工具节点、剪辑台、编剧台、捏脸、工程债。  
 > **原则**：只记代码可证伪的问题；已在导演台加深轮闭环的项（像素质检、DD-R-01 门禁、音量关键帧 schema、3D 切镜守卫）**不开重复票**。  
-> **存放**：`docs/8.12/`（本轮深挖专档）
+> **存放**：`docs/8.12/`（本轮深挖专档）  
+>
+> **2026-09-11 复核**：DR-01～07、DR-09 与 ENG-03 **已闭环**（见 `NX9-DEEP-REMAINING-GAPS-IMPLEMENTATION-LOG-2026-08-12.md` + `dr01`～`dr07` 测例）。DR-08（`audioUrl` 音画对齐）仍 ⏸。下文 §3～4 保留发现时叙述，**勿再当未修缺口开票**。BGM 已接 Suno 兼容协议；未配置时仍仅导入 + 诚实失败。
 
 ---
 
@@ -15,6 +17,8 @@
 1. **全局镜表写回未死透**——批审、审片工作区、简易导出仍读写 `workspace.storyboard`，多链生产态会改错账本或导出错集。  
 2. **连续性检查写回是「有问题就全镜失败」**——且 LLM JSON 常解析失败时静默不写回。  
 3. **产品能力诚实边界仍糊**——beat-sync 不做听音分析、BGM 真生成未接入、音量关键帧无时间轴可视、捏脸 P2+ 未开、死组件仍留仓。
+
+> **2026-09-11**：上表三处主风险已在实施日志闭环。剩余非通道关注点：DR-08 产品后置；通道真机（F-034/035/049）；文档本节正文为历史发现快照。
 
 工程债（分镜 hook ~3.2k 行、编剧主文件 ~2.1k 行）继续抬高任何后续改动的回归成本。
 
@@ -167,9 +171,9 @@ sound-gen music 模式已不再 TTS 假成功（✅），但产品「一键出 B
 |------|------|------|
 | P0 参数 + Prompt | ✅ | `faceRig` / 编译器 / 左栏 |
 | P1 瘦身视口 | ✅ | `CharacterSculptScene` + 切片 6 项 + 测例 |
-| P2 控制点 / 对称 / 台内 undo | ❌ 未做 | 设计 §14.3 |
-| P3 规范截图 → `faceLockUrl` | ❌ 未做 | 对出图锁人价值最大的下一刀 |
-| P4 正式 GLB + 舞台体型 | ❌ 未做 | `StageActor` 仍为球头胶囊身（设计明确后置，但身份锁无法进导演台机位） |
+| P2 控制点 / 对称 / 台内 undo | ✅ 已做 | 见捏模实施日志 FACE-02～04 |
+| P3 规范截图 → `faceLockUrl` | ✅ 已做 | FACE-05/06；健康条三项 |
+| P4 正式 GLB + 舞台体型 | ✅ | 捏模台 builtin；导演台 `StageActor`→`loadCharacterModel` + `applyPoseToArmature`（`stage-actor-pose.test.ts`） |
 
 **深挖结论**：捏脸已能「在库里拧头」，但 **3D 导演台人偶与定妆锁仍断开**——P3 不定妆导出、P4 不换模之前，出片一致性仍主要靠 2D 定妆图 + Prompt。
 
@@ -237,7 +241,7 @@ ENG-01/02 继续拆分镜/编剧巨石
 | 全局批审 | `core-pipeline-runner.ts` `approveAllKeyframes` |
 | 审片全局写 | `ReportWorkspace.tsx` |
 | 简易导出全局 | `simpleConcatExport` + `ExportWorkspace.tsx` + `useStudioDesk.ts` |
-| 连续性误杀 | `flow-runner.ts` continuity-check |
+| 连续性误杀 | `flow-runner-ops/story-ops.ts` + `ContinuityCheckBlock` 共用 `parseContinuityLlmJson`（2026-09-11 卡面已对齐） |
 | beat-sync | `flow-runner.ts` beat-sync |
 | 音量无轨可视 | `InspectorPanel.tsx` vs `TimelinePanel.tsx` |
 | BGM 未接入 | `gateway-music.service.ts` |

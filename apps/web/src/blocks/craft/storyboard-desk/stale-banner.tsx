@@ -6,6 +6,10 @@
  */
 import type { ScreenplayPackage } from '@nx9/shared';
 import { packageSourceHash } from '../../../engine/storyboard-desk-runner';
+import {
+  breakdownNewOnlyLabel,
+  breakdownPrimaryLabel,
+} from '../../../engine/breakdown-labels';
 
 export interface StoryboardStaleBannerProps {
   upstreamPackage: ScreenplayPackage;
@@ -53,7 +57,7 @@ export default function StoryboardStaleBanner({
         {upstreamNeedsConfirm
           ? `上游「${upstreamTitleShort}」已更新，但尚未确认成稿 · 先确认再同步`
           : incrementalNewEpisodeCount > 0
-            ? `上游新增 ${incrementalNewEpisodeCount} 集（可只拆新增，保留现有 1…集镜表）`
+            ? `上游新增 ${incrementalNewEpisodeCount} 集（可「拆镜 · 新增」，保留现有镜表）`
             : '上游成稿已更新（与当前镜表不同步）'}
       </span>
       <div className="sg3-stale-banner__acts">
@@ -78,7 +82,7 @@ export default function StoryboardStaleBanner({
                 disabled={breakingDown || breakdownBlocked || deskBusy}
                 onClick={onBreakdownNewOnly}
               >
-                只拆新增 {incrementalNewEpisodeCount} 集
+                {breakdownNewOnlyLabel(incrementalNewEpisodeCount, breakingDown)}
               </button>
             ) : (
               <button
@@ -87,7 +91,7 @@ export default function StoryboardStaleBanner({
                 disabled={breakingDown || breakdownBlocked || deskBusy}
                 onClick={onSyncLatest}
               >
-                同步最新成稿
+                {breakdownPrimaryLabel({ stale: true, hasLocalShots: true, busy: breakingDown })}
               </button>
             )}
             {upstreamPackage.screenplay.episodes.length > 1 ? (

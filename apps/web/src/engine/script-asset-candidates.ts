@@ -4,6 +4,7 @@ import {
   newBacklotWorkspaceItem,
   refreshWorkspacePrompts,
 } from '@nx9/shared';
+import { toastError } from '../stores/toast';
 
 export function scriptCandidateCharacterKeys(character: CharacterProfile): string[] {
   return [
@@ -133,6 +134,8 @@ export async function copyTextWithLog(
     await navigator.clipboard.writeText(text);
     appendLog(successMessage);
   } catch {
-    appendLog('复制失败：浏览器未授权剪贴板，请手动选中文本复制。');
+    const msg = '复制失败：浏览器未授权剪贴板，请手动选中文本复制。';
+    appendLog(msg);
+    toastError(msg);
   }
 }

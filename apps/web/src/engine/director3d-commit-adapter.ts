@@ -86,14 +86,14 @@ export function createDirector3dCommitAdapter(options: Director3dCommitAdapterOp
       return { ok: false, error: '候选帧尚未完成上传' };
     }
     if (!isPersistentImageUrl(payload.candidate.imageUrl)) {
-      return { ok: false, error: '采用帧缺少持久化图片，禁止提交本地草稿' };
+      return { ok: false, error: '采用帧缺少持久化图片，禁止提交本地草稿，禁止空成功' };
     }
 
     const nodes = options.getLatestNodes?.() ?? options.nodes;
     const sourceBlockId = options.sourceBlockId ?? options.blockId;
     const upstreamDeskId = resolveUpstreamChainDesk(sourceBlockId, nodes, options.edges);
     const chain = readUpstreamChainStoryboard(sourceBlockId, nodes, options.edges);
-    if (!upstreamDeskId || !chain) return { ok: false, error: '未连接上游分镜台链镜表，不能提交' };
+    if (!upstreamDeskId || !chain) return { ok: false, error: '未连接上游分镜台链镜表，不能提交，禁止空成功' };
     const shot = chain.shots.find((item) => item.id === payload.shotId);
     if (!shot) return { ok: false, error: '当前镜头不属于上游链镜表' };
 

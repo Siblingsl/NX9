@@ -8,7 +8,7 @@ export async function executeLegacyOps(deps: FlowExecuteDeps): Promise<void> {
   const { block, kind, prompt, upstream, updateNodeData, ctx } = deps;
   const d = block.data ?? {};
   if (kind === 'export-pack') {
-    if (!ctx) throw new Error('export-pack 缺少画布上下文');
+    if (!ctx) throw new Error('export-pack 缺少画布上下文，禁止空成功');
     const shots = resolveShotsForBlock(block.id, ctx.nodes, ctx.edges, false);
     const { runExportPack } = await import('../export-pack-runner');
     const { hasEffectiveTimeline } = await import('@nx9/shared');
@@ -50,7 +50,7 @@ export async function executeLegacyOps(deps: FlowExecuteDeps): Promise<void> {
           message: res.message,
           error: res.message,
         });
-        throw new Error(res.message ?? '导出未通过');
+        throw new Error(res.message ?? '导出未通过，禁止空成功');
       }
       if (res.taskId && !res.exportReady) {
         updateNodeData(block.id, {
@@ -60,6 +60,7 @@ export async function executeLegacyOps(deps: FlowExecuteDeps): Promise<void> {
           message: res.message ?? 'submitted',
         });
         const url = await pollMontageTaskUntilDone(res.taskId, 'hyperframes');
+        if (!url) throw new Error('HyperFrames 完成但无输出 URL，禁止空成功');
         updateNodeData(block.id, {
           status: 'success',
           exportReady: true,
@@ -69,8 +70,11 @@ export async function executeLegacyOps(deps: FlowExecuteDeps): Promise<void> {
         });
         return;
       }
+      if (res.exportReady === true && !res.url) {
+        throw new Error('导出未返回成片 URL，禁止空成功');
+      }
       updateNodeData(block.id, {
-        status: 'success',
+        status: res.exportReady ? 'success' : 'running',
         exportReady: res.exportReady === true,
         episodeUrl: res.url,
         exportCount: res.exportCount ?? 0,
@@ -86,9 +90,9 @@ export async function executeLegacyOps(deps: FlowExecuteDeps): Promise<void> {
 
   if (kind === 'audio-mix' || (kind === 'clip-editor' && (d.editorMode as string) === 'audio')) {
     const tracks = upstream.sounds ?? [];
-    if (tracks.length < 2) throw new Error('至少需要 2 条音频');
+    if (tracks.length < 2) throw new Error('至少需要 2 条音频，禁止空成功');
     const res = await api.mixAudio(tracks, (d.normalize as boolean | undefined) ?? true);
-    if (!res.ok || !res.url) throw new Error(res.message ?? '混音失败');
+    if (!res.ok || !res.url) throw new Error(res.message ?? '混音失败，禁止空成功');
     updateNodeData(block.id, {
       status: 'success',
       outputSound: res.url,
@@ -100,14 +104,14 @@ export async function executeLegacyOps(deps: FlowExecuteDeps): Promise<void> {
 
   if (kind === 'color-grade' || (kind === 'clip-editor' && (d.editorMode as string) === 'grade')) {
     const source = upstream.clips?.[0] ?? upstream.pictures?.[0];
-    if (!source) throw new Error('需要上游图像或视频');
+    if (!source) throw new Error('需要上游图像或视频，禁止空成功');
     const res = await api.colorGrade({
       sourceUrl: source,
       brightness: (d.brightness as number) ?? 0,
       contrast: (d.contrast as number) ?? 1,
       saturation: (d.saturation as number) ?? 1,
     });
-    if (!res.ok || !res.url) throw new Error(res.message ?? '调色失败');
+    if (!res.ok || !res.url) throw new Error(res.message ?? '调色失败，禁止空成功');
     if (res.mediaKind === 'clip') {
       updateNodeData(block.id, { status: 'success', clips: [res.url], outputUrl: res.url });
     } else {
@@ -134,7 +138,7 @@ export async function executeLegacyOps(deps: FlowExecuteDeps): Promise<void> {
 
   if (kind === 'prompt-diff') {
     const prompts = upstream.prompts ?? [];
-    if (prompts.length < 2) throw new Error('至少需要 2 路 prompt');
+    if (prompts.length < 2) throw new Error('至少需要 2 路 prompt，禁止空成功');
     // DEEP-17：模型随节点/设置可配，未指定时交给网关全局配置，禁止写死。
     const diffModel = ((d.llmModel as string) || (d.model as string) || '').trim() || undefined;
     const res = await api.proxyLlm({
@@ -144,7 +148,11 @@ export async function executeLegacyOps(deps: FlowExecuteDeps): Promise<void> {
         { role: 'user', content: `A:\n${prompts[0]}\n\nB:\n${prompts[1]}` },
       ],
     });
-    const merged = (res as { content?: string }).content?.trim() ?? '';
+    const merged =
+      ((res as { content?: string }).content?.trim() ?? '') ||
+      ((res as { choices?: { message?: { content?: string } }[] }).choices?.[0]?.message?.content?.trim() ??
+        '');
+    if (!merged) throw new Error('提示词合并返回空结果，禁止空成功');
     updateNodeData(block.id, {
       status: 'success',
       mergeSuggestion: merged,

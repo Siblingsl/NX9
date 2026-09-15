@@ -140,6 +140,7 @@ export class LuxTtsAdapter {
     }
 
     const buf = Buffer.from(await res.arrayBuffer());
+    if (!buf.length) throw new Error('LuxTTS 返回空音频，禁止空成功');
     return { ok: true, buffer: buf, contentType: res.headers.get('content-type') ?? 'audio/wav' };
   }
 }

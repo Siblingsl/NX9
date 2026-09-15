@@ -7,6 +7,7 @@ import { useActivityLog } from '../../../../../stores/activity-log';
 import { useWorkspaceDocument } from '../../../../../stores/workspace-document';
 import { patchUpstreamShot, resolveShotsForBlock } from '../../../../../engine/chain-storyboard-utils';
 import { api } from '../../../../../api/client';
+import { toastError } from '../../../../../stores/toast';
 
 const CAPTION_MODES = [
   { id: 'asr', label: '语音转字幕' },
@@ -62,13 +63,19 @@ export function CaptionWorkspace({ blockId, kind, onCollapse }: CaptionWorkspace
 
   const runAsr = useCallback(async () => {
     if (!src) {
-      appendLog('字幕台：无上游音频/视频');
+      const msg = '字幕台：无上游音频/视频，禁止空成功';
+      updateNodeData(blockId, { status: 'error', error: msg });
+      appendLog(msg);
+      toastError(msg);
       return;
     }
     setBusy(true);
     updateNodeData(blockId, { status: 'running' });
     try {
       const res = await api.transcribeAudio(src, language);
+      if (!res.ok || !String(res.srtContent ?? '').trim()) {
+        throw new Error('语音转字幕失败或结果为空，禁止空成功');
+      }
       updateNodeData(blockId, {
         status: 'success',
         srtContent: res.srtContent,
@@ -80,8 +87,10 @@ export function CaptionWorkspace({ blockId, kind, onCollapse }: CaptionWorkspace
       });
       appendLog(`转写完成 · ${res.cues.length} 段`);
     } catch (e) {
+      const msg = `转写失败: ${String(e)}`;
       updateNodeData(blockId, { status: 'error', error: String(e) });
-      appendLog(`转写失败: ${String(e)}`);
+      appendLog(msg);
+      toastError(msg);
     } finally {
       setBusy(false);
     }
@@ -90,11 +99,17 @@ export function CaptionWorkspace({ blockId, kind, onCollapse }: CaptionWorkspace
   const runBurn = useCallback(async () => {
     const clip = upstream?.clips?.[0] || (data.sourceUrl as string | undefined);
     if (!clip) {
-      appendLog('字幕烧录：需要上游视频');
+      const msg = '字幕烧录：需要上游视频，禁止空成功';
+      updateNodeData(blockId, { status: 'error', error: msg });
+      appendLog(msg);
+      toastError(msg);
       return;
     }
     if (!subtitle.trim()) {
-      appendLog('字幕烧录：字幕文本为空');
+      const msg = '字幕烧录：字幕文本为空，禁止空成功';
+      updateNodeData(blockId, { status: 'error', error: msg });
+      appendLog(msg);
+      toastError(msg);
       return;
     }
     setBusy(true);
@@ -106,7 +121,7 @@ export function CaptionWorkspace({ blockId, kind, onCollapse }: CaptionWorkspace
         durationSec,
         skipReview: true,
       });
-      if (!res.ok || !res.url) throw new Error(res.message ?? '烧录失败');
+      if (!res.ok || !res.url) throw new Error(res.message ?? '字幕烧录失败，禁止空成功');
       if (upstream?.shotIds) {
         for (const shotId of upstream.shotIds) {
           const ok = patchUpstreamShot(
@@ -129,8 +144,10 @@ export function CaptionWorkspace({ blockId, kind, onCollapse }: CaptionWorkspace
       });
       appendLog('字幕烧录完成');
     } catch (e) {
+      const msg = `烧录失败: ${String(e)}`;
       updateNodeData(blockId, { status: 'error', error: String(e) });
-      appendLog(`烧录失败: ${String(e)}`);
+      appendLog(msg);
+      toastError(msg);
     } finally {
       setBusy(false);
     }

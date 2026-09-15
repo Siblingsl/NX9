@@ -57,17 +57,17 @@ Acceptance on a live account (not automated here):
 3. 批准后推送 `directorKeyframeBatch`，clip-gen 逐镜消费，请求 `imageUrl` 与批准关键帧一致。
 4. 未配置的 URL 记 SKIP，不记为已验收。
 
-## BGM generation (not validated; import-only in UI)
+## BGM generation (Suno 兼容协议已接入；真实账号未验证)
 
-NX9 的 BGM 真生成尚未接入任何 provider。`apps/server/src/modules/gateway/gateway-music.service.ts` 对所有提交请求恒定抛出 `BGM_NOT_IMPLEMENTED`，不会创建假成功任务。
+2026-09-04 起网关已接 Suno 兼容聚合协议（`gateway-music.service.ts`）：提交 POST `{baseUrl}/generate` → 本地任务号；轮询 GET `{baseUrl}/generate/record-info?taskId=` → 宽解析状态与音频 URL。未配置通道（无 Base URL / Key）或未知 provider 时仍明确拒绝（`BGM_NOT_IMPLEMENTED`），禁止占位成功；行为由 `gateway-music-honesty.test.ts`（7 例，含 mock upstream）守护。
 
 当前产品行为：
 
-- 声音生成节点的 BGM 模式为「仅导入音频」：通过素材库绑定已上传音频并写 `audioUrl`，不提供生成按钮。
-- 画布 run 仍可能触发 music 分支，但网关会明确失败（`BGM_NOT_IMPLEMENTED`），不得在 UI 宣称可生成。
-- 设置面板 BGM Provider / API Key 字段为预留，不代表真实生成已可用。
+- 设置→BGM：Provider（suno）+ Base URL + API Key 三项配齐后，声音生成节点 BGM 模式出现「AI 生成」入口；未配置时保持仅导入提示。
+- 画布 run 的 music 分支（`runSoundGenBgm`）同样走该网关；未配置时明确失败。
+- 服务端 `/api/gateway/music` 已注册进 GatewayModule（此前 controller 未挂载、恒 404，属死文件，已修复）。
 
-接入真实 provider 后的账号侧验收步骤：
+真实账号侧验收步骤（未执行前记 SKIP）：
 
 1. 在设置中配置 provider 与短时 API Key。
 2. BGM 节点提交生成任务，任务经 `/api/gateway/music` 完成并返回可播放 URL。
@@ -75,6 +75,56 @@ NX9 的 BGM 真生成尚未接入任何 provider。`apps/server/src/modules/gate
 4. 未配置的 provider 记 SKIP；任一请求返回占位 URL 视为验收失败。
 
 验收人：账号侧手工放行，结果追加到本文件并注明日期。
+
+## 本机 `.env` 与台账边界
+
+`MAGIC_HOUR_API_KEY` 等仅覆盖图像（Magic Hour）时，**不得**据此把 F-034 / F-035 / F-049 / SF-11 标 100%。有声短片需 TTS+多轨导出；Bridge/Seedance 需对应视频通道。图像冒烟成功可记 SKIP/部分，不计入上述闭环勾选。
+
+**本机门禁状态（2026-09-11）**：进程环境未检出 TTS / 视频 / `NX9_REAL_PROVIDER_*` 真机开关 → F-034 / F-035 / F-049 勾选保持 `- [ ]`；缺陷总表维持 90% / 85% / 85%。配置有效密钥后按下列章节跑冒烟并勾选，再升完成度。
+
+## F-034 / SF-11 · 有声短片真机样片（通道层，未勾选前禁止 100%）
+
+Opt-in；默认 `pnpm test` 不跑真实 TTS/导出。
+
+```powershell
+$env:NX9_REAL_PROVIDER_TEST='1'
+# 配置有效 LLM + TTS（及导出所需）密钥后再手工走模板
+```
+
+手工清单（全部勾选后才可将缺陷台账 F-034 标 100%）：
+
+- [ ] 加载 `tpl-ai-short-film` 或 `tpl-voice-drama`，主链含 `sound-gen`，无假 `audio-mix`
+- [ ] 对白 TTS 成功：节点 `audioUrl` / `voice.lines` 有真实可播 URL
+- [ ] 智能剪辑挂上 VO 轨，起止与镜 `startSec/durationSec` 对齐（非全 0）
+- [ ] 导出 `remotion-episode`（或等价多轨）得到可播样片，含对白轨
+- [ ] 结果记入本节并注明日期；SKIP 不计入已验收
+
+## F-035 / F-049 · Bridge / Seedance / 线稿 / episode-queue 真机演示
+
+三条路径须分别勾选；mock 绿 ≠ 真机闭环。禁止将 F-035 / F-049 标 100% 直至下表完成：
+
+### Bridge
+
+- [ ] `videoMode: bridge`，上游有源视频；尾帧提取成功
+- [ ] 续写 prompt 含上一镜内容；生成第二镜可播
+- [ ] 无源视频时明确失败（非静默降级）
+
+### Seedance（`model=seedance`，非 `videoMode`）
+
+- [ ] 参考图/视频数量受 S-Class 上限约束；超限被拒
+- [ ] 编译 prompt 含参考约束；任务成功回写 URL
+- [ ] UI 无 `videoMode=seedance` 空开关
+
+### Episode-queue
+
+- [ ] 多集拆镜队列可暂停/继续/跳过/取消
+- [ ] 单集失败可恢复；成功记入 `results`
+
+### 线稿配方
+
+- [ ] `tpl-line-art-storyboard` 批出为线稿职责（非导演关键帧假标签）
+
+验收人：账号侧手工放行；日期与 SKIP 记入本节。
 
 ## VG-08/28 audioUrl 音画对齐（产品后置，禁止半接线）
 

@@ -1,4 +1,5 @@
 import type { NodeRunStatus } from '@nx9/shared';
+import { resolveRunLabel } from '@nx9/shared';
 import type { PromptHistoryEntry } from '../../../stores/prompt-history';
 import { ComposerWorkspaceHeader } from './ComposerWorkspaceHeader';
 import { ComposerWorkspaceToolbar } from './ComposerWorkspaceToolbar';
@@ -68,6 +69,11 @@ export function ComposerWorkspaceShell({
   bodyClassName = COMPOSER_PROMPT_BODY_CLASS,
   promptContainerRef,
 }: ComposerWorkspaceShellProps) {
+  // F-044: 未显式传入时按 kind 解析，禁止工作区主 CTA 默认叫「运行」
+  const resolvedRunLabel =
+    runLabel ??
+    resolveRunLabel(kind, running || status === 'running' ? 'running' : status).primary;
+
   return (
     <div
       className={`flex flex-col w-full ${heightClass} px-3 py-2 nodrag`}
@@ -102,7 +108,7 @@ export function ComposerWorkspaceShell({
             onRun={onRun}
             onStop={onStop}
             running={running}
-            runLabel={runLabel}
+            runLabel={resolvedRunLabel}
             runDisabled={runDisabled}
             showRun={showRun}
             showAi={showAi}

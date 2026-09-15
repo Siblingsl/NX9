@@ -305,7 +305,7 @@ export const AssetTrashPanel = memo(function AssetTrashPanel({
         let conflict = false;
         if (entry.kind === 'picture' || entry.kind === 'video') {
           const taken = takeMediaTrashItem(entry.id);
-          if (!taken) throw new Error('回收站项不存在');
+          if (!taken) throw new Error('回收站项不存在，禁止空成功');
           const runtime = useFlowRuntime.getState().runtime;
           const blockId = taken.sourceBlockId;
           const node = runtime && blockId ? runtime.getNodes().find((n) => n.id === blockId) : undefined;
@@ -348,7 +348,7 @@ export const AssetTrashPanel = memo(function AssetTrashPanel({
           }
         } else if (entry.kind === 'screenplay') {
           const restored = restoreScriptDeskTrashToDrafts(entry.id);
-          if (!restored) throw new Error('剧本回收站项不存在');
+          if (!restored) throw new Error('剧本回收站项不存在，禁止空成功');
           toastSuccess(`已恢复「${restored.title}」到编剧台草稿箱`);
         } else if (entry.scope === 'private') {
           if (entry.kind === 'character') {

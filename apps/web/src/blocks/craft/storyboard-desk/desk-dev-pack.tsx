@@ -9,6 +9,7 @@ import {
   type ScriptBreakdownPromptTemplates,
 } from '@nx9/shared';
 import { useDevPromptOverrides } from '../../../stores/dev-prompt-overrides';
+import { toastError } from '../../../stores/toast';
 
 /** 开发态 Prompt Pack：编辑即写入节点 `scriptBreakdownPrompts`。 */
 export function StoryboardDeskDevPack({ blockId }: { blockId: string }) {
@@ -77,9 +78,11 @@ export function StoryboardDeskDevPack({ blockId }: { blockId: string }) {
         setTip('导入成功并落盘');
       } else {
         setTip('非法 Pack 格式，拒绝导入');
+        toastError('非法 Pack 格式，拒绝导入');
       }
     } catch {
       setTip('JSON 解析失败');
+      toastError('分镜 Pack JSON 解析失败');
     }
   }, [persist]);
 

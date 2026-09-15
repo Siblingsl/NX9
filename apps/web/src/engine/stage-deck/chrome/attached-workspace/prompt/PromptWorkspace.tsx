@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { AssetLibraryKind } from '@nx9/shared';
-import { lookupBlock } from '@nx9/shared';
+import { lookupBlock, resolveRunLabel } from '@nx9/shared';
 import { useReactFlow } from '@xyflow/react';
 import {
   usePromptBatchNodeAdapter,
@@ -14,6 +14,7 @@ import { PromptToolbarLeft } from './PromptToolbarLeft';
 import { useDeckUi } from '../../../stores/deck-ui';
 import { useFlowRuntime } from '../../../../../stores/flow-runtime';
 import { useActivityLog } from '../../../../../stores/activity-log';
+import { toastError } from '../../../../../stores/toast';
 
 const PROMPT_MENTION_KINDS: AssetLibraryKind[] = ['character', 'scene', 'shot', 'emotion', 'sound'];
 const SYNC_MS = 280;
@@ -110,7 +111,9 @@ export function PromptWorkspace({ blockId, kind, onCollapse }: PromptWorkspacePr
       });
       appendLog(`运行 · ${meta?.label ?? kind} · ${batch.jobs.length || 1} 项`);
     } catch (e) {
-      appendLog(`运行失败: ${String(e)}`);
+      const msg = `运行失败: ${String(e)}`;
+      appendLog(msg);
+      toastError(msg);
     }
   }, [appendLog, batch.jobs.length, batch.useBatchWorkspace, blockId, canRun, flushSimplePrompt, kind, meta, runtime]);
 
@@ -136,8 +139,11 @@ export function PromptWorkspace({ blockId, kind, onCollapse }: PromptWorkspacePr
     return () => window.removeEventListener('keydown', onKey);
   }, [handleRun]);
 
-  const runLabel =
-    batch.useBatchWorkspace && batch.jobs.length > 0 ? `运行 (${batch.jobs.length})` : '运行';
+  const runLabel = resolveRunLabel(
+    'prompt',
+    data.status === 'running' ? 'running' : undefined,
+    batch.useBatchWorkspace && batch.jobs.length > 0 ? batch.jobs.length : undefined,
+  ).primary;
 
   const toolbarLeft = batch.useBatchWorkspace ? (
     <PromptToolbarLeft

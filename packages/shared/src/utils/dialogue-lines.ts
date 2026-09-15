@@ -6,6 +6,8 @@ export interface DialogueLine {
   speaker: string;
   text: string;
   emotion?: string;
+  /** 来自分镜/拆镜时绑定镜头，供 VO 轨对齐 */
+  shotId?: string;
 }
 
 const DIALOGUE_RE = /^([^：:\s（）()]{1,12})[：:]\s*(.{2,})$/;
@@ -24,7 +26,7 @@ export function extractDialogueLinesFromPackage(pkg: ScreenplayPackage): Dialogu
   return pkg.screenplay.episodes.flatMap((ep) => extractDialogueLinesFromText(ep.bodyMd));
 }
 
-export function normalizeDialogueLines(raw: unknown): DialogueLine[] {
+export function normalizeDialogueLines(raw: unknown, shotId?: string): DialogueLine[] {
   if (!Array.isArray(raw)) return [];
   const out: DialogueLine[] = [];
   for (const item of raw) {
@@ -34,14 +36,19 @@ export function normalizeDialogueLines(raw: unknown): DialogueLine[] {
     const text = typeof rec.text === 'string' ? rec.text.trim() : '';
     if (!speaker || !text) continue;
     const emotion = typeof rec.emotion === 'string' ? rec.emotion : undefined;
-    out.push(emotion ? { speaker, text, emotion } : { speaker, text });
+    const fromItem = typeof rec.shotId === 'string' ? rec.shotId.trim() : '';
+    const boundShot = fromItem || shotId || undefined;
+    const line: DialogueLine = { speaker, text };
+    if (emotion) line.emotion = emotion;
+    if (boundShot) line.shotId = boundShot;
+    out.push(line);
   }
   return out;
 }
 
 export function extractDialogueLinesFromBreakdown(payload: ScriptBreakdownPayload): DialogueLine[] {
   return payload.episodes.flatMap((ep) =>
-    ep.shots.flatMap((shot) => normalizeDialogueLines(shot.dialogue)),
+    ep.shots.flatMap((shot) => normalizeDialogueLines(shot.dialogue, shot.id)),
   );
 }
 

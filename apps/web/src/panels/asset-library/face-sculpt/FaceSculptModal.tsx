@@ -145,10 +145,12 @@ export function FaceSculptModal({
     setExportError('');
     try {
       const dataUrl = viewportRef.current.exportCanonicalImage(liveRig);
-      if (!dataUrl) throw new Error('定妆截图生成失败');
+      if (!dataUrl) throw new Error('定妆截图生成失败，禁止空成功');
       const blob = await (await fetch(dataUrl)).blob();
+      if (!blob.size) throw new Error('定妆截图内容为空，禁止空成功');
       const file = new File([blob], `face-lock-${Date.now()}.png`, { type: 'image/png' });
       const uploaded = await api.uploadAsset(file);
+      if (!uploaded?.url) throw new Error('定妆图上传失败，禁止空成功');
       const now = Date.now();
       const nextRig = {
         ...liveRig,
@@ -191,15 +193,30 @@ export function FaceSculptModal({
         <div className="min-w-0 flex-1">
           <h2 className="text-sm font-semibold text-ink">捏模台 · {c.name || '未命名角色'}</h2>
           <p className="text-[10px] text-ink/45">
-            P1 切片 6 项驱动网格；其余参数仍进 Prompt。拖滑块或橙色控制点，松手才写入档案。
+            {compat && compat.source !== 'proxy'
+              ? `成品基模实时驱动网格（已映射 ${compat.mappedParamIds.length}/${FACE_RIG_PARAMS.length} 项）。拖滑块或橙色控制点，松手才写入档案。`
+              : 'P1 切片 6 项驱动网格；其余参数仍进 Prompt。拖滑块或橙色控制点，松手才写入档案。'}
           </p>
         </div>
-        <span
-          className="rounded-full border border-warn/30 bg-warn/10 px-2 py-0.5 text-[10px] text-warn"
-          title="当前视口为工程代理网格，非成品基模；正式 GLB 就绪后自动替换，参数不换"
-        >
-          工程代理 · 非成品基模
-        </span>
+        {compat ? (
+          compat.source === 'proxy' ? (
+            <span
+              className="rounded-full border border-warn/30 bg-warn/10 px-2 py-0.5 text-[10px] text-warn"
+              title="正式 GLB 加载失败，已回退工程代理网格；参数不丢失，正式基模就绪后自动替换"
+            >
+              工程代理 · 非成品基模
+            </span>
+          ) : (
+            <span
+              className="rounded-full bg-brand/10 px-2 py-0.5 text-[10px] text-brand"
+              title={`正式基模已加载（source: ${compat.source}，${compat.morphTargetCount} 个 morph target）`}
+            >
+              成品基模 · {compat.morphTargetCount} morph
+            </span>
+          )
+        ) : (
+          <span className="rounded-full bg-surface px-2 py-0.5 text-[10px] text-ink/45">基模加载中…</span>
+        )}
         {compat ? (
           <button
             type="button"

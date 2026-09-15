@@ -49,3 +49,22 @@ export function mapToRecords<T>(map: Map<string, T>): Record<string, T> {
 export function recordsToMap<T>(records: Record<string, T>): Map<string, T> {
   return new Map(Object.entries(records));
 }
+
+/**
+ * SE-DEEP-07（统一到全部渲染任务服务）：服务重启后 queued / 进行中任务已无进程，
+ * 统一标记为中断并落盘，防止客户端永远轮询悬挂状态。返回标记的任务数。
+ */
+export function markInterruptedOnRestart<T extends { status: string; updatedAt?: number }>(
+  tasks: Map<string, T>,
+  inFlightStatuses: readonly string[],
+  mark: (task: T) => void,
+): number {
+  let marked = 0;
+  for (const task of tasks.values()) {
+    if (!inFlightStatuses.includes(task.status)) continue;
+    mark(task);
+    task.updatedAt = Date.now();
+    marked += 1;
+  }
+  return marked;
+}

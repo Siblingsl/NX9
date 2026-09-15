@@ -4,6 +4,7 @@ import { lookupBlock } from '@nx9/shared';
 import { ComposerWorkspaceShell } from '../composer/ComposerWorkspaceShell';
 import { useAttachedNodeData } from './use-attached-node-data';
 import { useActivityLog } from '../../../../../stores/activity-log';
+import { toastError } from '../../../../../stores/toast';
 import { api } from '../../../../../api/client';
 
 interface Point { x: number; y: number }
@@ -151,9 +152,24 @@ export function InpaintWorkspace({ blockId, kind, onCollapse }: InpaintWorkspace
   };
 
   const run = async () => {
-    if (!imageUrl || !imgRef.current) { appendLog('局部重绘：无上游图片'); return; }
-    if (!prompt.trim()) { appendLog('局部重绘：请输入 prompt'); return; }
-    if (strokesRef.current.length === 0) { appendLog('局部重绘：请绘制蒙版'); return; }
+    if (!imageUrl || !imgRef.current) {
+      const msg = '局部重绘：无上游图片，禁止空成功';
+      appendLog(msg);
+      toastError(msg);
+      return;
+    }
+    if (!prompt.trim()) {
+      const msg = '局部重绘：请输入 prompt，禁止空成功';
+      appendLog(msg);
+      toastError(msg);
+      return;
+    }
+    if (strokesRef.current.length === 0) {
+      const msg = '局部重绘：请绘制蒙版，禁止空成功';
+      appendLog(msg);
+      toastError(msg);
+      return;
+    }
     setUploading(true);
     updateNodeData(blockId, { status: 'running' });
     try {
@@ -179,6 +195,7 @@ export function InpaintWorkspace({ blockId, kind, onCollapse }: InpaintWorkspace
       const blob = await new Promise<Blob>((resolve) => mc.toBlob((b) => resolve(b!), 'image/png'));
       const file = new File([blob], 'mask.png', { type: 'image/png' });
       const uploaded = await api.uploadAsset(file);
+      if (!uploaded?.url) throw new Error('蒙版上传失败，禁止空成功');
       updateNodeData(blockId, { maskUrl: uploaded.url });
       const { runInpaintEdit, resolveInpaintModel, writeBackInpaintShot } = await import(
         '../../../../inpaint-edit-runner'
@@ -206,7 +223,9 @@ export function InpaintWorkspace({ blockId, kind, onCollapse }: InpaintWorkspace
       appendLog('局部重绘完成');
     } catch (e) {
       updateNodeData(blockId, { status: 'error', error: String(e) });
-      appendLog(`重绘失败: ${String(e)}`);
+      const msg = `重绘失败: ${String(e)}`;
+      appendLog(msg);
+      toastError(msg);
     } finally {
       setUploading(false);
     }

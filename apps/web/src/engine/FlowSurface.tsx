@@ -29,7 +29,7 @@ import {
   type OnNodeDrag,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import { PERF, validateLink, validateConnectionWithHandles, WORKFLOW_TEMPLATES, lookupBlock, canExecuteNode, resolveNodeInteraction, isPromptBarKind, syncAssetImportNodeFields, isStoryboardExecLink, isDirector3dDeskLink, buildMediaPinNodeData, parseMediaPinPayload, guessMediaPinKindFromFile, isMediaPinDropFile, mediaPinKindToSocket, resolveMediaPinKind } from '@nx9/shared';
+import { PERF, validateLink, validateConnectionWithHandles, WORKFLOW_TEMPLATES, lookupBlock, canExecuteNode, resolveNodeInteraction, isPromptBarKind, syncAssetImportNodeFields, isStoryboardExecLink, isDirector3dDeskLink, buildMediaPinNodeData, parseMediaPinPayload, guessMediaPinKindFromFile, isMediaPinDropFile, mediaPinKindToSocket, resolveMediaPinKind, syncMediaPinNodeFields } from '@nx9/shared';
 import { blockTypes, preloadBlockTypes } from '../blocks/registry';
 import { MEDIA_PIN_MIME } from './media-pin-drag';
 import { api } from '../api/client';
@@ -45,7 +45,8 @@ import { useStoryboardUi } from '../stores/flow-runtime';
 import { useFlowGraphMirror } from '../stores/flow-graph-mirror';
 import { useWorkspaceDocument } from '../stores/workspace-document';
 import { PLAYBOOK_DEFINITIONS, type PlaybookId } from '@nx9/shared';
-import { useExecutionQueue } from '../stores/execution-queue';
+import { useExecutionQueue, hydrateExecutionQueue } from '../stores/execution-queue';
+import { hydrateVersionHistory } from '../stores/version-history';
 import {
   copySelection,
   duplicateNodeWithIncomingEdges,
@@ -109,6 +110,8 @@ import { filterBlocksForWireDrop } from './stage-deck/interaction/wire-drop';
 import {
   buildSceneGroupMemberPreview,
   computeGroupBounds,
+  migrateSceneGroupCollapsedVersion,
+  migrateSceneGroupPadVersion,
   SCENE_GROUP_COLLAPSED,
   SCENE_GROUP_COLLAPSED_VERSION,
   SCENE_GROUP_PAD_VERSION,
@@ -234,6 +237,8 @@ const FlowSurfaceInner = memo(function FlowSurfaceInner({
   const loadWorkflowTemplateRef = useRef<
     (id: string, mode: 'merge' | 'replace') => Promise<void>
   >(async () => {});
+  /** 全图适配视口：fitView 在组件后段才可用，经 ref 前向引用 */
+  const fitViewAllRef = useRef<() => void>(() => {});
   const lastSaveRef = useRef<{
     workspaceId: string;
     nodes: Node[];
@@ -274,7 +279,7 @@ const FlowSurfaceInner = memo(function FlowSurfaceInner({
   // F-002/F-003: 镜像图供制作台在画布卸载后仍读写同一 chainStoryboard
   useEffect(() => {
     if (!ready) return;
-    useFlowGraphMirror.getState().syncGraph(workspaceId, nodes, edges);
+    useFlowGraphMirror.getState().syncGraph(workspaceId, nodes, edges, { stageDeck: isStageDeck });
   }, [ready, workspaceId, nodes, edges]);
 
   const bindFocusBlock = useCallback((fn: (blockId: string) => void) => {
@@ -446,6 +451,24 @@ const FlowSurfaceInner = memo(function FlowSurfaceInner({
     }, PERF.saveDebounceMs);
   }, [appendLog, isStageDeck, exportAliases]);
 
+  // ── SE-FLUSH: 页面关闭/隐藏时立即落盘，消灭防抖窗口丢失 ──
+  useEffect(() => {
+    const handler = () => {
+      if (skipSaveRef.current) return;
+      const pending = saveQueuedRef.current || lastSaveRef.current;
+      if (!pending) return;
+      const payload = buildFlowPayload(pending.nodes, pending.edges, pending.viewport, pending.idx, isStageDeck ? {
+        version: 3,
+        aliases: exportAliases(),
+        viewMode: useViewMode.getState().mode,
+        takes: useTakeStore.getState().takes,
+      } : { version: 2 });
+      void api.saveWorkspaceKeepalive(pending.workspaceId, payload);
+    };
+    window.addEventListener('pagehide', handler, { once: true });
+    return () => window.removeEventListener('pagehide', handler);
+  }, [isStageDeck, exportAliases]);
+
   useEffect(() => {
     let cancelled = false;
 
@@ -470,6 +493,9 @@ const FlowSurfaceInner = memo(function FlowSurfaceInner({
           hydrateTakes(parsed.v3.takes);
         }
         useWorkspaceDocument.getState().hydrate(workspaceId, payload);
+        // SE-RESUME: 恢复本工作区的批量运行进度与历史版本快照（刷新不丢）
+        hydrateExecutionQueue(workspaceId);
+        hydrateVersionHistory(workspaceId);
         pushRef.current({
           nodes: parsed.nodes,
           edges: parsed.edges,
@@ -573,6 +599,10 @@ const FlowSurfaceInner = memo(function FlowSurfaceInner({
         setEdges((eds) => [...eds, ...flowEdges]);
       }
       appendLog(`已加载工作流模板：${tpl.label}`);
+      // 模板加载后自动适配视口，保证整条链路第一眼可见
+      window.setTimeout(() => {
+        fitViewAllRef.current();
+      }, 80);
       setTimeout(() => {
         skipSaveRef.current = false;
       }, 100);
@@ -588,38 +618,51 @@ const FlowSurfaceInner = memo(function FlowSurfaceInner({
 
   const importWorkflowZip = useCallback(
     async (file: File, mode: 'merge' | 'replace' = 'merge') => {
-      const imported = await parseWorkflowZip(file);
-      skipSaveRef.current = true;
-      pushFlowSnapshot(nodesRef.current, edgesRef.current);
+      try {
+        const imported = await parseWorkflowZip(file);
+        skipSaveRef.current = true;
+        pushFlowSnapshot(nodesRef.current, edgesRef.current);
 
-      if (mode === 'replace') {
-        setNodes(imported.nodes);
-        setEdges(imported.edges);
-        hydrateAliases(imported.aliases);
-        hydrateTakes(imported.takes);
-        if (imported.viewMode) hydrateViewMode(imported.viewMode);
-        appendLog('已替换画布（ZIP 导入）');
-      } else {
-        const merged = mergeImportedWorkflow(
-          nodesRef.current,
-          edgesRef.current,
-          imported,
-        );
-        setNodes((prev) => [
-          ...prev.map((n) => ({ ...n, selected: false })),
-          ...merged.nodes,
-        ]);
-        setEdges((prev) => [...prev, ...merged.edges]);
-        useAliasStore.setState((s) => ({
-          aliases: { ...s.aliases, ...merged.aliases },
-        }));
-        hydrateTakes([...useTakeStore.getState().exportTakes(), ...merged.takes]);
-        appendLog(`已追加 ${merged.nodes.length} 个模块（ZIP 导入）`);
+        if (mode === 'replace') {
+          setNodes(imported.nodes);
+          setEdges(imported.edges);
+          hydrateAliases(imported.aliases);
+          hydrateTakes(imported.takes);
+          if (imported.viewMode) hydrateViewMode(imported.viewMode);
+          appendLog('已替换画布（ZIP 导入）');
+        } else {
+          const merged = mergeImportedWorkflow(
+            nodesRef.current,
+            edgesRef.current,
+            imported,
+          );
+          setNodes((prev) => [
+            ...prev.map((n) => ({ ...n, selected: false })),
+            ...merged.nodes,
+          ]);
+          setEdges((prev) => [...prev, ...merged.edges]);
+          useAliasStore.setState((s) => ({
+            aliases: { ...s.aliases, ...merged.aliases },
+          }));
+          hydrateTakes([...useTakeStore.getState().exportTakes(), ...merged.takes]);
+          appendLog(`已追加 ${merged.nodes.length} 个模块（ZIP 导入）`);
+        }
+
+        if (imported.assetWarnings?.length) {
+          const n = imported.assetWarnings.length;
+          appendLog(`ZIP 导入资源部分失败：${n} 项 · ${imported.assetWarnings[0]}`);
+          toastError(`ZIP 导入：${n} 个内嵌资源未上传成功`);
+        }
+
+        setTimeout(() => {
+          skipSaveRef.current = false;
+        }, 100);
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        appendLog(`ZIP 导入失败：${msg}`);
+        toastError(msg.includes('禁止空成功') ? msg : `ZIP 导入失败：${msg}`);
+        throw e;
       }
-
-      setTimeout(() => {
-        skipSaveRef.current = false;
-      }, 100);
     },
     [
       pushFlowSnapshot,
@@ -658,7 +701,9 @@ const FlowSurfaceInner = memo(function FlowSurfaceInner({
 
   useEffect(() => {
     if (!isStageDeck || !ready) return;
-    setNodes((nds) => propagateStaleFlags(nds, edgesRef.current));
+    const next = propagateStaleFlags(nodesRef.current, edgesRef.current);
+    if (next === nodesRef.current) return;
+    setNodes(next);
   }, [staleFingerprint, edges, isStageDeck, ready, setNodes]);
 
   const applySnapshot = useCallback(
@@ -975,7 +1020,13 @@ const FlowSurfaceInner = memo(function FlowSurfaceInner({
         });
         appendLog('Cascade 级联运行完成');
       } catch (e) {
-        appendLog(`Cascade 中断: ${String(e)}`);
+        if (runAbort.signal.aborted || cancelRunRef.current) {
+          appendLog(`Cascade 已停止: ${String(e)}`);
+        } else {
+          const msg = `Cascade 中断: ${String(e)}`;
+          appendLog(msg);
+          toastError(msg);
+        }
       }
     },
     [setEdges, updateNodeDataStable, appendLog, highlightBlock],
@@ -1285,7 +1336,8 @@ const FlowSurfaceInner = memo(function FlowSurfaceInner({
           return;
         }
       }
-      appendLog('未找到关联镜头；请用画布「分镜台」管理镜表');
+      appendLog('未找到关联镜头；请用画布「分镜台」管理镜表，禁止空成功');
+      toastError('未找到关联镜头；请用画布「分镜台」管理镜表，禁止空成功');
     },
     [storyboard.shots, selectShot, appendLog],
   );
@@ -1534,154 +1586,57 @@ const FlowSurfaceInner = memo(function FlowSurfaceInner({
     [resolveTargetGroupIds, push, setNodes, appendLog],
   );
 
-  // 旧场景组缺少内边距版本时，按成员自动重算包围盒
+  // 旧场景组缺少内边距版本时，按成员自动重算包围盒（指纹驱动，避免 [nodes] 空 setNodes 与 RF BatchProvider 互锁）
+  const sceneGroupPadKey = useMemo(() => {
+    return nodes
+      .filter(
+        (n) =>
+          n.type === 'scene-group' &&
+          !n.data?.collapsed &&
+          n.data?.padVersion !== SCENE_GROUP_PAD_VERSION,
+      )
+      .map((n) => {
+        const members = nodes.filter((c) => c.parentId === n.id);
+        const sizes = members
+          .map((c) => {
+            const w = c.width ?? (c as { measured?: { width?: number } }).measured?.width ?? 0;
+            const h = c.height ?? (c as { measured?: { height?: number } }).measured?.height ?? 0;
+            return `${w}x${h}`;
+          })
+          .join(',');
+        return `${n.id}:${members.length}:${sizes}`;
+      })
+      .join('|');
+  }, [nodes]);
+
+  const sceneGroupCollapsedKey = useMemo(
+    () =>
+      nodes
+        .filter(
+          (n) =>
+            n.type === 'scene-group' &&
+            Boolean(n.data?.collapsed) &&
+            n.data?.collapsedVersion !== SCENE_GROUP_COLLAPSED_VERSION,
+        )
+        .map((n) => n.id)
+        .join('|'),
+    [nodes],
+  );
+
   useEffect(() => {
-    const stale = nodesRef.current.filter(
-      (n) =>
-        n.type === 'scene-group' &&
-        !n.data?.collapsed &&
-        n.data?.padVersion !== SCENE_GROUP_PAD_VERSION,
-    );
-    if (stale.length === 0) return;
-    setNodes((prev) => {
-      const staleIds = new Set(
-        prev
-          .filter(
-            (n) =>
-              n.type === 'scene-group' &&
-              !n.data?.collapsed &&
-              n.data?.padVersion !== SCENE_GROUP_PAD_VERSION,
-          )
-          .map((n) => n.id),
-      );
-      if (staleIds.size === 0) return prev;
-      const parentBounds = new Map<string, { x: number; y: number; width: number; height: number }>();
-      const readyIds = new Set<string>();
-      for (const id of staleIds) {
-        const parent = prev.find((n) => n.id === id);
-        if (!parent) continue;
-        const members = prev.filter((c) => c.parentId === id);
-        if (members.length === 0) {
-          parentBounds.set(id, {
-            x: parent.position.x,
-            y: parent.position.y,
-            width: (parent.data?.width as number) || parent.width || 400,
-            height: (parent.data?.height as number) || parent.height || 280,
-          });
-          readyIds.add(id);
-          continue;
-        }
-        // 等 RF 量到真实尺寸再定版，避免用默认 220×160 算偏
-        const unmeasured = members.some((c) => {
-          const w = c.width ?? (c as { measured?: { width?: number } }).measured?.width;
-          const h = c.height ?? (c as { measured?: { height?: number } }).measured?.height;
-          return !w || !h;
-        });
-        if (unmeasured) continue;
-        parentBounds.set(
-          id,
-          computeGroupBounds(
-            members.map((c) => ({
-              position: {
-                x: parent.position.x + c.position.x,
-                y: parent.position.y + c.position.y,
-              },
-              width: c.width,
-              height: c.height,
-              measured: (c as { measured?: { width?: number; height?: number } }).measured,
-            })),
-          ),
-        );
-        readyIds.add(id);
-      }
-      if (readyIds.size === 0) return prev;
-      return prev.map((n) => {
-        if (readyIds.has(n.id) && n.type === 'scene-group') {
-          const bounds = parentBounds.get(n.id);
-          if (!bounds) {
-            return {
-              ...n,
-              data: { ...n.data, padVersion: SCENE_GROUP_PAD_VERSION },
-            };
-          }
-          return {
-            ...n,
-            position: { x: bounds.x, y: bounds.y },
-            data: {
-              ...n.data,
-              width: bounds.width,
-              height: bounds.height,
-              padVersion: SCENE_GROUP_PAD_VERSION,
-            },
-            style: {
-              ...(n.style as Record<string, unknown> | undefined),
-              width: bounds.width,
-              height: bounds.height,
-            },
-            width: bounds.width,
-            height: bounds.height,
-          };
-        }
-        if (n.parentId && readyIds.has(n.parentId)) {
-          const parent = prev.find((p) => p.id === n.parentId);
-          const bounds = parentBounds.get(n.parentId);
-          if (!parent || !bounds) return n;
-          return {
-            ...n,
-            position: {
-              x: parent.position.x + n.position.x - bounds.x,
-              y: parent.position.y + n.position.y - bounds.y,
-            },
-          };
-        }
-        return n;
-      });
-    });
-  }, [nodes, setNodes]);
+    if (!sceneGroupPadKey) return;
+    const next = migrateSceneGroupPadVersion(nodesRef.current);
+    if (!next) return;
+    setNodes(next);
+  }, [sceneGroupPadKey, setNodes]);
 
   // 旧折叠卡尺寸过小：升到新卡片尺寸，并补成员预览
   useEffect(() => {
-    const stale = nodesRef.current.filter(
-      (n) =>
-        n.type === 'scene-group' &&
-        Boolean(n.data?.collapsed) &&
-        n.data?.collapsedVersion !== SCENE_GROUP_COLLAPSED_VERSION,
-    );
-    if (stale.length === 0) return;
-    setNodes((prev) => {
-      let changed = false;
-      const next = prev.map((n) => {
-        if (
-          n.type !== 'scene-group' ||
-          !n.data?.collapsed ||
-          n.data?.collapsedVersion === SCENE_GROUP_COLLAPSED_VERSION
-        ) {
-          return n;
-        }
-        changed = true;
-        const members = prev.filter((c) => c.parentId === n.id);
-        return {
-          ...n,
-          data: {
-            ...n.data,
-            width: SCENE_GROUP_COLLAPSED.width,
-            height: SCENE_GROUP_COLLAPSED.height,
-            memberCount: members.length,
-            memberPreview: buildSceneGroupMemberPreview(members),
-            collapsedVersion: SCENE_GROUP_COLLAPSED_VERSION,
-          },
-          style: {
-            ...(n.style as Record<string, unknown> | undefined),
-            width: SCENE_GROUP_COLLAPSED.width,
-            height: SCENE_GROUP_COLLAPSED.height,
-          },
-          width: SCENE_GROUP_COLLAPSED.width,
-          height: SCENE_GROUP_COLLAPSED.height,
-        };
-      });
-      return changed ? next : prev;
-    });
-  }, [nodes, setNodes]);
+    if (!sceneGroupCollapsedKey) return;
+    const next = migrateSceneGroupCollapsedVersion(nodesRef.current);
+    if (!next) return;
+    setNodes(next);
+  }, [sceneGroupCollapsedKey, setNodes]);
 
   const getNodeCenterPositions = useCallback(() => {
     const map = new Map<string, { x: number; y: number }>();
@@ -1732,6 +1687,8 @@ const FlowSurfaceInner = memo(function FlowSurfaceInner({
   spawnBlockForShotRef.current = spawnBlockForShot;
 
   const { fitView } = useReactFlow();
+
+  fitViewAllRef.current = () => void fitView({ duration: 300, padding: 0.25 });
 
   const fitViewToNodes = useCallback((nodeIds: string[]) => {
     const nodeList = nodeIds
@@ -2196,7 +2153,14 @@ const FlowSurfaceInner = memo(function FlowSurfaceInner({
     if (localFiles.length > 0 && !mediaPinRaw) {
       pushFlowSnapshot(nodesRef.current, edgesRef.current);
       void (async () => {
-        const created: Node[] = [];
+        const uploadedItems: {
+          id: string;
+          url: string;
+          pinKind: NonNullable<ReturnType<typeof guessMediaPinKindFromFile>>;
+          filename?: string;
+          label?: string;
+          textContent?: string;
+        }[] = [];
         for (let i = 0; i < localFiles.length; i += 1) {
           const file = localFiles[i];
           const pinKind = guessMediaPinKindFromFile(file);
@@ -2207,38 +2171,56 @@ const FlowSurfaceInner = memo(function FlowSurfaceInner({
               textContent = await file.text();
             }
             const res = await api.uploadAsset(file);
-            const id = `blk-pin-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-            const blockIndex = nextIndexRef.current++;
-            created.push({
-              id,
-              type: 'media-pin',
-              position: {
-                x: dropAt.x + i * 36,
-                y: dropAt.y + i * 28,
-              },
-              data: buildMediaPinNodeData(
-                {
-                  url: res.url,
-                  source: 'local',
-                  label: file.name || pinKind,
-                  pinKind,
-                  filename: res.filename ?? file.name,
-                  textContent,
-                },
-                blockIndex,
-              ) as unknown as Record<string, unknown>,
-              selected: true,
+            if (!res.url?.trim()) throw new Error('上传失败或未返回 URL，禁止空成功');
+            uploadedItems.push({
+              id: `drop-${Date.now()}-${i}`,
+              url: res.url,
+              pinKind,
+              filename: res.filename ?? file.name,
+              label: file.name || pinKind,
+              textContent,
             });
-            appendLog(`本地投放钉板：${file.name}`);
           } catch (err) {
             appendLog(`本地投放失败：${file.name} · ${String(err)}`);
           }
         }
-        if (created.length === 0) return;
+        if (uploadedItems.length === 0) {
+          appendLog('本地投放全部失败，禁止空成功');
+          toastError('本地投放全部失败，禁止空成功');
+          return;
+        }
+        const failedCount = files.length - uploadedItems.length;
+        if (failedCount > 0) {
+          toastError(`本地投放部分失败：${failedCount}/${files.length} 项未上传成功`);
+        }
+        const primary = uploadedItems[0];
+        const id = `blk-pin-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+        const blockIndex = nextIndexRef.current++;
+        const baseData = buildMediaPinNodeData(
+          {
+            url: primary.url,
+            source: 'local',
+            label: primary.label || primary.pinKind,
+            pinKind: primary.pinKind,
+            filename: primary.filename,
+            textContent: primary.textContent,
+          },
+          blockIndex,
+        ) as unknown as Record<string, unknown>;
         setNodes((nds) => [
           ...nds.map((n) => ({ ...n, selected: false })),
-          ...created,
+          {
+            id,
+            type: 'media-pin',
+            position: dropAt,
+            data: {
+              ...baseData,
+              ...syncMediaPinNodeFields(uploadedItems, baseData),
+            } as unknown as Record<string, unknown>,
+            selected: true,
+          },
         ]);
+        appendLog(`本地投放钉板：${uploadedItems.length} 个素材`);
       })();
       return;
     }

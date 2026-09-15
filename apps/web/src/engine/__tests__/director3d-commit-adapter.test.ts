@@ -148,7 +148,7 @@ describe('director3d commit adapter', () => {
     dataOnly.candidate.imageUrl = undefined;
     expect(commit(dataOnly)).toMatchObject({
       ok: false,
-      error: '采用帧缺少持久化图片，禁止提交本地草稿',
+      error: '采用帧缺少持久化图片，禁止提交本地草稿，禁止空成功',
     });
 
     const dataAsImage = payload('shot-1', 'commit-data');

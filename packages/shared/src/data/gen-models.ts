@@ -329,3 +329,148 @@ export function listConnectedLlmModels(
   for (const c of llmConns.filter((x) => !x.isActive)) pushConn(c);
   return out;
 }
+
+export interface ConnectedVideoModelOption {
+  /** 上游 API 模型名（写入 clip-gen data.model） */
+  id: string;
+  label: string;
+  connectionId: string;
+  connectionModel: string;
+  connectionLabel: string;
+}
+
+type VideoConnectionLike = {
+  id: string;
+  kind: string;
+  model?: string;
+  label?: string;
+  provider?: string;
+  apiKey?: string;
+  baseUrl?: string;
+  isActive?: boolean;
+  availableModels?: string[];
+};
+
+/**
+ * 从设置里的视频连接推导可选模型：
+ * 优先展开连接上已获取的 availableModels；否则回退到默认 model。
+ */
+export function listConnectedVideoModels(
+  connections: VideoConnectionLike[] | undefined | null,
+): ConnectedVideoModelOption[] {
+  const videoConns = (connections ?? []).filter((c) => c.kind === 'video');
+  const out: ConnectedVideoModelOption[] = [];
+  const seen = new Set<string>();
+
+  const pushModel = (c: VideoConnectionLike, rawModel: string) => {
+    const raw = rawModel.trim();
+    if (!raw || seen.has(raw)) return;
+    seen.add(raw);
+    const connLabel = (c.label ?? '').trim() || '视频连接';
+    out.push({
+      id: raw,
+      label: `${connLabel} · ${raw}`,
+      connectionId: c.id,
+      connectionModel: raw,
+      connectionLabel: connLabel,
+    });
+  };
+
+  const pushConn = (c: VideoConnectionLike) => {
+    const cached = (c.availableModels ?? [])
+      .map((m) => m.trim())
+      .filter(Boolean);
+    if (cached.length > 0) {
+      for (const m of cached) pushModel(c, m);
+      const fallback = (c.model ?? '').trim();
+      if (fallback && !cached.includes(fallback)) pushModel(c, fallback);
+      return;
+    }
+    pushModel(c, c.model ?? '');
+  };
+
+  for (const c of videoConns.filter((x) => x.isActive)) pushConn(c);
+  for (const c of videoConns.filter((x) => !x.isActive)) pushConn(c);
+  return out;
+}
+
+export interface VideoGenModelOption {
+  id: string;
+  label: string;
+  hint?: string;
+  connectionId?: string;
+  connectionModel?: string;
+}
+
+/** 视频生成下拉：仅「设置 → 连接」中的视频模型 */
+export function listVideoGenModelOptions(
+  connections: VideoConnectionLike[] | undefined | null,
+): VideoGenModelOption[] {
+  return listConnectedVideoModels(connections).map((c) => ({
+    id: c.id,
+    label: c.label,
+    connectionId: c.connectionId,
+    connectionModel: c.connectionModel,
+  }));
+}
+
+/** 当前激活的视频连接默认模型 */
+export function resolveActiveVideoConnectionModel(
+  connections: VideoConnectionLike[] | undefined | null,
+): string | undefined {
+  const active = (connections ?? []).find((c) => c.kind === 'video' && c.isActive);
+  const model = (active?.model ?? '').trim();
+  return model || undefined;
+}
+
+export interface ActiveVideoConnection {
+  connectionId: string;
+  label: string;
+  apiKey: string;
+  baseUrl: string;
+  model?: string;
+  provider?: string;
+}
+
+/** 规范化视频 API Base URL：修正常见填错并补 /v1 */
+export function normalizeVideoBaseUrl(raw?: string | null): string {
+  let url = (raw ?? '').trim().replace(/\/+$/, '');
+  if (!url) return 'https://api.openai.com/v1';
+  // whatstoken OpenAI 兼容入口在 www；api 子域无 DNS，勿改写到 api.*
+  url = url.replace(/^(https?:\/\/)api\.whatstoken\.ai/i, '$1www.whatstoken.ai');
+  if (!/\/v1$/i.test(url) && !/\/v1beta$/i.test(url)) {
+    url = `${url}/v1`;
+  }
+  return url;
+}
+
+/** 当前可用的视频连接（优先 isActive，否则取首个有 Key 的视频连接） */
+export function resolveActiveVideoConnection(
+  connections: VideoConnectionLike[] | undefined | null,
+): ActiveVideoConnection | undefined {
+  const videoConns = (connections ?? []).filter((c) => c.kind === 'video');
+  const pick = videoConns.find((c) => c.isActive) ?? videoConns.find((c) => (c.apiKey ?? '').trim());
+  if (!pick) return undefined;
+  const apiKey = (pick.apiKey ?? '').trim();
+  if (!apiKey) return undefined;
+  return {
+    connectionId: pick.id,
+    label: (pick.label ?? '').trim() || '视频连接',
+    apiKey,
+    baseUrl: normalizeVideoBaseUrl(pick.baseUrl),
+    model: (pick.model ?? '').trim() || undefined,
+    provider: pick.provider,
+  };
+}
+
+export function lookupVideoGenModelHint(
+  id?: string,
+  connections?: VideoConnectionLike[] | null,
+): string | undefined {
+  if (!id) return undefined;
+  const hit = listConnectedVideoModels(connections).find(
+    (m) => m.id === id || m.connectionModel === id,
+  );
+  if (hit) return `${hit.connectionLabel} · OpenAI 兼容 POST /v1/video/generations`;
+  return '请在 设置 → 连接 中配置视频模型';
+}

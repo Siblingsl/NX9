@@ -137,20 +137,19 @@ describe('F-014 sound-gen BGM 真接入', () => {
   });
 
   // ─── 主路径接线（源码守卫） ───
-  it('ClipEditorBlock 源码：upstreamSounds 已传入 orchestrateDramaTimeline', () => {
+  it('ClipEditorBlock 源码：BGM 走 upstreamBgmUrls（SF-15，禁止把对白当 BGM）', () => {
     const src = readWeb('blocks/core/ClipEditorBlock.tsx');
 
-    // 断言 upstreamSounds 被使用（非仅 destructure 不用）
-    const usagesAfterInit = src.slice(src.indexOf('useUpstreamMedia(props.id)'));
-    const upstreamSoundsRefs = (usagesAfterInit.match(/upstreamSounds/g) ?? []).length;
-    // 至少：1 次解构声明 + 1 次 drama bgmUrl + 1 次 viral bgmUrl + 1 次 对白注入
-    expect(upstreamSoundsRefs).toBeGreaterThanOrEqual(4);
+    expect(src).toContain('bgmUrls: upstreamBgmUrls');
+    expect(src.match(/upstreamBgmUrls/g)?.length ?? 0).toBeGreaterThanOrEqual(3);
 
-    // drama 分支传 bgmUrl
-    expect(src).toMatch(/bgmUrl:\s*upstreamSounds\[0\]/);
+    // drama / viral 编排均用配乐分流字段
+    expect(src).toMatch(/bgmUrl:\s*upstreamBgmUrls\[0\]/);
+    expect(src).not.toMatch(/bgmUrl:\s*upstreamSounds\[0\]/);
 
-    // buildVoiceDramaTimeline 传 bgmUrl（外层可能套 migrate）
-    expect(src).toMatch(/buildVoiceDramaTimeline\([^)]*voiceLines,\s*bgmUrl\)/);
+    // 对白挂轨走 voice.lines；sfx 另传，不再把 BGM 塞进 buildVoiceDramaTimeline 第二位置
+    expect(src).toContain('buildVoiceDramaTimeline');
+    expect(src).toContain('sfxUrls: upstreamSfxUrls');
   });
 
   it('smart-edit-orchestrator：orchestrateDramaTimeline 收到 bgmUrl 时添加 BGM 轨', () => {

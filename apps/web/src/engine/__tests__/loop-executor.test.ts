@@ -15,6 +15,15 @@ describe('TOOL-04 iterator / loop', () => {
     const branch = src.slice(src.indexOf("if (kind === 'iterator')"), src.indexOf("if (kind === 'picker')"));
     expect(branch).toContain('advanceIteratorIndex');
     expect(branch).toContain('lastEmittedIndex');
+    expect(branch).toContain("status: 'skipped'");
+    expect(branch).toContain('上游池为空，禁止空成功');
+  });
+
+  it('picker 空池标 skipped，禁止空成功', () => {
+    const src = readFileSync(resolve(__dirname, '../flow-runner-ops/media-ops.ts'), 'utf8');
+    const branch = src.slice(src.indexOf("if (kind === 'picker')"), src.indexOf("if (kind === 'clip-editor')"));
+    expect(branch).toContain("status: 'skipped'");
+    expect(branch).toContain('上游池为空，禁止空成功');
   });
 
   it('并行并发会重叠，串行不会', async () => {

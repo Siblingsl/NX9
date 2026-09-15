@@ -36,4 +36,11 @@ describe('Script 3.3 Agent 技能轨 SSE', () => {
     const agentOps = readWeb('src/blocks/nx9/script-desk/use-script-desk-agent.ts');
     expect(agentOps).toContain('(chunk) => setStreamPreview((prev) => prev + chunk)');
   });
+
+  it('续写/技能/重写禁止空成功假绿', () => {
+    const agentOps = readWeb('src/blocks/nx9/script-desk/use-script-desk-agent.ts');
+    expect(agentOps).toContain("status: ok > 0 ? 'success' : aborted ? 'idle' : 'error'");
+    expect(agentOps).toContain('编剧台 Agent 无可用产出，禁止空成功');
+    expect(agentOps).toContain('重写未返回可应用补丁，禁止空成功');
+  });
 });

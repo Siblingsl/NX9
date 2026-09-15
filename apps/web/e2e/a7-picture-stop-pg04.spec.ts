@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { createCanvasProject } from './helpers';
 
 const mockSettings = {
   connections: [
@@ -40,13 +41,7 @@ test.describe('A7 PG-04 图像工作台停止', () => {
       await route.fulfill({ json: { ok: true, url: 'https://mock.nx9/image-stop.png' } });
     });
 
-    await page.goto('/');
-    await page.waitForLoadState('networkidle');
-    await page.getByRole('button', { name: /新建|New/i }).first().click();
-    await page.getByRole('button', { name: /创建并开始制作/i }).click();
-    await page.waitForTimeout(1000);
-    await page.getByRole('button', { name: /前往画布/i }).click();
-    await page.waitForTimeout(1000);
+    await createCanvasProject(page);
 
     await page.getByRole('button', { name: '能力' }).click();
     await page.getByRole('button', { name: /图像生成 文生图/ }).click();

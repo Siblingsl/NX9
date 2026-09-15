@@ -63,6 +63,10 @@ export async function renderTimelineToMp4(
       height: timeline.height,
     });
 
+    if (!existsSync(outPath)) {
+      return { ok: false, message: 'HyperFrames 成片未写出，禁止空成功' };
+    }
+
     return { ok: true, url: `/media/exports/${outFilename}` };
   } catch (e) {
     const message = (e as Error).message;

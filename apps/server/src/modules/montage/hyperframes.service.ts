@@ -12,6 +12,7 @@ import {
   HF_TASKS_FILE,
   loadTaskRecords,
   mapToRecords,
+  markInterruptedOnRestart,
   recordsToMap,
   saveTaskRecords,
 } from './render-task-store';
@@ -41,6 +42,15 @@ export class HyperframesService {
 
   constructor() {
     this.tasks = recordsToMap(loadTaskRecords<HyperframesTaskRecord>(this.persistFile));
+    // SE-DEEP-07 对齐 video-edit：重启前 queued/rendering 已无进程，标记中断而非悬挂
+    const stale = markInterruptedOnRestart(this.tasks, ['queued', 'rendering'], (t) => {
+      t.status = 'error';
+      t.message = '服务重启，渲染任务已中断；请重新渲染';
+    });
+    if (stale > 0) {
+      this.persist();
+      this.logger.warn(`hyperframes: ${stale} 个重启前任务标记为中断`);
+    }
   }
 
   async renderTimeline(
@@ -121,7 +131,7 @@ export class HyperframesService {
         const hf = (await import('@hyperframes/producer')) as unknown as {
           producer?: HfProducer;
         };
-        if (!hf.producer?.render) throw new Error('no render');
+        if (!hf.producer?.render) throw new Error('HyperFrames producer 无 render，禁止空成功');
         producer = hf.producer;
       } catch {
         throw new Error(HF_PRODUCER_UNAVAILABLE);

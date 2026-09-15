@@ -62,10 +62,10 @@ export async function runPictureGenJob(input: PictureGenJobInput): Promise<strin
       input.referenceImageUrl?.trim() ||
       input.referenceImageUrls?.find((u) => u?.trim())?.trim() ||
       '';
-    if (!src) throw new Error('图片高清需要参考图（上传或连接上游）');
+    if (!src) throw new Error('图片高清需要参考图（上传或连接上游），禁止空成功');
     const scale = Math.min(4, Math.max(2, input.upscaleScale ?? 2));
     const res = await api.upscaleImage({ sourceUrl: src, scale });
-    if (!res.url) throw new Error('高清放大失败');
+    if (!res.ok || !res.url) throw new Error('高清放大失败，禁止空成功');
     return [res.url];
   }
 
@@ -75,7 +75,7 @@ export async function runPictureGenJob(input: PictureGenJobInput): Promise<strin
     .filter(Boolean)
     .join('\n\n');
   // 图生图允许空 prompt（仅改风格时），文生图必须有
-  if (!prompt && !input.referenceImageUrl) throw new Error('Prompt 为空');
+  if (!prompt && !input.referenceImageUrl) throw new Error('Prompt 为空，禁止空成功');
   const safePrompt = prompt || 'high quality refined image, preserve subject';
 
   if (def.provider === 'fal') {
@@ -118,7 +118,7 @@ export async function runPictureGenJob(input: PictureGenJobInput): Promise<strin
       }
     }
      const res = await api.proxyFal({ model: def.model, input: falInput }, { signal: input.signal });
-    if (!res.url) throw new Error('Fal 未返回图片');
+    if (!res.ok || !res.url) throw new Error('Fal 未返回图片，禁止空成功');
     const urls = [res.url];
     return panorama ? normalizePanoramaUrls(urls) : urls;
   }
@@ -183,7 +183,9 @@ export async function runPictureGenJob(input: PictureGenJobInput): Promise<strin
     const urls = [url];
     return panorama ? normalizePanoramaUrls(urls) : urls;
   }
-  if (!res.url && !res.urls) throw new Error(res.message ?? '图像生成失败');
+  if (res.ok === false || (!res.url && !res.urls)) {
+    throw new Error(res.message ?? '图像生成失败，禁止空成功');
+  }
   const urls = res.urls ?? [res.url!];
   return panorama ? normalizePanoramaUrls(urls) : urls;
 }

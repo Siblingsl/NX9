@@ -134,9 +134,40 @@ export class MontageController {
     return this.montage.colorGrade(body);
   }
 
+  /** 变速保音调：setpts + atempo（0.25–4×），输出新素材地址 */
+  @Post('speed-pitch')
+  speedPitch(@Body() body: { sourceUrl: string; speed?: number }) {
+    return this.montage.speedPitch(body);
+  }
+
   @Post('probe-duration')
   probeDuration(@Body() body: { sourceUrl: string }) {
     return this.montage.probeDuration(body.sourceUrl ?? '');
+  }
+
+  /** AI 深度编排：LLM 理解镜头内容 → 顺序 + 时长（失败返回 ok:false，前端回退规则编排） */
+  @Post('ai-arrange')
+  aiArrange(
+    @Body()
+    body: {
+      shots: Array<{
+        id: string;
+        index: number;
+        durationSec?: number;
+        descriptionZh?: string;
+        subtitleText?: string | null;
+        status?: string;
+      }>;
+      targetDurationSec?: number;
+    },
+  ) {
+    return this.montage.aiArrange(body);
+  }
+
+  /** 音频节拍分析（能量 onset，真听感）：返回节拍点（秒）+ BPM */
+  @Post('beat-analyze')
+  beatAnalyze(@Body() body: { audioUrl: string }) {
+    return this.montage.beatAnalyze(body);
   }
 
   @Post('depth-pass')
@@ -163,7 +194,7 @@ export class MontageController {
     @Res() res: Response,
   ) {
     if (!workspaceId) {
-      res.type('text/html').send('<!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8"/><title>HF Preview</title></head><body><p style="padding:40px;color:red;">缺少 workspaceId 参数</p></body></html>');
+      res.type('text/html').send('<!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8"/><title>HF Preview</title></head><body><p style="padding:40px;color:red;">缺少 workspaceId 参数，禁止空成功</p></body></html>');
       return;
     }
     const payload = await this.workspace.load(workspaceId);
@@ -221,9 +252,24 @@ export class MontageController {
   /** P3: 视频级智能替换（Fal 队列，长任务） */
   @Post('video-edit')
   submitVideoEdit(
-    @Body() body: { videoUrl: string; maskUrl?: string; prompt: string; providerId?: string },
+    @Body()
+    body: {
+      videoUrl: string;
+      maskUrl?: string;
+      maskVideoUrl?: string;
+      prompt: string;
+      providerId?: string;
+    },
   ) {
     return this.videoEdit.submit(body);
+  }
+
+  /** P3: 首帧蒙版自动跨帧追踪（SAM2 视频分割 → 逐帧 mask 视频） */
+  @Post('video-trace')
+  submitVideoTrace(
+    @Body() body: { videoUrl: string; maskUrl: string; providerId?: string },
+  ) {
+    return this.videoEdit.submitTrace(body);
   }
 
   @Get('video-edit-tasks/:taskId')

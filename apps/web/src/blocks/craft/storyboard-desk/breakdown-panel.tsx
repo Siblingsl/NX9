@@ -1,5 +1,12 @@
 import React from 'react';
 import { EpisodeQueueBar } from '../../../components/EpisodeQueueBar';
+import { useCredentialVault } from '../../../stores/credential-vault';
+import { isProviderConnectionError } from '../../../engine/provider-error';
+import {
+  breakdownBusyLabel,
+  breakdownNewOnlyLabel,
+  breakdownPrimaryLabel,
+} from '../../../engine/breakdown-labels';
 
 interface BreakdownPanelProps {
   upstreamPackage: any;
@@ -39,6 +46,7 @@ interface BreakdownPanelProps {
   upstreamNeedsConfirm: boolean;
   upstreamTitleShort: string;
   openUpstreamScriptDeskForConfirm: () => void;
+  lastBreakdownError?: string | null;
 }
 
 const BreakdownPanel: React.FC<BreakdownPanelProps> = ({
@@ -79,6 +87,7 @@ const BreakdownPanel: React.FC<BreakdownPanelProps> = ({
   upstreamNeedsConfirm,
   upstreamTitleShort,
   openUpstreamScriptDeskForConfirm,
+  lastBreakdownError,
 }) => {
   return (
     <div className="sg3-pane sg3-pane--center">
@@ -90,6 +99,35 @@ const BreakdownPanel: React.FC<BreakdownPanelProps> = ({
             ? `上游成稿：${upstreamPackage.brief.title || '未命名'} · ${upstreamPackage.status}${packageStale ? ' · 成稿已更新' : ''}`
             : '未连接编剧台 confirmed package'}
         </p>
+        {lastBreakdownError?.trim() ? (
+          <div
+            className="sg3-breakdown-fail"
+            data-testid="breakdown-last-error"
+            style={{
+              marginTop: 8,
+              padding: '10px 12px',
+              borderRadius: 10,
+              background: 'rgba(196,92,92,0.12)',
+              border: '1px solid rgba(196,92,92,0.35)',
+              textAlign: 'left',
+            }}
+          >
+            <p style={{ margin: 0, fontSize: 12, color: 'var(--nx9-danger, #c45c5c)' }}>
+              上次拆镜失败：{lastBreakdownError.trim()}
+            </p>
+            {isProviderConnectionError(lastBreakdownError) ? (
+              <button
+                type="button"
+                className="sg3-btn sg3-btn--ghost"
+                data-testid="breakdown-open-settings-connection"
+                style={{ marginTop: 8 }}
+                onClick={() => useCredentialVault.getState().openSettingsTo('connection')}
+              >
+                去设置修复连接
+              </button>
+            ) : null}
+          </div>
+        ) : null}
         {!canBreakdownFromPackage && breakdownBlockedReason ? (
           <p className="sg3-muted" style={{ color: 'var(--nx9-danger, #c45c5c)' }}>
             {upstreamNeedsConfirm
@@ -121,14 +159,14 @@ const BreakdownPanel: React.FC<BreakdownPanelProps> = ({
               )}
             >
               {breakingDown
-                ? '同步中…'
+                ? breakdownBusyLabel()
                 : breakdownBlocked
                   ? '设定未就绪（硬模式）'
-                  : packageStale && missingUpstreamEpisodeCount > 0
-                    ? `只拆新增 ${missingUpstreamEpisodeCount} 集`
-                    : packageStale
-                      ? '同步最新成稿'
-                      : '从成稿拆镜'}
+                  : breakdownPrimaryLabel({
+                      stale: packageStale,
+                      newEpisodeCount: missingUpstreamEpisodeCount,
+                      hasLocalShots: Boolean(payload),
+                    })}
             </button>
           )}
           {upstreamPackage && !upstreamNeedsConfirm && upstreamPackage.screenplay.episodes.length > 1 && (
@@ -141,7 +179,7 @@ const BreakdownPanel: React.FC<BreakdownPanelProps> = ({
                   title={breakdownBlockedReason || (deskBusy ? '任务进行中' : undefined)}
                   onClick={() => void breakdownNewEpisodesOnly()}
                 >
-                  {breakingDown ? '同步中…' : `只拆新增 ${missingUpstreamEpisodeCount} 集`}
+                  {breakdownNewOnlyLabel(missingUpstreamEpisodeCount, breakingDown)}
                 </button>
               ) : null}
               <button

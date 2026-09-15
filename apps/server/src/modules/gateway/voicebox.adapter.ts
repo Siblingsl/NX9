@@ -52,6 +52,7 @@ export class VoiceboxAdapter {
 
     if (oaiRes.ok) {
       const buf = Buffer.from(await oaiRes.arrayBuffer());
+      if (!buf.length) throw new Error('Voicebox 返回空音频，禁止空成功');
       return { ok: true, buffer: buf, contentType: oaiRes.headers.get('content-type') ?? 'audio/mpeg' };
     }
 
@@ -68,6 +69,7 @@ export class VoiceboxAdapter {
 
     if (speakRes.ok) {
       const buf = Buffer.from(await speakRes.arrayBuffer());
+      if (!buf.length) throw new Error('Voicebox 返回空音频，禁止空成功');
       return { ok: true, buffer: buf, contentType: speakRes.headers.get('content-type') ?? 'audio/wav' };
     }
 
@@ -85,6 +87,7 @@ export class VoiceboxAdapter {
     }
 
     const buf = Buffer.from(await genRes.arrayBuffer());
+    if (!buf.length) throw new Error('Voicebox 返回空音频，禁止空成功');
     return { ok: true, buffer: buf, contentType: genRes.headers.get('content-type') ?? 'audio/wav' };
   }
 }

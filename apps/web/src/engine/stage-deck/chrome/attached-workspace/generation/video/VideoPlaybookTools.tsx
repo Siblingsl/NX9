@@ -3,6 +3,7 @@ import { ChevronDown, ImagePlus, Loader2, Plus, Trash2, Video, X } from 'lucide-
 import type { ReferenceSlot, ReferenceSlotRole } from '@nx9/shared';
 import { ComposerPopover } from '../../composer/ComposerPopover';
 import { api } from '../../../../../../api/client';
+import { toastError } from '../../../../../../stores/toast';
 
 function stop(e: React.SyntheticEvent) {
   e.stopPropagation();
@@ -376,7 +377,7 @@ export function VideoPlaybookTools({
     try {
       const res = await api.convertDepthVideo({ sourceUrl });
       if (!res.depthVideoUrl) {
-        throw new Error(res.message || '深度转换未返回视频');
+        throw new Error(res.message || '深度转换未返回视频，禁止空成功');
       }
       patchSlot(slotId, {
         assetUrl: res.depthVideoUrl,
@@ -404,6 +405,12 @@ export function VideoPlaybookTools({
     onBusy?.('上传中…');
     try {
       const res = await api.uploadAsset(file);
+      if (!res.url?.trim()) {
+        const msg = '参考素材上传失败或未返回 URL，禁止空成功';
+        toastError(msg);
+        patchSlot(slotId, { convertStatus: 'error', convertError: msg });
+        return;
+      }
       if (mode === 'source') {
         setBusyId(null);
         await convertFromUrl(slotId, res.url);
@@ -419,9 +426,11 @@ export function VideoPlaybookTools({
         patchSlot(slotId, { assetUrl: res.url, convertStatus: 'ready' });
       }
     } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      toastError(msg);
       patchSlot(slotId, {
         convertStatus: 'error',
-        convertError: e instanceof Error ? e.message : String(e),
+        convertError: msg,
       });
     } finally {
       if (mode !== 'source') {

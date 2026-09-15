@@ -16,6 +16,7 @@ import {
   REMOTION_TASKS_FILE,
   loadTaskRecords,
   mapToRecords,
+  markInterruptedOnRestart,
   recordsToMap,
   saveTaskRecords,
 } from './render-task-store';
@@ -47,6 +48,15 @@ export class RemotionRenderer {
 
   constructor() {
     this.jobs = recordsToMap(loadTaskRecords<RemotionRenderJob>(this.persistFile));
+    // SE-DEEP-07 对齐 video-edit：重启前 queued/rendering 已无进程，标记中断而非悬挂
+    const stale = markInterruptedOnRestart(this.jobs, ['queued', 'rendering'], (j) => {
+      j.status = 'error';
+      j.error = '服务重启，渲染任务已中断；请重新渲染';
+    });
+    if (stale > 0) {
+      this.persist();
+      this.logger.warn(`Remotion: ${stale} 个重启前任务标记为中断`);
+    }
     if (!fs.existsSync(this.outputDir)) {
       fs.mkdirSync(this.outputDir, { recursive: true });
     }
@@ -118,7 +128,7 @@ export class RemotionRenderer {
     try {
       // 验证时间线
       if (!timeline || typeof timeline !== 'object') {
-        throw new Error('无效的时间线数据');
+        throw new Error('无效的时间线数据，禁止空成功');
       }
 
       // 动态导入 @remotion/renderer（可选的 peer dep）
@@ -176,13 +186,13 @@ export class RemotionRenderer {
 
       // 验证产物
       if (!fs.existsSync(outputPath)) {
-        throw new Error('渲染完成但输出文件不存在');
+        throw new Error('渲染完成但输出文件不存在，禁止空成功');
       }
 
       const stats = fs.statSync(outputPath);
       if (stats.size === 0) {
         fs.unlinkSync(outputPath);
-        throw new Error('渲染产物为空文件');
+        throw new Error('渲染产物为空文件，禁止空成功');
       }
 
       if (!this.commitJob(taskId, {

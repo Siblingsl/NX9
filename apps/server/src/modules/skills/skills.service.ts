@@ -66,26 +66,26 @@ function validateSkill(skillId: string): SkillValidationResult {
   const dir = join(PATHS.skills, skillId);
 
   if (!existsSync(dir)) {
-    errors.push({ file: skillId, message: 'Skill directory not found' });
+    errors.push({ file: skillId, message: 'Skill directory not found，禁止空成功' });
     return { valid: false, errors };
   }
 
   const meta = tryReadMetadata(skillId);
   if (!meta) {
-    errors.push({ file: 'metadata.json', message: 'metadata.json 缺失' });
+    errors.push({ file: 'metadata.json', message: 'metadata.json 缺失，禁止空成功' });
   } else {
     if (!meta.name || meta.name !== skillId) {
-      errors.push({ file: 'metadata.json', message: 'name 必须与目录名一致' });
+      errors.push({ file: 'metadata.json', message: 'name 必须与目录名一致，禁止空成功' });
     }
-    if (!meta.title) errors.push({ file: 'metadata.json', message: 'title 缺失' });
-    if (!meta.description || meta.description.length < 5) {
-      errors.push({ file: 'metadata.json', message: 'description 缺失或过短（需 ≥20 字）' });
+    if (!meta.title) errors.push({ file: 'metadata.json', message: 'title 缺失，禁止空成功' });
+    if (!meta.description || meta.description.length < 20) {
+      errors.push({ file: 'metadata.json', message: 'description 缺失或过短（需 ≥20 字），禁止空成功' });
     }
-    if (!meta.version) errors.push({ file: 'metadata.json', message: 'version 缺失' });
+    if (!meta.version) errors.push({ file: 'metadata.json', message: 'version 缺失，禁止空成功' });
     if (!meta.entry) {
-      errors.push({ file: 'metadata.json', message: 'entry 缺失' });
+      errors.push({ file: 'metadata.json', message: 'entry 缺失，禁止空成功' });
     } else if (!existsSync(join(dir, meta.entry))) {
-      errors.push({ file: 'metadata.json', message: `entry 文件 ${meta.entry} 不存在` });
+      errors.push({ file: 'metadata.json', message: `entry 文件 ${meta.entry} 不存在，禁止空成功` });
     }
     if (meta.status && !['draft', 'stable', 'deprecated'].includes(meta.status)) {
       errors.push({ file: 'metadata.json', message: 'status 必须为 draft|stable|deprecated' });
@@ -103,8 +103,8 @@ function validateSkill(skillId: string): SkillValidationResult {
   if (existsSync(entryPath)) {
     const raw = readFileSync(entryPath, 'utf-8');
     const fm = readYamlFrontmatter(raw);
-    if (!fm.name) errors.push({ file: meta?.entry ?? 'SKILL.md', message: 'frontmatter 缺少 name' });
-    if (!fm.description) errors.push({ file: meta?.entry ?? 'SKILL.md', message: 'frontmatter 缺少 description' });
+    if (!fm.name) errors.push({ file: meta?.entry ?? 'SKILL.md', message: 'frontmatter 缺少 name，禁止空成功' });
+    if (!fm.description) errors.push({ file: meta?.entry ?? 'SKILL.md', message: 'frontmatter 缺少 description，禁止空成功' });
 
     if (meta) {
       if (fm.name && meta.title && fm.name !== meta.title) {
@@ -117,32 +117,32 @@ function validateSkill(skillId: string): SkillValidationResult {
 
     for (const section of KNOWN_SECTIONS) {
       if (!raw.includes(section)) {
-        errors.push({ file: meta?.entry ?? 'SKILL.md', message: `缺少强制章节：${section}` });
+        errors.push({ file: meta?.entry ?? 'SKILL.md', message: `缺少强制章节：${section}，禁止空成功` });
       }
     }
   } else {
-    errors.push({ file: meta?.entry ?? 'SKILL.md', message: 'SKILL.md 不存在' });
+    errors.push({ file: meta?.entry ?? 'SKILL.md', message: 'SKILL.md 不存在，禁止空成功' });
   }
 
   if (!existsSync(join(dir, 'examples'))) {
-    errors.push({ file: 'examples/', message: 'examples/ 目录缺失' });
+    errors.push({ file: 'examples/', message: 'examples/ 目录缺失，禁止空成功' });
   } else {
     if (!existsSync(join(dir, 'examples', 'input.md'))) {
-      errors.push({ file: 'examples/input.md', message: 'examples/input.md 缺失' });
+      errors.push({ file: 'examples/input.md', message: 'examples/input.md 缺失，禁止空成功' });
     }
     if (!existsSync(join(dir, 'examples', 'output.md'))) {
-      errors.push({ file: 'examples/output.md', message: 'examples/output.md 缺失' });
+      errors.push({ file: 'examples/output.md', message: 'examples/output.md 缺失，禁止空成功' });
     }
   }
 
   for (const reqDir of ['references', 'templates', 'tests'] as const) {
     const p = join(dir, reqDir);
     if (!existsSync(p) || !statSync(p).isDirectory()) {
-      errors.push({ file: `${reqDir}/`, message: `${reqDir}/ 目录缺失（模板强制）` });
+      errors.push({ file: `${reqDir}/`, message: `${reqDir}/ 目录缺失（模板强制），禁止空成功` });
     } else {
       const files = readdirSync(p).filter((f) => !f.startsWith('.'));
       if (files.length === 0) {
-        errors.push({ file: `${reqDir}/`, message: `${reqDir}/ 为空（至少 1 个文件）` });
+        errors.push({ file: `${reqDir}/`, message: `${reqDir}/ 为空（至少 1 个文件），禁止空成功` });
       }
     }
   }
@@ -294,9 +294,12 @@ export class SkillsService implements OnModuleInit {
     const id = input.id.trim();
     const dir = this.skillDir(id);
     if (existsSync(dir)) throw new BadRequestException('Skill 已存在');
-    mkdirSync(dir, { recursive: true });
     const title = (input.name ?? id).trim();
     const description = (input.description ?? '').trim();
+    if (!description || description.length < 20) {
+      throw new BadRequestException('Skill description 缺失或过短（需 ≥20 字），禁止空成功');
+    }
+    mkdirSync(dir, { recursive: true });
     const content = `---
 name: ${title}
 description: ${description}
@@ -473,7 +476,7 @@ ${description}
     const raw = readFileSync(entryPath, 'utf-8');
     const body = skillBodyForInjection(raw);
     if (!body) {
-      throw new NotFoundException(`Skill ${skillName} 正文为空`);
+      throw new NotFoundException(`Skill ${skillName} 正文为空，禁止空成功`);
     }
     return body;
   }

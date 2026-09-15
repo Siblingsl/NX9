@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { buildCameraPrompt } from '../schema/cameraGeometry';
+import { skinCameraPrompt } from '../schema/promptSkin';
 import { useDirectorStore } from '../store/directorStore';
 
 /** 与 @nx9/shared CAMERA_PRESETS 对齐的内置机位（director3d 不依赖 shared）。 */
@@ -48,7 +49,20 @@ export function CameraPresetBar() {
   const savePreset = () => {
     if (!active) return;
     const last = active.captures[active.captures.length - 1];
-    const cameraPrompt = last?.cameraPrompt ?? buildCameraPrompt(active);
+    const { cameraMove, promptPlatform, promptDetails, project } = useDirectorStore.getState();
+    const subject = project.objects.find((o) => o.kind === 'character' && o.visible);
+    const cameraPrompt =
+      last?.cameraPrompt ??
+      skinCameraPrompt(
+        buildCameraPrompt(active, {
+          roll: active.transform.rotation[2],
+          subjectYawDeg: subject?.transform.rotation[1] ?? 0,
+          move: cameraMove,
+          details: promptDetails,
+        }),
+        promptPlatform,
+        cameraMove,
+      );
     setShotPresets((prev) => [
       ...prev,
       {

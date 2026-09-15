@@ -20,7 +20,13 @@ import { TransformRail } from './TransformRail';
 import { AspectGuide } from './AspectGuide';
 import { InspectorCard } from '../panels/InspectorCard';
 import { Filmstrip } from './Filmstrip';
+import { CameraRigPanel } from './CameraRigPanel';
+import { DollyTimeline } from './DollyTimeline';
+import { ShotPreviewTimeline } from './ShotPreviewTimeline';
+import { StageMobileDock } from './StageMobileDock';
 import '../styles/stage-deck.css';
+import { buildCameraPrompt } from '../schema/cameraGeometry';
+import { skinCameraPrompt } from '../schema/promptSkin';
 import { isWebGLAvailable } from '../util/webgl';
 
 function debounce<T extends (...args: never[]) => void>(fn: T, ms: number) {
@@ -54,6 +60,9 @@ export function StageDeckShell({ options }: { options: Director3dHostOptions }) 
     shotState.selectedCandidateId ?? null,
   );
   const [glEpoch, setGlEpoch] = useState(0);
+  const [renderPaused, setRenderPaused] = useState(false);
+  const mobileSheet = useDirectorStore((s) => s.mobileSheet);
+  const setMobileSheet = useDirectorStore((s) => s.setMobileSheet);
 
   const activeState = shotState.shotId === (shotId ?? standaloneShotId)
     ? shotState
@@ -113,17 +122,17 @@ export function StageDeckShell({ options }: { options: Director3dHostOptions }) 
   useEffect(() => {
     const gl = glRef.current;
     if (!gl) return;
-    const canvas = gl.domElement;
     const normalDpr = Math.min(window.devicePixelRatio, 1.5);
 
     const onVisibility = () => {
       if (document.hidden) {
+        // Persist scissor/GL: never dispose and never display:none (keeps context + View tracks).
         savedDprRef.current = gl.getPixelRatio();
         gl.setPixelRatio(0.1);
-        canvas.style.display = 'none';
+        setRenderPaused(true);
       } else {
         gl.setPixelRatio(savedDprRef.current || normalDpr);
-        canvas.style.display = '';
+        setRenderPaused(false);
       }
     };
     document.addEventListener('visibilitychange', onVisibility);
@@ -166,6 +175,20 @@ export function StageDeckShell({ options }: { options: Director3dHostOptions }) 
         const project = useDirectorStore.getState().project;
         const camera = project.cameras[0];
         if (!camera) throw new Error('当前镜头没有相机');
+        const cameraMove = useDirectorStore.getState().cameraMove;
+        const promptPlatform = useDirectorStore.getState().promptPlatform;
+        const promptDetails = useDirectorStore.getState().promptDetails;
+        const subject = project.objects.find((o) => o.kind === 'character' && o.visible);
+        const prompt = skinCameraPrompt(
+          buildCameraPrompt(camera, {
+            roll: camera.transform.rotation[2],
+            subjectYawDeg: subject?.transform.rotation[1] ?? 0,
+            move: cameraMove,
+            details: promptDetails,
+          }),
+          promptPlatform,
+          cameraMove,
+        );
         const captureId = `candidate-${Date.now().toString(36)}`;
         const candidate: Director3dCandidate = {
           id: captureId,
@@ -179,6 +202,7 @@ export function StageDeckShell({ options }: { options: Director3dHostOptions }) 
             rotation: structuredClone(camera.transform.rotation),
             fov: camera.fov,
             aspectRatio: project.viewportAspectRatio,
+            move: cameraMove,
           },
           characterPlacements: project.objects
             .filter((object) => object.kind === 'character' && object.visible)
@@ -191,8 +215,9 @@ export function StageDeckShell({ options }: { options: Director3dHostOptions }) 
               scale: structuredClone(object.transform.scale),
               bodyType: object.bodyType,
               posePresetId: object.posePresetId,
+              poseJoints: object.poseJoints ? structuredClone(object.poseJoints) : undefined,
             })),
-          prompt: `Camera shot, FOV ${camera.fov}, target (${camera.target.map((n) => n.toFixed(1)).join(', ')})`,
+          prompt,
           status: 'ready',
           createdAt: new Date().toISOString(),
         };
@@ -426,20 +451,21 @@ export function StageDeckShell({ options }: { options: Director3dHostOptions }) 
   );
 
   return (
-    <div className="nx9-stage">
-      <div className="nx9-stage-context">
-        <strong>{options.shotContext?.upstreamConnected ? '导演台' : '独立场景模式'}</strong>
+    <div className="nx9-stage nx9-stage-v2">
+      <div className="nx9-stage-context nx9-stage-context-compact">
+        <strong>{options.shotContext?.upstreamConnected ? '3D 舞台' : '独立场景'}</strong>
         <span>{options.shotContext?.episodeLabel ?? '未连接分镜台'}</span>
-        <span>{options.shotContext?.shotId ? `镜头 ${options.shotContext.shotId}` : '可保存模板，不进入彩色关键帧链'}</span>
-        <span>{options.shotContext?.lineArtUrl ? '线稿已载入' : '线稿未载入'}</span>
-        <span>{activeState.committedCandidateId ? '3D 构图已提交' : '3D 构图未提交'}</span>
+        <span>{options.shotContext?.shotId ? `镜头 ${options.shotContext.shotId}` : '可保存模板'}</span>
+        <span className={`nx9-stage-chip${activeState.committedCandidateId ? ' is-on' : ''}`}>
+          {activeState.committedCandidateId ? '已提交' : '未提交'}
+        </span>
         <div style={{ flex: 1 }} />
         {(['composition', 'camera', 'compare', 'diagnostic'] as const).map((mode) => (
-          <button key={mode} type="button" className={`nx9-stage-pill${viewMode === mode ? ' is-on' : ''}`} onClick={() => setViewMode(mode)}>
+          <button key={mode} type="button" className={`nx9-stage-pill nx9-stage-desk-only${viewMode === mode ? ' is-on' : ''}`} onClick={() => setViewMode(mode)}>
             {mode === 'composition' ? '构图' : mode === 'camera' ? '镜头' : mode === 'compare' ? '对比' : '诊断'}
           </button>
         ))}
-        <button type="button" className="nx9-stage-cta" disabled={working || capturing || !canCommitSelected} onClick={() => void commitCandidate()}>提交到导演台</button>
+        <button type="button" className="nx9-stage-cta nx9-stage-desk-only" disabled={working || capturing || !canCommitSelected} onClick={() => void commitCandidate()}>提交</button>
       </div>
       <StageHeader
         linkedShotId={options.shotContext?.shotId}
@@ -474,8 +500,11 @@ export function StageDeckShell({ options }: { options: Director3dHostOptions }) 
         </div>
       )}
       <div className="nx9-stage-body">
-        <aside className="nx9-stage-shot-list">
-          <div className="nx9-stage-drawer-head">镜头</div>
+        <aside className={`nx9-stage-shot-list${mobileSheet === 'shots' ? ' is-mobile-open' : ''}`}>
+          <div className="nx9-stage-drawer-head">
+            镜头
+            <button type="button" className="nx9-stage-mini-btn nx9-stage-mobile-only" onClick={() => setMobileSheet(null)}>关闭</button>
+          </div>
           <div className="nx9-stage-drawer-body">
             {(options.shotContext?.shots ?? []).length === 0 && <p className="nx9-stage-hint">当前为独立场景模式，可保存模板。</p>}
             {(options.shotContext?.shots ?? []).map((shot) => (
@@ -485,6 +514,8 @@ export function StageDeckShell({ options }: { options: Director3dHostOptions }) 
               </button>
             ))}
           </div>
+          <DollyTimeline />
+          <ShotPreviewTimeline />
         </aside>
         <StageRail
           onUploadFile={options.onUploadFile}
@@ -501,6 +532,7 @@ export function StageDeckShell({ options }: { options: Director3dHostOptions }) 
               lineArtUrl={options.shotContext?.lineArtUrl}
               compareMode={viewMode === 'compare'}
               diagnosticMode={viewMode === 'diagnostic'}
+              renderPaused={renderPaused}
               onGLCreated={(gl) => {
                 glRef.current = gl;
                 setGlEpoch((n) => n + 1);
@@ -516,6 +548,13 @@ export function StageDeckShell({ options }: { options: Director3dHostOptions }) 
             <TransformRail />
             <AspectGuide />
           </div>
+          <div className={`nx9-stage-film-wrap${mobileSheet === 'film' ? ' is-mobile-open' : ''}`}>
+            {mobileSheet === 'film' && (
+              <div className="nx9-stage-drawer-head nx9-stage-mobile-only">
+                候选帧
+                <button type="button" className="nx9-stage-mini-btn" onClick={() => setMobileSheet(null)}>关闭</button>
+              </div>
+            )}
             <Filmstrip
               candidates={activeState.candidates}
               viewedId={viewedCandidateId}
@@ -527,8 +566,25 @@ export function StageDeckShell({ options }: { options: Director3dHostOptions }) 
               onRename={renameCandidate}
             />
           </div>
-        <InspectorCard />
+        </div>
+        <div className={`nx9-stage-right-rail${mobileSheet === 'rig' ? ' is-mobile-open' : ''}`}>
+          {mobileSheet === 'rig' && (
+            <div className="nx9-stage-drawer-head nx9-stage-mobile-only">
+              机位台
+              <button type="button" className="nx9-stage-mini-btn" onClick={() => setMobileSheet(null)}>关闭</button>
+            </div>
+          )}
+          <CameraRigPanel />
+          <InspectorCard />
+        </div>
       </div>
+      <StageMobileDock
+        onCapture={handleCapture}
+        capturing={capturing}
+        canCommit={canCommitSelected}
+        committing={working}
+        onCommit={() => void commitCandidate()}
+      />
       {(captureError || commitError) && <div className="nx9-stage-error">{captureError ?? commitError}</div>}
     </div>
   );

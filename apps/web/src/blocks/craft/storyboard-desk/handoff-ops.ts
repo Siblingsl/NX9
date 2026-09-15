@@ -23,7 +23,7 @@ import {
 } from '../../../engine/storyboard-desk-runner';
 import { resolveDownstreamDirectorDeskId } from '../../../engine/chain-storyboard-utils';
 import { askConfirm } from '../../../stores/confirm-dialog';
-import { useToast } from '../../../stores/toast';
+import { toastError, useToast } from '../../../stores/toast';
 import { useFlowCommands } from '../../../stores/flow-commands';
 import {
   createShotEditDraft,
@@ -248,7 +248,7 @@ export function useStoryboardHandoffOps(deps: StoryboardHandoffDeps) {
       if (confirmHardThreshold) {
         const missingList = missingShots.map((s) => s.sceneCode || `#${s.index}`).join(', ');
         useToast.getState().push({
-          message: `硬阈值：构图覆盖 ${Math.round(stats.coverage * 100)}% 未达标（≥60%）· 缺图: ${missingList}`,
+          message: `硬阈值：构图覆盖 ${Math.round(stats.coverage * 100)}% 未达标（≥60%）· 缺图: ${missingList}，禁止空成功`,
           variant: 'error',
         });
         return;
@@ -462,7 +462,9 @@ export function useStoryboardHandoffOps(deps: StoryboardHandoffDeps) {
     const edges = getEdges();
     const scriptDeskId = findUpstreamScriptDeskId(props.id, nodes, edges);
     if (!scriptDeskId) {
-      appendLog('分镜台：未找到连线上游编剧台');
+      const msg = '分镜台：未找到连线上游编剧台，禁止空成功';
+      appendLog(msg);
+      toastError(msg);
       return;
     }
     const title = upstreamPackage?.brief?.title?.trim() || '上游成稿';

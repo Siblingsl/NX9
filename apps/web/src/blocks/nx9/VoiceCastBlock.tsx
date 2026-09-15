@@ -61,7 +61,12 @@ function VoiceCastBlock(props: NodeProps) {
   const speakers = useMemo(() => [...new Set(lines.map((l) => l.speaker).filter(Boolean))], [lines]);
 
   const run = useCallback(async () => {
-    if (lines.length === 0) { appendLog('配音：无可解析的对白'); return; }
+    if (lines.length === 0) {
+      const msg = '配音：无可解析的对白，禁止空成功';
+      updateNodeData(props.id, { status: 'error', error: msg });
+      appendLog(msg);
+      return;
+    }
     setRunning(true);
     updateNodeData(props.id, { status: 'running' });
     try {
@@ -76,7 +81,44 @@ function VoiceCastBlock(props: NodeProps) {
         profileMap,
         meta: { total: nextResults.length, failed: nextResults.filter((r) => r.error).length, lineSource },
       });
-      appendLog(`配音完成 · ${audioUrls.length}/${nextResults.length} 段成功 · 对白来自${LINE_SOURCE_LABEL[lineSource]}`);
+      // SF-03: 写回 voice.lines，供剪辑台 buildVoiceDramaTimeline 挂轨
+      const store = useWorkspaceDocument.getState();
+      const existing = store.voice.lines;
+      const toAdd: import('@nx9/shared').VoiceLine[] = [];
+      for (let i = 0; i < nextResults.length; i++) {
+        const r = nextResults[i]!;
+        if (!r.audioUrl) continue;
+        const shotId = r.shotId ?? lines[i]?.shotId ?? null;
+        const hit = existing.find(
+          (l) =>
+            l.text === r.text &&
+            l.speaker === r.speaker &&
+            (shotId ? l.shotId === shotId : true),
+        );
+        if (hit) {
+          store.updateVoiceLine(hit.id, {
+            audioAssetId: r.audioUrl,
+            status: 'ready',
+            shotId: shotId ?? hit.shotId,
+            durationSec: r.durationSec ?? hit.durationSec,
+          });
+        } else {
+          toAdd.push({
+            id: `vl-${Date.now().toString(36)}-${i}-${Math.random().toString(36).slice(2, 6)}`,
+            shotId,
+            speaker: r.speaker,
+            text: r.text,
+            audioAssetId: r.audioUrl,
+            durationSec: r.durationSec ?? null,
+            status: 'ready',
+          });
+        }
+      }
+      if (toAdd.length > 0) store.addVoiceLines(toAdd);
+      appendLog(
+        `配音完成 · ${audioUrls.length}/${nextResults.length} 段成功 · 对白来自${LINE_SOURCE_LABEL[lineSource]}` +
+          (toAdd.length || existing.length ? ' · 已同步对白轨' : ''),
+      );
     } finally {
       setRunning(false);
     }

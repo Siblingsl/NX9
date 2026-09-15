@@ -82,6 +82,8 @@ export interface ImportedWorkflow {
   aliases: Record<string, string>;
   takes: TakeRecord[];
   viewMode?: WorkspacePayloadV3['viewMode'];
+  /** 内嵌资源上传失败条目（部分失败时保留画布结构并明示） */
+  assetWarnings?: string[];
 }
 
 /** P4-04: 选区/全画布 JSON + assets 打包 ZIP */
@@ -136,18 +138,25 @@ export async function exportWorkflowZip(input: WorkflowZipExportInput): Promise<
 export async function importWorkflowZip(file: File): Promise<ImportedWorkflow> {
   const zip = await JSZip.loadAsync(file);
   const jsonStr = await zip.file('workspace.json')?.async('string');
-  if (!jsonStr) throw new Error('ZIP 缺少 workspace.json');
+  if (!jsonStr) throw new Error('ZIP 缺少 workspace.json，禁止空成功');
 
   let payload = JSON.parse(jsonStr) as WorkspacePayload;
 
   const mapStr = await zip.file('asset-map.json')?.async('string');
+  const assetWarnings: string[] = [];
   if (mapStr) {
     const zipPathMap = JSON.parse(mapStr) as Record<string, string>;
     const resolved = new Map<string, string>();
+    let attempted = 0;
+    let ok = 0;
 
     for (const [origUrl, zipPath] of Object.entries(zipPathMap)) {
+      attempted += 1;
       const entry = zip.file(zipPath);
-      if (!entry) continue;
+      if (!entry) {
+        assetWarnings.push(`资源缺失：${zipPath}`);
+        continue;
+      }
       const blob = await entry.async('blob');
       const name = zipPath.split('/').pop() ?? 'asset.bin';
       const uploadFile = new File([blob], name, {
@@ -155,10 +164,18 @@ export async function importWorkflowZip(file: File): Promise<ImportedWorkflow> {
       });
       try {
         const uploaded = await api.uploadAsset(uploadFile);
+        if (!uploaded.url?.trim()) throw new Error('上传未返回 URL');
         resolved.set(origUrl, uploaded.url);
-      } catch {
-        /* keep original url if upload fails */
+        ok += 1;
+      } catch (e) {
+        assetWarnings.push(
+          `资源上传失败：${name}（${e instanceof Error ? e.message : String(e)}）`,
+        );
       }
+    }
+
+    if (attempted > 0 && ok === 0) {
+      throw new Error(`ZIP 内嵌资源全部上传失败（${attempted}），禁止空成功`);
     }
 
     if (resolved.size > 0) {
@@ -177,6 +194,7 @@ export async function importWorkflowZip(file: File): Promise<ImportedWorkflow> {
     aliases: v3.aliases ?? {},
     takes: v3.takes ?? [],
     viewMode: v3.viewMode,
+    ...(assetWarnings.length > 0 ? { assetWarnings } : {}),
   };
 }
 

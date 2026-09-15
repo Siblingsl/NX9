@@ -163,12 +163,12 @@ export class TopazService {
     executablePath?: string;
   }) {
     const local = resolveMediaUrl(body.sourceUrl);
-    if (!local || !existsSync(local)) throw new Error('无法读取输入图像');
+    if (!local || !existsSync(local)) throw new Error('无法读取输入图像，禁止空成功');
 
     const status = this.detectStatus({ gigapixelPath: body.executablePath });
     const exe = body.executablePath || status.gigapixel.executablePath;
     if (!exe) {
-      throw new Error(`未检测到 Gigapixel AI，请安装后填写路径：${DEFAULT_GIGAPIXEL_EXE}`);
+      throw new Error(`未检测到 Gigapixel AI，请安装后填写路径：${DEFAULT_GIGAPIXEL_EXE}，禁止空成功`);
     }
 
     const outDir = join(PATHS.images, `topaz-gigapixel-${Date.now()}`);
@@ -179,15 +179,16 @@ export class TopazService {
 
     const result = await this.runProcess(exe, args);
     if (result.code !== 0) {
-      throw new Error(`Gigapixel 执行失败：${result.stderr.slice(-400)}`);
+      throw new Error(`Gigapixel 执行失败：${result.stderr.slice(-400)}，禁止空成功`);
     }
 
     const files = this.walkImages(outDir).sort((a, b) => b.mtimeMs - a.mtimeMs);
-    if (files.length === 0) throw new Error('Gigapixel 未产生输出文件');
+    if (files.length === 0) throw new Error('Gigapixel 未产生输出文件，禁止空成功');
 
     const name = `topaz-${Date.now()}${basename(files[0].path).slice(files[0].path.lastIndexOf('.'))}`;
     const dest = join(PATHS.images, name);
     copyFileSync(files[0].path, dest);
+    if (!existsSync(dest)) throw new Error('Topaz 放大产物未写出，禁止空成功');
 
     return {
       ok: true,
@@ -209,14 +210,14 @@ export class TopazService {
     useGpu?: boolean;
   }) {
     const local = resolveMediaUrl(body.sourceUrl);
-    if (!local || !existsSync(local)) throw new Error('无法读取输入视频');
+    if (!local || !existsSync(local)) throw new Error('无法读取输入视频，禁止空成功');
 
     const status = this.detectStatus({ topazVideoPath: body.topazVideoPath });
     const ffmpeg = body.topazVideoPath
       ? topazVideoFfmpegFrom(body.topazVideoPath)
       : status.video.ffmpegPath;
     if (!ffmpeg) {
-      throw new Error(`未检测到 Topaz Video AI 自带 ffmpeg：${DEFAULT_TOPAZ_VIDEO_DIR}`);
+      throw new Error(`未检测到 Topaz Video AI 自带 ffmpeg：${DEFAULT_TOPAZ_VIDEO_DIR}，禁止空成功`);
     }
 
     const upscaleModel = TOPAZ_UPSCALE.includes(body.upscaleModel ?? '') ? body.upscaleModel! : 'iris-3';
@@ -260,7 +261,10 @@ export class TopazService {
       result = await this.runProcess(ffmpeg, args);
     }
     if (result.code !== 0) {
-      throw new Error(`Topaz Video 执行失败：${result.stderr.slice(-500)}`);
+      throw new Error(`Topaz Video 执行失败：${result.stderr.slice(-500)}，禁止空成功`);
+    }
+    if (!existsSync(outPath)) {
+      throw new Error('Topaz Video 产物未写出，禁止空成功');
     }
 
     return {

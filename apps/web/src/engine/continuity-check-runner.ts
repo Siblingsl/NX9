@@ -36,6 +36,11 @@ function extractJsonObject(text: string): Record<string, unknown> | null {
   return null;
 }
 
+/** 供关键帧评分等路径复用：去 markdown 围栏后提取 JSON 对象。 */
+export function extractLlmJsonObject(text: string): Record<string, unknown> | null {
+  return extractJsonObject(text);
+}
+
 function normalizeContinuityIssue(item: unknown): ContinuityIssue | null {
   if (typeof item === 'string') {
     const message = item.trim();

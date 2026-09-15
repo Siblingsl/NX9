@@ -1,28 +1,27 @@
 import { useCallback, useMemo, useState } from 'react';
 import { useReactFlow } from '@xyflow/react';
-import { lookupBlock, newBacklotWorkspaceItem } from '@nx9/shared';
+import { lookupBlock, newBacklotWorkspaceItem, detectLinkParserPlatform, mapLinkParseErrorCode, formatLinkParserSupportedLabel } from '@nx9/shared';
 import { ComposerWorkspaceShell } from '../composer/ComposerWorkspaceShell';
 import { useAttachedNodeData } from '../generation/use-attached-node-data';
 import { useActivityLog } from '../../../../../stores/activity-log';
 import { useWorkspaceDocument } from '../../../../../stores/workspace-document';
 import { api } from '../../../../../api/client';
-
-const PLATFORM_ADAPTERS = [
-  { match: /douyin\.com|iesdouyin/i, label: '抖音', icon: '🎵' },
-  { match: /bilibili\.com|b23\.tv/i, label: 'B站', icon: '📺' },
-  { match: /xiaohongshu\.com|xhslink/i, label: '小红书', icon: '📕' },
-  { match: /weibo\.com/i, label: '微博', icon: '📱' },
-  { match: /youtube\.com|youtu\.be/i, label: 'YouTube', icon: '▶️' },
-  { match: /t\.co|twitter\.com|x\.com/i, label: 'X/Twitter', icon: '🐦' },
-  { match: /instagram\.com/i, label: 'Instagram', icon: '📷' },
-  { match: /tiktok\.com/i, label: 'TikTok', icon: '🎵' },
-];
+import { toastError } from '../../../../../stores/toast';
 
 function detectPlatform(url: string): { label: string; icon: string } | null {
-  for (const p of PLATFORM_ADAPTERS) {
-    if (p.match.test(url)) return { label: p.label, icon: p.icon };
-  }
-  return null;
+  const p = detectLinkParserPlatform(url);
+  if (!p) return null;
+  const icons: Record<string, string> = {
+    douyin: '🎵',
+    bilibili: '📺',
+    xiaohongshu: '📕',
+    weibo: '📱',
+    youtube: '▶️',
+    'x-twitter': '🐦',
+    instagram: '📷',
+    tiktok: '🎵',
+  };
+  return { label: p.label, icon: icons[p.id] ?? '🔗' };
 }
 
 export interface LinkParserWorkspaceProps {
@@ -52,26 +51,23 @@ export function LinkParserWorkspace({ blockId, kind, onCollapse }: LinkParserWor
 
   const [parseErrorCode, setParseErrorCode] = useState<string | null>(null);
 
-  const mapErrorCode = (code: string): string => {
-    const map: Record<string, string> = {
-      UNSUPPORTED_HOST: '暂不支持解析此平台。支持：抖音/B站/小红书/Twitter/Instagram/YouTube',
-      NETWORK: '网络请求失败，请检查网络后重试',
-      PARSE: '链接内容解析失败，链接可能已失效',
-      AUTH: '该平台需要登录才能访问，请手动上传素材',
-      TIMEOUT: '解析超时（30s），请稍后重试',
-    };
-    return map[code] ?? `解析失败：${code}`;
-  };
+  const mapErrorCode = (code: string): string => mapLinkParseErrorCode(code);
 
   const run = useCallback(async () => {
     if (!url.trim()) {
-      appendLog('链接解析：请输入 URL');
+      const msg = '链接解析：请输入 URL，禁止空成功';
+      updateNodeData(blockId, { status: 'error', error: msg });
+      appendLog(msg);
+      toastError(msg);
       return;
     }
     setParseErrorCode(null);
     updateNodeData(blockId, { status: 'running' });
     try {
       const res = await api.parseLink(url.trim(), hint || undefined);
+      if (!res.ok || !String(res.prompt ?? '').trim()) {
+        throw new Error('链接解析失败或结果为空，禁止空成功');
+      }
       updateNodeData(blockId, {
         status: 'success',
         parseResult: res,
@@ -89,6 +85,7 @@ export function LinkParserWorkspace({ blockId, kind, onCollapse }: LinkParserWor
       const userMsg = code ? mapErrorCode(code) : msg;
       updateNodeData(blockId, { status: 'error', error: userMsg, errorCode: code ?? 'PARSE' });
       appendLog(`链接解析失败: ${userMsg}`);
+      toastError(userMsg);
     }
   }, [url, hint, blockId, updateNodeData, appendLog]);
 
@@ -97,6 +94,7 @@ export function LinkParserWorkspace({ blockId, kind, onCollapse }: LinkParserWor
     updateNodeData(blockId, { status: 'running' });
     try {
       const res = await api.captureUrl(url.trim());
+      if (!res.ok || !res.url) throw new Error('素材采集失败，禁止空成功');
       updateNodeData(blockId, {
         status: 'success',
         capturedAssetUrl: res.url,
@@ -108,6 +106,7 @@ export function LinkParserWorkspace({ blockId, kind, onCollapse }: LinkParserWor
       const msg = String(e);
       updateNodeData(blockId, { status: 'error', error: msg });
       appendLog(`采集失败: ${msg}`);
+      toastError(msg);
     }
   }, [url, blockId, updateNodeData, appendLog]);
 
@@ -116,6 +115,9 @@ export function LinkParserWorkspace({ blockId, kind, onCollapse }: LinkParserWor
     updateNodeData(blockId, { status: 'running' });
     try {
       const res = await api.importPromptPackage(url.trim());
+      if (!res.ok || !res.items?.length) {
+        throw new Error('素材库导入为空，禁止空成功');
+      }
       let imported = 0;
       for (const item of res.items) {
         const wk = item.kind as import('@nx9/shared').BacklotWorkspaceKind;
@@ -131,8 +133,10 @@ export function LinkParserWorkspace({ blockId, kind, onCollapse }: LinkParserWor
       });
       appendLog(`已导入 ${imported} 个素材模板（来源: GitHub）`);
     } catch (e) {
+      const msg = `导入失败: ${String(e)}`;
       updateNodeData(blockId, { status: 'error', error: String(e) });
-      appendLog(`导入失败: ${String(e)}`);
+      appendLog(msg);
+      toastError(msg);
     }
   }, [url, blockId, updateNodeData, appendLog, upsertBacklot]);
 
@@ -157,7 +161,7 @@ export function LinkParserWorkspace({ blockId, kind, onCollapse }: LinkParserWor
             type="url"
             value={url}
             onChange={(e) => updateNodeData(blockId, { url: e.target.value })}
-            placeholder="粘贴自媒体 / 网页链接…"
+            placeholder={`粘贴链接（支持 ${formatLinkParserSupportedLabel()}）…`}
             className="flex-1 rounded-xl border border-line px-3 py-2 bg-surface text-xs"
           />
           {platform && (

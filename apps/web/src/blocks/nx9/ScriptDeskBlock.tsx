@@ -24,6 +24,7 @@ import { ScreenModal } from '../../components/ui/ScreenModal';
 import { useActivityLog } from '../../stores/activity-log';
 import { useAssetLibraryModalUi } from '../../stores/asset-library-modal-ui';
 import { useConnectedLlmModels } from '../../hooks/use-connected-llm-models';
+import { useOpenDeskSignal } from '../../engine/use-open-desk-signal';
 import {
   persistScriptDeskPackage,
   readScriptDeskPackage,
@@ -107,6 +108,9 @@ function ScriptDeskBlock(props: NodeProps) {
   const legacyBreakdown = nodeData?.legacyScriptBreakdown;
 
   const [studioOpen, setStudioOpen] = useState(false);
+  useOpenDeskSignal((props.data as Record<string, unknown> | undefined)?.openDeskAt, () =>
+    setStudioOpen(true),
+  );
   const [rightTab, setRightTab] = useState<RightTab>('screenplay');
   const [activeSkills, setActiveSkills] = useState<ScriptDeskSkillId[]>(['generate']);
   const [chatInput, setChatInput] = useState('');
@@ -190,9 +194,9 @@ function ScriptDeskBlock(props: NodeProps) {
     lastOpenStudioRequestAtRef.current = req.at;
     setStudioOpen(true);
     if (req.reason === 'confirm-for-breakdown' && pkg.status !== 'confirmed') {
-      setTip('分镜台等待本稿确认：请点顶栏「确认成稿」，再回分镜台同步最新成稿');
+      setTip('分镜台等待本稿确认：请点顶栏「确认成稿」（设定就绪时将自动送到分镜台）');
     } else if (req.reason === 'confirm-for-breakdown' && pkg.status === 'confirmed') {
-      setTip('成稿已确认：可点「送到分镜台」，或直接回分镜台点「同步最新成稿」');
+      setTip('成稿已确认：可点「送到分镜台」，或直接回分镜台点「拆镜」');
     }
     updateNodeData(props.id, { openStudioRequest: null });
   }, [nodeData?.openStudioRequest, pkg.status, props.id, updateNodeData]);
@@ -391,10 +395,12 @@ function ScriptDeskBlock(props: NodeProps) {
     setIngestPreviewOpen,
     setPendingIngestSource,
     setHandoffOpen,
+    setRightDrawerOpen,
     setEntryMode,
     setFirstGenFloatDeferred,
     setGenEpisodeCount,
     setGenFloatExpanded,
+    setStudioOpen,
   });
 
   const agent = useScriptDeskAgentOps({
@@ -998,8 +1004,8 @@ function ScriptDeskBlock(props: NodeProps) {
                     items.push('设定已就绪');
                   }
                   if (storyboardSync === 'synced') items.push('分镜已同步（本次送出后请回分镜台核对）');
-                  else if (storyboardSync === 'stale') items.push('分镜落后于成稿：送出后请在拆镜页「同步最新成稿」');
-                  else if (storyboardSync === 'unbroken') items.push('分镜台尚未拆镜：送出后请点「从成稿拆镜」');
+                  else if (storyboardSync === 'stale') items.push('分镜落后于成稿：送出后将自动「拆镜 · 同步」或请在拆镜页操作');
+                  else if (storyboardSync === 'unbroken') items.push('分镜台尚未拆镜：送出后空台将自动拆镜');
                   return items.join(' · ');
                 })()}
               </div>

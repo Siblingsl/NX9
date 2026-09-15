@@ -84,7 +84,7 @@ export async function composeStoryboardSheetPng(
     subtitle?: string;
   },
 ): Promise<Blob> {
-  if (cells.length === 0) throw new Error('没有可拼接的分镜');
+  if (cells.length === 0) throw new Error('没有可拼接的分镜，禁止空成功');
 
   const cols = opts?.cols ?? suggestStoryboardGridCols(cells.length);
   const rows = Math.ceil(cells.length / cols);
@@ -107,7 +107,7 @@ export async function composeStoryboardSheetPng(
   canvas.width = canvasW;
   canvas.height = canvasH;
   const ctx = canvas.getContext('2d');
-  if (!ctx) throw new Error('无法创建画布');
+  if (!ctx) throw new Error('无法创建画布，禁止空成功');
 
   // 纸白底
   ctx.fillStyle = '#f7f6f2';

@@ -1,6 +1,6 @@
 import { formatAssetMention, isBuiltinStylePreset } from '@nx9/shared';
 import { api } from '../../../api/client';
-import { toastSuccess } from '../../../stores/toast';
+import { toastError, toastSuccess } from '../../../stores/toast';
 import { usePublicAssetLibrary } from '../../../stores/public-asset-library';
 import { AssetDetailStickyBar } from '../AssetDetailStickyBar';
 import { AssetEditQuickJump } from '../AssetEditQuickJump';
@@ -88,11 +88,16 @@ export function AssetDetailStyleView() {
             scope === 'public' && !isBuiltinStylePreset(selectedStyle)
               ? (file) => {
                   void (async () => {
-                    const res = await api.uploadAsset(file);
-                    publicUpsertStyle({
-                      ...selectedStyle,
-                      referenceImageUrl: res.url,
-                    });
+                    try {
+                      const res = await api.uploadAsset(file);
+                      if (!res.url?.trim()) throw new Error('风格参考图上传失败或未返回 URL，禁止空成功');
+                      publicUpsertStyle({
+                        ...selectedStyle,
+                        referenceImageUrl: res.url,
+                      });
+                    } catch (e) {
+                      toastError(e instanceof Error ? e.message : '风格参考图上传失败，禁止空成功');
+                    }
                   })();
                 }
               : undefined

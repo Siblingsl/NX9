@@ -175,7 +175,7 @@ export function HomeNavPage() {
             <span className="inline-flex mt-6 text-sm font-semibold text-brand">进入画布 →</span>
           </button>
 
-          {/* F-002: 制作台为次级入口（兼容） */}
+          {/* F-002: 制作台为次级入口（场记桌视图） */}
           <button
             type="button"
             onClick={() => {
@@ -187,9 +187,9 @@ export function HomeNavPage() {
             <span className="w-14 h-14 rounded-2xl bg-accent/10 text-accent flex items-center justify-center mb-5 group-hover:scale-105 transition-transform">
               <Clapperboard size={28} />
             </span>
-            <h2 className="text-xl font-bold text-ink tracking-tight">制作台（兼容）</h2>
+            <h2 className="text-xl font-bold text-ink tracking-tight">制作台</h2>
             <p className="text-sm text-ink/55 leading-relaxed mt-2">
-              传统通告台模式：剧本 → 分镜表 → 出图批审 → 视频 → 导出。与画布同数据同源，功能对等。
+              场记桌视图：剧本 → 分镜表 → 出图批审 → 视频 → 导出。与画布同一项目数据。
             </p>
             <p className="mt-4 text-[12px] text-ink/40 leading-relaxed">
               与画布共享镜表与链数据，编辑内容在画布分镜台同样可见。

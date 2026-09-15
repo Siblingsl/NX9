@@ -98,7 +98,7 @@ describe.skipIf(!DISP_PATH)('方案 B TS 阶段：施加 Blender 位移并出 GL
     const applied: string[] = [];
 
     const walk = (o: unknown) => {
-      const obj = o as { isMesh?: boolean; name?: string; geometry?: { attributes?: { position?: { count: number; getX: (i: number) => number; getY: (i: number) => number; getZ: (i: number) => number } }; computeVertexNormals?: () => void }; children?: unknown[] };
+      const obj = o as { isMesh?: boolean; name?: string; geometry?: { attributes?: { position?: { count: number; getX: (i: number) => number; getY: (i: number) => number; getZ: (i: number) => number; setXYZ: (i: number, x: number, y: number, z: number) => void } }; computeVertexNormals?: () => void }; children?: unknown[] };
       if (obj.isMesh) {
         const name = obj.name ?? '';
         const dm = dispData.meshes[name];

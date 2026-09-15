@@ -24,6 +24,11 @@ import {
   videoRequestNeedsReferenceChannel,
 } from './video-payload.util';
 import {
+  normalizeVideoBaseUrl,
+  resolveActiveVideoConnectionModel,
+  resolveActiveVideoConnection,
+} from '@nx9/shared';
+import {
   countImageRefUrls,
   decideMagicHourImageRoute,
   isExplicitMagicHourRoute,
@@ -62,6 +67,7 @@ export class GatewayService {
   ) {}
 
   private shouldUseMagicHour(model?: string, provider?: string): boolean {
+    if (this.hasConfiguredVideoConnection()) return false;
     if (!this.magicHour.hasKey()) return false;
     const p = (provider || '').toLowerCase();
     if (p === 'magichour' || p === 'magic-hour') return true;
@@ -137,6 +143,9 @@ export class GatewayService {
           ? cfg.llmBaseUrl || cfg.primaryBaseUrl
           : cfg.primaryBaseUrl;
     let url = (override || configured || 'https://api.openai.com/v1').replace(/\/$/, '');
+    if (kind === 'video') {
+      return normalizeVideoBaseUrl(url);
+    }
     // OpenAI 兼容根路径需带 /v1；设置里常漏写（如 host:port），会导致 /images/generations → 405
     if (
       (kind === 'primary' || kind === 'llm') &&
@@ -233,19 +242,92 @@ export class GatewayService {
       };
     }
 
-    const baseUrl = this.baseUrl(body.baseUrl as string, 'video');
+    const activeConn = resolveActiveVideoConnection(cfg.connections);
+    const resolvedBaseUrl = this.baseUrl(
+      (body.baseUrl as string) || activeConn?.baseUrl || cfg.videoBaseUrl,
+      'video',
+    );
+    const resolvedApiKey = activeConn?.apiKey || this.apiKey('video');
     return {
       kind,
-      apiKey: this.apiKey('video'),
-      baseUrl,
-      label: this.isLocalBaseUrl(baseUrl) ? '本地 OpenAI 兼容视频代理' : 'OpenAI 兼容视频 API',
-      isLocalBridge: this.isLocalBaseUrl(baseUrl),
+      apiKey: resolvedApiKey,
+      baseUrl: resolvedBaseUrl,
+      label: this.isLocalBaseUrl(resolvedBaseUrl) ? '本地 OpenAI 兼容视频代理' : 'OpenAI 兼容视频 API',
+      isLocalBridge: this.isLocalBaseUrl(resolvedBaseUrl),
     };
+  }
+
+  private hasConfiguredVideoConnection(): boolean {
+    const cfg = this.settings.getRaw();
+    if (Boolean((cfg.videoApiKey || '').trim())) return true;
+    return Boolean(resolveActiveVideoConnection(cfg.connections)?.apiKey);
+  }
+
+  /** 视频 model 以连接配置为准；节点留空或旧默认 veo 时用当前激活连接模型 */
+  private resolveVideoModel(body: Record<string, unknown>): string {
+    const raw = String(body.model ?? '').trim();
+    const cfg = this.settings.getRaw();
+    const fromConnection = resolveActiveVideoConnectionModel(cfg.connections);
+    const effective = raw && raw !== 'veo' ? raw : (fromConnection || raw);
+    if (!effective) {
+      throw new BadRequestException('请先在 设置 → 连接 中配置并选择视频模型，禁止空成功');
+    }
+    return this.normalizeOpenAiVideoModel(effective);
   }
 
   private normalizeOpenAiVideoModel(model: string): string {
     if (model === 'grok') return 'grok-imagine-video';
     return model;
+  }
+
+  /** OpenAI Sora 风格 POST /videos（whatstoken 等中转站，见 doc0007） */
+  private mapToOpenAiVideosCreatePayload(payload: Record<string, unknown>): Record<string, unknown> {
+    const out: Record<string, unknown> = {
+      model: payload.model,
+      prompt: payload.prompt,
+    };
+    if (payload.size) out.size = payload.size;
+    const dur = payload.duration ?? payload.seconds;
+    if (dur != null && String(dur).trim()) out.seconds = String(dur);
+    const imageUrl = payload.image_url ?? payload.imageUrl;
+    if (typeof imageUrl === 'string' && imageUrl.trim()) {
+      out.input_reference = imageUrl.trim();
+    }
+    if (payload.aspect_ratio) out.aspect_ratio = payload.aspect_ratio;
+    if (payload.resolution) out.resolution = payload.resolution;
+    if (payload.reference_images) out.reference_images = payload.reference_images;
+    if (payload.reference_videos) out.reference_videos = payload.reference_videos;
+    if (payload.last_frame_url) out.last_frame_url = payload.last_frame_url;
+    return out;
+  }
+
+  private async submitOpenAiCompatibleVideo(
+    provider: VideoProviderRuntime,
+    payload: Record<string, unknown>,
+  ): Promise<Response> {
+    const headers = {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${provider.apiKey}`,
+    };
+    const videosPayload = this.mapToOpenAiVideosCreatePayload(payload);
+    // 兼容多家中转：whatstoken 用 /video/generations；部分站用 /videos/generations；OpenAI Sora 用 /videos
+    const attempts: Array<{ path: string; body: Record<string, unknown> }> = [
+      { path: '/video/generations', body: payload },
+      { path: '/videos/generations', body: payload },
+      { path: '/videos', body: videosPayload },
+    ];
+    let last: Response | undefined;
+    for (const attempt of attempts) {
+      const res = await this.fetchWithTimeout(
+        `${provider.baseUrl}${attempt.path}`,
+        { method: 'POST', headers, body: JSON.stringify(attempt.body) },
+        45000,
+      );
+      last = res;
+      if (res.status !== 404 && res.status !== 405) return res;
+      await res.body?.cancel().catch(() => undefined);
+    }
+    return last!;
   }
 
   private normalizeOpenAiVideoResolution(resolution: unknown): string | undefined {
@@ -455,7 +537,7 @@ export class GatewayService {
     routedProvider?: string;
   }> {
     const prompt = ((body.prompt as string) ?? '').trim();
-    if (!prompt) throw new BadRequestException('Image prompt is required');
+    if (!prompt) throw new BadRequestException('Image prompt is required，禁止空成功');
 
     const model = (body.model as string) || 'gemini-2.5-flash-image';
     const size = (body.size as string) || '1024x1024';
@@ -560,26 +642,32 @@ export class GatewayService {
     const json = (await res.json()) as {
       data?: { b64_json?: string; url?: string; revised_prompt?: string }[];
     };
-    if (!json.data?.length) throw new ServiceUnavailableException('Empty image response');
+      if (!json.data?.length) throw new ServiceUnavailableException('Empty image response，禁止空成功');
 
     const urls: string[] = [];
     for (const item of json.data) {
       if (!existsSync(PATHS.images)) mkdirSync(PATHS.images, { recursive: true });
       const name = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}.png`;
+      const out = join(PATHS.images, name);
 
       if (item.b64_json) {
-        writeFileSync(join(PATHS.images, name), Buffer.from(item.b64_json, 'base64'));
+        const buf = Buffer.from(item.b64_json, 'base64');
+        if (!buf.length) continue;
+        writeFileSync(out, buf);
       } else if (item.url) {
         const imgRes = await this.fetchWithRetry(item.url, {}, { attempts: 3, timeoutMs: 60_000 });
         if (!imgRes.ok) throw upstreamException('Image download', imgRes.status, await imgRes.text());
-        writeFileSync(join(PATHS.images, name), Buffer.from(await imgRes.arrayBuffer()));
+        const buf = Buffer.from(await imgRes.arrayBuffer());
+        if (!buf.length) continue;
+        writeFileSync(out, buf);
       } else {
         continue;
       }
+      if (!existsSync(out)) continue;
       urls.push(`/media/images/${encodeURIComponent(name)}`);
     }
 
-    if (urls.length === 0) throw new ServiceUnavailableException('No image data in response');
+    if (urls.length === 0) throw new ServiceUnavailableException('No image data in response，禁止空成功');
 
     void this.track('image', { userId, model, workspaceId });
     return {
@@ -618,7 +706,7 @@ export class GatewayService {
       attached += 1;
     }
     if (attached === 0) {
-      throw new BadRequestException('参考图无法读取：请确认 @上游/@生成 对应的图片仍在工作区');
+      throw new BadRequestException('参考图无法读取，禁止空成功：请确认 @上游/@生成 对应的图片仍在工作区');
     }
 
     return this.fetchWithTimeout(`${opts.baseUrl}/images/edits`, {
@@ -763,6 +851,9 @@ export class GatewayService {
     });
 
     void this.track('image', { userId, model: result.model, units: result.urls.length, workspaceId });
+    if (!result.urls?.length || !result.urls[0]) {
+      throw new ServiceUnavailableException('Gemini 未返回图片，禁止空成功');
+    }
     return {
       ok: true,
       url: result.urls[0],
@@ -812,11 +903,14 @@ export class GatewayService {
 
     const remoteUrls = this.magicHour.downloadUrls(project);
     if (!remoteUrls.length) {
-      throw new ServiceUnavailableException('Magic Hour 图片完成但无下载地址');
+      throw new ServiceUnavailableException('Magic Hour 图片完成但无下载地址，禁止空成功');
     }
     const urls: string[] = [];
     for (const remote of remoteUrls) {
       urls.push(await this.saveRemoteImage(remote, 'mh'));
+    }
+    if (!urls.length || !urls[0]) {
+      throw new ServiceUnavailableException('Magic Hour 图片落盘失败，禁止空成功');
     }
     void this.track('image', { userId, model: opts.model || 'magic-hour', workspaceId });
     return { ok: true, url: urls[0], urls, taskId, status: 'success' };
@@ -836,40 +930,15 @@ export class GatewayService {
     providerBaseUrl?: string;
   }> {
     const prompt = ((body.prompt as string) ?? '').trim();
-    if (!prompt) throw new BadRequestException('Video prompt is required');
+    if (!prompt) throw new BadRequestException('Video prompt is required，禁止空成功');
 
-    const model = this.normalizeOpenAiVideoModel((body.model as string) || 'veo');
-    if (this.shouldUseMagicHour(model, body.provider as string | undefined)) {
-      // VG-14: 有参考/尾帧时禁止静默切 Magic Hour
-      if (videoRequestNeedsReferenceChannel(body)) {
-        throw new BadRequestException(this.magicHourReferenceBlockedMessage());
-      }
-      const explicitMh =
-        /magic/.test(String(body.provider || '').toLowerCase())
-        || this.magicHour.isMagicHourModel(model);
-      return this.proxyVideoMagicHour(
-        body,
-        userId,
-        workspaceId,
-        explicitMh ? undefined : '当前配置走 Magic Hour 通道',
-      );
-    }
-
+    const model = this.resolveVideoModel(body);
     const provider = this.resolveVideoProvider(body);
     const { apiKey, baseUrl } = provider;
     if (!apiKey) {
-      if (this.magicHour.hasKey()) {
-        if (videoRequestNeedsReferenceChannel(body)) {
-          throw new BadRequestException(this.magicHourReferenceBlockedMessage());
-        }
-        return this.proxyVideoMagicHour(
-          body,
-          userId,
-          workspaceId,
-          '未配置视频 API Key，已回落到 Magic Hour',
-        );
-      }
-      throw new BadRequestException(`${provider.label} 未配置 API Key`);
+      throw new BadRequestException(
+        '请先在 设置 → 连接 中配置视频 API Key 与 Base URL，并在视频节点选择对应模型，禁止空成功',
+      );
     }
 
     const payload: Record<string, unknown> = { model, prompt };
@@ -935,21 +1004,14 @@ export class GatewayService {
 
     let res: Response;
     try {
-      res = await this.fetchWithTimeout(
-        `${baseUrl}/videos/generations`,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${apiKey}`,
-          },
-          body: JSON.stringify(payload),
-        },
-        45000,
-      );
+      res = await this.submitOpenAiCompatibleVideo(provider, payload);
     } catch (e) {
+      const cause = e instanceof Error ? e.message : String(e);
+      const whatstokenDnsHint = /api\.whatstoken\.ai/i.test(baseUrl)
+        ? ' whatstoken 的 API 主机是 https://www.whatstoken.ai/v1（api.whatstoken.ai 无 DNS）。'
+        : '';
       throw new ServiceUnavailableException(
-        `视频 API 连接失败：${provider.label}（${baseUrl}）。请确认服务可访问、Base URL 正确。${String(e)}`,
+        `视频 API 连接失败：${provider.label}（${baseUrl}）。请确认服务可访问、Base URL 正确。${whatstokenDnsHint}${cause}`,
       );
     }
 
@@ -957,19 +1019,12 @@ export class GatewayService {
       if (videoRequestNeedsReferenceChannel(body)) {
         return { ok: false, status: 'failed', message: this.magicHourReferenceBlockedMessage() };
       }
-      if (this.magicHour.hasKey()) {
-        return this.proxyVideoMagicHour(
-          body,
-          userId,
-          workspaceId,
-          '上游不支持 /videos/generations，已回落到 Magic Hour',
-        );
-      }
       return {
         ok: false,
         status: 'failed',
         message:
-          `当前通道不支持 /videos/generations：${provider.label}。请切换到 xAI 官方、GrokGo 测试桥，或配置支持视频的 OpenAI 兼容端点。`,
+          `当前视频连接不支持 POST /video/generations、/videos/generations 或 /videos：${provider.label}（${baseUrl}）。` +
+          `whatstoken 请用 Base URL https://www.whatstoken.ai/v1（见文档 quickstart）。`,
       };
     }
 
@@ -1023,7 +1078,7 @@ export class GatewayService {
       ok: false,
       status: taskId ? 'processing' : 'failed',
       taskId,
-      message: `视频 API 返回格式无法识别（字段: ${Object.keys(json).join(', ') || '空响应'}）`,
+      message: `视频 API 返回格式无法识别（字段: ${Object.keys(json).join(', ') || '空响应'}），禁止空成功`,
       providerBaseUrl: baseUrl,
     };
   }
@@ -1084,8 +1139,8 @@ export class GatewayService {
           status: 'failed',
           taskId,
           message: fallbackNote
-            ? `${fallbackNote}；Magic Hour 视频完成但无下载地址`
-            : 'Magic Hour 视频完成但无下载地址',
+            ? `${fallbackNote}；Magic Hour 视频完成但无下载地址，禁止空成功`
+            : 'Magic Hour 视频完成但无下载地址，禁止空成功',
         };
       }
       const local = await this.saveVideoFromUrl(remote);
@@ -1175,7 +1230,7 @@ export class GatewayService {
     }
 
     const provider = this.resolveVideoProvider(baseUrlOverride ? { baseUrl: baseUrlOverride } : {});
-    if (!provider.apiKey) throw new BadRequestException(`${provider.label} 未配置 API Key`);
+    if (!provider.apiKey) throw new BadRequestException(`${provider.label} 未配置 API Key，禁止空成功`);
     // VG-18: HTTP poll 单次查询，节奏交给客户端 pollVideoUntilDone
     const json = await this.fetchVideoTaskStatus(provider, taskId);
     const polled = await this.interpretVideoTaskStatus(provider, taskId, json);
@@ -1205,16 +1260,18 @@ export class GatewayService {
       return { ok: false, status: 'failed', taskId, message };
     }
     if (this.isVideoSuccessStatus(json.status)) {
-      const url = await this.extractVideoUrl(json);
+      let url = await this.extractVideoUrl(json);
+      if (!url) url = await this.fetchOpenAiVideoContent(provider, taskId);
       if (url) {
-        const local = await this.saveVideoFromUrl(url, provider.baseUrl);
+        const local = url.startsWith('/media/') ? url : await this.saveVideoFromUrl(url, provider.baseUrl);
         return { ok: true, status: 'success', url: local, taskId };
       }
-      return { ok: false, status: 'failed', taskId, message: '视频任务完成但未返回可下载地址' };
+      return { ok: false, status: 'failed', taskId, message: '视频任务完成但未返回可下载地址，禁止空成功' };
     }
-    const url = await this.extractVideoUrl(json);
+    let url = await this.extractVideoUrl(json);
+    if (!url) url = await this.fetchOpenAiVideoContent(provider, taskId);
     if (url) {
-      const local = await this.saveVideoFromUrl(url, provider.baseUrl);
+      const local = url.startsWith('/media/') ? url : await this.saveVideoFromUrl(url, provider.baseUrl);
       return { ok: true, status: 'success', url: local, taskId };
     }
     return { ok: true, status: 'processing', taskId, message: message || '视频仍在生成中' };
@@ -1224,7 +1281,11 @@ export class GatewayService {
     provider: VideoProviderRuntime,
     taskId: string,
   ): Promise<Record<string, unknown> | null> {
-    for (const path of [`/videos/generations/${taskId}`, `/videos/${taskId}`]) {
+    for (const path of [
+      `/video/generations/${taskId}`,
+      `/videos/generations/${taskId}`,
+      `/videos/${taskId}`,
+    ]) {
       let res: Response;
       try {
         res = await this.fetchWithRetry(
@@ -1248,6 +1309,34 @@ export class GatewayService {
     return null;
   }
 
+  /** OpenAI Sora 风格：GET /videos/{id}/content 取成片 */
+  private async fetchOpenAiVideoContent(
+    provider: VideoProviderRuntime,
+    taskId: string,
+  ): Promise<string | null> {
+    let res: Response;
+    try {
+      res = await this.fetchWithRetry(
+        `${provider.baseUrl}/videos/${encodeURIComponent(taskId)}/content`,
+        { headers: { Authorization: `Bearer ${provider.apiKey}` }, redirect: 'follow' },
+        { attempts: 2, timeoutMs: 120_000 },
+      );
+    } catch {
+      return null;
+    }
+    if (!res.ok) return null;
+    const contentType = res.headers.get('content-type') ?? '';
+    if (!contentType.includes('video') && !contentType.includes('octet-stream')) return null;
+    if (!existsSync(PATHS.videos)) mkdirSync(PATHS.videos, { recursive: true });
+    const name = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}.mp4`;
+    const buf = Buffer.from(await res.arrayBuffer());
+    if (!buf.length) return null;
+    const out = join(PATHS.videos, name);
+    writeFileSync(out, buf);
+    if (!existsSync(out)) return null;
+    return `/media/videos/${encodeURIComponent(name)}`;
+  }
+
   private upstreamErrorMessage(json: Record<string, unknown>): string | undefined {
     if (typeof json.message === 'string') return json.message;
     if (typeof json.error === 'string') return json.error;
@@ -1268,6 +1357,8 @@ export class GatewayService {
     if (typeof json.video_url === 'string') return json.video_url;
     if (typeof json.download_url === 'string') return json.download_url;
     if (typeof json.output_url === 'string') return json.output_url;
+    const metadata = json.metadata as { url?: string } | undefined;
+    if (metadata?.url) return metadata.url;
     const video = json.video as { url?: string; video_url?: string } | undefined;
     if (video?.url) return video.url;
     if (video?.video_url) return video.video_url;
@@ -1288,10 +1379,12 @@ export class GatewayService {
   private async saveVideoFromUrl(url: string, baseUrl?: string): Promise<string> {
     if (!existsSync(PATHS.videos)) mkdirSync(PATHS.videos, { recursive: true });
     const name = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}.mp4`;
+    const out = join(PATHS.videos, name);
     if (url.startsWith('data:video/')) {
       const base64 = url.split(',')[1] ?? '';
-      if (!base64) throw new ServiceUnavailableException('视频返回了空的 base64 数据');
-      writeFileSync(join(PATHS.videos, name), Buffer.from(base64, 'base64'));
+      if (!base64) throw new ServiceUnavailableException('视频返回了空的 base64 数据，禁止空成功');
+      writeFileSync(out, Buffer.from(base64, 'base64'));
+      if (!existsSync(out)) throw new ServiceUnavailableException('视频产物未写出，禁止空成功');
       return `/media/videos/${encodeURIComponent(name)}`;
     }
     const absoluteUrl = this.resolveUpstreamUrl(url, baseUrl);
@@ -1302,7 +1395,10 @@ export class GatewayService {
       return absoluteUrl;
     }
     if (!res.ok) return absoluteUrl;
-    writeFileSync(join(PATHS.videos, name), Buffer.from(await res.arrayBuffer()));
+    const buf = Buffer.from(await res.arrayBuffer());
+    if (!buf.length) return absoluteUrl;
+    writeFileSync(out, buf);
+    if (!existsSync(out)) return absoluteUrl;
     return `/media/videos/${encodeURIComponent(name)}`;
   }
 
@@ -1315,9 +1411,16 @@ export class GatewayService {
   }
 
   private saveAudioBuffer(buffer: Buffer, prefix: string, ext = 'wav'): string {
+    if (!buffer?.length) {
+      throw new ServiceUnavailableException('TTS 音频内容为空，禁止空成功');
+    }
     const name = `${Date.now()}-${prefix}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
     if (!existsSync(PATHS.audio)) mkdirSync(PATHS.audio, { recursive: true });
-    writeFileSync(join(PATHS.audio, name), buffer);
+    const out = join(PATHS.audio, name);
+    writeFileSync(out, buffer);
+    if (!existsSync(out)) {
+      throw new ServiceUnavailableException('TTS 音频产物未写出，禁止空成功');
+    }
     return `/media/audio/${encodeURIComponent(name)}`;
   }
 
@@ -1409,7 +1512,7 @@ export class GatewayService {
   }> {
     const cfg = this.settings.getRaw();
     const input = (body.input as string) ?? '';
-    if (!input.trim()) throw new BadRequestException('TTS input text is required');
+    if (!input.trim()) throw new BadRequestException('TTS input text is required，禁止空成功');
 
     const voice = (body.voice as string) || cfg.voiceboxDefaultProfile || 'alloy';
     let luxSkipFallback: TtsFallbackInfo | undefined;
@@ -1606,7 +1709,7 @@ export class GatewayService {
         id: 'magic-hour',
         label: 'Magic Hour',
         available: false,
-        message: '未配置 MAGIC_HOUR_API_KEY',
+        message: '未配置 MAGIC_HOUR_API_KEY，禁止空成功',
       });
     }
 
@@ -1622,7 +1725,7 @@ export class GatewayService {
         id: 'gemini',
         label: 'Google Gemini / Imagen',
         available: false,
-        message: '未配置 GEMINI_API_KEY / 设置中的 Gemini API Key',
+        message: '未配置 GEMINI_API_KEY / 设置中的 Gemini API Key，禁止空成功',
       });
     }
 
@@ -1632,7 +1735,7 @@ export class GatewayService {
   /** OpenAI 兼容：GET {baseUrl}/models → 模型 id 列表 */
   async listConnectionModels(baseUrl?: string, apiKey?: string, connectionId?: string) {
     const raw = (baseUrl ?? '').trim().replace(/\/+$/, '');
-    if (!raw) throw new BadRequestException('请先填写 Base URL');
+    if (!raw) throw new BadRequestException('请先填写 Base URL，禁止空成功');
 
     let key = (apiKey ?? '').trim();
     // 设置页下发的是脱敏密钥（****xxxx）；已保存连接用服务端明文密钥探测
@@ -1640,9 +1743,9 @@ export class GatewayService {
       const stored = this.settings.getRaw().connections?.find((c) => c.id === connectionId);
       if (stored?.apiKey) key = stored.apiKey.trim();
     }
-    if (!key) throw new BadRequestException('请先填写 API Key');
+    if (!key) throw new BadRequestException('请先填写 API Key，禁止空成功');
     if (key.startsWith('****')) {
-      throw new BadRequestException('当前为脱敏密钥，请重新输入完整 API Key 后再获取');
+      throw new BadRequestException('当前为脱敏密钥，请重新输入完整 API Key 后再获取，禁止空成功');
     }
 
     const candidates = [raw];
@@ -1650,7 +1753,7 @@ export class GatewayService {
       candidates.push(`${raw}/v1`);
     }
 
-    let lastError = '无法获取模型列表';
+    let lastError = '无法获取模型列表，禁止空成功';
     for (const root of candidates) {
       try {
         const res = await fetch(`${root}/models`, {
@@ -1682,7 +1785,7 @@ export class GatewayService {
           .filter(Boolean);
         const models = Array.from(new Set([...fromData, ...fromModels])).sort((a, b) => a.localeCompare(b));
         if (models.length === 0) {
-          lastError = '接口已响应，但未返回模型';
+          lastError = '接口已响应，但未返回模型，禁止空成功';
           continue;
         }
         return { models, baseUrl: root };
@@ -1700,7 +1803,7 @@ export class GatewayService {
 
   private mediaUrlToDataUri(url: string): string {
     const local = resolveMediaUrl(url);
-    if (!local) throw new BadRequestException(`无法解析本地媒体: ${url}`);
+    if (!local) throw new BadRequestException(`无法解析本地媒体，禁止空成功: ${url}`);
     const buf = readFileSync(local);
     const mime = mimeFromMediaPath(local);
     return `data:${mime};base64,${buf.toString('base64')}`;
@@ -1711,7 +1814,11 @@ export class GatewayService {
     if (!res.ok) throw upstreamException('Image download', res.status, await res.text());
     if (!existsSync(PATHS.images)) mkdirSync(PATHS.images, { recursive: true });
     const name = `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}.png`;
-    writeFileSync(join(PATHS.images, name), Buffer.from(await res.arrayBuffer()));
+    const out = join(PATHS.images, name);
+    const buf = Buffer.from(await res.arrayBuffer());
+    if (!buf.length) throw new ServiceUnavailableException('远程图片内容为空，禁止空成功');
+    writeFileSync(out, buf);
+    if (!existsSync(out)) throw new ServiceUnavailableException('远程图片产物未写出，禁止空成功');
     return `/media/images/${encodeURIComponent(name)}`;
   }
 
@@ -1720,12 +1827,12 @@ export class GatewayService {
     body: { model: string; input: Record<string, unknown> },
     userId?: string,
     workspaceId?: string,
-  ): Promise<{ ok: boolean; url?: string; output?: Record<string, unknown> }> {
+  ): Promise<{ ok: boolean; url?: string; output?: Record<string, unknown>; message?: string }> {
     const apiKey = this.settings.getRaw().primaryApiKey || '';
-    if (!apiKey) throw new BadRequestException('请在设置中配置 Fal.ai API Key（primaryApiKey）');
+    if (!apiKey) throw new BadRequestException('请在设置中配置 Fal.ai API Key（primaryApiKey），禁止空成功');
 
     const model = (body.model ?? '').replace(/^\/+/, '').trim();
-    if (!model) throw new BadRequestException('Fal model id is required');
+    if (!model) throw new BadRequestException('Fal model id is required，禁止空成功');
 
     const input = { ...(body.input ?? {}) };
     for (const key of ['image_url', 'image', 'video_url']) {
@@ -1750,7 +1857,6 @@ export class GatewayService {
     }
 
     const json = (await res.json()) as Record<string, unknown>;
-    void this.track('image', { userId, model: `fal:${model}`, workspaceId });
 
     const imageUrl =
       (json.image as { url?: string })?.url ||
@@ -1760,6 +1866,7 @@ export class GatewayService {
 
     if (imageUrl) {
       const saved = await this.saveRemoteImage(imageUrl, 'fal');
+      void this.track('image', { userId, model: `fal:${model}`, workspaceId });
       return { ok: true, url: saved, output: json };
     }
 
@@ -1772,10 +1879,10 @@ export class GatewayService {
       return this.pollFalRequest(model, requestId, apiKey, userId, workspaceId);
     }
     if (status && /inprogress|queued|processing/i.test(status) && !requestId) {
-      throw new ServiceUnavailableException(`Fal 任务已排队但缺少 request_id，无法轮询：${status}`);
+      throw new ServiceUnavailableException(`Fal 任务已排队但缺少 request_id，禁止空成功：${status}`);
     }
 
-    return { ok: true, output: json };
+    return { ok: false, output: json, message: 'Fal 未返回图片，禁止空成功' };
   }
 
   private async pollFalRequest(
@@ -1784,7 +1891,7 @@ export class GatewayService {
     apiKey: string,
     userId?: string,
     workspaceId?: string,
-  ): Promise<{ ok: boolean; url?: string; output?: Record<string, unknown> }> {
+  ): Promise<{ ok: boolean; url?: string; output?: Record<string, unknown>; message?: string }> {
     for (let i = 0; i < 30; i++) {
       await new Promise((r) => setTimeout(r, 3000));
       const pollRes = await fetch(`https://fal.run/${model}/requests/${requestId}`, {
@@ -1805,10 +1912,10 @@ export class GatewayService {
       }
       const status = (json.status as string) || '';
       if (/error|failed|cancel/i.test(status)) {
-        throw new ServiceUnavailableException(`Fal 任务失败：${status}`);
+        throw new ServiceUnavailableException(`Fal 任务失败：${status}，禁止空成功`);
       }
     }
-    throw new ServiceUnavailableException('Fal 任务轮询超时（90s），请稍后在客户端重试查询');
+      throw new ServiceUnavailableException('Fal 任务轮询超时（90s），请稍后在客户端重试查询，禁止空成功');
   }
 
   private resolveComfyBaseUrl(override?: string): string {
@@ -1849,7 +1956,7 @@ export class GatewayService {
   ): Promise<{ ok: boolean; url?: string; promptId?: string; message?: string }> {
     const baseUrl = this.resolveComfyBaseUrl(body.baseUrl);
     if (!body.workflow || typeof body.workflow !== 'object') {
-      throw new BadRequestException('ComfyUI workflow JSON is required');
+      throw new BadRequestException('ComfyUI workflow JSON is required，禁止空成功');
     }
 
     let workflow = body.workflow;
@@ -1869,7 +1976,7 @@ export class GatewayService {
 
     const submitted = (await submit.json()) as { prompt_id?: string };
     const promptId = submitted.prompt_id;
-    if (!promptId) throw new ServiceUnavailableException('ComfyUI 未返回 prompt_id');
+    if (!promptId) throw new ServiceUnavailableException('ComfyUI 未返回 prompt_id，禁止空成功');
 
     for (let attempt = 0; attempt < 90; attempt++) {
       await new Promise((r) => setTimeout(r, 2000));
@@ -1897,7 +2004,11 @@ export class GatewayService {
 
       if (!existsSync(PATHS.images)) mkdirSync(PATHS.images, { recursive: true });
       const name = `${Date.now()}-comfy-${Math.random().toString(36).slice(2, 8)}.png`;
-      writeFileSync(join(PATHS.images, name), Buffer.from(await imgRes.arrayBuffer()));
+      const out = join(PATHS.images, name);
+      const buf = Buffer.from(await imgRes.arrayBuffer());
+      if (!buf.length) continue;
+      writeFileSync(out, buf);
+      if (!existsSync(out)) continue;
       void this.track('image', { userId, model: 'comfyui', workspaceId });
       return {
         ok: true,
@@ -1909,7 +2020,7 @@ export class GatewayService {
     return {
       ok: false,
       promptId,
-      message: 'ComfyUI 任务超时（180s），请检查本地 ComfyUI 是否仍在运行',
+      message: 'ComfyUI 任务超时（180s），请检查本地 ComfyUI 是否仍在运行，禁止空成功',
     };
   }
 }

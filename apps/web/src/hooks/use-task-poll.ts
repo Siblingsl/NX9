@@ -1,7 +1,7 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { api } from '../api/client';
 
-export type TaskStatus = 'idle' | 'queued' | 'rendering' | 'done' | 'error';
+export type TaskStatus = 'idle' | 'queued' | 'rendering' | 'done' | 'error' | 'cancelled';
 
 interface TaskState {
   status: TaskStatus;
@@ -20,12 +20,26 @@ export function useTaskPoll() {
         const res = await api.getTaskStatus(taskId);
         const raw = res.status;
         if (raw === 'done') {
-          setTask({ status: 'done', url: res.url });
+          if (!res.url) {
+            setTask({
+              status: 'error',
+              message: res.message || '渲染完成但无输出地址，禁止空成功',
+            });
+          } else {
+            setTask({ status: 'done', url: res.url });
+          }
           if (intervalRef.current) clearInterval(intervalRef.current);
-        } else if (raw === 'error' || raw === 'cancelled') {
+        } else if (raw === 'cancelled') {
+          // F-046: 取消与失败分流，禁止后续写成 success
+          setTask({
+            status: 'cancelled',
+            message: res.message || '渲染已取消',
+          });
+          if (intervalRef.current) clearInterval(intervalRef.current);
+        } else if (raw === 'error') {
           setTask({
             status: 'error',
-            message: res.message || (raw === 'cancelled' ? '渲染已取消' : '渲染失败'),
+            message: res.message || '渲染失败',
           });
           if (intervalRef.current) clearInterval(intervalRef.current);
         } else {

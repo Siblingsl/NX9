@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import type { AppSettings, ConnectionChannelStatus, ConnectionStatus, ModelConnection } from '@nx9/shared';
+import { normalizeVideoBaseUrl } from '@nx9/shared';
 import { JsonStoreService } from '../../common/json-store.service';
 import { PATHS } from '../../config/app.config';
 
@@ -90,6 +91,7 @@ export class SettingsService {
       },
     });
     raw.connections = migrateConnections(raw);
+    this.applyActiveConnectionCredentials(raw);
     return raw;
   }
 
@@ -178,7 +180,7 @@ export class SettingsService {
       }
       if (c.kind === 'video') {
         if (c.apiKey) cfg.videoApiKey = c.apiKey;
-        if (c.baseUrl !== undefined) cfg.videoBaseUrl = c.baseUrl;
+        if (c.baseUrl !== undefined) cfg.videoBaseUrl = normalizeVideoBaseUrl(c.baseUrl);
         if (['xai', 'grokgo', 'custom'].includes(c.provider)) {
           cfg.videoProvider = c.provider as AppSettings['videoProvider'];
         }

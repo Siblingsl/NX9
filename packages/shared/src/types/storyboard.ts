@@ -37,6 +37,10 @@ export interface StoryboardDirectorCharacterPlacement {
   scale: [number, number, number];
   bodyType?: string;
   posePresetId?: string;
+  /** Relative joint offsets (deg) on pose preset — Stage Composer 关节微调 */
+  poseJoints?: Partial<
+    Record<'body' | 'torso' | 'head' | 'armL' | 'armR' | 'legL' | 'legR', [number, number, number]>
+  >;
 }
 
 export interface EpisodeExportRecord {
@@ -259,6 +263,8 @@ export interface VoiceLine {
   audioAssetId?: string | null;
   /** OL-19：生成时钉住的声音库 id（成片轨可继承） */
   soundAssetId?: string | null;
+  /** SF-16：TTS 实测/估算时长（秒），挂轨优先于视频镜长 */
+  durationSec?: number | null;
   status: VoiceLineStatus;
 }
 

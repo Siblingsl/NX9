@@ -41,7 +41,7 @@ export const BUILTIN_CONNECTION_PRESETS: Omit<ModelConnection, 'id' | 'apiKey' |
   { label: 'Together AI', kind: 'llm', provider: 'together', baseUrl: 'https://api.together.xyz/v1', model: 'meta-llama/Llama-3.1-8B-Instruct-Turbo' },
   { label: 'OpenRouter', kind: 'llm', provider: 'openrouter', baseUrl: 'https://openrouter.ai/api/v1', model: 'openai/gpt-4o-mini' },
   { label: 'Azure OpenAI', kind: 'llm', provider: 'azure', baseUrl: 'https://YOUR-RESOURCE.openai.azure.com', model: 'gpt-4o' },
-  { label: 'GrokGo 本地桥', kind: 'video', provider: 'grokgo', baseUrl: 'http://127.0.0.1:8787/v1', model: 'grok-imagine-video' },
+  { label: '本地视频桥（开发）', kind: 'video', provider: 'grokgo', baseUrl: 'http://127.0.0.1:8787/v1', model: 'grok-imagine-video' },
   { label: 'LocalAI', kind: 'llm', provider: 'localai', baseUrl: 'http://127.0.0.1:8080/v1', model: 'llama-3.1-8b' },
   { label: 'Ollama', kind: 'llm', provider: 'ollama', baseUrl: 'http://127.0.0.1:11434/v1', model: 'qwen2.5:7b' },
   { label: '通用 OpenAI 兼容 (TTS)', kind: 'audio', provider: 'openai', baseUrl: 'https://api.openai.com/v1', model: 'tts-1' },
@@ -144,8 +144,10 @@ export interface AppSettings {
    * - cpu：仍用 LuxTTS CPU 推理（较慢，完全离线）
    */
   luxTtsNoGpuFallback?: 'cpu' | 'cloud';
-  /** BGM 音乐生成 Provider：suno | udio | elevenlabs */
+  /** BGM 音乐生成 Provider：suno（Suno 兼容聚合协议） */
   bgmProvider?: string;
   /** BGM 音乐生成 API Key */
   bgmApiKey?: string;
+  /** BGM Suno 兼容聚合端点 Base URL（如 https://api.sunoapi.org/api/v1） */
+  bgmBaseUrl?: string;
 }

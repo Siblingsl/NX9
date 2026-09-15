@@ -52,7 +52,7 @@ export async function executeBaseOps(deps: FlowExecuteDeps): Promise<void> {
       ? d.package as import('@nx9/shared').ScreenplayPackage
       : readScriptDeskPackage(d);
     const source = screenplayFullText(pkg).trim() || ((d.sourceText as string) || prompt).trim();
-    if (!source) throw new Error('编剧台缺少成稿文本');
+    if (!source) throw new Error('编剧台缺少成稿文本，禁止空成功');
     if (!screenplayFullText(pkg).trim()) {
       pkg = ingestScreenplayText(pkg, source, 'pasted');
     }

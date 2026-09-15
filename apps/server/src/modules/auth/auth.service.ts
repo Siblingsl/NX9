@@ -83,10 +83,10 @@ export class AuthService {
    */
   async register(name: string, password: string): Promise<AuthResult> {
     const clean = (name ?? '').trim();
-    if (!clean) throw new BadRequestException('昵称不能为空');
+    if (!clean) throw new BadRequestException('昵称不能为空，禁止空成功');
     if (clean.length > 24) throw new BadRequestException('昵称最长 24 个字符');
     if (!password || password.length < PASSWORD_MIN_LENGTH) {
-      throw new BadRequestException(`密码至少 ${PASSWORD_MIN_LENGTH} 位`);
+      throw new BadRequestException(`密码至少 ${PASSWORD_MIN_LENGTH} 位，禁止空成功`);
     }
 
     const passwordHash = this.hashPassword(password);
@@ -121,7 +121,7 @@ export class AuthService {
 
   async login(name: string, password: string): Promise<AuthResult> {
     const clean = (name ?? '').trim();
-    if (!clean || !password) throw new BadRequestException('请输入昵称和密码');
+    if (!clean || !password) throw new BadRequestException('请输入昵称和密码，禁止空成功');
     const user = await this.prisma.user.findUnique({ where: { name: clean } });
     if (!user?.passwordHash || !this.verifyPassword(password, user.passwordHash)) {
       throw new UnauthorizedException('昵称或密码不正确');

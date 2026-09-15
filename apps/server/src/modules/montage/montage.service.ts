@@ -7,6 +7,7 @@ import { buildTimelineFromShots, buildTimelineFromShotsV2, type TranscribeCue } 
 import { PATHS } from '../../config/app.config';
 import { resolveMediaUrl } from '../../common/media-path';
 import type { StoryboardShot } from '@nx9/shared';
+import { detectBeats } from './beat-detection';
 import { GatewayService } from '../gateway/gateway.service';
 import { SettingsService } from '../settings/settings.service';
 
@@ -39,10 +40,13 @@ export class MontageService {
     cols = 3,
     lineArt = false,
   ) {
+    const count = shots.length;
+    if (count === 0) {
+      return { ok: false, message: '联系表镜头为空，禁止空成功', shotCount: 0 };
+    }
     const cellW = 320;
     const cellH = 200;
     const labelH = 36;
-    const count = shots.length;
     const rows = Math.ceil(count / cols) || 1;
     const canvasW = cols * cellW;
     const canvasH = rows * (cellH + labelH);
@@ -96,6 +100,10 @@ export class MontageService {
       .png()
       .toFile(out);
 
+    if (!existsSync(out)) {
+      return { ok: false, message: '联系表产物未写出，禁止空成功', shotCount: count };
+    }
+
     return { ok: true, url: `/media/exports/${name}`, shotCount: count };
   }
 
@@ -110,12 +118,12 @@ export class MontageService {
       return {
         ok: false,
         status: 'failed',
-        message: '未检测到 FFmpeg，请安装后重试（https://ffmpeg.org）',
+        message: '未检测到 FFmpeg，请安装后重试（https://ffmpeg.org），禁止空成功',
       };
     }
 
     const videoPath = resolveMediaUrl(body.videoUrl);
-    if (!videoPath) throw new Error(`无法解析视频: ${body.videoUrl}`);
+    if (!videoPath) throw new Error(`无法解析视频，禁止空成功: ${body.videoUrl}`);
 
     const stamp = Date.now();
     const outName = `shot-${stamp}.mp4`;
@@ -153,6 +161,10 @@ export class MontageService {
     }
 
     await this.runFfmpeg(videoPath, audioPath, srtPath, outPath);
+
+    if (!existsSync(outPath)) {
+      return { ok: false, status: 'failed', message: '单镜渲染产物未写出，禁止空成功' };
+    }
 
     return { ok: true, url: `/media/exports/${outName}`, status: 'done' };
   }
@@ -236,7 +248,7 @@ export class MontageService {
       return {
         ok: false,
         status: 'failed',
-        message: '未检测到 FFmpeg，无法整集合成',
+        message: '未检测到 FFmpeg，无法整集合成，禁止空成功',
       };
     }
 
@@ -249,7 +261,7 @@ export class MontageService {
     }
 
     if (segments.length === 0) {
-      return { ok: false, status: 'failed', message: '无可用视频片段，请先生成各镜头视频' };
+      return { ok: false, status: 'failed', message: '无可用视频片段，请先生成各镜头视频，禁止空成功' };
     }
 
     const stamp = Date.now();
@@ -328,6 +340,10 @@ export class MontageService {
       });
     });
 
+    if (!existsSync(outPath)) {
+      return { ok: false, status: 'failed', message: '整集合成产物未写出，禁止空成功' };
+    }
+
     return {
       ok: true,
       status: 'done',
@@ -342,7 +358,7 @@ export class MontageService {
   async concatClips(videoUrls: string[], title?: string, transition?: string) {
     const hasFfmpeg = await this.checkFfmpeg();
     if (!hasFfmpeg) {
-      return { ok: false, status: 'failed', message: '未检测到 FFmpeg' };
+      return { ok: false, status: 'failed', message: '未检测到 FFmpeg，禁止空成功' };
     }
 
     const paths: string[] = [];
@@ -351,7 +367,7 @@ export class MontageService {
       if (local && existsSync(local)) paths.push(local);
     }
     if (paths.length === 0) {
-      return { ok: false, status: 'failed', message: '无可用视频片段' };
+      return { ok: false, status: 'failed', message: '无可用视频片段，禁止空成功' };
     }
 
     const stamp = Date.now();
@@ -444,6 +460,10 @@ export class MontageService {
       });
     }
 
+    if (!existsSync(outPath)) {
+      return { ok: false, status: 'failed', message: '剪辑合成产物未写出，禁止空成功' };
+    }
+
     return {
       ok: true,
       status: 'done',
@@ -490,16 +510,16 @@ export class MontageService {
   }) {
     const hasFfmpeg = await this.checkFfmpeg();
     if (!hasFfmpeg) {
-      return { ok: false, status: 'failed', message: '未检测到 FFmpeg' };
+      return { ok: false, status: 'failed', message: '未检测到 FFmpeg，禁止空成功' };
     }
 
     const imagePath = resolveMediaUrl(body.imageUrl);
     if (!imagePath || !existsSync(imagePath)) {
-      return { ok: false, status: 'failed', message: '无法读取图片' };
+      return { ok: false, status: 'failed', message: '无法读取图片，禁止空成功' };
     }
 
     const text = (body.text ?? '').trim();
-    if (!text) return { ok: false, status: 'failed', message: '口播文本为空' };
+    if (!text) return { ok: false, status: 'failed', message: '口播文本为空，禁止空成功' };
 
     const tts = await this.gateway.proxyTts({
       input: text,
@@ -508,9 +528,12 @@ export class MontageService {
       useLuxTts: body.useLuxTts,
       luxTtsProfileId: body.characterId,
     });
+    if (!tts?.ok || !tts.url) {
+      return { ok: false, status: 'failed', message: 'TTS 未返回音频，禁止空成功' };
+    }
     const audioPath = resolveMediaUrl(tts.url);
     if (!audioPath || !existsSync(audioPath)) {
-      return { ok: false, status: 'failed', message: 'TTS 生成失败' };
+      return { ok: false, status: 'failed', message: 'TTS 音频文件未写出，禁止空成功' };
     }
 
     const duration = await this.probeAudioDurationSec(audioPath);
@@ -561,6 +584,10 @@ export class MontageService {
       });
     });
 
+    if (!existsSync(outPath)) {
+      return { ok: false, status: 'failed', message: '照片说话成片未写出，禁止空成功' };
+    }
+
     return {
       ok: true,
       status: 'done',
@@ -577,7 +604,7 @@ export class MontageService {
   async mixAudio(audioUrls: string[], opts?: { normalize?: boolean }) {
     const hasFfmpeg = await this.checkFfmpeg();
     if (!hasFfmpeg) {
-      return { ok: false, status: 'failed', message: '未检测到 FFmpeg' };
+      return { ok: false, status: 'failed', message: '未检测到 FFmpeg，禁止空成功' };
     }
     const paths: string[] = [];
     let failedCount = 0;
@@ -587,7 +614,7 @@ export class MontageService {
       else failedCount++;
     }
     if (paths.length < 2) {
-      return { ok: false, status: 'failed', message: `至少需要 2 条音频轨（${failedCount} 条不可用）` };
+      return { ok: false, status: 'failed', message: `至少需要 2 条音频轨（${failedCount} 条不可用），禁止空成功` };
     }
 
     const stamp = Date.now();
@@ -611,19 +638,22 @@ export class MontageService {
       });
     });
 
+    if (!existsSync(outPath)) {
+      return { ok: false, status: 'failed', message: '混音产物未写出，禁止空成功' };
+    }
+
     return { ok: true, status: 'done', url: `/media/exports/${outName}`, trackCount: paths.length, failedTracks: failedCount };
   }
 
   /** Apply brightness/contrast/saturation via FFmpeg (video) or sharp (image). */
-  async colorGrade(body: {
-    sourceUrl: string;
+  async colorGrade(body: {    sourceUrl: string;
     brightness?: number;
     contrast?: number;
     saturation?: number;
   }) {
     const sourcePath = resolveMediaUrl(body.sourceUrl);
     if (!sourcePath || !existsSync(sourcePath)) {
-      return { ok: false, status: 'failed', message: '无法读取源媒体' };
+      return { ok: false, status: 'failed', message: '无法读取源媒体，禁止空成功' };
     }
 
     const brightness = body.brightness ?? 0;
@@ -635,7 +665,7 @@ export class MontageService {
     if (isVideo) {
       const hasFfmpeg = await this.checkFfmpeg();
       if (!hasFfmpeg) {
-        return { ok: false, status: 'failed', message: '未检测到 FFmpeg' };
+        return { ok: false, status: 'failed', message: '未检测到 FFmpeg，禁止空成功' };
       }
       const outName = `grade-${stamp}.mp4`;
       const outPath = join(PATHS.exports, outName);
@@ -652,6 +682,9 @@ export class MontageService {
           else reject(new Error(stderr.slice(-600) || `ffmpeg eq exit ${code}`));
         });
       });
+      if (!existsSync(outPath)) {
+        return { ok: false, status: 'failed', message: '调色产物未写出，禁止空成功' };
+      }
       return { ok: true, status: 'done', url: `/media/exports/${outName}`, mediaKind: 'clip' };
     }
 
@@ -666,7 +699,83 @@ export class MontageService {
       .linear(contrast, -(128 * (contrast - 1)))
       .jpeg({ quality: 92 })
       .toFile(outPath);
+    if (!existsSync(outPath)) {
+      return { ok: false, status: 'failed', message: '调色产物未写出，禁止空成功' };
+    }
     return { ok: true, status: 'done', url: `/media/exports/${outName}`, mediaKind: 'picture' };
+  }
+
+  /**
+   * 变速保音调：视频 setpts 变速 + 音频 atempo 时间伸缩（音调不变）。
+   * speed 范围 0.25–4；atempo 单段仅支持 0.5–2，超出自动串联多段。
+   */
+  async speedPitch(body: { sourceUrl: string; speed?: number }) {
+    const sourcePath = resolveMediaUrl(body.sourceUrl);
+    if (!sourcePath || !existsSync(sourcePath)) {
+      return { ok: false, status: 'failed', message: '无法读取源媒体，禁止空成功' };
+    }
+    const speed = Math.max(0.25, Math.min(4, body.speed ?? 1));
+    if (Math.abs(speed - 1) < 1e-6) {
+      return { ok: true, status: 'done', url: body.sourceUrl, speed, unchanged: true };
+    }
+    const hasFfmpeg = await this.checkFfmpeg();
+    if (!hasFfmpeg) {
+      return { ok: false, status: 'failed', message: '未检测到 FFmpeg，禁止空成功' };
+    }
+    const stamp = Date.now();
+    const outName = `speed-${stamp}.mp4`;
+    const outPath = join(PATHS.exports, outName);
+    const atempos: string[] = [];
+    let remain = speed;
+    while (Math.abs(remain - 1) > 1e-6) {
+      if (remain > 1) {
+        atempos.push('atempo=2');
+        remain /= 2;
+      } else {
+        atempos.push('atempo=0.5');
+        remain /= 0.5;
+      }
+    }
+    const af = atempos.length > 0 ? atempos.join(',') : null;
+    const args = [
+      '-y',
+      '-i', sourcePath,
+      '-map', '0:v:0',
+      '-map', '0:a:0?',
+      '-vf', `setpts=PTS/${speed}`,
+      ...(af ? ['-af', af] : []),
+      '-c:v', 'libx264',
+      '-preset', 'fast',
+      '-crf', '20',
+      '-c:a', 'aac',
+      '-b:a', '192k',
+      '-movflags', '+faststart',
+      outPath,
+    ];
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const proc = spawn('ffmpeg', args);
+        let stderr = '';
+        proc.stderr.on('data', (d) => {
+          stderr += String(d);
+        });
+        proc.on('error', reject);
+        proc.on('close', (code) => {
+          if (code === 0) resolve();
+          else reject(new Error(stderr.slice(-600) || `ffmpeg speed exit ${code}`));
+        });
+      });
+      if (!existsSync(outPath)) {
+        return { ok: false, status: 'failed', message: '变速产物未写出，禁止空成功' };
+      }
+      return { ok: true, status: 'done', url: `/media/exports/${outName}`, speed };
+    } catch (e) {
+      return {
+        ok: false,
+        status: 'failed',
+        message: e instanceof Error ? e.message : String(e),
+      };
+    }
   }
 
   /** Probe media duration in seconds (audio/video). */
@@ -677,11 +786,163 @@ export class MontageService {
     return { ok: durationSec > 0, durationSec };
   }
 
+  /**
+   * AI 深度编排：LLM 理解每个镜头的内容描述/台词/状态，
+   * 输出镜头播放顺序与每镜时长（起承转合结构）。
+   * 任何解析/校验失败返回 ok:false，调用方回退规则编排（不做静默降级伪装）。
+   */
+  async aiArrange(body: {
+    shots: Array<{
+      id: string;
+      index: number;
+      durationSec?: number;
+      descriptionZh?: string;
+      subtitleText?: string | null;
+      status?: string;
+    }>;
+    targetDurationSec?: number;
+  }): Promise<{
+    ok: boolean;
+    order?: string[];
+    durations?: Record<string, number>;
+    title?: string;
+    notes?: string[];
+    message?: string;
+  }> {
+    const shots = (body.shots ?? []).filter((s) => s && typeof s.id === 'string');
+    if (shots.length < 2) {
+      return { ok: false, message: '镜头不足（至少 2 镜），禁止空成功' };
+    }
+    const target = Math.max(10, Math.min(600, body.targetDurationSec ?? 60));
+    const shotList = shots
+      .map(
+        (s, i) =>
+          `#${s.index ?? i + 1} ${s.id}：${(s.descriptionZh ?? '').slice(0, 120)}${
+            s.subtitleText ? `｜台词：${s.subtitleText.slice(0, 80)}` : ''
+          }${s.status ? `（状态：${s.status}）` : ''}${s.durationSec ? `，原时长 ${s.durationSec}s` : ''}`,
+      )
+      .join('\n');
+
+    const system = `你是专业短视频剪辑导演。根据镜头清单做「AI 自动剪辑」决策：安排镜头播放顺序并分配每镜时长，形成有起承转合的成片。
+规则：
+1) 所有镜头必须出现且只出现一次（order 用镜头 id 表示）；
+2) 单镜时长 1–20 秒；
+3) 总时长尽量接近 ${target} 秒；
+4) 开场用最有吸引力的镜头，高潮镜头给足时长，结尾干脆；
+5) 依据镜头描述与台词判断内容重要性，而不是按编号顺序。
+只输出 JSON，不要任何其他文字，格式：
+{"order":["镜头id按播放顺序"],"durations":{"镜头id":秒数},"title":"成片标题(≤20字)","notes":["1-3条剪辑思路"]}`;
+
+    try {
+      const res = (await this.gateway.proxyLlm({
+        response_format: { type: 'json_object' },
+        messages: [
+          { role: 'system', content: system },
+          { role: 'user', content: `镜头清单：\n${shotList}` },
+        ],
+      })) as { choices?: { message?: { content?: string } }[] };
+      const content = res.choices?.[0]?.message?.content ?? '';
+      const parsed = extractJsonFromLlm(content);
+      if (!parsed) return { ok: false, message: 'LLM 未返回可解析的 JSON，禁止空成功' };
+
+      const order = Array.isArray(parsed.order)
+        ? parsed.order.filter((x): x is string => typeof x === 'string')
+        : [];
+      const idSet = new Set(shots.map((s) => s.id));
+      const validOrder = order.filter((id) => idSet.has(id));
+      const missing = shots.filter((s) => !validOrder.includes(s.id)).map((s) => s.id);
+      const dupes = validOrder.length - new Set(validOrder).size;
+      if (missing.length > 0 || dupes > 0) {
+        return { ok: false, message: `LLM 顺序非法（缺 ${missing.length} 镜 / 重复 ${dupes}），禁止空成功` };
+      }
+      const rawDurs =
+        typeof parsed.durations === 'object' && parsed.durations !== null
+          ? (parsed.durations as Record<string, unknown>)
+          : {};
+      const durations: Record<string, number> = {};
+      for (const id of validOrder) {
+        const v = Number(rawDurs[id]);
+        const d = Number.isFinite(v)
+          ? Math.max(1, Math.min(20, Math.round(v * 10) / 10))
+          : Math.max(1, Math.min(20, Math.round((target / validOrder.length) * 10) / 10));
+        durations[id] = d;
+      }
+      const notes = Array.isArray(parsed.notes)
+        ? parsed.notes.filter((n): n is string => typeof n === 'string').slice(0, 3)
+        : [];
+      return {
+        ok: true,
+        order: validOrder,
+        durations,
+        title: typeof parsed.title === 'string' ? parsed.title.slice(0, 30) : undefined,
+        notes,
+      };
+    } catch (e) {
+      return { ok: false, message: e instanceof Error ? e.message : String(e) };
+    }
+  }
+
+  /**
+   * 音频节拍分析（真·听感）：FFmpeg 解码为单声道 8k f32le PCM，
+   * 能量 onset 检测输出节拍点与 BPM，供时间线踩点对齐与 beat-cut 建议使用。
+   */
+  async beatAnalyze(body: { audioUrl: string }): Promise<{
+    ok: boolean;
+    beats?: number[];
+    tempo?: number;
+    message?: string;
+  }> {
+    const local = resolveMediaUrl(body.audioUrl);
+    if (!local || !existsSync(local)) {
+      return { ok: false, message: '无法读取音频文件，禁止空成功' };
+    }
+    const hasFfmpeg = await this.checkFfmpeg();
+    if (!hasFfmpeg) {
+      return { ok: false, message: '未检测到 FFmpeg，禁止空成功' };
+    }
+    const chunks: Buffer[] = [];
+    const exitCode = await new Promise<number>((resolve) => {
+      const proc = spawn('ffmpeg', [
+        '-v', 'error',
+        '-i', local,
+        '-ac', '1',
+        '-ar', '8000',
+        '-t', '600',
+        '-f', 'f32le',
+        'pipe:1',
+      ]);
+      proc.stdout.on('data', (d) => chunks.push(d as Buffer));
+      proc.stderr.on('data', () => {
+        /* 忽略 ffmpeg 日志 */
+      });
+      proc.on('error', () => resolve(-1));
+      proc.on('close', (code) => resolve(code ?? -1));
+    });
+    if (exitCode !== 0 || chunks.length === 0) {
+      return { ok: false, message: `音频解码失败（ffmpeg exit ${exitCode}），禁止空成功` };
+    }
+    const pcm = Buffer.concat(chunks);
+    const samples = new Float32Array(
+      pcm.buffer,
+      pcm.byteOffset,
+      Math.floor(pcm.byteLength / 4),
+    );
+    const result = detectBeats(samples, 8000);
+    if (result.beats.length === 0) {
+      return { ok: false, message: result.message ?? '未检测到节拍，禁止空成功' };
+    }
+    return {
+      ok: true,
+      beats: result.beats,
+      ...(result.tempo ? { tempo: result.tempo } : {}),
+    };
+  }
+
   /** Luminance-derived depth + emboss normal maps for ControlNet-style workflows. */
   async generateDepthPass(body: { sourceUrl: string }) {
     const sourcePath = resolveMediaUrl(body.sourceUrl);
     if (!sourcePath || !existsSync(sourcePath)) {
-      return { ok: false, status: 'failed', message: '无法读取源图像' };
+      return { ok: false, status: 'failed', message: '无法读取源图像，禁止空成功' };
     }
 
     const stamp = Date.now();
@@ -706,6 +967,10 @@ export class MontageService {
       .normalize()
       .png()
       .toFile(normalPath);
+
+    if (!existsSync(depthPath) || !existsSync(normalPath)) {
+      return { ok: false, status: 'failed', message: '深度通道产物未写出，禁止空成功' };
+    }
 
     return {
       ok: true,
@@ -739,7 +1004,7 @@ export class MontageService {
     const maxDurationSec = Math.min(Math.max(Number(body.maxDurationSec) || 60, 1), 60);
     const sourcePath = resolveMediaUrl(body.sourceUrl);
     if (!sourcePath || !existsSync(sourcePath)) {
-      return { ok: false, status: 'failed', message: '无法读取源视频，请重新上传' };
+      return { ok: false, status: 'failed', message: '无法读取源视频，禁止空成功' };
     }
 
     const hasFfmpeg = await this.checkFfmpeg();
@@ -747,7 +1012,7 @@ export class MontageService {
       return {
         ok: false,
         status: 'failed',
-        message: '未检测到 FFmpeg，无法转换深度视频。请安装 FFmpeg 后重试。',
+        message: '未检测到 FFmpeg，无法转换深度视频。请安装 FFmpeg 后重试，禁止空成功',
       };
     }
 
@@ -769,6 +1034,14 @@ export class MontageService {
         ok: false,
         status: 'failed',
         message: `深度视频转换失败：${String(e).slice(0, 240)}`,
+      };
+    }
+
+    if (!existsSync(outPath)) {
+      return {
+        ok: false,
+        status: 'failed',
+        message: '深度视频产物未写出，禁止空成功',
       };
     }
 
@@ -838,10 +1111,10 @@ export class MontageService {
   ): Promise<{ ok: boolean; srtContent: string; cues: { start: number; end: number; text: string }[] }> {
     const local = resolveMediaUrl(sourceUrl);
     if (!local || !existsSync(local)) {
-      throw new ServiceUnavailableException('无法读取音频/视频文件');
+      throw new ServiceUnavailableException('无法读取音频/视频文件，禁止空成功');
     }
     const apiKey = this.settings.getRaw().primaryApiKey || '';
-    if (!apiKey) throw new ServiceUnavailableException('API key 未配置');
+    if (!apiKey) throw new ServiceUnavailableException('API key 未配置，禁止空成功');
 
     const form = new FormData();
     const blob = new Blob([readFileSync(local)], { type: 'audio/mpeg' }) as Blob & { name?: string };
@@ -858,9 +1131,12 @@ export class MontageService {
     });
     if (!res.ok) {
       const text = await res.text();
-      throw new ServiceUnavailableException(`Whisper 转写失败: ${text.slice(0, 200)}`);
+      throw new ServiceUnavailableException(`Whisper 转写失败: ${text.slice(0, 200)}，禁止空成功`);
     }
     const srtContent = await res.text();
+    if (!String(srtContent ?? '').trim()) {
+      throw new ServiceUnavailableException('语音转字幕结果为空，禁止空成功');
+    }
 
     const cues: { start: number; end: number; text: string }[] = [];
     const blockRegex = /(\d+)\n(\d{2}:\d{2}:\d{2},\d{3}) --> (\d{2}:\d{2}:\d{2},\d{3})\n([\s\S]*?)(?=\n\n|\n*$)/g;
@@ -881,4 +1157,30 @@ function srtToMs(timestamp: string): number {
   const [h, m, s] = timestamp.split(':');
   const [sec, ms] = s!.split(',');
   return Number(h) * 3600000 + Number(m) * 60000 + Number(sec) * 1000 + Number(ms);
+}
+
+/** 从 LLM 输出中稳健提取 JSON 对象（剥离代码围栏；失败再尝试截取首个 {…}） */
+function extractJsonFromLlm(text: string): Record<string, unknown> | null {
+  const t = (text ?? '').trim();
+  if (!t) return null;
+  const fenced = t.match(/```(?:json)?\s*([\s\S]*?)```/);
+  const candidate = fenced ? fenced[1].trim() : t;
+  try {
+    const parsed = JSON.parse(candidate);
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : null;
+  } catch {
+    const start = candidate.indexOf('{');
+    const end = candidate.lastIndexOf('}');
+    if (start < 0 || end <= start) return null;
+    try {
+      const parsed = JSON.parse(candidate.slice(start, end + 1));
+      return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+        ? (parsed as Record<string, unknown>)
+        : null;
+    } catch {
+      return null;
+    }
+  }
 }

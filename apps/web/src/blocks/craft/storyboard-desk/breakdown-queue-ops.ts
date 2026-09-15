@@ -23,8 +23,9 @@ import {
   stripEpisodeConfirmation,
 } from '../../../engine/storyboard-desk-runner';
 import { runProductionScriptBreakdownForEpisodes, stableSourceResultEpisodeId } from '../../../engine/script-breakdown-runner';
+import { breakdownNewOnlyLabel } from '../../../engine/breakdown-labels';
 import { runStoryboardPreflight } from '../../../engine/asset-readiness';
-import { useToast } from '../../../stores/toast';
+import { toastError, useToast } from '../../../stores/toast';
 import { askConfirm } from '../../../stores/confirm-dialog';
 import { api } from '../../../api/client';
 import { type StudioTab } from './helpers';
@@ -131,9 +132,15 @@ export function useStoryboardBreakdownQueueOps(deps: StoryboardBreakdownQueueDep
   }, [applyBreakdownPayload, local, props.id, updateNodeData, upstream]);
 
   /** 主路径：从编剧台 confirmed package 拆镜 */
-  const breakdownFromPackage = useCallback(async (_episodeIndex?: number, multiEpisode?: boolean) => {
+  const breakdownFromPackage = useCallback(async (
+    _episodeIndex?: number,
+    multiEpisode?: boolean,
+    opts?: { skipOverwriteConfirm?: boolean },
+  ) => {
     if (!upstreamPackage) {
-      appendLog('分镜台：上游无编剧台成稿包');
+      const msg = '分镜台：上游无编剧台成稿包，禁止空成功';
+      appendLog(msg);
+      toastError(msg);
       return;
     }
     const gate = runStoryboardPreflight(readiness, preflightMode);
@@ -155,7 +162,7 @@ export function useStoryboardBreakdownQueueOps(deps: StoryboardBreakdownQueueDep
         variant: 'info',
       });
     }
-    if (local && flattenScriptBreakdownShots(local).length > 0) {
+    if (!opts?.skipOverwriteConfirm && local && flattenScriptBreakdownShots(local).length > 0) {
       const hasConfirmed = confirmedEpisodeIds.length > 0;
       const ok = await askConfirm({
         title: hasConfirmed ? '重拆将清空确认状态并覆盖镜表' : '已有镜表将被覆盖',
@@ -190,7 +197,7 @@ export function useStoryboardBreakdownQueueOps(deps: StoryboardBreakdownQueueDep
           )?.scriptBreakdown as ScriptBreakdownPayload | undefined,
           signal: controller.signal,
         });
-        if (epoch === breakdownEpochRef.current) appendLog('从成稿拆镜完成');
+        if (epoch === breakdownEpochRef.current) appendLog('拆镜完成');
       }
       if (epoch === breakdownEpochRef.current && !controller.signal.aborted) {
         useToast.getState().dismiss('sb-breakdown-bg');
@@ -206,7 +213,7 @@ export function useStoryboardBreakdownQueueOps(deps: StoryboardBreakdownQueueDep
         useToast.getState().dismiss('sb-breakdown-bg');
       } else {
         const msg = e instanceof Error ? e.message : String(e);
-        appendLog(`[SB_BREAKDOWN_FAIL] 从成稿拆镜失败：${msg}`);
+        appendLog(`[SB_BREAKDOWN_FAIL] 拆镜失败：${msg}`);
         useToast.getState().dismiss('sb-breakdown-bg');
         await offerReturnAfterBreakdown('fail', msg);
       }
@@ -220,8 +227,18 @@ export function useStoryboardBreakdownQueueOps(deps: StoryboardBreakdownQueueDep
   /** 增量补拆：按用户指定的文本补拆镜并合并进现有镜表 */
   const runIncrementalBreakdown = useCallback(async () => {
     const text = incrementalText.trim();
-    if (!text) { appendLog('分镜台：请输入待补拆的文本'); return; }
-    if (!upstreamPackage) { appendLog('分镜台：上游无编剧台成稿包'); return; }
+    if (!text) {
+      const msg = '分镜台：请输入待补拆的文本，禁止空成功';
+      appendLog(msg);
+      toastError(msg);
+      return;
+    }
+    if (!upstreamPackage) {
+      const msg = '分镜台：上游无编剧台成稿包，禁止空成功';
+      appendLog(msg);
+      toastError(msg);
+      return;
+    }
     const gate = runStoryboardPreflight(readiness, preflightMode);
     if (gate.blocking) {
       appendLog(`分镜台：硬预检阻断增量补拆 · ${gate.reason ?? '设定未就绪'}`);
@@ -249,14 +266,16 @@ export function useStoryboardBreakdownQueueOps(deps: StoryboardBreakdownQueueDep
         prompts: pro ? normalizeScriptBreakdownPrompts(pro) : undefined,
       }, { signal: incAbort.signal });
       if (incAbort.signal.aborted) { appendLog('增量补拆已取消 · 镜表不变'); return; }
-      if (!result.ok || !result.payload) throw new Error('API 返回异常');
+      if (!result.ok || !result.payload) throw new Error('拆镜 API 未返回有效镜表，禁止空成功');
       const incremental = result.payload;
       const existing = payload ?? { version: 1, title: '', sourceText: '', generatedAt: new Date().toISOString(), episodes: [] };
       const merged = mergeIncrementalBreakdown(existing, incremental);
       const existingShotIds = new Set(flattenScriptBreakdownShots(existing).map((s) => s.id));
       const newShots = flattenScriptBreakdownShots(merged).filter((s) => !existingShotIds.has(s.id));
       if (newShots.length === 0) {
-        appendLog('增量补拆：未检出可比对的新镜，镜表不变');
+        const msg = '增量补拆：未检出可比对的新镜，镜表不变，禁止空成功';
+        appendLog(msg);
+        toastError(msg);
         setIncrementalText('');
         setStudioTab('grid');
         return;
@@ -298,6 +317,7 @@ export function useStoryboardBreakdownQueueOps(deps: StoryboardBreakdownQueueDep
       } else {
         const msg = e instanceof Error ? e.message : String(e);
         appendLog(`[SB_BREAKDOWN_FAIL] 增量补拆失败：${msg}`);
+        toastError(`增量补拆失败：${msg}`);
       }
     } finally {
       if (incrementalAbortRef.current === incAbort) incrementalAbortRef.current = null;
@@ -456,7 +476,9 @@ export function useStoryboardBreakdownQueueOps(deps: StoryboardBreakdownQueueDep
       if (!body) {
         initQs.errors[ep.id] = '该集正文为空';
         initQs.results[ep.id] = false;
-        appendLog(`[SB_BREAKDOWN_FAIL] 分镜台 · 第 ${idx + 1} 集拆镜失败：该集正文为空`);
+        const emptyMsg = `分镜台 · 第 ${idx + 1} 集拆镜失败：该集正文为空，禁止空成功`;
+        appendLog(`[SB_BREAKDOWN_FAIL] ${emptyMsg}`);
+        toastError(emptyMsg);
         idx++;
         initQs.index = idx;
         if (idx >= episodes.length) initQs.status = 'done';
@@ -577,6 +599,18 @@ export function useStoryboardBreakdownQueueOps(deps: StoryboardBreakdownQueueDep
     setQueueProgress(final);
     appendLog(`分镜台 · 队列完成 · 成功 ${final.succeeded} · 失败 ${final.failed} · 跳过 ${final.skipped}`);
     setQueueCurrentTitle('');
+    // P0-2: 全部失败时必须抛错，让外层走 fail 分支留在拆镜页——
+    // 否则外层当成功处理，会把用户甩到空镜表页，失败原因被藏进队列
+    if (final.failed > 0 && final.succeeded === 0) {
+      const firstError = final.errorList[0]?.error ?? '上游生成失败';
+      throw new Error(`共 ${final.failed} 集拆镜失败：${firstError}，禁止空成功`);
+    }
+    if (final.failed > 0) {
+      useToast.getState().push({
+        message: `拆镜完成 · 成功 ${final.succeeded} · 失败 ${final.failed}（失败详情见「拆镜」页队列）`,
+        variant: 'error',
+      });
+    }
   }, [props.id, props.data, upstreamPackage, updateNodeData, getNodes, appendLog, buildProgress]);
 
   /** B-05: 重试失败集 */
@@ -588,17 +622,22 @@ export function useStoryboardBreakdownQueueOps(deps: StoryboardBreakdownQueueDep
     void runQueueForEpisodes(failedEps);
   }, [queueState.errors, upstreamPackage, runQueueForEpisodes]);
 
-  /** 只拆上游新增集，保留已有镜表（不 replaceAll）；本地空台请走从成稿拆镜 */
+  /** 只拆上游新增集，保留已有镜表（不 replaceAll）；本地空台请走「拆镜」 */
   const breakdownNewEpisodesOnly = useCallback(async () => {
-    if (!upstreamPackage) { appendLog('分镜台：上游无编剧台成稿包'); return; }
+    if (!upstreamPackage) {
+      const msg = '分镜台：上游无编剧台成稿包，禁止空成功';
+      appendLog(msg);
+      toastError(msg);
+      return;
+    }
     if (!hasLocalBreakdownEpisodes) {
-      appendLog('分镜台：本地尚无镜表，改走从成稿拆镜');
+      appendLog('分镜台：本地尚无镜表，改走拆镜');
       await breakdownFromPackage();
       return;
     }
     const newEps = missingUpstreamEpisodes;
     if (newEps.length === 0) {
-      appendLog('分镜台：没有新增集可拆（若旧集正文有变，请用「仅重拆未确认」或「全量重拆」）');
+      appendLog('分镜台：没有新增集可拆（若旧集正文有变，请用「仅重拆未确认」或「全量重拆」），禁止空成功');
       useToast.getState().push({
         message: '没有新增集。旧集有改动时请用「仅重拆未确认」或「全量重拆」',
         variant: 'info',
@@ -625,9 +664,9 @@ export function useStoryboardBreakdownQueueOps(deps: StoryboardBreakdownQueueDep
     }
     const titles = newEps.map((ep) => ep.title || `第${ep.index}集`).join('、');
     const ok = await askConfirm({
-      title: `只拆新增 ${newEps.length} 集`,
+      title: breakdownNewOnlyLabel(newEps.length),
       description: `将拆：${titles}。已有镜表（第 1…集）会保留，不会覆盖。`,
-      confirmLabel: '开始拆新增',
+      confirmLabel: '开始拆镜',
     });
     if (!ok) return;
     breakdownAbortRef.current?.abort();
@@ -635,11 +674,11 @@ export function useStoryboardBreakdownQueueOps(deps: StoryboardBreakdownQueueDep
     breakdownAbortRef.current = controller;
     const epoch = ++breakdownEpochRef.current;
     setBreakingDown(true);
-    appendLog(`分镜台：只拆新增 ${newEps.length} 集（保留已有镜表）…`);
+    appendLog(`分镜台：${breakdownNewOnlyLabel(newEps.length)}（保留已有镜表）…`);
     try {
       await runQueueForEpisodes(newEps, controller.signal);
       if (epoch === breakdownEpochRef.current && !controller.signal.aborted) {
-        appendLog(`只拆新增集完成 · ${newEps.length} 集`);
+        appendLog(`${breakdownNewOnlyLabel(newEps.length)}完成`);
         useToast.getState().dismiss('sb-breakdown-bg');
         await offerReturnAfterBreakdown('ok');
       }
@@ -677,12 +716,17 @@ export function useStoryboardBreakdownQueueOps(deps: StoryboardBreakdownQueueDep
 
   /** B-04: 仅重拆未确认的集 */
   const breakdownUnconfirmedOnly = useCallback(async () => {
-    if (!upstreamPackage) { appendLog('分镜台：上游无编剧台成稿包'); return; }
+    if (!upstreamPackage) {
+      const msg = '分镜台：上游无编剧台成稿包，禁止空成功';
+      appendLog(msg);
+      toastError(msg);
+      return;
+    }
     const unconfirmedEps = upstreamPackage.screenplay.episodes.filter(
       (ep) => !confirmedEpisodeIds.includes(ep.id),
     );
     if (unconfirmedEps.length === 0) {
-      appendLog('所有集均已确认，无需重拆');
+      appendLog('所有集均已确认，无需重拆，禁止空成功');
       useToast.getState().push({ message: '所有集均已确认，无需重拆', variant: 'info' });
       return;
     }

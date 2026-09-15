@@ -28,6 +28,11 @@ export class ToolsController {
     return this.vision.extractStyle(body.imageUrl ?? '');
   }
 
+  @Post('analyze-faces')
+  analyzeFaces(@Body() body: { imageUrl: string }) {
+    return this.vision.analyzeFaces(body.imageUrl ?? '');
+  }
+
   @Post('quick-montage')
   quickMontage(@Body() body: { topic: string; durationSec?: number }) {
     return this.vision.quickMontage(body.topic ?? '', body.durationSec ?? 30);
@@ -53,7 +58,7 @@ export class ToolsController {
     } catch (e) {
       throw new HttpException(String(e), HttpStatus.BAD_GATEWAY);
     }
-    if (!res.ok) throw new HttpException(`下载失败: ${res.status}`, HttpStatus.SERVICE_UNAVAILABLE);
+    if (!res.ok) throw new HttpException(`下载失败: ${res.status}，禁止空成功`, HttpStatus.SERVICE_UNAVAILABLE);
 
     const contentType = res.headers.get('content-type') ?? '';
     if (/text\/html/i.test(contentType)) {
@@ -67,6 +72,9 @@ export class ToolsController {
       throw new HttpException(platformHint, HttpStatus.UNPROCESSABLE_ENTITY);
     }
     const buf = Buffer.from(await res.arrayBuffer());
+    if (buf.length === 0) {
+      throw new HttpException('采集内容为空，禁止空成功', HttpStatus.UNPROCESSABLE_ENTITY);
+    }
     const stamp = Date.now();
     const rand = Math.random().toString(36).slice(2, 6);
 
@@ -94,7 +102,11 @@ export class ToolsController {
 
     if (!existsSync(folder)) mkdirSync(folder, { recursive: true });
     const name = `capture-${stamp}-${rand}.${ext}`;
-    writeFileSync(join(folder, name), buf);
+    const out = join(folder, name);
+    writeFileSync(out, buf);
+    if (!existsSync(out)) {
+      throw new HttpException('采集产物未写出，禁止空成功', HttpStatus.INTERNAL_SERVER_ERROR);
+    }
 
     return { ok: true, url: `${servePrefix}/${encodeURIComponent(name)}`, filename: name, sourceUrl: src };
   }
@@ -114,10 +126,13 @@ export class ToolsController {
     } catch (e) {
       throw new HttpException(String(e), HttpStatus.BAD_GATEWAY);
     }
-    if (!res.ok) throw new HttpException(`下载失败: ${res.status}`, HttpStatus.SERVICE_UNAVAILABLE);
+    if (!res.ok) throw new HttpException(`下载失败: ${res.status}，禁止空成功`, HttpStatus.SERVICE_UNAVAILABLE);
 
     const contentType = res.headers.get('content-type') ?? '';
     const buf = Buffer.from(await res.arrayBuffer());
+    if (buf.length === 0) {
+      throw new HttpException('下载内容为空，禁止空成功', HttpStatus.UNPROCESSABLE_ENTITY);
+    }
     const stamp = Date.now();
     const rand = Math.random().toString(36).slice(2, 6);
 
@@ -128,7 +143,11 @@ export class ToolsController {
 
     if (!existsSync(PATHS.exports)) mkdirSync(PATHS.exports, { recursive: true });
     const name = `proxy-${stamp}-${rand}.${ext}`;
-    writeFileSync(join(PATHS.exports, name), buf);
+    const out = join(PATHS.exports, name);
+    writeFileSync(out, buf);
+    if (!existsSync(out)) {
+      throw new HttpException('下载产物未写出，禁止空成功', HttpStatus.INTERNAL_SERVER_ERROR);
+    }
 
     return { ok: true, url: `/media/exports/${encodeURIComponent(name)}`, filename: name };
   }
@@ -148,12 +167,12 @@ export class ToolsController {
     } catch (e) {
       throw new HttpException(String(e), HttpStatus.BAD_GATEWAY);
     }
-    if (!res.ok) throw new HttpException(`拉取失败: ${res.status}`, HttpStatus.SERVICE_UNAVAILABLE);
+    if (!res.ok) throw new HttpException(`拉取失败: ${res.status}，禁止空成功`, HttpStatus.SERVICE_UNAVAILABLE);
 
     const json = (await res.json()) as Record<string, unknown>;
     const items = Array.isArray(json) ? json : (json.items as unknown[]) ?? [];
     if (!Array.isArray(items) || items.length === 0) {
-      throw new HttpException('Prompt 包格式无效：需要 JSON 数组或 {items: [...]}', HttpStatus.BAD_REQUEST);
+      throw new HttpException('Prompt 包格式无效：需要 JSON 数组或 {items: [...]}，禁止空成功', HttpStatus.BAD_REQUEST);
     }
 
     const parsed = items.map((item: unknown) => {

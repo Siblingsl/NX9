@@ -1,5 +1,6 @@
 /**
- * DR-07：BGM 真生成未接入，UI 必须诚实标「仅导入」，禁止引导配置后假装可生成。
+ * DR-07：BGM 诚实边界——未配置通道时仅导入、不出现生成按钮；
+ * 已配置 Suno 兼容通道后才提供 AI 生成，禁止配置缺失时假装可生成。
  */
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
@@ -14,18 +15,18 @@ const validationDoc = readFileSync(
   'utf8',
 );
 
-describe('DR-07 BGM 诚实边界（仅导入）', () => {
-  it('音乐模式不提供生成按钮，明示仅导入音频', () => {
-    expect(blockSrc).toContain('BGM 仅支持导入音频');
-    expect(blockSrc).toContain('禁止假成功');
-    expect(blockSrc).not.toContain('生成 BGM');
-    expect(blockSrc).not.toContain('BGM 服务未配置');
-    expect(blockSrc).not.toContain('bgmApiKey');
+describe('DR-07 BGM 诚实边界（未配置仅导入）', () => {
+  it('未配置时明示仅导入；生成按钮由 bgmReady 守卫，不凭空出现', () => {
+    expect(blockSrc).toContain('未配置 BGM 通道');
+    expect(blockSrc).toContain('仅支持导入音频');
+    // 生成入口必须挂在 bgmReady（Base URL + Key 齐备）之后
+    expect(blockSrc).toContain('bgmReady');
+    expect(blockSrc.indexOf('bgmReady')).toBeLessThan(blockSrc.indexOf('AI 生成'));
   });
 
-  it('设置面板 BGM 标为预留，不宣传已可生成', () => {
-    expect(settingsSrc).toContain('真实 BGM 生成 API 未接入');
-    expect(settingsSrc).toContain('仅支持导入音频');
+  it('设置面板标明已接 Suno 兼容协议，且未配置仍仅导入', () => {
+    expect(settingsSrc).toContain('Suno 兼容');
+    expect(settingsSrc).toContain('未配置时声音节点仅支持导入音频');
   });
 
   it('画布 run 的 music 分支仍走真实网关（未接 provider 时明确失败）', () => {

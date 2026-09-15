@@ -1059,6 +1059,12 @@ export function buildShotPrompt(
       };
     }
     prompt = checked.prompt;
+    for (const url of constraint.assetUrls ?? []) {
+      if (url && !referenceImageUrls.includes(url)) {
+        referenceImageUrls.push(url);
+        usedRefs.push('reference-board');
+      }
+    }
   } else if (template) {
     prompt = `${prompt}\n\n[Composition: ${template.name}]\n${template.promptSuffix}`;
   } else if (opts.enforceComposition) {
@@ -1113,7 +1119,7 @@ async function attemptGenerate(
       shotId: shot.id,
       index: shot.index,
       ok: false,
-      error: '缺少上游链镜表写回适配器',
+      error: '缺少上游链镜表写回适配器，禁止空成功',
       prompt: built.prompt,
       attempts: attempt,
       phase: 'failed',
@@ -1177,7 +1183,7 @@ async function attemptGenerate(
       signal: opts.signal,
     });
     const url = urls[0];
-    if (!url) throw new Error('图像生成未返回 URL');
+    if (!url) throw new Error('图像生成未返回 URL，禁止空成功');
 
     const colorCheck = await inspectDirectorKeyframeColor(url, opts.inspectKeyframeColor);
     const reviewMode = opts.reviewMode ?? (opts.blockData?.reviewMode as 'manual' | 'auto' | undefined) ?? 'manual';

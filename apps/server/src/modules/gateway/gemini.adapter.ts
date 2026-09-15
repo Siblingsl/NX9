@@ -289,11 +289,15 @@ export class GeminiAdapter {
           ].join(" "),
         );
       }
-      throw new ServiceUnavailableException(`Gemini 请求异常: ${detail.slice(0, 300)}`);
+        throw new ServiceUnavailableException(`Gemini 请求异常: ${detail.slice(0, 300)}，禁止空成功`);
     }
   }
 
   private saveInlineImage(base64: string, mimeType?: string): string {
+    const raw = (base64 ?? '').trim();
+    if (!raw) {
+      throw new ServiceUnavailableException('Gemini 图片数据为空，禁止空成功');
+    }
     if (!existsSync(PATHS.images)) mkdirSync(PATHS.images, { recursive: true });
     const ext =
       mimeType?.includes('jpeg') || mimeType?.includes('jpg')
@@ -302,7 +306,15 @@ export class GeminiAdapter {
           ? 'webp'
           : 'png';
     const name = `gemini-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
-    writeFileSync(join(PATHS.images, name), Buffer.from(base64, 'base64'));
+    const buf = Buffer.from(raw, 'base64');
+    if (!buf.length) {
+      throw new ServiceUnavailableException('Gemini 图片解码为空，禁止空成功');
+    }
+    const out = join(PATHS.images, name);
+    writeFileSync(out, buf);
+    if (!existsSync(out)) {
+      throw new ServiceUnavailableException('Gemini 图片产物未写出，禁止空成功');
+    }
     return `/media/images/${encodeURIComponent(name)}`;
   }
 
@@ -399,7 +411,7 @@ export class GeminiAdapter {
     const modelPrimary = this.resolveModelId(opts.model);
     const prompt = (opts.prompt || '').trim();
     if (!prompt && !(opts.referenceParts?.length)) {
-      throw new BadRequestException('Gemini 图片 prompt 不能为空');
+      throw new BadRequestException('Gemini 图片 prompt 不能为空，禁止空成功');
     }
 
     const parts: Array<Record<string, unknown>> = [];
@@ -454,14 +466,14 @@ export class GeminiAdapter {
       try {
         json = JSON.parse(text);
       } catch {
-        throw new ServiceUnavailableException(`Gemini 返回非 JSON: ${text.slice(0, 200)}`);
+        throw new ServiceUnavailableException(`Gemini 返回非 JSON: ${text.slice(0, 200)}，禁止空成功`);
       }
 
       const { urls, texts } = this.extractImagesFromUnknown(json);
       if (urls.length === 0) {
         lastErr = texts.length
-          ? `Gemini 未返回图片（仅文本）: ${texts.join(' ').slice(0, 200)}`
-          : 'Gemini generateContent 未返回图片数据';
+          ? `Gemini 未返回图片（仅文本），禁止空成功: ${texts.join(' ').slice(0, 200)}`
+          : 'Gemini generateContent 未返回图片数据，禁止空成功';
         continue;
       }
       return {
@@ -471,7 +483,7 @@ export class GeminiAdapter {
       };
     }
 
-    throw new ServiceUnavailableException(lastErr || 'Gemini generateContent 未返回图片数据');
+    throw new ServiceUnavailableException(lastErr || 'Gemini generateContent 未返回图片数据，禁止空成功');
   }
 
   /**
@@ -486,7 +498,7 @@ export class GeminiAdapter {
     const model = this.resolveModelId(opts.model);
     const prompt = (opts.prompt || '').trim();
     if (!prompt && !(opts.referenceParts?.length)) {
-      throw new BadRequestException('Gemini 图片 prompt 不能为空');
+      throw new BadRequestException('Gemini 图片 prompt 不能为空，禁止空成功');
     }
 
     const input: Array<Record<string, unknown>> = [];
@@ -542,7 +554,7 @@ export class GeminiAdapter {
     try {
       json = JSON.parse(text);
     } catch {
-      throw new ServiceUnavailableException(`Gemini Interactions 返回非 JSON: ${text.slice(0, 200)}`);
+      throw new ServiceUnavailableException(`Gemini Interactions 返回非 JSON: ${text.slice(0, 200)}，禁止空成功`);
     }
 
     const { urls, texts } = this.extractImagesFromUnknown(json);
@@ -556,8 +568,8 @@ export class GeminiAdapter {
     if (urls.length === 0) {
       throw new ServiceUnavailableException(
         texts.length
-          ? `Gemini 未返回图片（仅文本）: ${texts.join(' ').slice(0, 200)}`
-          : 'Gemini Interactions 未返回图片数据',
+          ? `Gemini 未返回图片（仅文本），禁止空成功: ${texts.join(' ').slice(0, 200)}`
+          : 'Gemini Interactions 未返回图片数据，禁止空成功',
       );
     }
     return {
@@ -575,7 +587,7 @@ export class GeminiAdapter {
     n?: number;
   }): Promise<{ urls: string[]; text?: string; model: string }> {
     const prompt = (opts.prompt || '').trim();
-    if (!prompt) throw new BadRequestException('Imagen prompt 不能为空');
+    if (!prompt) throw new BadRequestException('Imagen prompt 不能为空，禁止空成功');
     const model = opts.model.startsWith('imagen-')
       ? opts.model
       : 'imagen-4.0-generate-001';
@@ -607,11 +619,11 @@ export class GeminiAdapter {
     try {
       json = JSON.parse(text);
     } catch {
-      throw new ServiceUnavailableException(`Imagen 返回非 JSON: ${text.slice(0, 200)}`);
+      throw new ServiceUnavailableException(`Imagen 返回非 JSON: ${text.slice(0, 200)}，禁止空成功`);
     }
     const { urls, texts } = this.extractImagesFromUnknown(json);
     if (urls.length === 0) {
-      throw new ServiceUnavailableException('Imagen 未返回图片数据');
+      throw new ServiceUnavailableException('Imagen 未返回图片数据，禁止空成功');
     }
     return {
       urls,

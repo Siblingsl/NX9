@@ -275,11 +275,11 @@ describe('F-030 acceptance', () => {
       expect(export_ready(ctx)).toBe(false);
     });
 
-    it('export-pack 有时间线返回 true', () => {
+    it('export-pack 仅有时间线不算 ready（须真产物）', () => {
       const ctx = emptyCtx({
         nodes: [{ id: 'ep', type: 'export-pack', data: { timelineDraft: { clips: [{ id: 'c1' }] } } }],
       });
-      expect(export_ready(ctx)).toBe(true);
+      expect(export_ready(ctx)).toBe(false);
     });
 
     it('export-pack 有 episodeUrl 返回 true', () => {
@@ -299,6 +299,13 @@ describe('F-030 acceptance', () => {
     it('export-pack 无产物返回 false', () => {
       const ctx = emptyCtx({
         nodes: [{ id: 'ep', type: 'export-pack', data: {} }],
+      });
+      expect(export_ready(ctx)).toBe(false);
+    });
+
+    it('export-pack 仅 status=success 无 URL 返回 false', () => {
+      const ctx = emptyCtx({
+        nodes: [{ id: 'ep', type: 'export-pack', data: { status: 'success' } }],
       });
       expect(export_ready(ctx)).toBe(false);
     });

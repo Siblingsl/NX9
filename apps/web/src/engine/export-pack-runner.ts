@@ -4,7 +4,7 @@ import { api } from '../api/client';
 import type { StoryboardShot } from '@nx9/shared';
 
 export interface ExportPackInput {
-  mode: 'zip' | 'ffmpeg-episode' | 'hyperframes-episode' | 'remotion-bundle' | 'ecom-pack';
+  mode: 'zip' | 'ffmpeg-episode' | 'hyperframes-episode' | 'remotion-episode' | 'remotion-bundle' | 'ecom-pack';
   prefix: string;
   audioUrl?: string;
   multiEpisode?: boolean;
@@ -28,7 +28,7 @@ export interface ExportPackResult {
   exportReady?: boolean;
 }
 
-const NO_TIMELINE_MSG = '无有效时间线（请先在智能剪辑编排并同步，clips≥1）';
+const NO_TIMELINE_MSG = '无有效时间线（请先在智能剪辑编排并同步，clips≥1），禁止空成功';
 
 async function fetchBlob(url: string): Promise<Blob> {
   if (url.startsWith('/media/')) {
@@ -36,9 +36,9 @@ async function fetchBlob(url: string): Promise<Blob> {
     if (res.ok) return res.blob();
   }
   const proxied = await api.proxyDownload(url);
-  if (!proxied.ok || !proxied.url) throw new Error(`代理下载失败 ${url}`);
+  if (!proxied.ok || !proxied.url) throw new Error(`代理下载失败 ${url}，禁止空成功`);
   const res = await fetch(proxied.url);
-  if (!res.ok) throw new Error(`无法下载 ${proxied.url}`);
+  if (!res.ok) throw new Error(`无法下载 ${proxied.url}，禁止空成功`);
   return res.blob();
 }
 
@@ -53,7 +53,7 @@ function triggerDownload(blob: Blob, filename: string): void {
 export async function runExportPack(input: ExportPackInput): Promise<ExportPackResult> {
   if (input.mode === 'ffmpeg-episode') {
     if (input.shots.length === 0) {
-      return { ok: false, message: '无连接链镜表，无法导出成片', exportReady: false };
+      return { ok: false, message: '无连接链镜表，无法导出成片，禁止空成功', exportReady: false };
     }
     const res = await api.concatEpisode({
       shots: input.shots,
@@ -61,7 +61,9 @@ export async function runExportPack(input: ExportPackInput): Promise<ExportPackR
       title: input.multiEpisode ? `${input.prefix}-multi-ep` : input.prefix,
       audioUrl: input.audioUrl?.trim() || undefined,
     });
-    if (!res.ok) return { ok: false, message: res.message ?? res.status, url: undefined, exportReady: false };
+    if (!res.ok || !res.url) {
+      return { ok: false, message: res.message ?? res.status ?? '成片未返回 URL，禁止空成功', url: undefined, exportReady: false };
+    }
     return { ok: true, url: res.url, exportCount: 1, exportReady: true };
   }
 
@@ -74,9 +76,35 @@ export async function runExportPack(input: ExportPackInput): Promise<ExportPackR
       templateId: 'nx9-vertical-episode',
     });
     if (!res.ok || !res.taskId) {
-      return { ok: false, message: res.status || 'HyperFrames 提交失败', exportReady: false };
+      return { ok: false, message: res.status || 'HyperFrames 提交失败，禁止空成功', exportReady: false };
     }
     return { ok: true, taskId: res.taskId, message: 'submitted', exportReady: false };
+  }
+
+  // SF-14: Remotion 服务端多轨成片（含 VO/BGM/字幕），阻塞轮询至完成
+  if (input.mode === 'remotion-episode') {
+    if (!hasEffectiveTimeline(input.timeline)) {
+      return { ok: false, message: NO_TIMELINE_MSG, exportReady: false };
+    }
+    try {
+      const { renderClipEditorTimeline } = await import('./clip-editor-render');
+      const rendered = await renderClipEditorTimeline(input.timeline!, 'remotion', {
+        title: input.prefix || '短片成片',
+      });
+      return {
+        ok: true,
+        url: rendered.url,
+        taskId: rendered.taskId,
+        exportCount: 1,
+        exportReady: true,
+      };
+    } catch (e) {
+      return {
+        ok: false,
+        message: e instanceof Error ? e.message : String(e),
+        exportReady: false,
+      };
+    }
   }
 
   if (input.mode === 'remotion-bundle') {
@@ -85,6 +113,9 @@ export async function runExportPack(input: ExportPackInput): Promise<ExportPackR
     }
     const { timelineToRemotionStudioBundle } = await import('@nx9/shared');
     const bundle = timelineToRemotionStudioBundle(input.timeline!);
+    if (!bundle.files.length) {
+      return { ok: false, message: 'Remotion 工程包无文件，禁止空成功', exportReady: false };
+    }
     const zip = new JSZip();
     for (const file of bundle.files) {
       zip.file(file.name, file.content);
@@ -96,7 +127,7 @@ export async function runExportPack(input: ExportPackInput): Promise<ExportPackR
 
   if (input.mode === 'ecom-pack') {
     const selected = input.selectedSpecs ?? [];
-    if (selected.length === 0) return { ok: false, message: '请选择至少一个电商规格', exportReady: false };
+    if (selected.length === 0) return { ok: false, message: '请选择至少一个电商规格，禁止空成功', exportReady: false };
     const plan = planEcomPackFiles({
       selectedSpecs: selected,
       pictures: input.pictures,
@@ -105,7 +136,7 @@ export async function runExportPack(input: ExportPackInput): Promise<ExportPackR
     });
     if (plan.files.length === 0) {
       const detail = plan.skipped.map((s) => `${s.specId}: ${s.reason}`).join('；') || '无匹配媒资';
-      return { ok: false, message: `电商包无有效文件（${detail}）`, exportCount: 0, exportReady: false };
+      return { ok: false, message: `电商包无有效文件（${detail}），禁止空成功`, exportCount: 0, exportReady: false };
     }
     const ecomZip = new JSZip();
     let packed = 0;
@@ -122,7 +153,7 @@ export async function runExportPack(input: ExportPackInput): Promise<ExportPackR
     if (packed === 0) {
       return {
         ok: false,
-        message: `电商包下载全部失败（${failed.length} 项）`,
+        message: `电商包下载全部失败（${failed.length} 项），禁止空成功`,
         exportCount: 0,
         exportReady: false,
       };
@@ -143,7 +174,7 @@ export async function runExportPack(input: ExportPackInput): Promise<ExportPackR
 
   const mediaCount = input.pictures.length + input.clips.length + input.sounds.length;
   if (mediaCount === 0) {
-    return { ok: false, message: '无可导出的媒资', exportCount: 0, exportReady: false };
+    return { ok: false, message: '无可导出的媒资，禁止空成功', exportCount: 0, exportReady: false };
   }
 
   const zip = new JSZip();

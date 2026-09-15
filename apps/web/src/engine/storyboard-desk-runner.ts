@@ -271,7 +271,7 @@ export function buildBreakdownDiagnostics(
   const out: StoryboardDiagnostic[] = [];
   const shots = flattenScriptBreakdownShots(payload);
   if (shots.length === 0) {
-    out.push({ level: 'error', code: 'no-shots', message: '镜表为空，请从成稿拆镜或导入旧表' });
+      out.push({ level: 'error', code: 'no-shots', message: '镜表为空，请从成稿拆镜或导入旧表，禁止空成功' });
     return out;
   }
   for (const shot of shots) {
@@ -280,7 +280,7 @@ export function buildBreakdownDiagnostics(
       out.push({
         level: 'warning',
         code: 'empty-content',
-        message: `镜 ${shot.sceneCode || shot.index} 文案/动作/画面皆空`,
+        message: `镜 ${shot.sceneCode || shot.index} 文案/动作/画面皆空，禁止空成功`,
         shotId: shot.id,
       });
     }
@@ -769,8 +769,8 @@ export async function runBreakdownFromPackage(opts: {
   signal?: AbortSignal;
 }): Promise<ScriptBreakdownPayload> {
   const sourceText = assembleScreenplaySourceText(opts.pkg);
-  if (!sourceText) throw new Error('成稿正文为空');
-  if (opts.pkg.status !== 'confirmed') throw new Error('请先在编剧台确认成稿');
+  if (!sourceText) throw new Error('成稿正文为空，禁止空成功');
+  if (opts.pkg.status !== 'confirmed') throw new Error('请先在编剧台确认成稿，禁止空成功');
   if (opts.signal?.aborted) throw new DOMException('拆镜已取消', 'AbortError');
 
   const hash = packageSourceHash(opts.pkg);
@@ -817,10 +817,10 @@ export async function runBreakdownFromPackage(opts: {
       breakdownJob: {
         phase: 'error',
         sourcePackageHash: hash,
-        error: '拆镜未返回有效镜表',
+        error: '拆镜未返回有效镜表，禁止空成功',
       },
     });
-    throw new Error('拆镜未返回有效镜表');
+    throw new Error('拆镜未返回有效镜表，禁止空成功');
   }
 
   applyDeskBreakdown(opts.blockId, live, opts.updateNodeData, {

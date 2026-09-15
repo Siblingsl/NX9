@@ -1,4 +1,5 @@
 import { test, expect, type ConsoleMessage } from '@playwright/test';
+import { createCanvasProject } from './helpers';
 
 test.describe('FACE 定妆出图复现', () => {
   test('新建角色 → 打开捏模台 → 定妆出图', async ({ page }) => {
@@ -17,24 +18,15 @@ test.describe('FACE 定妆出图复现', () => {
       }
     });
 
-    await page.goto('/');
-    await page.waitForLoadState('networkidle');
-    await page.getByRole('button', { name: /新建|New/i }).first().click();
-    await page.getByRole('button', { name: /创建并开始制作/i }).click();
-    await page.waitForTimeout(1200);
-    const canvasBtn = page.getByRole('button', { name: /前往画布/i });
-    if (await canvasBtn.isVisible().catch(() => false)) {
-      await canvasBtn.click();
-    }
-    await page.waitForTimeout(1500);
+    await createCanvasProject(page);
 
     const assetBtn = page.getByRole('button', { name: /素材|素材库/i }).first();
     await assetBtn.click();
     await expect(page.getByRole('dialog', { name: '素材库' })).toBeVisible();
 
     await page.getByRole('button', { name: /新建角色/i }).click();
-    await expect(page.getByRole('button', { name: /打开捏模台/i })).toBeVisible({ timeout: 10_000 });
-    await page.getByRole('button', { name: /打开捏模台/i }).click();
+    await expect(page.getByRole('button', { name: /打开全身捏模台/i })).toBeVisible({ timeout: 10_000 });
+    await page.getByRole('button', { name: /打开全身捏模台/i }).click();
     await expect(page.getByRole('dialog', { name: '捏模台' })).toBeVisible({ timeout: 10_000 });
 
     // 不再等待固定时长：立即点定妆，验证视口就绪闸门（按钮须先等 Scene 报告兼容性）。

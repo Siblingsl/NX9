@@ -159,7 +159,7 @@ export function ScreenplaySupportPanel(props: {
 
   const push = (mode: BiblePushMode) => {
     if (!hasDesk) {
-      toastError('画布上未找到编剧台，无法回写 Bible');
+      toastError('画布上未找到编剧台，无法回写 Bible，禁止空成功');
       return;
     }
     setBusy(true);
@@ -174,7 +174,7 @@ export function ScreenplaySupportPanel(props: {
             ? pushSceneToBiblePackage(pkg, props.sceneItem, mode)
             : null;
       if (!result) {
-        toastError('缺少可推送的库条目');
+        toastError('缺少可推送的库条目，禁止空成功');
         return;
       }
       if (result.action === 'unchanged') {

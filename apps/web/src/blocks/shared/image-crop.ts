@@ -29,7 +29,7 @@ export async function cropImageToBlob(
   canvas.width = sw;
   canvas.height = sh;
   const ctx = canvas.getContext('2d');
-  if (!ctx) throw new Error('Canvas 不可用');
+  if (!ctx) throw new Error('Canvas 不可用，禁止空成功');
   ctx.drawImage(img, sx, sy, sw, sh, 0, 0, sw, sh);
 
   return new Promise((resolve, reject) => {

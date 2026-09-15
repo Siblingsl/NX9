@@ -11,6 +11,7 @@ import {
 import { api } from '../api/client';
 import { FLOW_EDGE_TYPES } from '../engine/flow-edge-types';
 import { useWorkspaceDocument } from '../stores/workspace-document';
+import { toastError } from '../stores/toast';
 
 export type CanvasThemeUISetting = CanvasThemeMode | 'system';
 
@@ -62,7 +63,13 @@ export function CanvasAppearancePanel() {
       setUploading(true);
       try {
         const res = await api.uploadAsset(file);
+        if (!res.url?.trim()) {
+          toastError('画布背景上传失败或未返回 URL，禁止空成功');
+          return;
+        }
         update({ backgroundImageUrl: res.url });
+      } catch (e) {
+        toastError(e instanceof Error ? e.message : '画布背景上传失败，禁止空成功');
       } finally {
         setUploading(false);
         if (inputRef.current) inputRef.current.value = '';

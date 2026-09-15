@@ -43,6 +43,28 @@ describe('TOOL-05 continuity-check', () => {
     expect(block).toContain('resolveContinuityModel');
     expect(block).not.toMatch(/model:\s*'gpt-4o-mini'/);
   });
+
+  it('解析失败时 status=error，禁止空成功假绿', () => {
+    const runner = readFileSync(resolve(webSrc, 'flow-runner-ops/story-ops.ts'), 'utf8');
+    const branch = runner.slice(
+      runner.indexOf("if (kind === 'continuity-check')"),
+      runner.indexOf("if (kind === 'beat-sync')"),
+    );
+    expect(branch).toContain("status: parsed.parseFailed ? 'error' : 'success'");
+    expect(branch).toContain('连贯性检查解析失败，禁止空成功');
+
+    const block = readFileSync(resolve(webSrc, '../blocks/nx9/ContinuityCheckBlock.tsx'), 'utf8');
+    expect(block).toContain("status: parsed.parseFailed ? 'error' : 'success'");
+    expect(block).toContain('连贯性检查解析失败，禁止空成功');
+    expect(block).toContain('连贯性检查：至少需要 2 张图像（上游图片或故事板线稿），禁止空成功');
+    expect(block).toContain('[连贯性] 未找到连线上游分镜台，禁止空成功');
+  });
+
+  it('story-ops 连贯性空前置禁止空成功', () => {
+    const ops = readFileSync(resolve(webSrc, 'flow-runner-ops/story-ops.ts'), 'utf8');
+    expect(ops).toContain('至少需要 2 张上游图像，禁止空成功');
+    expect(ops).toContain('需要上游音频，禁止空成功');
+  });
 });
 
 describe('TOOL-06 inpaint-edit 双路径合一', () => {
@@ -66,6 +88,18 @@ describe('TOOL-06 inpaint-edit 双路径合一', () => {
     );
     expect(ws).toContain('runInpaintEdit');
     expect(ws).toContain('writeBackInpaintShot');
+    expect(ws).toContain('局部重绘：无上游图片，禁止空成功');
+    expect(ws).toContain('局部重绘：请输入 prompt，禁止空成功');
+    expect(ws).toContain('局部重绘：请绘制蒙版，禁止空成功');
+    expect(ws).toContain('toastError');
     expect(ws).not.toContain("model: 'fal-ai/fast-sdxl/inpainting'");
+  });
+
+  it('runInpaintEdit 校验 ok，禁止空成功', () => {
+    const src = readFileSync(resolve(webSrc, 'inpaint-edit-runner.ts'), 'utf8');
+    expect(src).toContain('!res.ok || !res.url');
+    expect(src).toContain('局部重绘：需要上游图片，禁止空成功');
+    expect(src).toContain('局部重绘：请输入 prompt，禁止空成功');
+    expect(src).toContain('重绘失败，禁止空成功');
   });
 });

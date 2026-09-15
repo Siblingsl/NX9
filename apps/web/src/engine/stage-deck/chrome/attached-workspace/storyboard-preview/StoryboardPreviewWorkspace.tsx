@@ -14,6 +14,7 @@ import { useReactFlow } from '@xyflow/react';
 import { normalizeDirectorProject } from '@nx9/director3d';
 import { useDeckUi } from '../../../stores/deck-ui';
 import { useActivityLog } from '../../../../../stores/activity-log';
+import { toastError } from '../../../../../stores/toast';
 import { DIRECTOR_3D_ENABLED } from '../../../../director3d-feature';
 import { openDirector3dStage } from '../../../../director3d-open';
 import { useStoryboardGuidePrefs } from '../../../../../stores/storyboard-guide-prefs';
@@ -204,7 +205,9 @@ export function StoryboardPreviewWorkspace({
       (f) => ids.includes(f.id) && !f.locked && f.status !== 'generating',
     );
     if (unlocked.length === 0) {
-      appendLog('无可重新生成的分镜（已全部锁定或生成中）');
+      const msg = '无可重新生成的分镜（已全部锁定或生成中），禁止空成功';
+      appendLog(msg);
+      toastError(msg);
       return;
     }
     setGenerating(true);

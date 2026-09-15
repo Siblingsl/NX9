@@ -1,7 +1,7 @@
 import { useCallback } from 'react';
 import { useReactFlow } from '@xyflow/react';
 import { ChevronLeft, ChevronRight, Play, Zap } from 'lucide-react';
-import { lookupBlock } from '@nx9/shared';
+import { lookupBlock, resolveRunLabel } from '@nx9/shared';
 import { ComposerWorkspaceShell } from '../composer/ComposerWorkspaceShell';
 import { useAttachedNodeData } from '../generation/use-attached-node-data';
 import { useFlowRuntime } from '../../../../../stores/flow-runtime';
@@ -49,7 +49,7 @@ export function IteratorWorkspace({ blockId, kind, onCollapse }: IteratorWorkspa
       onCollapse={onCollapse}
       onRun={() => runtime?.runSelected([blockId])}
       running={batchRunning}
-      runLabel="运行"
+      runLabel={resolveRunLabel('iterator', batchRunning ? 'running' : status).primary}
       showAi={false}
       showAdvanced={false}
       showHistory={false}
@@ -131,7 +131,7 @@ export function IteratorWorkspace({ blockId, kind, onCollapse }: IteratorWorkspa
             className="flex-1 flex items-center justify-center gap-1 rounded-xl bg-brand text-white py-2 disabled:opacity-50"
           >
             <Play size={14} />
-            运行
+            {resolveRunLabel('iterator', batchRunning ? 'running' : status).primary}
           </button>
           <button
             type="button"

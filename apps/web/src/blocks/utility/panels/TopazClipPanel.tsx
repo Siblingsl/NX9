@@ -3,6 +3,7 @@ import { type NodeProps, useReactFlow } from '@xyflow/react';
 import { BlockShell } from '../../shared/BlockShell';
 import { api } from '../../../api/client';
 import { useActivityLog } from '../../../stores/activity-log';
+import { toastError } from '../../../stores/toast';
 
 function TopazClipBlock(props: NodeProps) {
   const { updateNodeData } = useReactFlow();
@@ -24,7 +25,10 @@ function TopazClipBlock(props: NodeProps) {
 
   const run = useCallback(async () => {
     if (!sourceUrl) {
-      appendLog('Topaz 视频：缺少上游视频');
+      const msg = 'Topaz 视频：缺少上游视频，禁止空成功';
+      updateNodeData(props.id, { status: 'error', error: msg });
+      appendLog(msg);
+      toastError(msg);
       return;
     }
     updateNodeData(props.id, { status: 'running' });
@@ -36,6 +40,7 @@ function TopazClipBlock(props: NodeProps) {
         enableInterpolation: enableFi,
         topazVideoPath: topazPath || undefined,
       });
+      if (!res.ok || !res.url) throw new Error('Topaz 视频处理失败，禁止空成功');
       updateNodeData(props.id, {
         status: 'success',
         videoUrl: res.url,
@@ -44,7 +49,9 @@ function TopazClipBlock(props: NodeProps) {
       appendLog('Topaz 视频处理完成');
     } catch (e) {
       updateNodeData(props.id, { status: 'error', error: String(e) });
-      appendLog(`Topaz 视频失败: ${String(e)}`);
+      const msg = `Topaz 视频失败: ${String(e)}`;
+      appendLog(msg);
+      toastError(msg);
     }
   }, [sourceUrl, upscaleModel, upscaleFactor, enableFi, topazPath, props.id, updateNodeData, appendLog]);
 

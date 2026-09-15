@@ -14,11 +14,30 @@ import type {
   ViewportAspectRatio,
 } from '../schema/directorProject';
 import { emptyDirectorProject } from '../schema/directorProject';
-import { buildCameraPrompt } from '../schema/cameraGeometry';
+import {
+  applyOrbitToCamera,
+  buildCameraPrompt,
+  DEFAULT_PROMPT_DETAILS,
+  type CameraMoveId,
+  type CameraOrbit,
+  type PromptDetailFlags,
+} from '../schema/cameraGeometry';
+import type { PromptPlatformId } from '../schema/promptSkin';
+import { skinCameraPrompt } from '../schema/promptSkin';
 import { loadLocalLibrary, upsertLocalAsset } from '../io/localLibrary';
 
 const CROWD_MAX = 20;
 const UNDO_MAX = 40;
+
+export type StageInteractionMode = 'navigate' | 'subject' | 'camera';
+export type StageViewportLayout = 'single' | 'quad';
+export type StageQuadPane = 'camera' | 'top' | 'left' | 'right';
+export type StageMobileSheet = 'shots' | 'rig' | 'layers' | 'add' | 'env' | 'film' | null;
+
+export interface DollyKeySnapshot {
+  camera: DirectorCameraShot;
+  capturedAt: number;
+}
 
 let idSeq = 0;
 function uid(prefix: string) {
@@ -45,6 +64,18 @@ export type StageDrawer = 'layers' | 'add' | 'env' | null;
 export interface DirectorStoreState {
   viewMode: ViewMode;
   transformMode: TransformMode;
+  interactionMode: StageInteractionMode;
+  viewportLayout: StageViewportLayout;
+  activeQuadPane: StageQuadPane;
+  mobileSheet: StageMobileSheet;
+  cameraMove: CameraMoveId;
+  promptPlatform: PromptPlatformId;
+  promptDetails: PromptDetailFlags;
+  dollyA: DollyKeySnapshot | null;
+  dollyB: DollyKeySnapshot | null;
+  dollyT: number;
+  timelineT: number;
+  timelinePlaying: boolean;
   selectedObjectId: string | null;
   activeDrawer: StageDrawer;
   project: DirectorProject;
@@ -52,6 +83,20 @@ export interface DirectorStoreState {
   crowdMax: number;
   setViewMode: (mode: ViewMode) => void;
   setTransformMode: (mode: TransformMode) => void;
+  setInteractionMode: (mode: StageInteractionMode) => void;
+  setViewportLayout: (layout: StageViewportLayout) => void;
+  setActiveQuadPane: (pane: StageQuadPane) => void;
+  setMobileSheet: (sheet: StageMobileSheet) => void;
+  setCameraMove: (move: CameraMoveId) => void;
+  setPromptPlatform: (platform: PromptPlatformId) => void;
+  setPromptDetail: (key: keyof PromptDetailFlags, on: boolean) => void;
+  setPromptDetails: (patch: Partial<PromptDetailFlags>) => void;
+  setDollyKey: (slot: 'A' | 'B') => void;
+  setDollyT: (t: number) => void;
+  clearDolly: () => void;
+  setTimelineT: (t: number) => void;
+  setTimelinePlaying: (playing: boolean) => void;
+  applyActiveOrbit: (orbit: Partial<CameraOrbit> & { fov?: number; roll?: number }) => void;
   setViewportAspectRatio: (ratio: ViewportAspectRatio) => void;
   setActiveDrawer: (drawer: StageDrawer) => void;
   toggleSceneFlag: (key: 'showGround' | 'showGrid' | 'ruleOfThirds' | 'snapToGrid') => void;
@@ -65,7 +110,12 @@ export interface DirectorStoreState {
   updateCamera: (id: string, patch: Partial<DirectorCameraShot>) => void;
   updateCharacter: (
     id: string,
-    patch: { bodyType?: CharacterBodyType; posePresetId?: string; color?: string },
+    patch: {
+      bodyType?: CharacterBodyType;
+      posePresetId?: string;
+      color?: string;
+      poseJoints?: DirectorObject['poseJoints'];
+    },
   ) => void;
   toggleObjectVisible: (id: string) => void;
   toggleObjectLocked: (id: string) => void;
@@ -81,6 +131,9 @@ export interface DirectorStoreState {
   registerAsset: (asset: DirectorAsset) => void;
   addMeshFromAsset: (assetId: string) => void;
   addCapture: (dataUrl: string, imageUrl?: string) => DirectorCameraCapture | null;
+  frameSelection: () => void;
+  /** 运镜 scrub：不入 undo 栈 */
+  previewActiveCamera: (patch: Partial<DirectorCameraShot>) => void;
 }
 
 function pushUndo(get: () => DirectorStoreState, set: (partial: Partial<DirectorStoreState>) => void) {
@@ -91,6 +144,18 @@ function pushUndo(get: () => DirectorStoreState, set: (partial: Partial<Director
 export const useDirectorStore = create<DirectorStoreState>((set, get) => ({
   viewMode: 'director',
   transformMode: 'translate',
+  interactionMode: 'navigate',
+  viewportLayout: 'single',
+  activeQuadPane: 'camera',
+  mobileSheet: null,
+  cameraMove: 'static',
+  promptPlatform: 'nx9',
+  promptDetails: { ...DEFAULT_PROMPT_DETAILS },
+  dollyA: null,
+  dollyB: null,
+  dollyT: 0,
+  timelineT: 0,
+  timelinePlaying: false,
   selectedObjectId: null,
   activeDrawer: null,
   project: emptyDirectorProject(),
@@ -99,6 +164,97 @@ export const useDirectorStore = create<DirectorStoreState>((set, get) => ({
 
   setViewMode: (mode) => set({ viewMode: mode }),
   setTransformMode: (mode) => set({ transformMode: mode }),
+  setInteractionMode: (mode) => {
+    set({
+      interactionMode: mode,
+      transformMode: mode === 'subject' ? 'translate' : get().transformMode,
+      viewMode: mode === 'camera' ? 'camera' : mode === 'navigate' ? 'director' : get().viewMode,
+      timelinePlaying: false,
+    });
+  },
+  setViewportLayout: (layout) => set({ viewportLayout: layout, mobileSheet: null }),
+  setActiveQuadPane: (pane) => set({ activeQuadPane: pane }),
+  setMobileSheet: (sheet) =>
+    set({
+      mobileSheet: sheet,
+      activeDrawer: sheet === 'layers' || sheet === 'add' || sheet === 'env' ? sheet : get().activeDrawer,
+    }),
+  setCameraMove: (move) => set({ cameraMove: move }),
+  setPromptPlatform: (platform) => set({ promptPlatform: platform }),
+  setPromptDetail: (key, on) =>
+    set((s) => ({ promptDetails: { ...s.promptDetails, [key]: on } })),
+  setPromptDetails: (patch) =>
+    set((s) => ({ promptDetails: { ...s.promptDetails, ...patch } })),
+  setDollyKey: (slot) => {
+    const { project } = get();
+    const cam = project.cameras.find((c) => c.id === project.activeCameraId) ?? project.cameras[0];
+    if (!cam) return;
+    const snap: DollyKeySnapshot = { camera: structuredClone(cam), capturedAt: Date.now() };
+    set(slot === 'A' ? { dollyA: snap, dollyT: 0 } : { dollyB: snap, dollyT: 1 });
+  },
+  setDollyT: (t) => set({ dollyT: Math.min(1, Math.max(0, t)) }),
+  clearDolly: () => set({ dollyA: null, dollyB: null, dollyT: 0 }),
+  setTimelineT: (t) => set({ timelineT: Math.min(1, Math.max(0, t)) }),
+  setTimelinePlaying: (playing) => set({ timelinePlaying: playing }),
+  applyActiveOrbit: (orbit) => {
+    const { project } = get();
+    const id = project.activeCameraId ?? project.cameras[0]?.id;
+    if (!id) return;
+    const cam = project.cameras.find((c) => c.id === id);
+    if (!cam) return;
+    pushUndo(get, set);
+    let next = applyOrbitToCamera(cam, orbit);
+    if (typeof orbit.roll === 'number') {
+      next = {
+        ...next,
+        transform: {
+          ...next.transform,
+          rotation: [next.transform.rotation[0], next.transform.rotation[1], orbit.roll],
+        },
+      };
+    }
+    set((s) => ({
+      project: {
+        ...s.project,
+        cameras: s.project.cameras.map((c) => (c.id === id ? next : c)),
+      },
+    }));
+  },
+  frameSelection: () => {
+    const { project, selectedObjectId } = get();
+    const obj = project.objects.find((o) => o.id === selectedObjectId);
+    const camId = project.activeCameraId ?? project.cameras[0]?.id;
+    if (!obj || !camId) return;
+    const cam = project.cameras.find((c) => c.id === camId);
+    if (!cam) return;
+    pushUndo(get, set);
+    const target: [number, number, number] = [
+      obj.transform.position[0],
+      obj.transform.position[1] + 1.0,
+      obj.transform.position[2],
+    ];
+    const withTarget = { ...cam, target };
+    const next = applyOrbitToCamera(withTarget, { dist: 3.2, el: 8 });
+    set((s) => ({
+      project: {
+        ...s.project,
+        cameras: s.project.cameras.map((c) => (c.id === camId ? next : c)),
+      },
+      viewMode: 'camera',
+      interactionMode: 'camera',
+    }));
+  },
+  previewActiveCamera: (patch) => {
+    const { project } = get();
+    const id = project.activeCameraId ?? project.cameras[0]?.id;
+    if (!id) return;
+    set((s) => ({
+      project: {
+        ...s.project,
+        cameras: s.project.cameras.map((c) => (c.id === id ? { ...c, ...patch } : c)),
+      },
+    }));
+  },
   setActiveDrawer: (drawer) => set({ activeDrawer: drawer }),
 
   setViewportAspectRatio: (ratio) => {
@@ -392,22 +548,30 @@ export const useDirectorStore = create<DirectorStoreState>((set, get) => ({
   },
 
   addCapture: (dataUrl, imageUrl) => {
-    const { project } = get();
+    const { project, cameraMove, promptPlatform, promptDetails } = get();
     const camId = project.activeCameraId;
     if (!camId) return null;
     const camera = project.cameras.find((c) => c.id === camId);
     if (!camera) return null;
+    const subject = project.objects.find((o) => o.kind === 'character' && o.visible);
     pushUndo(get, set);
     const index = camera.captures.length + 1;
+    const basePrompt = buildCameraPrompt(camera, {
+      roll: camera.transform.rotation[2],
+      subjectYawDeg: subject?.transform.rotation[1] ?? 0,
+      move: cameraMove,
+      details: promptDetails,
+    });
     const capture: DirectorCameraCapture = {
       id: uid('cap'),
       index,
       name: `帧 ${String(index).padStart(2, '0')}`,
       dataUrl,
       imageUrl,
-      cameraPrompt: buildCameraPrompt(camera),
-      cameraPosition: camera.transform.position,
-      cameraRotation: camera.transform.rotation,
+      cameraPrompt: skinCameraPrompt(basePrompt, promptPlatform, cameraMove),
+      cameraPosition: [...camera.transform.position] as [number, number, number],
+      cameraTarget: [...camera.target] as [number, number, number],
+      cameraRotation: [...camera.transform.rotation] as [number, number, number],
       cameraFov: camera.fov,
       createdAt: Date.now(),
     };

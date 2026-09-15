@@ -45,6 +45,68 @@ export interface TimelineClip {
    * 配音/对白 clip 优先写此字段，便于 unused / 重绑 / 替换源音。
    */
   soundAssetId?: string | null;
+  /** 片段视觉效果（模糊等）；预览与成片共用 */
+  effects?: TimelineClipEffects;
+  /** 属性关键帧动画；预览与成片共用 */
+  animations?: TimelineClipAnimations;
+  /** 片段蒙版；预览与成片共用 */
+  mask?: TimelineClipMask;
+  /** CSS mix-blend-mode（normal/multiply/screen/overlay…）；缺省 normal */
+  blendMode?: string;
+}
+
+/** 片段级视觉效果；预览与 Remotion 成片共用同一字段 */
+export interface TimelineClipEffects {
+  /** 高斯模糊半径（px），0/缺省 = 不模糊 */
+  blur?: number;
+}
+
+/** 画布背景：预览与成片共用；缺省为纯黑 */
+export interface TimelineBackground {
+  kind: 'color' | 'gradient';
+  /** kind=color 时生效 */
+  color?: string;
+  /** kind=gradient 时生效 */
+  gradientFrom?: string;
+  gradientTo?: string;
+}
+
+/** 属性动画关键帧；atSec 相对片段起点 */
+export interface TimelineAnimKeyframe {
+  atSec: number;
+  value: number;
+  /** 缓动；缺省 linear */
+  ease?: 'linear' | 'ease-in' | 'ease-out' | 'ease-in-out';
+}
+
+/** 片段属性随时间动画（预览与 Remotion 成片共用同一字段） */
+export interface TimelineClipAnimations {
+  /** 0–1 */
+  opacity?: TimelineAnimKeyframe[];
+  /** 画布百分比锚点 0–100（仅 overlay 位姿使用） */
+  x?: TimelineAnimKeyframe[];
+  y?: TimelineAnimKeyframe[];
+  /** 缩放 0.2–3（所有视觉片段可用，以画布中心为锚） */
+  scale?: TimelineAnimKeyframe[];
+  /** 旋转角度（仅 overlay 位姿使用） */
+  rotation?: TimelineAnimKeyframe[];
+}
+
+export type TimelineMaskKind = 'rect' | 'ellipse' | 'diamond' | 'heart' | 'cinematic';
+
+/** 片段级蒙版：x/y 为形状中心（画布百分比），w/h 为宽高（画布百分比） */
+export interface TimelineClipMask {
+  kind: TimelineMaskKind;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  /** 旋转角度 */
+  rotation?: number;
+  /** 羽化（画布百分比单位 0–10）；diamond/heart 走 SVG 高斯模糊蒙版 */
+  feather?: number;
+  /** 描边（画布百分比单位），0 = 无 */
+  stroke?: number;
 }
 
 /** v3 轨道类型：字幕/贴片从 video 中分出 */
@@ -70,6 +132,8 @@ export interface TimelinePayload {
   width: number;
   height: number;
   tracks: TimelineTrack[];
+  /** 画布背景（颜色/渐变）；缺省纯黑 */
+  background?: TimelineBackground;
   renderPreset?: 'ffmpeg-fast' | 'hyperframes-vertical' | 'remotion-studio';
   metadata?: {
     episodeId?: string;

@@ -334,8 +334,10 @@ export { enrichPromptWithEnvironment, buildEnvironmentContextPrompt } from './ut
 export type { ConsistencyIssue, ConsistencyReport } from './utils/consistency-repair';
 export { buildBridgeContinuationPrompt, type ContinuationInput } from './utils/seedance-continuation';
 
-export { buildTimelineFromShots, buildTimelineFromShotsV2, type TranscribeCue, type ShotInput } from './utils/timeline-export';
-export type { TimelineClip, TimelineTrack, TimelineTrackKind, TimelinePayload, TimelineAspect, TimelineTransition, TimelineVolumeKeyframe } from './types/timeline';
+export { buildTimelineFromShots, buildTimelineFromShotsV2, buildSubtitleClipsFromCues, type TranscribeCue, type ShotInput, type SubtitleBuildResult } from './utils/timeline-export';
+export { computeClipTransition, transitionFadesOut, type ClipTransitionStyle, type ClipTransitionResult } from './utils/timeline-transitions';
+export { heartPolygonPoints, diamondPolygonPoints, toClipPathPolygon, toSvgPolygonPoints, polygonFeatherMask, isPolygonMaskKind, type MaskPoint } from './utils/timeline-mask';
+export type { TimelineClip, TimelineTrack, TimelineTrackKind, TimelinePayload, TimelineAspect, TimelineTransition, TimelineVolumeKeyframe, TimelineClipEffects, TimelineBackground, TimelineAnimKeyframe, TimelineClipAnimations, TimelineClipMask, TimelineMaskKind } from './types/timeline';
 export { migrateTimelinePayload, computeTimelineDuration } from './utils/timeline-migrate';
 export {
   applyTimelineOp,
@@ -344,6 +346,7 @@ export {
   listTimelineMediaUrls,
   calibrateTimelineWithDurations,
   nextTrackId,
+  clampStartToTrackGap,
   MIN_CLIP_SEC,
   type TimelineOp,
   type ClipLocation,
@@ -356,6 +359,15 @@ export {
   clampClipVolume,
   sortVolumeKeyframes,
 } from './utils/timeline-volume';
+export {
+  sampleAnimKeyframes,
+  sampleClipAnimation,
+  sortAnimKeyframes,
+  upsertAnimKeyframe,
+  removeAnimKeyframe,
+  splitAnimKeyframes,
+  ANIM_DEFAULTS,
+} from './utils/timeline-anim';
 export { FIXTURE_TIMELINE_V2, FIXTURE_SHOTS_FOR_TIMELINE } from './utils/fixtures-timeline';
 export {
   parseTimelineDraft,
@@ -447,6 +459,8 @@ export {
   buildMediaPinNodeData,
   parseMediaPinPayload,
   resolveMediaPinKind,
+  resolveMediaPinItems,
+  syncMediaPinNodeFields,
   guessMediaPinKindFromUrl,
   guessMediaPinKindFromFile,
   isMediaPinDropFile,
@@ -457,6 +471,7 @@ export {
   type MediaPinSource,
   type MediaPinKind,
   type MediaPinNodeData,
+  type MediaPinItem,
 } from './utils/media-pin';
 
 export {
@@ -947,6 +962,7 @@ export {
 } from './utils/script-consistency';
 export {
   resolveRunLabel,
+  listedRunLabelKinds,
   type RunLabelDict,
 } from './utils/run-labels';
 export {
@@ -965,6 +981,23 @@ export {
   type EcomPackFilePlan,
   type EcomPackPlanResult,
 } from './utils/ecom-specs';
+export {
+  LINK_PARSER_PLATFORMS,
+  detectLinkParserPlatform,
+  isSupportedLinkParserUrl,
+  formatLinkParserSupportedLabel,
+  mapLinkParseErrorCode,
+  classifyLinkParserUrl,
+  type LinkParserPlatform,
+  type LinkParseErrorCode,
+} from './utils/link-parser-platforms';
+export {
+  resolveUsageWorkspaceId,
+  filterUsageByWorkspace,
+  aggregateUsageSummary,
+  aggregateUsageDaily,
+  type UsageEventLike,
+} from './utils/usage-aggregate';
 export {
   validatePoseCommand,
   poseCommandSummary,
@@ -990,6 +1023,9 @@ export {
   CLIP_GEN_MODE_CONFIGS,
   lookupClipGenMode,
   isClipGenModeAvailable,
+  isSeedanceModel,
+  normalizeClipGenVideoModeData,
+  SEEDANCE_MODEL_ID,
   type ClipGenMode,
   type ClipGenModeConfig,
 } from './utils/seedance-bridge';
@@ -1059,10 +1095,18 @@ export {
   has_reference_board,
   has_viral_output,
   has_timeline_draft,
+  has_sound_assets,
+  has_timeline_confirmed,
   consistency_resolved,
   export_ready,
 } from './utils/playbook-readiness';
-export { WORKFLOW_TEMPLATES, type WorkflowTemplate } from './data/workflow-templates';
+export {
+  WORKFLOW_TEMPLATES,
+  listWorkflowTemplates,
+  isWorkflowTemplateListed,
+  type WorkflowTemplate,
+  type WorkflowTemplateStatus,
+} from './data/workflow-templates';
 export {
   PROMPT_TEMPLATES,
   PROMPT_TEMPLATE_CATEGORIES,
@@ -1158,9 +1202,18 @@ export {
   resolvePictureModelForRequest,
   listConnectedPictureModels,
   listConnectedLlmModels,
+  listConnectedVideoModels,
+  listVideoGenModelOptions,
+  lookupVideoGenModelHint,
+  resolveActiveVideoConnectionModel,
+  resolveActiveVideoConnection,
+  normalizeVideoBaseUrl,
+  type ActiveVideoConnection,
   type PictureGenModelDef,
   type ConnectedPictureModelOption,
   type ConnectedLlmModelOption,
+  type ConnectedVideoModelOption,
+  type VideoGenModelOption,
 } from './data/gen-models';
 export {
   PERF,
@@ -1249,6 +1302,10 @@ export {
   DEFAULT_VIDEO_EDIT_PROVIDER,
   resolveVideoEditProvider,
   type VideoEditProviderDef,
+  VIDEO_TRACE_PROVIDERS,
+  DEFAULT_VIDEO_TRACE_PROVIDER,
+  resolveVideoTraceProvider,
+  type VideoTraceProviderDef,
 } from './data/provider-registry';
 
 export {
@@ -1283,6 +1340,9 @@ export {
 export {
   mapVoiceLinesToShots,
   buildVoiceDramaTimeline,
+  estimateVoiceDurationSec,
+  type BuildVoiceDramaOptions,
+  type VoiceDramaConfig,
 } from './utils/voice-drama-orchestrator';
 
 // F-037: 资产库 Bible→定妆/场景图

@@ -253,7 +253,7 @@ export function useStoryboardShotWritebackOps(deps: StoryboardShotWritebackDeps)
     if (!episode) return;
     const willRemainCount = episode.shots.length - selectedShotIds.size;
     if (willRemainCount <= 0) {
-      useToast.getState().push({ message: '不能删除本集全部镜头，请保留至少 1 镜', variant: 'error' });
+      useToast.getState().push({ message: '不能删除本集全部镜头，请保留至少 1 镜，禁止空成功', variant: 'error' });
       return;
     }
     const ok = await confirmDelete({ title: `删除 ${selectedShotIds.size} 镜？`, description: '删除后可用撤销恢复镜表、预览与确认态。', confirmLabel: '确认删除' });

@@ -363,7 +363,7 @@ export class AgentService {
     }, userId)) as { choices?: { message?: { content?: string } }[] };
     const content = res.choices?.[0]?.message?.content ?? '';
     const parsed = extractJsonObject(content);
-    if (!parsed) throw new ServiceUnavailableException('LLM 返回的 JSON 对象无法解析');
+    if (!parsed) throw new ServiceUnavailableException('LLM 返回的 JSON 对象无法解析，禁止空成功');
     return parsed;
   }
 
@@ -373,7 +373,7 @@ export class AgentService {
   ): Promise<{ ok: true; lines: { speaker: string; text: string; emotion?: string }[] }> {
     const source = (text ?? '').trim();
     if (source.length < 20) {
-      throw new BadRequestException('请输入至少 20 字的剧本/对白文本');
+      throw new BadRequestException('请输入至少 20 字的剧本/对白文本，禁止空成功');
     }
 
     const system = this.systemFrom(
@@ -398,7 +398,7 @@ export class AgentService {
     )) as { choices?: { message?: { content?: string } }[] };
 
     const content = res.choices?.[0]?.message?.content ?? '';
-    if (!content) throw new ServiceUnavailableException('LLM 未返回内容');
+    if (!content.trim()) throw new ServiceUnavailableException('LLM 未返回内容，禁止空成功');
 
     const start = content.indexOf('[');
     const end = content.lastIndexOf(']');
@@ -412,7 +412,7 @@ export class AgentService {
         raw = obj.lines ?? [];
       } catch { /* fall */ }
     }
-    if (raw.length === 0) throw new ServiceUnavailableException('LLM 返回格式无法解析');
+    if (raw.length === 0) throw new ServiceUnavailableException('LLM 返回格式无法解析，禁止空成功');
 
     const lines = raw
       .map((item: unknown) => {
@@ -425,7 +425,7 @@ export class AgentService {
       })
       .filter((l) => l.speaker && l.text);
 
-    if (lines.length === 0) throw new ServiceUnavailableException('LLM 未提取到有效对白');
+    if (lines.length === 0) throw new ServiceUnavailableException('LLM 未提取到有效对白，禁止空成功');
 
     return { ok: true, lines: lines.slice(0, 100) };
   }
@@ -436,7 +436,7 @@ export class AgentService {
   ): Promise<{ ok: true; rows: AgentShotScriptRow[] }> {
     const source = (text ?? '').trim();
     if (source.length < 20) {
-      throw new BadRequestException('请输入至少 20 字的小说/章节文本');
+      throw new BadRequestException('请输入至少 20 字的小说/章节文本，禁止空成功');
     }
 
     const system = this.systemFrom(
@@ -462,8 +462,8 @@ export class AgentService {
     )) as { choices?: { message?: { content?: string } }[] };
 
     const content = res.choices?.[0]?.message?.content ?? '';
-    if (!content) {
-      throw new ServiceUnavailableException('LLM 未返回内容');
+    if (!content.trim()) {
+      throw new ServiceUnavailableException('LLM 未返回内容，禁止空成功');
     }
 
     const raw = extractJsonArray(content);
@@ -481,7 +481,7 @@ export class AgentService {
       .slice(0, 50);
 
     if (rows.length === 0) {
-      throw new ServiceUnavailableException('LLM 返回的分镜无法解析，请重试');
+      throw new ServiceUnavailableException('LLM 返回的分镜无法解析，禁止空成功');
     }
 
     return { ok: true, rows };
@@ -513,14 +513,14 @@ export class AgentService {
     )) as { choices?: { message?: { content?: string } }[] };
 
     const content = res.choices?.[0]?.message?.content ?? '';
-    if (!content) throw new ServiceUnavailableException('LLM 未返回内容');
+    if (!content.trim()) throw new ServiceUnavailableException('LLM 未返回内容，禁止空成功');
 
     try {
       const skeleton = JSON.parse(content) as StorySkeleton;
-      if (!skeleton.title || !skeleton.acts) throw new Error('缺少必填字段');
+      if (!skeleton.title || !skeleton.acts) throw new Error('缺少必填字段，禁止空成功');
       return { ok: true, skeleton };
     } catch (e) {
-      throw new ServiceUnavailableException(`骨架解析失败: ${String(e)}`);
+      throw new ServiceUnavailableException(`骨架解析失败，禁止空成功: ${String(e)}`);
     }
   }
 
@@ -551,7 +551,7 @@ export class AgentService {
     )) as { choices?: { message?: { content?: string } }[] };
 
     const content = res.choices?.[0]?.message?.content ?? '';
-    if (!content) throw new ServiceUnavailableException('LLM 未返回内容');
+    if (!content.trim()) throw new ServiceUnavailableException('LLM 未返回内容，禁止空成功');
 
     const raw = extractJsonArray(content);
     const rows: StoryboardTableRow[] = raw
@@ -573,7 +573,7 @@ export class AgentService {
       .filter((r) => r.descriptionZh.length > 0)
       .slice(0, 100);
 
-    if (rows.length === 0) throw new ServiceUnavailableException('LLM 未生成有效分镜表');
+    if (rows.length === 0) throw new ServiceUnavailableException('LLM 未生成有效分镜表，禁止空成功');
     return { ok: true, table: rows };
   }
 
@@ -587,7 +587,7 @@ export class AgentService {
     userId?: string,
   ) {
     const sourceText = String(body.sourceText ?? '').trim();
-    if (sourceText.length < 20) throw new BadRequestException('请输入至少 20 字的小说、剧本或大纲');
+    if (sourceText.length < 20) throw new BadRequestException('请输入至少 20 字的小说、剧本或大纲，禁止空成功');
     const config = normalizeScriptBreakdownConfig(body.config);
     const clientPrompts = normalizeScriptBreakdownPrompts(body.prompts);
     const prompts: ScriptBreakdownPromptTemplates = {
@@ -605,7 +605,7 @@ export class AgentService {
         ),
     };
     const chunks = splitSourceIntoEpisodeChunks(sourceText, config);
-    if (chunks.length === 0) throw new BadRequestException('无法从原文规划分集');
+    if (chunks.length === 0) throw new BadRequestException('无法从原文规划分集，禁止空成功');
     const diagnostics: ScriptBreakdownDiagnostic[] = [];
     // eslint-disable-next-line no-console
     console.log(`[script-breakdown] start · chars=${sourceText.length} · chunks=${chunks.length}`);
@@ -674,7 +674,7 @@ export class AgentService {
         const allowed = new Set(shots.map((shot) => shot.id));
         scenes = scenes.map((scene) => ({ ...scene, shots: scene.shots.filter((shot) => allowed.has(shot.id)) }))
           .filter((scene) => scene.shots.length > 0);
-        if (shots.length === 0) throw new Error('AI 未生成有效镜头');
+        if (shots.length === 0) throw new Error('AI 未生成有效镜头，禁止空成功');
       } catch (error) {
         if (!config.allowRuleFallback) throw error;
         const local = buildScriptBreakdownFromText(chunk.text).episodes[0];
@@ -789,8 +789,16 @@ export class AgentService {
       ],
     }, userId)) as { choices?: { message?: { content?: string } }[] };
     const content = res.choices?.[0]?.message?.content ?? '';
-    if (!content) throw new ServiceUnavailableException('LLM 未返回内容');
-    const adaptation = JSON.parse(content) as AdaptationStrategy;
+    if (!content.trim()) throw new ServiceUnavailableException('LLM 未返回内容，禁止空成功');
+    let adaptation: AdaptationStrategy;
+    try {
+      adaptation = JSON.parse(content) as AdaptationStrategy;
+    } catch {
+      throw new ServiceUnavailableException('改编策略 JSON 无法解析，禁止空成功');
+    }
+    if (!adaptation || typeof adaptation !== 'object') {
+      throw new ServiceUnavailableException('改编策略为空，禁止空成功');
+    }
     return { ok: true, adaptation };
   }
 
@@ -820,7 +828,7 @@ export class AgentService {
       ],
     }, userId)) as { choices?: { message?: { content?: string } }[] };
     const content = res.choices?.[0]?.message?.content ?? '';
-    if (!content) throw new ServiceUnavailableException('LLM 未返回内容');
+    if (!content.trim()) throw new ServiceUnavailableException('LLM 未返回内容，禁止空成功');
     return { ok: true, script: content };
   }
 
@@ -837,7 +845,7 @@ export class AgentService {
       userId,
       onChunk,
     );
-    if (!full.trim()) throw new ServiceUnavailableException('LLM 未返回内容');
+    if (!full.trim()) throw new ServiceUnavailableException('LLM 未返回内容，禁止空成功');
     return full;
   }
 
@@ -860,7 +868,7 @@ export class AgentService {
       ],
     }, userId)) as { choices?: { message?: { content?: string } }[] };
     const content = res.choices?.[0]?.message?.content ?? '';
-    if (!content) throw new ServiceUnavailableException('LLM 未返回内容');
+    if (!content.trim()) throw new ServiceUnavailableException('LLM 未返回内容，禁止空成功');
     return { ok: true, plan: content };
   }
 
@@ -884,13 +892,18 @@ export class AgentService {
       ],
     }, userId)) as { choices?: { message?: { content?: string } }[] };
     const content = res.choices?.[0]?.message?.content ?? '';
-    if (!content) throw new ServiceUnavailableException('LLM 未返回内容');
-    const parsed = JSON.parse(content) as {
+    if (!content.trim()) throw new ServiceUnavailableException('LLM 未返回内容，禁止空成功');
+    let parsed: {
       characters?: Partial<CharacterProfile>[];
       locations?: string[];
       environments?: Array<string | { name?: string; location?: string; title?: string }>;
       scenes?: Array<{ name?: string; location?: string }>;
     };
+    try {
+      parsed = JSON.parse(content) as typeof parsed;
+    } catch {
+      throw new ServiceUnavailableException('资产抽取 JSON 无法解析，禁止空成功');
+    }
     const fromEnv = (parsed.environments ?? [])
       .map((item) => (typeof item === 'string'
         ? item.trim()
@@ -905,10 +918,14 @@ export class AgentService {
       ...fromScenes,
     ];
     const deduped = [...new Set(locations)];
+    const characters = parsed.characters ?? [];
+    if (characters.length === 0 && deduped.length === 0) {
+      throw new ServiceUnavailableException('资产抽取结果为空（无角色与场景），禁止空成功');
+    }
     return {
       ok: true,
       assets: {
-        characters: parsed.characters ?? [],
+        characters,
         locations: deduped,
         environments: parsed.environments ?? deduped,
         scenes: parsed.scenes ?? [],
@@ -936,13 +953,13 @@ export class AgentService {
       ],
     }, userId)) as { choices?: { message?: { content?: string } }[] };
     const content = res.choices?.[0]?.message?.content ?? '';
-    if (!content) throw new ServiceUnavailableException('LLM 未返回内容');
+    if (!content.trim()) throw new ServiceUnavailableException('LLM 未返回内容，禁止空成功');
     const raw = extractJsonArray(content);
     const events = raw.map((item: unknown) => {
       const r = item as Record<string, unknown>;
       return { chapter: Number(r.chapter) || 0, title: String(r.title ?? ''), summary: String(r.summary ?? ''), characters: Array.isArray(r.characters) ? r.characters.map(String) : [] };
     }).filter((e: { chapter: number }) => e.chapter > 0).slice(0, 200);
-    if (events.length === 0) throw new ServiceUnavailableException('LLM 未生成有效事件');
+    if (events.length === 0) throw new ServiceUnavailableException('LLM 未生成有效事件，禁止空成功');
     return { ok: true, events };
   }
 
@@ -963,6 +980,9 @@ export class AgentService {
         characters: s.characters,
         summary: s.content.slice(0, 100),
       }));
+      if (records.length === 0) {
+        throw new BadRequestException('规则拆场未识别到有效场次，禁止空成功');
+      }
       return { ok: true, scenes: records };
     }
 
@@ -985,7 +1005,7 @@ export class AgentService {
     }, userId)) as { choices?: { message?: { content?: string } }[] };
 
     const content = res.choices?.[0]?.message?.content ?? '';
-    if (!content) throw new ServiceUnavailableException('LLM 未返回内容');
+    if (!content.trim()) throw new ServiceUnavailableException('LLM 未返回内容，禁止空成功');
 
     const raw = extractJsonArray(content);
     const scenes: SceneSplitRecord[] = raw
@@ -1006,7 +1026,7 @@ export class AgentService {
       .filter((s: SceneSplitRecord) => s.location.length > 0)
       .slice(0, 50);
 
-    if (scenes.length === 0) throw new ServiceUnavailableException('LLM 未生成有效场次');
+    if (scenes.length === 0) throw new ServiceUnavailableException('LLM 未生成有效场次，禁止空成功');
     return { ok: true, scenes };
   }
 
@@ -1036,7 +1056,7 @@ export class AgentService {
     }, userId)) as { choices?: { message?: { content?: string } }[] };
 
     const content = res.choices?.[0]?.message?.content ?? '';
-    if (!content) throw new ServiceUnavailableException('LLM 未返回内容');
+    if (!content.trim()) throw new ServiceUnavailableException('LLM 未返回内容，禁止空成功');
 
     const raw = extractJsonArray(content);
     const environments = raw
@@ -1056,10 +1076,17 @@ export class AgentService {
       })
       .filter((e: { name: string }) => e.name.length > 0);
 
+    if (environments.length === 0) {
+      throw new ServiceUnavailableException('LLM 未生成有效环境卡，禁止空成功');
+    }
+
     return { ok: true, environments };
   }
 
   async materializeShots(table: StoryboardTableRow[]): Promise<{ ok: true; shots: StoryboardShot[] }> {
+    if (!table.length) {
+      throw new BadRequestException('分镜表为空，禁止空成功');
+    }
     const shots: StoryboardShot[] = table.map((row, i) => ({
       id: `shot-mat-${Date.now()}-${Math.random().toString(36).slice(2, 6)}-${i}`,
       index: i + 1,
@@ -1114,8 +1141,13 @@ export class AgentService {
       ],
     }, userId)) as { choices?: { message?: { content?: string } }[] };
     const content = res.choices?.[0]?.message?.content ?? '';
-    if (!content) throw new ServiceUnavailableException('LLM 未返回内容');
-    const parsed = JSON.parse(content) as Record<string, unknown>;
+    if (!content.trim()) throw new ServiceUnavailableException('LLM 未返回内容，禁止空成功');
+    let parsed: Record<string, unknown>;
+    try {
+      parsed = JSON.parse(content) as Record<string, unknown>;
+    } catch {
+      throw new ServiceUnavailableException('编剧技能 JSON 无法解析，禁止空成功');
+    }
     return {
       ok: true,
       patch: (parsed.patch ?? parsed) as Record<string, unknown>,
@@ -1156,9 +1188,14 @@ export class AgentService {
       userId,
       onChunk,
     );
-    if (!content.trim()) throw new ServiceUnavailableException('LLM 未返回内容');
+    if (!content.trim()) throw new ServiceUnavailableException('LLM 未返回内容，禁止空成功');
     const jsonText = content.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '');
-    const parsed = JSON.parse(jsonText) as Record<string, unknown>;
+    let parsed: Record<string, unknown>;
+    try {
+      parsed = JSON.parse(jsonText) as Record<string, unknown>;
+    } catch {
+      throw new ServiceUnavailableException('编剧技能 JSON 无法解析，禁止空成功');
+    }
     return {
       ok: true,
       patch: (parsed.patch ?? parsed) as Record<string, unknown>,

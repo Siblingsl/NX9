@@ -121,9 +121,54 @@ describe('timeline ops', () => {
     ]);
 
   it('trim 右边缘受素材真实时长约束', () => {
-    const tl = applyTimelineOp(base(), { op: 'trim-clip', clipId: 'c1', edge: 'end', deltaSec: 10 });
+    const lone = makeTimeline([
+      {
+        id: 'V1',
+        kind: 'video',
+        clips: [clip({ id: 'c1', startSec: 0, durationSec: 4, sourceDurationSec: 6 })],
+      },
+    ]);
+    const tl = applyTimelineOp(lone, { op: 'trim-clip', clipId: 'c1', edge: 'end', deltaSec: 10 });
     // source 6s，trimIn 0 → 上限 6s
     expect(findTimelineClip(tl, 'c1')!.clip.durationSec).toBe(6);
+  });
+
+  it('SE-EDIT-01: trim 右边缘不越过同轨下一片段起点', () => {
+    const tl = applyTimelineOp(base(), { op: 'trim-clip', clipId: 'c1', edge: 'end', deltaSec: 10 });
+    // c1 0–4s，c2 从 4s 开始：素材上限 6s 但相邻片段限制为 4s
+    expect(findTimelineClip(tl, 'c1')!.clip.durationSec).toBe(4);
+  });
+
+  it('SE-EDIT-01: trim 左边缘不越过同轨上一片段右边缘', () => {
+    const tl = applyTimelineOp(base(), { op: 'trim-clip', clipId: 'c2', edge: 'start', deltaSec: -10 });
+    // c2 4–8s，上一片段 c1 结束于 4s → 不可向左延伸
+    const c2 = findTimelineClip(tl, 'c2')!.clip;
+    expect(c2.startSec).toBe(4);
+    expect(c2.durationSec).toBe(4);
+  });
+
+  it('SE-EDIT-01: move-clip clamp 到同轨空隙，不与相邻片段重叠', () => {
+    // c3 8–10s 移到 3s：[3,5) 与 c1/c2 重叠 → 就近推入唯一空隙 [8,∞)
+    const tl = applyTimelineOp(base(), { op: 'move-clip', clipId: 'c3', startSec: 3 });
+    const c3 = findTimelineClip(tl, 'c3')!.clip;
+    expect(c3.startSec).toBe(8);
+    // 移入 8s 与 c2 尾相接合法（空隙 [8,∞) 内原位保持）
+    const tl2 = applyTimelineOp(base(), { op: 'move-clip', clipId: 'c3', startSec: 8 });
+    expect(findTimelineClip(tl2, 'c3')!.clip.startSec).toBe(8);
+  });
+
+  it('set-timeline-meta 改画幅/画布背景，background null 清除', () => {
+    const tl0 = applyTimelineOp(base(), {
+      op: 'set-timeline-meta',
+      patch: { aspect: '16:9', width: 1920, height: 1080, background: { kind: 'gradient', gradientFrom: '#000', gradientTo: '#fff' } },
+    });
+    expect(tl0.aspect).toBe('16:9');
+    expect(tl0.width).toBe(1920);
+    expect(tl0.height).toBe(1080);
+    expect(tl0.background?.kind).toBe('gradient');
+    const tl1 = applyTimelineOp(tl0, { op: 'set-timeline-meta', patch: { background: null } });
+    expect(tl1.background).toBeUndefined();
+    expect(tl1.aspect).toBe('16:9'); // 其余字段保持
   });
 
   it('trim 左边缘写 trimInSec 并同步 startSec', () => {

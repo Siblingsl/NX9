@@ -4,9 +4,9 @@ import {
   adoptStoryboardVideoVersion,
   appendStoryboardVideoVersion,
   approveStoryboardVideoShot,
-  CLIP_GEN_MODELS,
   lookupBlock,
   rejectStoryboardVideoShot,
+  resolveRunLabel,
   validateVideoModelParams,
 } from '@nx9/shared';
 import { useReactFlow, useNodes, useEdges } from '@xyflow/react';
@@ -17,6 +17,7 @@ import { useWorkspaceAiLog } from '../../composer/useWorkspaceAiLog';
 import { useDeckUi } from '../../../../stores/deck-ui';
 import { useFlowRuntime } from '../../../../../../stores/flow-runtime';
 import { useActivityLog } from '../../../../../../stores/activity-log';
+import { toastError } from '../../../../../../stores/toast';
 import { usePromptHistory } from '../../../../stores/prompt-history';
 import { useAttachedNodeData } from '../use-attached-node-data';
 import { useLocalNodePrompt } from '../use-local-node-prompt';
@@ -52,6 +53,7 @@ import {
 } from '../../../../../core-pipeline-runner';
 import { api } from '../../../../../../api/client';
 import { setMediaPinDragData } from '../../../../../media-pin-drag';
+import { useConnectedVideoModels } from '../../../../../../hooks/use-connected-video-models';
 
 const EMPTY_HISTORY: { id: string; blockId: string; text: string; savedAt: number }[] = [];
 const VIDEO_MENTION_KINDS: AssetLibraryKind[] = [
@@ -167,7 +169,22 @@ export function VideoWorkspace({ blockId, kind, onCollapse }: VideoWorkspaceProp
     onHistoryPush: pushHistoryDebounced,
   });
 
-  const model = (data.model as string) ?? 'veo';
+  const model = (data.model as string) ?? '';
+  const {
+    options: videoModelOptions,
+    hasConnections: hasVideoConnections,
+    preferredModel,
+    isKnownModel,
+    selectModel: selectVideoModel,
+    openConnectionsSettings,
+  } = useConnectedVideoModels(model);
+
+  useEffect(() => {
+    if (!preferredModel || preferredModel === model) return;
+    if (!hasVideoConnections) return;
+    if (isKnownModel(model)) return;
+    handlePatch({ model: preferredModel });
+  }, [hasVideoConnections, handlePatch, isKnownModel, model, preferredModel]);
   const status = (data.status as string) ?? 'idle';
   const videoGenMode = readVideoGenMode(data);
   const showFrames = showVideoFrameStrip(videoGenMode);
@@ -217,11 +234,13 @@ export function VideoWorkspace({ blockId, kind, onCollapse }: VideoWorkspaceProp
     if (videoGenMode === 'bridge') {
       const source = sourceClipUrl || upstreamClips[0];
       if (!source) {
+        const msg = 'Bridge 续拍需要源视频：请连接上游视频节点或上传源片，禁止空成功';
         updateNodeData(blockId, {
           status: 'error',
-          error: 'Bridge 续拍需要源视频：请连接上游视频节点或上传源片',
+          error: msg,
         });
-        appendLog('Bridge 续拍已阻断：缺少源视频');
+        appendLog('Bridge 续拍已阻断：缺少源视频，禁止空成功');
+        toastError(msg);
         return;
       }
       if (!sourceClipUrl && upstreamClips[0]) {
@@ -269,7 +288,9 @@ export function VideoWorkspace({ blockId, kind, onCollapse }: VideoWorkspaceProp
       if (controller.signal.aborted) {
         appendLog('已停止；已提交的任务可继续查询');
       } else {
-        appendLog(`运行失败: ${String(e)}`);
+        const msg = `运行失败: ${String(e)}`;
+        appendLog(msg);
+        toastError(msg);
       }
     } finally {
       if (runAbortRef.current === controller) runAbortRef.current = null;
@@ -349,20 +370,42 @@ export function VideoWorkspace({ blockId, kind, onCollapse }: VideoWorkspaceProp
             message: undefined,
           });
           appendLog('视频任务已完成');
+        } else if (res.status === 'success' && !res.url) {
+          const msg = '视频任务标成功但未返回 URL，禁止空成功';
+          updateNodeData(blockId, {
+            status: 'error',
+            error: msg,
+          });
+          appendLog('视频任务空成功已拒绝，禁止空成功');
+          toastError(msg);
         } else if (res.status === 'failed') {
-          updateNodeData(blockId, { status: 'error', error: res.message ?? '视频生成任务失败' });
+          const msg = res.message ?? '视频生成任务失败';
+          updateNodeData(blockId, { status: 'error', error: msg });
           appendLog('视频任务失败');
+          toastError(msg);
         } else {
           appendLog('视频仍在生成中，请稍后再查');
         }
       }
     } catch (e) {
+      const msg = `任务查询失败: ${String(e)}`;
       updateNodeData(blockId, { status: 'error', error: String(e) });
-      appendLog(`任务查询失败: ${String(e)}`);
+      appendLog(msg);
+      toastError(msg);
     } finally {
       setResuming(false);
     }
   }, [blockId, pendingTaskCount, hasSinglePending, singleTaskId, data, shots, model, patchChainShotLocal, updateNodeData, appendLog]);
+
+  // VG-10+: 打开工作台时自动查一轮待恢复任务，不再依赖用户记得点「继续查询」
+  const autoResumedRef = useRef(false);
+  useEffect(() => {
+    if (autoResumedRef.current) return;
+    if (pendingTaskCount === 0 && !hasSinglePending) return;
+    autoResumedRef.current = true;
+    appendLog(`检测到 ${pendingTaskCount || 1} 个待恢复视频任务，自动查询中…`);
+    void resumeTasks();
+  }, [pendingTaskCount, hasSinglePending, resumeTasks, appendLog]);
 
   const approveAllVideos = useCallback(() => {
     for (const shot of shots) {
@@ -465,18 +508,18 @@ export function VideoWorkspace({ blockId, kind, onCollapse }: VideoWorkspaceProp
           <span className="text-[9px] text-error">{modelParamsError}</span>
         )}
       </label>
-      {/* F-048: 并发/重试配置单轨 UI */}
+      {/* F-048: 并发/重试唯一配置源（卡面不露，仅工作区） */}
       <div className="border-t border-line/20 pt-2 mt-1 space-y-1.5">
         <p className="text-[9px] text-ink/40 font-medium">批出配置</p>
         <div className="flex items-center gap-3">
           <label className="flex items-center gap-1.5 text-[9px] text-ink/50">
             <span>并发</span>
             <select
-              value={String((data.concurrency as number) ?? 2)}
-              onChange={(e) => handlePatch({ concurrency: Number(e.target.value) })}
+              value={String(Math.min(4, Math.max(1, Number((data.concurrency as number) ?? 2) || 2)))}
+              onChange={(e) => handlePatch({ concurrency: Math.min(4, Math.max(1, Number(e.target.value) || 1)) })}
               className="rounded border border-line/40 px-1 py-0.5 text-[10px]"
             >
-              {[1, 2, 3, 4, 5, 6, 7, 8].map((n) => (
+              {[1, 2, 3, 4].map((n) => (
                 <option key={n} value={n}>{n}</option>
               ))}
             </select>
@@ -505,7 +548,9 @@ export function VideoWorkspace({ blockId, kind, onCollapse }: VideoWorkspaceProp
     ? validateReferenceSlots(playbookState.slots, playbookState.enforce)
     : { ready: true as boolean, reason: undefined as string | undefined };
 
-  const runLabel = playbookAction ? '运行 · 深度复刻' : undefined;
+  const runLabel = playbookAction
+    ? '深度复刻'
+    : resolveRunLabel('clip-gen', data.status === 'running' ? 'running' : undefined).primary;
 
   const playbookTop =
     playbookAction?.needsSlotTools && playbookState ? (
@@ -549,10 +594,20 @@ export function VideoWorkspace({ blockId, kind, onCollapse }: VideoWorkspaceProp
             variant="header"
           />
           <ComposerModelSelect
-            value={model}
-            options={CLIP_GEN_MODELS.map((m) => ({ id: m.id, label: m.label }))}
-            onChange={(v) => handlePatch({ model: v })}
-            width={220}
+            value={model || preferredModel}
+            options={
+              hasVideoConnections
+                ? videoModelOptions.map((m) => ({ id: m.id, label: m.label }))
+                : [{ id: '', label: '请配置视频连接' }]
+            }
+            onChange={(v) => {
+              if (!v) {
+                openConnectionsSettings();
+                return;
+              }
+              void selectVideoModel(v, (id) => handlePatch({ model: id }));
+            }}
+            width={260}
             tone="desk"
           />
         </div>

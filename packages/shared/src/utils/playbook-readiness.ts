@@ -210,6 +210,34 @@ export function has_timeline_draft(ctx: PlaybookReadinessContext): boolean {
   });
 }
 
+/** SF-06: 声音步 — sound-gen 成功且有可播放音频 URL */
+export function has_sound_assets(ctx: PlaybookReadinessContext): boolean {
+  return ctx.nodes.some((node) => {
+    if (node.type !== 'sound-gen') return false;
+    const data = (node.data ?? {}) as Record<string, unknown>;
+    const ok = data.status === 'done' || data.status === 'success';
+    if (!ok) return false;
+    if (typeof data.audioUrl === 'string' && data.audioUrl.trim()) return true;
+    if (Array.isArray(data.sounds) && data.sounds.some((u) => typeof u === 'string' && u.trim())) {
+      return true;
+    }
+    const results = data.results as Array<{ audioUrl?: string }> | undefined;
+    return Array.isArray(results) && results.some((r) => typeof r.audioUrl === 'string' && r.audioUrl.trim());
+  });
+}
+
+/**
+ * F-050 / SF-07: 智能剪辑已有有效时间线，且用户已点确认（节点 data.confirmedAt）。
+ */
+export function has_timeline_confirmed(ctx: PlaybookReadinessContext): boolean {
+  return ctx.nodes.some((node) => {
+    if (node.type !== 'clip-editor') return false;
+    const data = (node.data ?? {}) as Record<string, unknown>;
+    if (!hasEffectiveTimeline(data.timelineDraft as TimelineDraftRaw)) return false;
+    return typeof data.confirmedAt === 'string' && data.confirmedAt.trim().length > 0;
+  });
+}
+
 export function has_character_bibles(ctx: PlaybookReadinessContext): boolean {
   const chars = ctx.characters ?? [];
   if (chars.length === 0) return false;
@@ -261,25 +289,20 @@ export function consistency_resolved(ctx: PlaybookReadinessContext): boolean {
 }
 
 export function export_ready(ctx: PlaybookReadinessContext): boolean {
-  // F-047: 存在 export-pack 且（最近一次 history success 有有效产物 URL，或有效时间线可导）
-  // 禁止仅靠 status 字符串判 ready；必须有实际产物 URL。
-  return ctx.nodes.some(n => {
+  // F-047: 存在 export-pack 且最近一次成功导出有有效产物 URL（history.url 或 episodeUrl）。
+  // 禁止仅靠 status / 空时间线捷径判 ready；时间线就绪另走 has_timeline_*。
+  return ctx.nodes.some((n) => {
     if (n.type !== 'export-pack') return false;
     const data = n.data as Record<string, unknown>;
-    // 检查最近一次 history success 且有有效产物 URL
     const history = data.exportHistory as Array<{ status: string; url?: string }> | undefined;
     if (Array.isArray(history) && history.length > 0 && history[0].status === 'success' && history[0].url) {
       return true;
     }
-    // 检查有效 episodeUrl（实际产物 URL）
     if (data.episodeUrl && typeof data.episodeUrl === 'string' && data.episodeUrl.trim().length > 0) {
       return true;
     }
-    // 检查有效时间线（tracks[].clips 或遗留 clips；含 JSON 字符串）
-    if (hasEffectiveTimeline(data.timelineDraft as TimelineDraftRaw)) {
-      return true;
-    }
     // 禁止：return data?.status === 'done' || data?.status === 'success';
+    // 禁止：仅有 timelineDraft 即 true（会假完成导出步）
     return false;
   });
 }
@@ -300,6 +323,8 @@ export const readinessRegistry: Record<string, ReadinessFn> = {
   has_reference_board,
   has_viral_output,
   has_timeline_draft,
+  has_sound_assets,
+  has_timeline_confirmed,
   canvas_node_done,
   review_gate_passed,
   has_character_refs,

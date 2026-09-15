@@ -118,6 +118,7 @@ export const ImageEditModal = memo(function ImageEditModal({
   const uploadBlob = useCallback(async (blob: Blob, name: string) => {
     const file = new File([blob], name, { type: blob.type || 'image/png' });
     const res = await api.uploadAsset(file);
+    if (!res.url?.trim()) throw new Error('上传失败或未返回 URL，禁止空成功');
     return res.url;
   }, []);
 
@@ -141,7 +142,7 @@ export const ImageEditModal = memo(function ImageEditModal({
     setError('');
     try {
       const res = await api.gridSplit({ sourceUrl: srcUrl, rows, cols });
-      if (!res.urls?.length) throw new Error('宫格切分未返回图片');
+      if (!res.urls?.length) throw new Error('宫格切分未返回图片，禁止空成功');
       await onProduce(res.urls);
       onClose();
     } catch (e) {

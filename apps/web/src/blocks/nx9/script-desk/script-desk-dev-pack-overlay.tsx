@@ -8,6 +8,7 @@ import {
   type ScriptDeskSkillId,
 } from '@nx9/shared';
 import { useDevPromptOverrides } from '../../../stores/dev-prompt-overrides';
+import { toastError } from '../../../stores/toast';
 
 export function ScriptDeskDevPackOverlay({
   pkg: _pkg,
@@ -63,6 +64,7 @@ export function ScriptDeskDevPackOverlay({
       const parsed = JSON.parse(text);
       if (parsed.kind !== 'nx9-script-desk-prompt-pack' || parsed.version !== 1) {
         setTip('非法 Pack 格式，拒绝导入');
+        toastError('非法 Pack 格式，拒绝导入');
         return;
       }
       const skills: Partial<Record<ScriptDeskSkillId, string>> = {};
@@ -75,6 +77,7 @@ export function ScriptDeskDevPackOverlay({
       setTip('导入成功');
     } catch {
       setTip('导入失败：JSON 解析错误');
+      toastError('编剧 Pack 导入失败：JSON 解析错误');
     }
   }, []);
 

@@ -59,7 +59,9 @@ describe('DD-D-05/08 文案与全局回退', () => {
 
   it('DIRECTOR_3D_ENABLED=true 时不再出现“暂未开放”主文案', () => {
     expect(desk).not.toContain('3D 构图（暂未开放）');
-    expect(panel).toContain("director3dEnabled ? '打开 3D 舞台'");
+    // 空态主按钮：启用时「打开 3D 舞台」/「去 3D 重拍」；禁用时「暂未开放」
+    expect(panel).toContain("'打开 3D 舞台'");
+    expect(panel).toContain("'去 3D 重拍'");
     expect(panel).toContain("director3dEnabled ? '3D 机位'");
     expect(preview).toContain("{DIRECTOR_3D_ENABLED ? '3D 导演台' : '3D 暂未开放'}");
   });

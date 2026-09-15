@@ -23,6 +23,7 @@ import {
 } from '@nx9/shared';
 import { useWorkspaceDocument } from '../../../../../stores/workspace-document';
 import { useActivityLog } from '../../../../../stores/activity-log';
+import { toastError } from '../../../../../stores/toast';
 import { api } from '../../../../../api/client';
 import { stripEpisodeConfirmation } from '../../../../storyboard-desk-runner';
 import { resolveUpstreamChainDesk } from '../../../../chain-storyboard-utils';
@@ -567,7 +568,9 @@ export function useStoryboardPreviewState(blockId: string) {
     async (frameId: string) => {
       const pictureNode = connectedPictureNode();
       if (!pictureNode) {
-        appendLog('请先连接图像生成节点（红线连接）');
+        const msg = '请先连接图像生成节点（红线连接），禁止空成功';
+        appendLog(msg);
+        toastError(msg);
         return;
       }
 
@@ -654,6 +657,7 @@ export function useStoryboardPreviewState(blockId: string) {
         });
         updateNodeData(pictureNode.id, { status: 'error', error: String(e) });
         appendLog(`单张重新生成失败: ${String(e)}`);
+        toastError(`单张重新生成失败: ${String(e)}`);
       }
     },
     [activeEpisodeId, appendLog, blockId, connectedPictureNode, getNodes, readBreakdown, readPayload, stripConnectedDeskConfirmation, syncPictureSettingsToExecNode, updateNodeData],
@@ -663,7 +667,9 @@ export function useStoryboardPreviewState(blockId: string) {
     async (onlyMissing = true, frameIds?: string[]) => {
       const pictureNode = connectedPictureNode();
       if (!pictureNode) {
-        appendLog('请先连接图像生成节点（红线连接）');
+        const msg = '请先连接图像生成节点（红线连接），禁止空成功';
+        appendLog(msg);
+        toastError(msg);
         return;
       }
       const pictureData = (pictureNode.data ?? {}) as Record<string, unknown>;
@@ -687,7 +693,11 @@ export function useStoryboardPreviewState(blockId: string) {
         return true;
       });
       if (targets.length === 0) {
-        appendLog(current.frames.length === 0 ? '没有可同步的分镜，请先在故事板确认镜头' : '没有需要生成的分镜');
+        const msg = current.frames.length === 0
+          ? '没有可同步的分镜，请先在故事板确认镜头，禁止空成功'
+          : '没有需要生成的分镜';
+        appendLog(msg);
+        if (current.frames.length === 0) toastError(msg);
         return;
       }
 
@@ -759,12 +769,16 @@ export function useStoryboardPreviewState(blockId: string) {
     async (prompt: string): Promise<string | undefined> => {
       const pictureNode = connectedPictureNode();
       if (!pictureNode) {
-        appendLog('请先连接图像生成节点（顶部能力口）');
+        const msg = '请先连接图像生成节点（顶部能力口），禁止空成功';
+        appendLog(msg);
+        toastError(msg);
         return undefined;
       }
       const scenePrompt = prompt.trim();
       if (!scenePrompt) {
-        appendLog('请先填写 720° 全景场景描述');
+        const msg = '请先填写 720° 全景场景描述，禁止空成功';
+        appendLog(msg);
+        toastError(msg);
         return undefined;
       }
 
@@ -826,6 +840,7 @@ export function useStoryboardPreviewState(blockId: string) {
         updateNodeData(blockId, { status: 'error', error: String(error) });
         updateNodeData(pictureNode.id, { status: 'error', error: String(error) });
         appendLog(`720° 全景生成失败: ${String(error)}`);
+        toastError(`720° 全景生成失败: ${String(error)}`);
         return undefined;
       }
     },
@@ -864,7 +879,9 @@ export function useStoryboardPreviewState(blockId: string) {
         current = readPayload((fresh?.data ?? {}) as Record<string, unknown>);
       }
       if (current.frames.length === 0) {
-        appendLog('没有可评分的关键帧，请先同步并出图');
+        const msg = '没有可评分的关键帧，请先同步并出图，禁止空成功';
+        appendLog(msg);
+        toastError(msg);
         return null;
       }
       updateNodeData(blockId, { status: 'running' });
@@ -900,6 +917,7 @@ export function useStoryboardPreviewState(blockId: string) {
       } catch (e) {
         updateNodeData(blockId, { status: 'error', error: String(e) });
         appendLog(`一致性检查失败: ${String(e)}`);
+        toastError(`一致性检查失败: ${String(e)}`);
         return null;
       }
     },
@@ -954,7 +972,7 @@ export function useStoryboardPreviewState(blockId: string) {
 
       try {
         const res = await api.gridCompose({ imageUrls, rows, cols, labels });
-        if (!res.ok || !res.url) throw new Error('合成失败');
+        if (!res.ok || !res.url) throw new Error('合成失败，禁止空成功');
         patchPayload({
           contactSheetUrl: res.url,
           contactSheetSignature: signature,
@@ -962,7 +980,9 @@ export function useStoryboardPreviewState(blockId: string) {
         appendLog(`关键帧宫格大图已合成 · ${imageUrls.length} 格`);
         return res.url;
       } catch (e) {
-        appendLog(`关键帧宫格合成失败: ${String(e)}`);
+        const msg = `关键帧宫格合成失败: ${String(e)}`;
+        appendLog(msg);
+        toastError(msg);
         return null;
       }
     },

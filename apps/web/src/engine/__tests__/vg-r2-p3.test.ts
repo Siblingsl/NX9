@@ -44,12 +44,13 @@ describe('VG-27/32/33', () => {
     ).toBe(false);
   });
 
-  it('工作台并发 1–8', () => {
+  it('工作台并发钳制 ≤4（F-048）', () => {
     const ws = readFileSync(
       resolve(webSrc, 'stage-deck/chrome/attached-workspace/generation/video/VideoWorkspace.tsx'),
       'utf8',
     );
-    expect(ws).toContain('[1, 2, 3, 4, 5, 6, 7, 8]');
+    expect(ws).toMatch(/\[1,\s*2,\s*3,\s*4\]/);
+    expect(ws).not.toContain('[1, 2, 3, 4, 5, 6, 7, 8]');
   });
 });
 

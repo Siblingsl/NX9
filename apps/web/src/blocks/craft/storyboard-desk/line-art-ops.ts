@@ -28,7 +28,7 @@ import { generateStoryboardFrameImage, resolvePictureGenSettings } from '../../.
 import { runPictureGenJob } from '../../../engine/picture-gen-runner';
 import { applyScriptBreakdownPayload } from '../../../engine/script-breakdown-runner';
 import { api } from '../../../api/client';
-import { toastSuccess, useToast } from '../../../stores/toast';
+import { toastSuccess, toastError, useToast } from '../../../stores/toast';
 import { patchShotInPayload, type StudioTab } from './helpers';
 
 type StoryboardLineArtDeps = {
@@ -154,7 +154,9 @@ export function useStoryboardLineArtOps(deps: StoryboardLineArtDeps) {
       }
       const pictureId = resolveConnectedPictureGenId(props.id, getNodes(), getEdges());
       if (!pictureId) {
-        appendLog('分镜台：请先用顶部能力口连接「图像生成」节点后再生成线稿');
+        const msg = '分镜台：请先用顶部能力口连接「图像生成」节点后再生成线稿，禁止空成功';
+        appendLog(msg);
+        toastError(msg);
         return;
       }
       const pictureNode = getNodes().find((n) => n.id === pictureId);
@@ -267,7 +269,9 @@ export function useStoryboardLineArtOps(deps: StoryboardLineArtDeps) {
         if (singleAbort.signal.aborted) {
           appendLog(`分镜线稿已取消 · ${shot.sceneCode || shot.id}`);
         } else {
-          appendLog(`[SB_LINEART_FAIL] 分镜线稿生成失败: ${String(e)}`);
+          const msg = `分镜线稿生成失败: ${String(e)}`;
+          appendLog(`[SB_LINEART_FAIL] ${msg}`);
+          toastError(msg);
         }
       } finally {
         if (singleLineArtAbortRef.current === singleAbort) singleLineArtAbortRef.current = null;
@@ -327,7 +331,9 @@ export function useStoryboardLineArtOps(deps: StoryboardLineArtDeps) {
     async (scope: 'visible' | 'all' = 'visible') => {
       const pictureId = resolveConnectedPictureGenId(props.id, getNodes(), getEdges());
       if (!pictureId) {
-        appendLog('分镜台：批量线稿前请先连接「图像生成」节点');
+        const msg = '分镜台：批量线稿前请先连接「图像生成」节点，禁止空成功';
+        appendLog(msg);
+        toastError(msg);
         return;
       }
       const pictureNode = getNodes().find((n) => n.id === pictureId);
@@ -340,7 +346,8 @@ export function useStoryboardLineArtOps(deps: StoryboardLineArtDeps) {
 
       let targetShots = (scope === 'visible' ? visibleShots : shots).filter(Boolean);
       if (targetShots.length === 0) {
-        appendLog('分镜台：当前没有可生成线稿的镜头');
+        appendLog('分镜台：当前没有可生成线稿的镜头，禁止空成功');
+        toastError('分镜台：当前没有可生成线稿的镜头，禁止空成功');
         lineArtAbortRef.current = null;
         return;
       }
@@ -351,7 +358,8 @@ export function useStoryboardLineArtOps(deps: StoryboardLineArtDeps) {
         targetShots = targetShots.filter((s) => !isShotComposed(s, preview));
       }
       if (targetShots.length === 0) {
-        appendLog('分镜台：当前没有需要补线稿的镜头');
+        appendLog('分镜台：当前没有需要补线稿的镜头，禁止空成功');
+        toastError('分镜台：当前没有需要补线稿的镜头，禁止空成功');
         lineArtAbortRef.current = null;
         setBatchMode(null);
         return;
@@ -482,6 +490,9 @@ export function useStoryboardLineArtOps(deps: StoryboardLineArtDeps) {
       const aborted = signal.aborted;
       appendLog(`批量线稿${aborted ? '已停止' : '完成'} · 成功 ${ok} · 失败 ${fail}`);
       if (ok > 0) toastSuccess(`批量线稿完成 ${ok}/${targetShots.length}`);
+      if (fail > 0 && !aborted) {
+        toastError(`批量线稿失败 ${fail}/${targetShots.length}`);
+      }
     },
     [
       appendLog,
@@ -518,7 +529,9 @@ export function useStoryboardLineArtOps(deps: StoryboardLineArtDeps) {
     async (scope: 'visible' | 'all' = 'visible') => {
       const pictureId = resolveConnectedPictureGenId(props.id, getNodes(), getEdges());
       if (!pictureId) {
-        appendLog('分镜台：宫格线稿前请先连接「图像生成」节点');
+        const msg = '分镜台：宫格线稿前请先连接「图像生成」节点，禁止空成功';
+        appendLog(msg);
+        toastError(msg);
         return;
       }
       const pictureNode = getNodes().find((n) => n.id === pictureId);
@@ -531,7 +544,8 @@ export function useStoryboardLineArtOps(deps: StoryboardLineArtDeps) {
 
       let targetShots = (scope === 'visible' ? visibleShots : shots).filter(Boolean);
       if (targetShots.length === 0) {
-        appendLog('分镜台：当前没有可生成线稿的镜头');
+        appendLog('分镜台：当前没有可生成线稿的镜头，禁止空成功');
+        toastError('分镜台：当前没有可生成线稿的镜头，禁止空成功');
         lineArtAbortRef.current = null;
         return;
       }
@@ -543,7 +557,8 @@ export function useStoryboardLineArtOps(deps: StoryboardLineArtDeps) {
         targetShots = targetShots.filter((s) => !isShotComposed(s, preview));
       }
       if (targetShots.length === 0) {
-        appendLog('分镜台：当前没有需要补线稿的镜头');
+        appendLog('分镜台：当前没有需要补线稿的镜头，禁止空成功');
+        toastError('分镜台：当前没有需要补线稿的镜头，禁止空成功');
         lineArtAbortRef.current = null;
         return;
       }
@@ -621,10 +636,10 @@ export function useStoryboardLineArtOps(deps: StoryboardLineArtDeps) {
             signal,
           });
           const gridUrl = urls[0];
-          if (!gridUrl) throw new Error('宫格线稿未返回图片');
+          if (!gridUrl) throw new Error('宫格线稿未返回图片，禁止空成功');
 
            const split = await api.gridSplit({ sourceUrl: gridUrl, rows, cols }, { signal });
-          if (!split.urls?.length) throw new Error('宫格切分未返回图片');
+          if (!split.urls?.length) throw new Error('宫格切分未返回图片，禁止空成功');
 
           // 每页开始前重读节点，并用已有预览帧图补齐缺 previewImageUrl 的镜
           // （避免上一页写回尚未进入闭包 / 被旧 payload 覆盖）
@@ -764,6 +779,9 @@ export function useStoryboardLineArtOps(deps: StoryboardLineArtDeps) {
       const aborted = signal.aborted;
       appendLog(`宫格线稿${aborted ? '已停止' : '完成'} · 成功 ${ok} · 失败 ${fail}`);
       if (ok > 0) toastSuccess(`宫格线稿完成 ${ok}/${targetShots.length}`);
+      if (fail > 0 && !aborted) {
+        toastError(`宫格线稿失败 ${fail}/${targetShots.length}`);
+      }
     },
     [
       appendLog,

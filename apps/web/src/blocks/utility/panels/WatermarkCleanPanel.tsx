@@ -3,6 +3,7 @@ import { type NodeProps, useReactFlow } from '@xyflow/react';
 import { BlockShell } from '../../shared/BlockShell';
 import { api } from '../../../api/client';
 import { useActivityLog } from '../../../stores/activity-log';
+import { toastError } from '../../../stores/toast';
 
 function WatermarkCleanBlock(props: NodeProps) {
   const { updateNodeData } = useReactFlow();
@@ -14,12 +15,16 @@ function WatermarkCleanBlock(props: NodeProps) {
 
   const run = useCallback(async () => {
     if (!sourceUrl) {
-      appendLog('去水印：请连接上游图片');
+      const msg = '去水印：请连接上游图片，禁止空成功';
+      updateNodeData(props.id, { status: 'error', error: msg });
+      appendLog(msg);
+      toastError(msg);
       return;
     }
     updateNodeData(props.id, { status: 'running' });
     try {
       const res = await api.stripMetadata({ sourceUrl });
+      if (!res.ok || !res.url) throw new Error('元数据清理失败，禁止空成功');
       updateNodeData(props.id, {
         status: 'success',
         previewUrl: res.url,
@@ -28,7 +33,9 @@ function WatermarkCleanBlock(props: NodeProps) {
       appendLog('元数据已清理');
     } catch (e) {
       updateNodeData(props.id, { status: 'error', error: String(e) });
-      appendLog(`清理失败: ${String(e)}`);
+      const msg = `清理失败: ${String(e)}`;
+      appendLog(msg);
+      toastError(msg);
     }
   }, [sourceUrl, props.id, updateNodeData, appendLog]);
 

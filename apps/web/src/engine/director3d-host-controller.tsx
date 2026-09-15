@@ -784,7 +784,7 @@ export function Director3dHostController({
   const handleCommit = useCallback(
     (payload: Director3dCommitPayload) => {
       const result = commit(payload);
-      if (!result.ok) throw new Error(result.error ?? '3D 构图提交失败');
+      if (!result.ok) throw new Error(result.error ?? '3D 构图提交失败，禁止空成功');
     },
     [commit],
   );
@@ -792,7 +792,7 @@ export function Director3dHostController({
   const handleCandidate = useCallback(
     async (payload: { dataUrl: string; shotId: string }) => {
       if (payload.shotId !== shotState.shotId) {
-        throw new Error('镜头已切换，请重新记录候选帧');
+        throw new Error('镜头已切换，请重新记录候选帧，禁止空成功');
       }
       const blob = await (await fetch(payload.dataUrl)).blob();
       const file = new File(
@@ -801,6 +801,7 @@ export function Director3dHostController({
         { type: 'image/png' },
       );
       const uploaded = await api.uploadAsset(file);
+      if (!uploaded.url?.trim()) throw new Error('候选帧上传失败或未返回 URL，禁止空成功');
       return { imageUrl: uploaded.url };
     },
     [shotState.shotId],
@@ -893,7 +894,7 @@ export function Director3dHostController({
         confirmed,
       );
       if (!result.ok || !result.nextState) {
-        throw new Error(result.error ?? 'Agent 摆位应用失败');
+        throw new Error(result.error ?? 'Agent 摆位应用失败，禁止空成功');
       }
       persistState(result.nextState);
       appendLog(`Agent 3D 摆位已应用 · ${result.summary ?? ''}`);
@@ -1022,6 +1023,7 @@ export function Director3dHostController({
           },
           onUploadFile: async (file) => {
             const uploaded = await api.uploadAsset(file);
+            if (!uploaded.url?.trim()) throw new Error('3D 资源上传失败或未返回 URL，禁止空成功');
             return { url: uploaded.url, filename: uploaded.filename };
           },
           onSaveSceneTemplate: handleTemplate,

@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useMemo, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { type NodeProps, useEdges, useNodes, useReactFlow } from '@xyflow/react';
 import {
   resolveEngine,
@@ -17,7 +17,9 @@ import {
 import { BlockShell } from '../shared/BlockShell';
 import { ScreenModal } from '../../components/ui/ScreenModal';
 import { useActivityLog } from '../../stores/activity-log';
-import { renderClipEditorTimeline } from '../../engine/clip-editor-render';
+import { toastError } from '../../stores/toast';
+import { renderClipEditorTimeline, pollMontageTaskUntilDone } from '../../engine/clip-editor-render';
+import { useOpenDeskSignal } from '../../engine/use-open-desk-signal';
 import { useWorkspaceDocument } from '../../stores/workspace-document';
 import { useUpstreamMedia } from '../../engine/stage-deck/chrome/attached-workspace/generation/use-upstream-media';
 import { useUpstreamShots } from '../../engine/stage-deck/chrome/attached-workspace/generation/use-upstream-shots';
@@ -33,17 +35,27 @@ import './clip-editor.v2.css';
  * 智能剪辑节点：画布摘要卡 + ScreenModal 剪辑台。
  * 时间线（timelineDraft）存于本节点，只消费本节点连入的上游。
  */
+
+/** SE-RESUME: 本会话已在轮询的渲染任务（防虚拟化重挂载双重轮询） */
+const claimedRenderTasks = new Set<string>();
+/** SE-RESUME: 本会话有操作在跑的节点（防重挂载时误判为上次中断） */
+const inFlightBlockOps = new Set<string>();
+
 function ClipEditorBlock(props: NodeProps) {
   const { updateNodeData, fitView } = useReactFlow();
   const nodes = useNodes();
   const edges = useEdges();
   const appendLog = useActivityLog((s) => s.append);
-  const { clips: upstreamClips, sounds: upstreamSounds, hasMedia } = useUpstreamMedia(props.id);
+  const { clips: upstreamClips, sounds: upstreamSounds, bgmUrls: upstreamBgmUrls, sfxUrls: upstreamSfxUrls, hasMedia } = useUpstreamMedia(props.id);
   const { hasUpstream: hasShotUpstream, shots: upstreamShots } = useUpstreamShots(props.id);
 
   const [deskOpen, setDeskOpen] = useState(false);
+  useOpenDeskSignal((props.data as Record<string, unknown> | undefined)?.openDeskAt, () =>
+    setDeskOpen(true),
+  );
   const [rendering, setRendering] = useState(false);
   const [renderTip, setRenderTip] = useState('');
+  const [deepArrange, setDeepArrange] = useState(true);
 
   const status = (props.data?.status as string) ?? 'idle';
   const storedProfile = props.data?.profile as SmartEditProfile | undefined;
@@ -72,6 +84,48 @@ function ClipEditorBlock(props: NodeProps) {
     updateNodeData(props.id, { linkedShotIds: nextIds });
   }, [hasShotUpstream, upstreamShots, props.data?.linkedShotIds, props.id, updateNodeData]);
 
+  // ── SE-RESUME: 挂载时恢复上次中断的渲染任务 ──
+  const renderTaskId = props.data?.renderTaskId as string | undefined;
+  const renderBackend = props.data?.renderBackend as string | undefined;
+  useEffect(() => {
+    if (status === 'running' && !rendering && renderTaskId && !claimedRenderTasks.has(renderTaskId)) {
+      // 上次渲染进行中刷新了——恢复轮询
+      const kind = renderBackend === 'hyperframes' ? 'hyperframes' as const : 'remotion' as const;
+      claimedRenderTasks.add(renderTaskId);
+      setRendering(true);
+      setRenderTip(`恢复 ${renderBackend} 渲染…`);
+      pollMontageTaskUntilDone(renderTaskId, kind)
+        .then((url) => {
+          updateNodeData(props.id, { status: 'success', outputUrl: url, videoUrl: url });
+          setRenderTip(`渲染完成：${url}`);
+          appendLog(`${renderBackend} 渲染恢复完成`);
+        })
+        .catch((e) => {
+          const msg = e instanceof Error ? e.message : String(e);
+          updateNodeData(props.id, { status: 'error', error: msg });
+          setRenderTip(`渲染失败：${msg}`);
+          appendLog(`渲染恢复失败：${msg}`);
+          toastError(`渲染恢复失败：${msg}`);
+        })
+        .finally(() => setRendering(false));
+    }
+  }, [props.id, status, rendering, renderTaskId, renderBackend, updateNodeData, appendLog]);
+
+  // SE-RESUME: 卡在 running 但没有 taskId = 上次操作中断（编排/手动渲染），诚实标错
+  useEffect(() => {
+    if (status !== 'running' || rendering || renderTaskId || inFlightBlockOps.has(props.id)) return;
+    const blockId = props.id;
+    // 推迟到下一帧，避免与 RF BatchProvider layout 批处理互锁
+    const t = requestAnimationFrame(() => {
+      updateNodeData(blockId, {
+        status: 'error',
+        error: '上次操作未完成（页面刷新或服务重启），请重新执行',
+      });
+      appendLog(`剪辑节点 ${blockId} 上次运行中断，已标记为错误`);
+    });
+    return () => cancelAnimationFrame(t);
+  }, [props.id, status, rendering, renderTaskId, updateNodeData, appendLog]);
+
   // ── 时间线持久化（剪辑台每次提交回写） ──
   const persistTimeline = useCallback(
     (tl: TimelinePayload) => {
@@ -84,45 +138,74 @@ function ClipEditorBlock(props: NodeProps) {
   );
 
   // ── AI 编排 ──
-  const handleOrchestrate = useCallback(async (): Promise<OrchestrateOutcome> => {
-    updateNodeData(props.id, { status: 'running' });
-    try {
-      let result: OrchestrateOutcome;
-      if (profile === 'drama') {
-        if (!hasShotUpstream) throw new Error('请先连接导演台或带镜头的上游节点');
-        if (upstreamShots.length === 0) throw new Error('上游未提供可用镜头');
-        result = await orchestrateDramaTimeline({
-          title: '漫剧成片',
-          aspect: '9:16',
-          approvedOnly: true,
-          shots: upstreamShots.map((s) => ({
-            id: s.id,
-            index: s.index,
-            status: s.status,
-            durationSec: s.durationSec,
-            videoAssetId: s.videoAssetId,
-            videoStatus: s.videoStatus,
-            firstFrameAssetId: s.firstFrameAssetId,
-            audioAssetId: s.audioAssetId,
-            descriptionZh: s.descriptionZh,
-            subtitleText: s.subtitleText,
-          })),
-          bgmUrl: upstreamSounds[0],
-        });
-      } else {
+  const handleOrchestrate = useCallback(
+    async (deepArrange: boolean): Promise<OrchestrateOutcome> => {
+      inFlightBlockOps.add(props.id);
+      updateNodeData(props.id, { status: 'running' });
+      try {
+        let result: OrchestrateOutcome;
+        if (profile === 'drama') {
+          if (!hasShotUpstream) throw new Error('请先连接导演台或带镜头的上游节点，禁止空成功');
+          if (upstreamShots.length === 0) throw new Error('上游未提供可用镜头，禁止空成功');
+          result = await orchestrateDramaTimeline({
+            title: '漫剧成片',
+            aspect: '9:16',
+            approvedOnly: true,
+            deepArrange,
+            shots: upstreamShots.map((s) => ({
+              id: s.id,
+              index: s.index,
+              status: s.status,
+              durationSec: s.durationSec,
+              videoAssetId: s.videoAssetId,
+              videoStatus: s.videoStatus,
+              firstFrameAssetId: s.firstFrameAssetId,
+              audioAssetId: s.audioAssetId,
+              descriptionZh: s.descriptionZh,
+              subtitleText: s.subtitleText,
+            })),
+            bgmUrl: upstreamBgmUrls[0],
+          });
+          // SF-05/19/20: 编排后挂对白轨（+字幕）与音效；BGM 已由 orchestrate 注入，此处不再重复
+          const voiceLines = useWorkspaceDocument.getState().voice.lines.filter(
+            (l) => l.audioAssetId && l.shotId,
+          );
+          if (voiceLines.length > 0 || upstreamSfxUrls.length > 0) {
+            result = {
+              ...result,
+              timeline: migrateTimelinePayload(
+                buildVoiceDramaTimeline(result.timeline, voiceLines, {
+                  sfxUrls: upstreamSfxUrls,
+                }),
+              ),
+              notes: [
+                ...result.notes,
+                voiceLines.length > 0
+                  ? `已自动挂入 ${voiceLines.length} 条对白音轨（按镜头时间对齐，含同源字幕）`
+                  : '',
+                upstreamSfxUrls.length ? `已挂入 ${upstreamSfxUrls.length} 条音效` : '',
+              ].filter(Boolean),
+            };
+          }
+        } else {
         const dataClips =
           ((props.data?.upstream as { clips?: string[] } | undefined)?.clips ?? []);
         const extraClips = (props.data?.extraClips as string[] | undefined) ?? [];
         const clips = [...upstreamClips, ...dataClips, ...extraClips].filter(Boolean);
-        if (clips.length === 0) throw new Error('请先连接视频上游，或放入额外片段');
+        if (clips.length === 0) throw new Error('请先连接视频上游，或放入额外片段，禁止空成功');
         result = await orchestrateViralTimeline({
           clips,
           aspect: '9:16',
-          bgmUrl: upstreamSounds[0],
+          bgmUrl: upstreamBgmUrls[0],
         });
+      }
+      if (!result.timeline?.tracks?.length) {
+        throw new Error('编排未生成有效时间线，禁止空成功');
       }
       updateNodeData(props.id, {
         status: 'success',
+        timelineDraft: result.timeline,
+        timelineSyncedAt: new Date().toISOString(),
         pendingSuggestionIds: result.suggestions.map((s) => s.id),
         suggestions: result.suggestions,
       });
@@ -132,7 +215,10 @@ function ClipEditorBlock(props: NodeProps) {
       const msg = e instanceof Error ? e.message : String(e);
       updateNodeData(props.id, { status: 'error', error: msg });
       appendLog(`智能编排失败：${msg}`);
+      toastError(`智能编排失败：${msg}`);
       throw e;
+    } finally {
+      inFlightBlockOps.delete(props.id);
     }
   }, [
     appendLog,
@@ -143,7 +229,8 @@ function ClipEditorBlock(props: NodeProps) {
     updateNodeData,
     upstreamClips,
     upstreamShots,
-    upstreamSounds,
+    upstreamBgmUrls,
+    upstreamSfxUrls,
   ]);
 
   // ── 建议处理 ──
@@ -155,10 +242,11 @@ function ClipEditorBlock(props: NodeProps) {
     [props.data?.pendingSuggestionIds, props.id, updateNodeData],
   );
 
-  // ── 渲染（D3：remotion 走服务端任务队列） ──
+  // ── 渲染（D3：remotion 走服务端任务队列；SE-RESUME: 提交即持久化 taskId） ──
   const handleRender = useCallback(
     async (timeline: TimelinePayload) => {
       setRendering(true);
+      inFlightBlockOps.add(props.id);
       updateNodeData(props.id, { status: 'running' });
       setRenderTip(`提交 ${engineLabel(engine)} 渲染任务…`);
       try {
@@ -167,6 +255,13 @@ function ClipEditorBlock(props: NodeProps) {
           title: '智能剪辑导出',
           templateId: (props.data?.templateId as string) ?? 'nx9-vertical-episode',
           onProgress: setRenderTip,
+          onSubmitted: (taskId, backend) => {
+            claimedRenderTasks.add(taskId);
+            updateNodeData(props.id, {
+              renderTaskId: taskId,
+              renderBackend: backend,
+            });
+          },
         });
 
         updateNodeData(props.id, {
@@ -183,8 +278,10 @@ function ClipEditorBlock(props: NodeProps) {
         updateNodeData(props.id, { status: 'error', error: msg });
         setRenderTip(`渲染失败：${msg}`);
         appendLog(`渲染失败：${msg}`);
+        toastError(`渲染失败：${msg}`);
       } finally {
         setRendering(false);
+        inFlightBlockOps.delete(props.id);
       }
     },
     [appendLog, engine, profile, props.data?.templateId, props.id, updateNodeData],
@@ -200,7 +297,9 @@ function ClipEditorBlock(props: NodeProps) {
         (n) => n.type === 'export-pack' && downstreamPackIds.has(n.id),
       );
       if (packNodes.length === 0) {
-        appendLog('请先把本节点连到交付打包，再同步时间线');
+        const msg = '请先把本节点连到交付打包，再同步时间线，禁止空成功';
+        appendLog(msg);
+        toastError(msg);
         setRenderTip('请连接交付打包后再同步');
         return 0;
       }
@@ -244,20 +343,27 @@ function ClipEditorBlock(props: NodeProps) {
     (timeline: TimelinePayload): TimelinePayload | null => {
       const voiceLines = useWorkspaceDocument.getState().voice.lines;
       if (!voiceLines || voiceLines.length === 0) {
-        appendLog('无对白行可注入');
+        const msg = '无对白行可注入，禁止空成功';
+        appendLog(msg);
+        toastError(msg);
+        setRenderTip(msg);
         return null;
       }
-      const bgmUrl = upstreamSounds[0];
+      const bgmUrl = upstreamBgmUrls[0];
       const updated = migrateTimelinePayload(
-        buildVoiceDramaTimeline(timeline, voiceLines, bgmUrl),
+        buildVoiceDramaTimeline(timeline, voiceLines, {
+          bgmUrl,
+          sfxUrls: upstreamSfxUrls,
+        }),
       );
       const voCount = voiceLines.filter((l) => l.audioAssetId).length;
       const parts = [`${voCount} 条对白音轨`];
       if (bgmUrl) parts.push('BGM 音轨');
+      if (upstreamSfxUrls.length) parts.push(`${upstreamSfxUrls.length} 条音效`);
       appendLog(`已注入 ${parts.join(' + ')}`);
       return updated;
     },
-    [appendLog, upstreamSounds],
+    [appendLog, upstreamBgmUrls, upstreamSfxUrls],
   );
 
   /** 智能替换采纳 → 上游镜 videoVersions（take） */
@@ -292,10 +398,26 @@ function ClipEditorBlock(props: NodeProps) {
     [upstreamShots, updateNodeData, props.id, nodes, edges],
   );
 
+  const unapprovedVideoCount =
+    profile === 'drama'
+      ? upstreamShots.filter((s) => Boolean(s.videoAssetId) && s.videoStatus !== 'approved').length
+      : 0;
+  const approvedVideoCount =
+    profile === 'drama'
+      ? upstreamShots.filter((s) => s.videoStatus === 'approved' && Boolean(s.videoAssetId)).length
+      : 0;
+  const orchestrateBlockedReason =
+    profile === 'drama' && unapprovedVideoCount > 0 && approvedVideoCount === 0
+      ? `上游 ${upstreamShots.length} 镜视频均未批准 · 请先在视频工作区全部通过后再编排`
+      : undefined;
   const arrangeHint =
     profile === 'drama'
       ? hasShotUpstream
-        ? `本节点上游 ${upstreamShots.length} 个镜头`
+        ? orchestrateBlockedReason
+          ? orchestrateBlockedReason
+          : unapprovedVideoCount > 0
+            ? `本节点上游 ${upstreamShots.length} 个镜头（已批准 ${approvedVideoCount}，待批准 ${unapprovedVideoCount}）`
+            : `本节点上游 ${upstreamShots.length} 个镜头`
         : '漫剧模式：请连接导演台或镜头上游（不读取全局故事板）'
       : hasMedia || upstreamClips.length > 0
         ? `本节点上游 ${upstreamClips.length} 段视频`
@@ -382,14 +504,18 @@ function ClipEditorBlock(props: NodeProps) {
           onPersist={persistTimeline}
           profile={profile}
           onProfileChange={(p) => updateNodeData(props.id, { profile: p })}
+          deepArrange={deepArrange}
+          onDeepArrangeChange={setDeepArrange}
           arrangeHint={arrangeHint}
-          onOrchestrate={handleOrchestrate}
+          orchestrateBlockedReason={orchestrateBlockedReason}
+          onOrchestrate={(deep) => handleOrchestrate(deep)}
           suggestions={suggestions}
           pendingIds={pendingIds}
           onSuggestionResolved={handleSuggestionResolved}
           shots={upstreamShots}
           upstreamClips={upstreamClips}
           upstreamSounds={upstreamSounds}
+          upstreamBgmUrls={upstreamBgmUrls}
           engine={engine}
           onEngineChange={(e) => updateNodeData(props.id, { engine: e })}
           rendering={rendering}

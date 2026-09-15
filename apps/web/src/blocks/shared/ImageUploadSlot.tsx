@@ -2,6 +2,7 @@
 import { Upload, ZoomIn } from 'lucide-react';
 import { api } from '../../api/client';
 import { ImageLightbox, type ImageLightboxItem } from '../../components/ui/ImageLightbox';
+import { toastError } from '../../stores/toast';
 
 interface ImageUploadSlotProps {
   url?: string;
@@ -43,7 +44,13 @@ function ImageUploadSlot({
       setUploading(true);
       try {
         const res = await api.uploadAsset(file);
+        if (!res.url?.trim()) {
+          toastError('上传失败或未返回 URL，禁止空成功');
+          return;
+        }
         onUploaded(res.url);
+      } catch (e) {
+        toastError(e instanceof Error ? e.message : '上传失败，禁止空成功');
       } finally {
         setUploading(false);
         if (inputRef.current) inputRef.current.value = '';

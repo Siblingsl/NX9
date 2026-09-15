@@ -84,6 +84,16 @@ export const api = {
       method: 'PUT',
       body: JSON.stringify(payload),
     }),
+  /** SE-FLUSH: 页面卸载时的 keepalive 保存——PUT + 鉴权头，浏览器在页面关闭后仍完成请求（body 上限 64KB，超限静默失败） */
+  saveWorkspaceKeepalive: (id: string, payload: WorkspacePayload) =>
+    fetch(`/api/workspaces/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', ...userHeaders() },
+      body: JSON.stringify(payload),
+      keepalive: true,
+    })
+      .then((res) => res.ok)
+      .catch(() => false),
   renameWorkspace: (id: string, title: string) =>
     request<WorkspaceSummary>(`/api/workspaces/${id}/title`, {
       method: 'PATCH',
@@ -116,17 +126,17 @@ export const api = {
               filename?: string;
               thumbUrl?: string | null;
             };
-            if (!body.url) {
-              reject(new Error('上传响应缺少 url'));
+            if (body.ok === false || !body.url?.trim()) {
+              reject(new Error('上传失败或未返回 URL，禁止空成功'));
               return;
             }
             resolve({
-              url: body.url,
+              url: body.url.trim(),
               filename: body.filename ?? file.name,
               thumbUrl: body.thumbUrl ?? undefined,
             });
           } catch {
-            reject(new Error('上传响应解析失败'));
+            reject(new Error('上传响应解析失败，禁止空成功'));
           }
           return;
         }
@@ -139,6 +149,17 @@ export const api = {
 
   proxyLlm: (body: Record<string, unknown>, signal?: AbortSignal) =>
     request<unknown>('/api/gateway/llm', { method: 'POST', body: JSON.stringify(body), signal }),
+  submitBgm: (body: { prompt: string; durationSec?: number }, signal?: AbortSignal) =>
+    request<{ ok?: boolean; taskId: string }>('/api/gateway/music', {
+      method: 'POST',
+      body: JSON.stringify(body),
+      signal,
+    }),
+  getBgmStatus: (taskId: string, signal?: AbortSignal) =>
+    request<{ taskId: string; status: 'queued' | 'running' | 'done' | 'error'; url?: string; error?: string }>(
+      `/api/gateway/music/${encodeURIComponent(taskId)}`,
+      { method: 'GET', signal },
+    ),
   proxyLlmStream: (body: { messages: { role: string; content: string }[]; model?: string }, onChunk: (text: string) => void, signal?: AbortSignal): Promise<string> =>
     fetch('/api/gateway/llm/stream', {
       method: 'POST',
@@ -150,7 +171,7 @@ export const api = {
          const text = await res.text();
          throw new Error(text || `LLM stream error: ${res.status}`);
        }
-       if (!res.body) throw new Error('LLM stream response body missing');
+       if (!res.body) throw new Error('LLM stream response body missing，禁止空成功');
        const reader = res.body.getReader();
       const decoder = new TextDecoder();
       let full = '';
@@ -182,6 +203,19 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(body),
       signal: options?.signal,
+    }),
+  separateImageLayers: (sourceUrl: string, tolerance = 34) =>
+    request<{
+      ok: boolean;
+      method: string;
+      foregroundUrl: string;
+      backdropUrl: string;
+      coverage: number;
+      tolerance: number;
+      background: { r: number; g: number; b: number };
+    }>('/api/image-ops/separate-layers', {
+      method: 'POST',
+      body: JSON.stringify({ sourceUrl, tolerance }),
     }),
   proxyVideo: (body: Record<string, unknown>, options?: { signal?: AbortSignal }) =>
     request<{
@@ -542,7 +576,7 @@ export const api = {
     }),
 
   reversePrompt: (imageUrl: string) =>
-    request<{ ok: boolean; prompt: string; tags: string[]; style: string }>(
+    request<{ ok: boolean; prompt: string; tags: string[]; style: string; message?: string }>(
       '/api/tools/reverse-prompt',
       { method: 'POST', body: JSON.stringify({ imageUrl }) },
     ),
@@ -554,7 +588,22 @@ export const api = {
       sceneTokens: string;
       negativePrompt: string;
       combinedPrompt: string;
+      message?: string;
     }>('/api/tools/extract-style', { method: 'POST', body: JSON.stringify({ imageUrl }) }),
+
+  analyzeFaces: (imageUrl: string) =>
+    request<{
+      ok: boolean;
+      faces: {
+        id: string;
+        box: { x: number; y: number; width: number; height: number };
+        expression: string;
+        confidence: number;
+        description: string;
+      }[];
+      summary: string;
+      analyzedAt: string;
+    }>('/api/tools/analyze-faces', { method: 'POST', body: JSON.stringify({ imageUrl }) }),
 
   quickMontage: (topic: string, durationSec?: number) =>
     request<{ ok: boolean; markdown: string; topic: string; durationSec: number }>(
@@ -613,6 +662,12 @@ export const api = {
       { method: 'POST', body: JSON.stringify(body) },
     ),
 
+  speedPitch: (body: { sourceUrl: string; speed?: number }) =>
+    request<{ ok: boolean; url?: string; status: string; message?: string; speed?: number; unchanged?: boolean }>(
+      '/api/montage/speed-pitch',
+      { method: 'POST', body: JSON.stringify(body) },
+    ),
+
   thumbnailCompose: (body: { imageUrl: string; title?: string; safeZone?: string }) =>
     request<{ ok: boolean; url: string }>('/api/image-ops/thumbnail-compose', { method: 'POST', body: JSON.stringify(body) }),
 
@@ -621,6 +676,32 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ sourceUrl }),
     }),
+
+  aiArrange: (body: {
+    shots: Array<{
+      id: string;
+      index: number;
+      durationSec?: number;
+      descriptionZh?: string;
+      subtitleText?: string | null;
+      status?: string;
+    }>;
+    targetDurationSec?: number;
+  }) =>
+    request<{
+      ok: boolean;
+      order?: string[];
+      durations?: Record<string, number>;
+      title?: string;
+      notes?: string[];
+      message?: string;
+    }>('/api/montage/ai-arrange', { method: 'POST', body: JSON.stringify(body) }),
+
+  beatAnalyze: (audioUrl: string) =>
+    request<{ ok: boolean; beats?: number[]; tempo?: number; message?: string }>(
+      '/api/montage/beat-analyze',
+      { method: 'POST', body: JSON.stringify({ audioUrl }) },
+    ),
 
   transcribeAudio: (sourceUrl: string, language?: string) =>
     request<{ ok: boolean; srtContent: string; cues: { start: number; end: number; text: string }[] }>(
@@ -757,7 +838,7 @@ export const api = {
         }
       }
     }
-    if (!full.trim()) throw new Error('剧本生成未返回正文');
+    if (!full.trim()) throw new Error('剧本生成未返回正文，禁止空成功');
     return { ok: true, screenplay: full };
   },
 
@@ -851,7 +932,7 @@ export const api = {
         }
       }
     }
-    if (!full.trim()) throw new Error('技能生成未返回内容');
+    if (!full.trim()) throw new Error('技能生成未返回内容，禁止空成功');
     return { ok: true, full };
   },
 
@@ -864,7 +945,7 @@ export const api = {
       },
       body: JSON.stringify({ package: pkg }),
     });
-    if (!res.ok) throw new Error('导出失败');
+    if (!res.ok) throw new Error('导出失败，禁止空成功');
     return res.blob();
   },
 
@@ -1018,8 +1099,20 @@ export const api = {
     }),
 
   /** P3: 视频级智能替换（Fal 队列长任务） */
-  videoEditSubmit: (body: { videoUrl: string; maskUrl?: string; prompt: string; providerId?: string }) =>
+  videoEditSubmit: (body: {
+    videoUrl: string;
+    maskUrl?: string;
+    maskVideoUrl?: string;
+    prompt: string;
+    providerId?: string;
+  }) =>
     request<{ ok: boolean; taskId?: string; message?: string }>('/api/montage/video-edit', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+
+  videoTraceSubmit: (body: { videoUrl: string; maskUrl: string; providerId?: string }) =>
+    request<{ ok: boolean; taskId?: string; message?: string }>('/api/montage/video-trace', {
       method: 'POST',
       body: JSON.stringify(body),
     }),

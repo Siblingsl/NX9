@@ -18,36 +18,45 @@ export class ExportManifestService {
   async generateCsv(csvContent: string, prefix = 'manifest'): Promise<{ url: string }> {
     const trimmed = csvContent.trim();
     if (!trimmed) {
-      throw new BadRequestException('CSV 内容为空，拒绝生成空文件');
+      throw new BadRequestException('CSV 内容为空，禁止空成功');
     }
     const filename = `${prefix}-${Date.now()}.csv`;
     const filepath = join(this.getOutDir(), filename);
     writeFileSync(filepath, trimmed, 'utf-8');
+    if (!existsSync(filepath)) {
+      throw new BadRequestException('CSV 产物未写出，禁止空成功');
+    }
     return { url: `/media/export-manifests/${filename}` };
   }
 
   async generateHtml(htmlContent: string, prefix = 'manifest'): Promise<{ url: string }> {
     const trimmed = htmlContent.trim();
     if (!trimmed) {
-      throw new BadRequestException('HTML 内容为空，拒绝生成空文件');
+      throw new BadRequestException('HTML 内容为空，禁止空成功');
     }
     const filename = `${prefix}-${Date.now()}.html`;
     const filepath = join(this.getOutDir(), filename);
     writeFileSync(filepath, trimmed, 'utf-8');
+    if (!existsSync(filepath)) {
+      throw new BadRequestException('HTML 产物未写出，禁止空成功');
+    }
     return { url: `/media/export-manifests/${filename}` };
   }
 
   async generatePdf(rows: ManifestRow[], prefix = 'manifest', title?: string): Promise<{ url: string }> {
     if (!rows || rows.length === 0) {
-      throw new BadRequestException('镜头清单为空，拒绝生成空 PDF');
+      throw new BadRequestException('镜头清单为空，禁止空成功');
     }
     const pdfBuffer = manifestToPdf(rows, title);
     if (!pdfBuffer || pdfBuffer.length === 0) {
-      throw new BadRequestException('PDF 生成失败：输出为空');
+      throw new BadRequestException('PDF 生成失败：输出为空，禁止空成功');
     }
     const filename = `${prefix}-${Date.now()}.pdf`;
     const filepath = join(this.getOutDir(), filename);
     writeFileSync(filepath, Buffer.from(pdfBuffer));
+    if (!existsSync(filepath)) {
+      throw new BadRequestException('PDF 产物未写出，禁止空成功');
+    }
     return { url: `/media/export-manifests/${filename}` };
   }
 }

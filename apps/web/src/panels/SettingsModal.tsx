@@ -29,7 +29,7 @@ import type {
   ModelConnection,
 } from '@nx9/shared';
 import { FLOW_EDGE_TYPES } from '../engine/flow-edge-types';
-import { perfTierLabel, resolvePerfTier, translate, BUILTIN_CONNECTION_PRESETS } from '@nx9/shared';
+import { perfTierLabel, resolvePerfTier, translate, BUILTIN_CONNECTION_PRESETS, normalizeVideoBaseUrl } from '@nx9/shared';
 import { useCredentialVault } from '../stores/credential-vault';
 import { useUserSession } from '../stores/user-session';
 import { confirmDelete } from '../stores/confirm-dialog';
@@ -39,6 +39,7 @@ import { useFlowGraphMirror } from '../stores/flow-graph-mirror';
 import { useDevPromptOverrides } from '../stores/dev-prompt-overrides';
 import { api } from '../api/client';
 import { getRuntime } from '../platform/runtime-bridge';
+import { toastError } from '../stores/toast';
 import './settings-modal.css';
 
 type SettingsSection = 'connection' | 'services' | 'canvas' | 'prefs' | 'usage';
@@ -305,20 +306,24 @@ function ConnectionSettings({
 
   const upsertConnection = (conn: ModelConnection, activate: boolean) => {
     const now = new Date().toISOString();
+    const normalized =
+      conn.kind === 'video' && conn.baseUrl
+        ? { ...conn, baseUrl: normalizeVideoBaseUrl(conn.baseUrl) }
+        : conn;
     const idx = connections.findIndex((c) => c.id === conn.id);
     let conns: ModelConnection[];
     if (idx >= 0) {
       conns = [...connections];
-      conns[idx] = { ...conn, updatedAt: now };
+      conns[idx] = { ...normalized, updatedAt: now };
       if (activate) {
         conns = conns.map((c) => (
-          c.kind === conn.kind ? { ...c, isActive: c.id === conn.id } : c
+          c.kind === normalized.kind ? { ...c, isActive: c.id === normalized.id } : c
         ));
       }
     } else {
-      const created = { ...conn, createdAt: now, updatedAt: now, isActive: activate };
+      const created = { ...normalized, createdAt: now, updatedAt: now, isActive: activate };
       conns = activate
-        ? [...connections.map((c) => (c.kind === conn.kind ? { ...c, isActive: false } : c)), created]
+        ? [...connections.map((c) => (c.kind === normalized.kind ? { ...c, isActive: false } : c)), created]
         : [...connections, created];
     }
     syncToDraft(conns);
@@ -636,12 +641,13 @@ function ServicesSettings({
         {luxStatus && <p className="nx9-settings__hint">{luxStatus}</p>}
       </SettingCard>
 
-      <SettingCard title="BGM" badge="预留" description="真实 BGM 生成 API 未接入；当前 BGM 模式仅支持导入音频，禁止假装可生成。">
+      <SettingCard title="BGM" badge="可选" description="AI 生成 BGM（Suno 兼容聚合协议）。未配置时声音节点仅支持导入音频。">
         <p className="nx9-settings__hint">
-          BGM 生成 provider 预留字段。服务端未接真实 provider 前，BGM 节点只导入音频；接入后按 REAL-PROVIDER-VALIDATION.md 验收再开放。
+          填写 Suno 兼容聚合端点的 Base URL 与 API Key 后，声音生成节点的 BGM 模式即可「AI 生成」配乐；服务端按任务提交 + 轮询直到拿到可播放音频。未配置时保持仅导入，禁止假成功。
         </p>
         <div className="nx9-settings__field-grid">
           <Field label="Provider" value={draft.bgmProvider ?? 'suno'} onChange={(v) => setDraft({ ...draft, bgmProvider: v })} plain />
+          <Field label="Base URL" value={draft.bgmBaseUrl ?? ''} onChange={(v) => setDraft({ ...draft, bgmBaseUrl: v })} placeholder="https://api.sunoapi.org/api/v1" />
           <Field label="API Key" value={draft.bgmApiKey ?? ''} onChange={(v) => setDraft({ ...draft, bgmApiKey: v })} />
         </div>
       </SettingCard>
@@ -996,7 +1002,13 @@ function CanvasSettings() {
       setUploading(true);
       try {
         const res = await api.uploadAsset(file);
+        if (!res.url?.trim()) {
+          toastError('画布背景上传失败或未返回 URL，禁止空成功');
+          return;
+        }
         update({ backgroundImageUrl: res.url });
+      } catch (e) {
+        toastError(e instanceof Error ? e.message : '画布背景上传失败，禁止空成功');
       } finally {
         setUploading(false);
         if (inputRef.current) inputRef.current.value = '';
@@ -1237,7 +1249,7 @@ function PrefsSettings({
           field="autoAdvanceEnabled"
           defaultVal={true}
           label="步骤完成自动前进"
-          description="当前步骤成功后自动进入下一步，适合连续生产。"
+          description="Playbook 成功后进下一步；编剧台确认成稿且设定就绪后直送分镜（空台可自动拆镜）。关闭后保留交接核对清单。"
         />
         <PrefsCheckbox
           draft={draft}

@@ -48,6 +48,7 @@ describe('DEEP-03/04/17 假绿与参数诚实', () => {
     expect(branch).toContain('diffModel');
     expect(branch).toContain('...(diffModel ? { model: diffModel } : {})');
     expect(branch).not.toContain("model: 'gpt-4o-mini'");
+    expect(branch).toContain('提示词合并返回空结果，禁止空成功');
   });
 });
 

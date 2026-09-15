@@ -49,7 +49,7 @@ export async function executeClipGenOps(deps: FlowExecuteDeps): Promise<void> {
       if (!ctx?.nodes || !ctx.edges) {
         updateNodeData(block.id, {
           status: 'blocked',
-          error: '关键帧门禁缺少画布上下文，拒绝回退全局镜表',
+          error: '关键帧门禁缺少画布上下文，拒绝回退全局镜表，禁止空成功',
           meta: { gate: 'keyframe', from: 'director-desk' },
         });
         throw new ReviewGateBlockedError([]);
@@ -63,7 +63,7 @@ export async function executeClipGenOps(deps: FlowExecuteDeps): Promise<void> {
       if (!chain) {
         updateNodeData(block.id, {
           status: 'blocked',
-          error: '关键帧门禁未找到上游链镜表',
+          error: '关键帧门禁未找到上游链镜表，禁止空成功',
           meta: { gate: 'keyframe', from: 'director-desk' },
         });
         throw new ReviewGateBlockedError([]);
@@ -109,8 +109,8 @@ export async function executeClipGenOps(deps: FlowExecuteDeps): Promise<void> {
 
     if (hasDirectorBatch && directorBatch) {
       if (!ctx?.nodes || !ctx.edges) {
-        updateNodeData(block.id, { status: 'blocked', error: '导演关键帧批次缺少画布上下文' });
-        throw new DirectorRunBlockedError('导演关键帧批次缺少画布上下文');
+      updateNodeData(block.id, { status: 'blocked', error: '导演关键帧批次缺少画布上下文，禁止空成功' });
+      throw new DirectorRunBlockedError('导演关键帧批次缺少画布上下文，禁止空成功');
       }
       const sourceChainNode = ctx.nodes.find((node) => node.id === directorBatch.sourceChainDeskId);
       const sourceChain = sourceChainNode
@@ -121,7 +121,7 @@ export async function executeClipGenOps(deps: FlowExecuteDeps): Promise<void> {
           status: 'blocked',
           error: '导演关键帧批次的 source chain 已断开',
         });
-        throw new DirectorRunBlockedError('导演关键帧批次的 source chain 已断开');
+        throw new DirectorRunBlockedError('导演关键帧批次的 source chain 已断开，禁止空成功');
       }
       const sourceChainNodeRef = sourceChainNode!;
 
@@ -313,8 +313,18 @@ export async function executeClipGenOps(deps: FlowExecuteDeps): Promise<void> {
       const hardFailed = result.receipt.failed.filter((f) => !pendingShotIds.has(f.shotId));
       const pendingCount = pendingShotIds.size;
       updateNodeData(block.id, {
-        status: hardFailed.length > 0 ? 'error' : pendingCount > 0 ? 'running' : 'success',
-        error: hardFailed.length > 0 ? `${hardFailed.length} 镜视频生成失败` : undefined,
+        status: hardFailed.length > 0
+          ? 'error'
+          : pendingCount > 0
+            ? 'running'
+            : videoUrls.length === 0 && result.batch.shots.length > 0
+              ? 'error'
+              : 'success',
+        error: hardFailed.length > 0
+          ? `${hardFailed.length} 镜视频生成失败`
+          : videoUrls.length === 0 && pendingCount === 0 && result.batch.shots.length > 0
+            ? '导演批出无可用视频，禁止空成功'
+            : undefined,
         message: pendingCount > 0
           ? `${pendingCount} 个任务仍在后台生成，可继续查询`
           : undefined,
@@ -331,7 +341,10 @@ export async function executeClipGenOps(deps: FlowExecuteDeps): Promise<void> {
         lastVideoConsumptionReceipt: result.receipt,
       });
       if (hardFailed.length > 0) {
-        throw new Error(`${hardFailed.length} 镜视频生成失败，已保留批次回执供重试`);
+        throw new Error(`${hardFailed.length} 镜视频生成失败，已保留批次回执供重试，禁止空成功`);
+      }
+      if (videoUrls.length === 0 && pendingCount === 0 && result.batch.shots.length > 0) {
+        throw new Error('导演批出无可用视频，禁止空成功');
       }
       return;
     }
@@ -343,6 +356,9 @@ export async function executeClipGenOps(deps: FlowExecuteDeps): Promise<void> {
         blockClipRun('Bridge 续拍需要源视频：请连接上游视频节点或上传源片');
       }
       const framesRes = await api.extractFrames(clipUrl, 1);
+      if (!framesRes.ok || !framesRes.frames?.length) {
+        blockClipRun(framesRes.message ?? 'Bridge 续拍抽尾帧失败：请检查源视频是否可访问');
+      }
       const endFrameUrl = framesRes.frames?.[0];
       const nextPrompt = prompt || (d.content as string) || '';
       const continuationPrompt = (await import('@nx9/shared')).buildBridgeContinuationPrompt({
@@ -560,6 +576,16 @@ export async function executeClipGenOps(deps: FlowExecuteDeps): Promise<void> {
         charCtx,
         undefined,
       );
+      if (clips.length === 0 && pendingCount === 0) {
+        updateNodeData(block.id, {
+          status: 'error',
+          error: '级联出片无可用视频，禁止空成功',
+          videoUrls: [],
+          batchCount: 0,
+          pendingVideoTasks: multiPendingTasks,
+        });
+        throw new Error('级联出片无可用视频，禁止空成功');
+      }
       updateNodeData(block.id, {
         status: pendingCount > 0 ? 'running' : 'success',
         videoUrl: clips[0],

@@ -43,4 +43,32 @@ describe('DD-D-01/02 成片编排门禁', () => {
       .flatMap((t) => t.clips);
     expect(videoClips.map((c) => c.assetUrl).sort()).toEqual(['/media/a.mp4', '/media/b.mp4']);
   });
+
+  it('approvedOnly 滤空时诚实失败，禁止空时间线假成功', async () => {
+    await expect(
+      orchestrateDramaTimeline({
+        approvedOnly: true,
+        shots: [
+          {
+            id: 'a',
+            index: 0,
+            videoStatus: 'review',
+            videoAssetId: '/media/a.mp4',
+          },
+          {
+            id: 'c',
+            index: 1,
+            videoStatus: 'review',
+            videoAssetId: '/media/c.mp4',
+          },
+        ],
+      }),
+    ).rejects.toThrow(/尚未批准/);
+  });
+
+  it('空镜头输入诚实失败', async () => {
+    await expect(orchestrateDramaTimeline({ approvedOnly: true, shots: [] })).rejects.toThrow(
+      /无可编排镜头/,
+    );
+  });
 });

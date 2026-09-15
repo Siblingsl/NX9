@@ -131,7 +131,7 @@ export async function extractBibleFromPackage(
     return touchScreenplayPackage(pkg, {
       diagnostics: [
         ...(pkg.diagnostics ?? []).filter((d) => d.code !== 'extract-empty'),
-        { level: 'error', code: 'extract-empty', message: '成稿为空，无法抽取 Bible' },
+        { level: 'error', code: 'extract-empty', message: '成稿为空，无法抽取 Bible，禁止空成功' },
       ],
     });
   }
@@ -392,7 +392,7 @@ export async function runAppendEpisodeSkill(
   if (signal?.aborted) throw new DOMException('已中止', 'AbortError');
   const visualStyle = pkg.bible.world?.visualStyleNotes?.trim();
   if (!visualStyle) {
-    throw new Error('生成剧本前必须先选择人物与全片视觉风格');
+    throw new Error('生成剧本前必须先选择人物与全片视觉风格，禁止空成功');
   }
   const sorted = [...pkg.screenplay.episodes]
     .filter((ep) => ep.bodyMd.trim())
@@ -423,7 +423,7 @@ export async function runAppendEpisodeSkill(
 
   if (signal?.aborted) throw new DOMException('已中止', 'AbortError');
   const text = await requestScreenplayText(context, { signal, onChunk: options.onChunk });
-  if (!text) throw new Error('剧本生成未返回正文');
+  if (!text) throw new Error('剧本生成未返回正文，禁止空成功');
 
   const generated = ingestTextToPackage(emptyScreenplayPackage(), text, {
     sourceType: 'generated',
@@ -431,7 +431,7 @@ export async function runAppendEpisodeSkill(
     episodeCount: 1,
   });
   const newEpisode = generated.screenplay.episodes[0];
-  if (!newEpisode) throw new Error('续写未返回有效集内容');
+  if (!newEpisode) throw new Error('续写未返回有效集内容，禁止空成功');
 
   const newEpisodePatch = {
     ...newEpisode,
@@ -464,7 +464,7 @@ export async function runRewriteEpisodeSkill(
 
   const sorted = [...pkg.screenplay.episodes].sort((a, b) => a.index - b.index);
   const target = sorted.find((ep) => ep.index === options.episodeIndex);
-  if (!target) throw new Error(`第 ${options.episodeIndex} 集不存在`);
+  if (!target) throw new Error(`第 ${options.episodeIndex} 集不存在，禁止空成功`);
 
   const prevEps = sorted.filter((ep) => ep.index < options.episodeIndex && ep.bodyMd.trim());
   const prev = prevEps[prevEps.length - 1];
@@ -501,7 +501,7 @@ export async function runRewriteEpisodeSkill(
 
   if (signal?.aborted) throw new DOMException('已中止', 'AbortError');
   const text = await requestScreenplayText(context, { signal, onChunk: options.onChunk });
-  if (!text) throw new Error('重写未返回正文');
+  if (!text) throw new Error('重写未返回正文，禁止空成功');
 
   const generated = ingestTextToPackage(emptyScreenplayPackage(), text, {
     sourceType: 'generated',
@@ -509,7 +509,7 @@ export async function runRewriteEpisodeSkill(
     episodeCount: 1,
   });
   const replacement = generated.screenplay.episodes[0];
-  if (!replacement?.bodyMd.trim()) throw new Error('重写未返回有效集内容');
+  if (!replacement?.bodyMd.trim()) throw new Error('重写未返回有效集内容，禁止空成功');
 
   const targetPatch = {
     ...target,
@@ -556,7 +556,7 @@ export async function runGenerateScreenplaySkill(
 
   if (signal?.aborted) throw new DOMException('已中止', 'AbortError');
   const text = await requestScreenplayText(context, { signal, onChunk });
-  if (!text) throw new Error('剧本生成未返回正文');
+  if (!text) throw new Error('剧本生成未返回正文，禁止空成功');
 
   if (episodeIndex != null) {
     const generated = ingestTextToPackage(emptyScreenplayPackage(), text, {
@@ -565,9 +565,9 @@ export async function runGenerateScreenplaySkill(
       episodeCount: 1,
     });
     const replacement = generated.screenplay.episodes[0];
-    if (!replacement) throw new Error('续写未返回有效集内容');
+    if (!replacement) throw new Error('续写未返回有效集内容，禁止空成功');
     const targetEp = pkg.screenplay.episodes.find((ep) => ep.index === episodeIndex);
-    if (!targetEp) throw new Error(`第 ${episodeIndex} 集不存在`);
+    if (!targetEp) throw new Error(`第 ${episodeIndex} 集不存在，禁止空成功`);
     const patchEp = {
       ...targetEp,
       ...replacement,
@@ -614,7 +614,7 @@ export async function runCharacterSceneSkill(
     pkg.brief.plotOutline ?? '',
     pkg.brief.logline ?? '',
   ].filter(Boolean).join('\n\n').trim();
-  if (!source) throw new Error('缺少可用于抽取人物/场景的文本');
+  if (!source) throw new Error('缺少可用于抽取人物/场景的文本，禁止空成功');
   const tmp = await extractBibleFromPackage(
     source === screenplayFullText(pkg)
       ? pkg
@@ -694,7 +694,7 @@ export async function runScriptDeskSkill(
   try {
     if (signal?.aborted) throw new DOMException('已中止', 'AbortError');
     if (skillId === 'generate' && !pkg.bible.world?.visualStyleNotes?.trim()) {
-      throw new Error('生成剧本前必须先选择人物与全片视觉风格');
+      throw new Error('生成剧本前必须先选择人物与全片视觉风格，禁止空成功');
     }
     let rawPatch: Record<string, unknown>;
     let explanation: string;

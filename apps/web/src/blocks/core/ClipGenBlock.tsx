@@ -1,9 +1,12 @@
-import { memo, useCallback, useMemo, useState, useRef } from 'react';
+import { memo, useCallback, useMemo, useState, useRef, useEffect } from 'react';
 import { type NodeProps, useEdges, useNodes, useReactFlow } from '@xyflow/react';
 import {
   CLIP_GEN_ASPECTS,
-  CLIP_GEN_MODELS,
+  CLIP_GEN_MODE_CONFIGS,
   gatherUpstream,
+  isSeedanceModel,
+  lookupVideoGenModelHint,
+  normalizeClipGenVideoModeData,
   pickReferenceImage,
   resolveBlockCharacters,
   resolveRunLabel,
@@ -23,11 +26,14 @@ import { CharacterBadge, CharacterSelect } from '../shared/CharacterSelect';
 import { GenUpstreamHint } from '../shared/upstream-hints';
 import { useUpstreamPrompt } from '../shared/use-upstream-prompt';
 import { useActivityLog } from '../../stores/activity-log';
+import { toastError } from '../../stores/toast';
 import { MentionEditor } from '../../engine/stage-deck/chrome/MentionEditor';
 import { useWorkspaceDocument } from '../../stores/workspace-document';
 import { api } from '../../api/client';
 import { describeDirectorKeyframeBatchStatus } from '../../engine/director-keyframe-batch-runner';
 import GenSettingsPills from '../shared/GenSettingsPills';
+import { useConnectedVideoModels } from '../../hooks/use-connected-video-models';
+import { useCredentialVault } from '../../stores/credential-vault';
 
 /**
  * ClipGenBlock — 视频生成节点（非 canvasFirst 回退卡面）。
@@ -41,11 +47,39 @@ function ClipGenBlock(props: NodeProps) {
   const appendLog = useActivityLog((s) => s.append);
   const characters = useWorkspaceDocument((s) => s.characters.characters);
   const rawVideoMode = (props.data?.videoMode as string) ?? 'single';
-  const videoMode =
-    rawVideoMode === 'bridge' ? 'bridge'
-    : rawVideoMode === 'seedance' ? 'seedance'
-    : 'single';
-  const model = (props.data?.model as string) ?? 'veo';
+  // F-035: Seedance 不是 videoMode；历史 videoMode=seedance 视为 single
+  const videoMode = rawVideoMode === 'bridge' ? 'bridge' : 'single';
+  const model = (props.data?.model as string) ?? '';
+  const seedanceModel = isSeedanceModel(model);
+
+  useEffect(() => {
+    const normalized = normalizeClipGenVideoModeData(
+      (props.data ?? {}) as Record<string, unknown>,
+    );
+    if (normalized.videoMode !== props.data?.videoMode || normalized.model !== props.data?.model) {
+      updateNodeData(props.id, {
+        videoMode: normalized.videoMode,
+        model: normalized.model,
+        videoGenMode: normalized.videoGenMode,
+      });
+    }
+  }, [props.data?.videoMode, props.data?.model, props.data?.videoGenMode, props.id, updateNodeData]);
+  const {
+    options: videoModelOptions,
+    hasConnections: hasVideoConnections,
+    preferredModel,
+    isKnownModel,
+    selectModel: selectVideoModel,
+    openConnectionsSettings,
+  } = useConnectedVideoModels(model);
+  const connections = useCredentialVault((s) => s.settings?.connections);
+
+  useEffect(() => {
+    if (!preferredModel || preferredModel === model) return;
+    if (!hasVideoConnections) return;
+    if (isKnownModel(model)) return;
+    updateNodeData(props.id, { model: preferredModel });
+  }, [hasVideoConnections, isKnownModel, model, preferredModel, props.id, updateNodeData]);
   const aspect = (props.data?.aspect as string) ?? '16:9';
   const durationSec = (props.data?.durationSec as number) ?? 5;
   const resolution = (props.data?.resolution as string) ?? '720';
@@ -54,18 +88,18 @@ function ClipGenBlock(props: NodeProps) {
   const status = props.data?.status as string | undefined;
   const videoUrl = props.data?.videoUrl as string | undefined;
   const taskId = props.data?.taskId as string | undefined;
+  // VG-10+: 卡面直接显示待恢复任务数（徽章）
+  const pendingCount = Object.keys(
+    (props.data?.pendingVideoTasks as Record<string, unknown> | undefined) ?? {},
+  ).length;
   const upstreamPrompt = props.data?.upstreamPrompt as string | undefined;
   const characterId = (props.data?.characterId as string) ?? '';
   const linkedShotId = props.data?.linkedShotId as string | undefined;
   const localContent = (props.data?.content as string) ?? '';
   const { hasUpstream, preview: upstreamPreview } = useUpstreamPrompt(props.id);
 
-  /** F-004/F-049: 单镜 + Bridge 续拍 + Seedance 模式 */
-  const VIDEO_MODES = [
-    { id: 'single', label: '单镜' },
-    { id: 'bridge', label: 'Bridge 续拍' },
-    { id: 'seedance', label: 'Seedance' },
-  ] as const;
+  /** F-035/F-049: videoMode 仅 single|bridge；Seedance 走 model */
+  const VIDEO_MODES = CLIP_GEN_MODE_CONFIGS.map((c) => ({ id: c.mode, label: c.label }));
 
   // F-003/F-004: 从上游 chainStoryboard 读取镜头。
   // 无上游链时返回空数组（禁止回退全局镜表批出）。
@@ -195,8 +229,10 @@ function ClipGenBlock(props: NodeProps) {
         );
       }
     } catch (e) {
+      const msg = `视频生成失败 · ${String(e)}`;
       updateNodeData(props.id, { status: 'error', error: String(e) });
-      appendLog(`视频生成失败 · ${String(e)}`);
+      appendLog(msg);
+      toastError(msg);
     }
   }, [
     appendLog, props.id, updateNodeData, nodes, edges, directorKeyframeBatch,
@@ -235,13 +271,24 @@ function ClipGenBlock(props: NodeProps) {
           }
         }
         appendLog('视频轮询完成');
+      } else if (res.status === 'success' && !res.url) {
+        const msg = '视频任务标成功但未返回 URL，禁止空成功';
+        updateNodeData(props.id, {
+          status: 'error',
+          error: msg,
+        });
+        toastError(msg);
       } else if (res.status === 'failed') {
-        updateNodeData(props.id, { status: 'error', error: res.message ?? '视频生成任务失败' });
+        const msg = res.message ?? '视频生成任务失败';
+        updateNodeData(props.id, { status: 'error', error: msg });
+        toastError(msg);
       } else {
         updateNodeData(props.id, { status: 'running', message: '仍在生成中，请稍后再查' });
       }
     } catch (e) {
-      updateNodeData(props.id, { status: 'error', error: String(e) });
+      const msg = String(e);
+      updateNodeData(props.id, { status: 'error', error: msg });
+      toastError(`视频轮询失败：${msg}`);
     }
   }, [taskId, props.id, props.data, updateNodeData, appendLog, linkedShot, nodes, edges]);
 
@@ -326,7 +373,7 @@ function ClipGenBlock(props: NodeProps) {
             <span className="text-ink/40 ml-1">({upstreamMedia.sounds?.length ?? 0} 条)</span>
           </p>
         )}
-        {model === 'seedance' && (refImageCount > 0 || refVideoCount > 0) && (
+        {seedanceModel && (refImageCount > 0 || refVideoCount > 0) && (
           <div className="flex gap-2 text-[10px]">
             <span className={overRefImages ? 'text-warn font-bold' : 'text-ink/50'}>
               参考图 {refImageCount}/{9}
@@ -343,9 +390,9 @@ function ClipGenBlock(props: NodeProps) {
           placeholder="视频 Prompt… 输入 @ 引用上游"
           className="w-full min-h-[64px] rounded-xl border border-line bg-surface px-2 py-1.5 text-sm resize-y focus:outline-none focus:border-brand/40"
         />
-        {model === 'seedance' && (
+        {seedanceModel && (
           <div className="rounded-lg bg-surface p-2 space-y-1.5">
-            <p className="text-[10px] text-brand font-medium">Seedance 模式</p>
+            <p className="text-[10px] text-brand font-medium">Seedance 模型（非 videoMode）</p>
             <label className="flex items-center gap-2 text-[10px]">
               <input
                 type="checkbox"
@@ -358,20 +405,35 @@ function ClipGenBlock(props: NodeProps) {
         )}
         <select
           value={model}
-          onChange={(e) => updateNodeData(props.id, { model: e.target.value })}
+          onChange={(e) => {
+            void selectVideoModel(e.target.value, (id) => updateNodeData(props.id, { model: id }));
+          }}
           className="w-full rounded-lg border border-line bg-surface px-2 py-1.5 text-xs"
         >
-          {CLIP_GEN_MODELS.map((m) => (
-            <option key={m.id} value={m.id}>
-              {m.label}
-            </option>
-          ))}
+          {!hasVideoConnections ? (
+            <option value="">请先在设置 → 连接中配置视频模型</option>
+          ) : (
+            videoModelOptions.map((m) => (
+              <option key={m.id} value={m.id}>
+                {m.label}
+              </option>
+            ))
+          )}
         </select>
+        {!hasVideoConnections && (
+          <button
+            type="button"
+            className="text-[10px] text-accent underline"
+            onClick={() => openConnectionsSettings()}
+          >
+            打开连接设置
+          </button>
+        )}
         <p className="text-[10px] text-ink/40">
           {resolution}p · {orientation === 'landscape' ? '16:9' : orientation === 'portrait' ? '9:16' : '1:1'} · {durationSec}s · {generateAudio ? '有声' : '无声'}
         </p>
         <p className="text-[10px] text-ink/40">
-          {CLIP_GEN_MODELS.find((m) => m.id === model)?.hint}
+          {lookupVideoGenModelHint(model, connections)}
         </p>
         <div className="border-t border-line pt-2 mt-2">
           <p className="text-[10px] text-ink/40 mb-1">视频设置</p>
@@ -433,34 +495,12 @@ function ClipGenBlock(props: NodeProps) {
             />
             生成音频
           </label>
-          {/* F-048: 并发/重试配置 */}
-          <div className="flex gap-2 mt-1">
-            <label className="flex items-center gap-1 text-[9px] text-ink/40">
-              并发
-              <input
-                type="number"
-                min={1}
-                max={8}
-                value={(props.data?.concurrency as number) ?? 2}
-                onChange={(e) => updateNodeData(props.id, { concurrency: Math.max(1, Math.min(8, Number(e.target.value))) })}
-                className="w-10 rounded border border-line/30 px-1 py-0.5 text-[9px] bg-surface text-center"
-              />
-            </label>
-            <label className="flex items-center gap-1 text-[9px] text-ink/40">
-              重试
-              <input
-                type="number"
-                min={0}
-                max={5}
-                value={(props.data?.maxRetries as number) ?? 1}
-                onChange={(e) => updateNodeData(props.id, { maxRetries: Math.max(0, Math.min(5, Number(e.target.value))) })}
-                className="w-10 rounded border border-line/30 px-1 py-0.5 text-[9px] bg-surface text-center"
-              />
-            </label>
-          </div>
         </div>
         <p className="text-[10px] text-ink/40">
           {resolution}p · {orientation === 'landscape' ? '16:9' : orientation === 'portrait' ? '9:16' : '1:1'} · {durationSec}s · {generateAudio ? '有声' : '无声'}
+          {(props.data?.concurrency as number | undefined) != null
+            ? ` · 并发 ${(props.data.concurrency as number)}`
+            : ''}
         </p>
         <CharacterSelect
           characters={characters}
@@ -498,6 +538,11 @@ function ClipGenBlock(props: NodeProps) {
         {(props.data?.message as string) && (
           <p className="text-[10px] text-warn">{props.data.message as string}</p>
         )}
+        {pendingCount > 0 && (
+          <p className="text-[10px] text-warn bg-warn/5 border border-warn/30 rounded px-1.5 py-1">
+            待恢复视频任务 {pendingCount} 个 · 打开视频工作台将自动查询（也可手动点「继续查询」）
+          </p>
+        )}
         <div className="flex gap-1">
           <button
             type="button"
@@ -509,7 +554,7 @@ function ClipGenBlock(props: NodeProps) {
             }
             className="flex-1 rounded-xl bg-brand text-white text-sm py-2 disabled:opacity-50"
           >
-            {status === 'running' ? '生成中…' : (resolveRunLabel('clip-gen').primary || '运行生成')}
+            {resolveRunLabel('clip-gen', status).primary}
           </button>
           {taskId && !videoUrl && (
             <button

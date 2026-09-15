@@ -1,4 +1,4 @@
-import { lazy, memo, Suspense, useCallback, useMemo, useRef } from 'react';
+import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { type NodeProps, useEdges, useNodes, useReactFlow } from '@xyflow/react';
 import { gatherUpstream, AUDIO_FORMAT_OPTIONS, SPEECH_RATE_OPTIONS, resolveRunLabel, resolveCharacterReferenceAudio } from '@nx9/shared';
 import { BlockShell } from '../shared/BlockShell';
@@ -6,10 +6,12 @@ import { GenUpstreamHint } from '../shared/upstream-hints';
 import { useUpstreamPrompt } from '../shared/use-upstream-prompt';
 import { api } from '../../api/client';
 import { useActivityLog } from '../../stores/activity-log';
+import { toastError } from '../../stores/toast';
 import { runSoundGenCast, synthesizeTts } from '../../engine/sound-gen-runner';
 import { useAllAssetLibraryItems } from '../../hooks/use-asset-library-items';
 import { MentionEditor } from '../../engine/stage-deck/chrome/MentionEditor';
 import { AssetLinkField, assetRefFromData, patchWithAssetRef } from '../shared/AssetLinkField';
+import { useCredentialVault } from '../../stores/credential-vault';
 import { useWorkspaceDocument } from '../../stores/workspace-document';
 import GenSettingsPills from '../shared/GenSettingsPills';
 
@@ -18,6 +20,7 @@ const SOUND_MODES = [
   { id: 'tts', label: '单轨 TTS' },
   { id: 'cast', label: '多角色' },
   { id: 'music', label: 'BGM' },
+  { id: 'sfx', label: '音效' },
 ] as const;
 
 const VoiceCastPanel = lazy(() => import('../nx9/VoiceCastBlock'));
@@ -49,6 +52,88 @@ function SoundGenBlock(props: NodeProps) {
   const { hasUpstream, preview: upstreamPreview } = useUpstreamPrompt(props.id);
 
   const { allItems } = useAllAssetLibraryItems('sound');
+  const bgmChannel = useCredentialVault((s) => s.settings);
+  const bgmReady = Boolean((bgmChannel?.bgmBaseUrl ?? '').trim()) && Boolean((bgmChannel?.bgmApiKey ?? '').trim());
+  const [bgmPrompt, setBgmPrompt] = useState('');
+  const [bgmBusy, setBgmBusy] = useState(false);
+  const [bgmPhase, setBgmPhase] = useState('');
+  const [bgmError, setBgmError] = useState('');
+  const bgmPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  useEffect(() => () => {
+    if (bgmPollRef.current) clearInterval(bgmPollRef.current);
+  }, []);
+
+  const generateBgm = useCallback(async () => {
+    const prompt = bgmPrompt.trim();
+    if (!prompt) {
+      setBgmError('请先填写 BGM 描述，禁止空成功');
+      return;
+    }
+    setBgmBusy(true);
+    setBgmError('');
+    setBgmPhase('提交生成任务…');
+    try {
+      const { taskId } = await api.submitBgm({ prompt, durationSec: 30 });
+      appendLog(`BGM 生成任务已提交：${taskId}`);
+      setBgmPhase('生成中…（通常 1-2 分钟）');
+      const deadline = Date.now() + 5 * 60_000;
+      await new Promise<void>((resolve, reject) => {
+        const tick = async () => {
+          try {
+            const t = await api.getBgmStatus(taskId);
+            if (t.status === 'done' && t.url) {
+              if (bgmPollRef.current) clearInterval(bgmPollRef.current);
+              updateNodeData(props.id, { audioUrl: t.url, status: 'success' });
+              appendLog('BGM 生成完成');
+              setBgmPhase('');
+              setBgmBusy(false);
+              resolve();
+              return;
+            }
+            if (t.status === 'done' && !t.url) {
+              if (bgmPollRef.current) clearInterval(bgmPollRef.current);
+              setBgmPhase('');
+              setBgmBusy(false);
+              setBgmError('BGM 生成完成但无音频地址，禁止空成功');
+              reject(new Error('BGM 生成完成但无音频地址，禁止空成功'));
+              return;
+            }
+            if (t.status === 'error') {
+              if (bgmPollRef.current) clearInterval(bgmPollRef.current);
+              setBgmPhase('');
+              setBgmBusy(false);
+              setBgmError(t.error || 'BGM 生成失败，禁止空成功');
+              reject(new Error(t.error || 'BGM 生成失败，禁止空成功'));
+              return;
+            }
+            if (Date.now() > deadline) {
+              if (bgmPollRef.current) clearInterval(bgmPollRef.current);
+              setBgmPhase('');
+              setBgmBusy(false);
+              setBgmError('BGM 生成超时（5 分钟），请稍后重试');
+              reject(new Error('BGM 生成超时'));
+              return;
+            }
+          } catch (e) {
+            if (bgmPollRef.current) clearInterval(bgmPollRef.current);
+            setBgmPhase('');
+            setBgmBusy(false);
+            const msg = e instanceof Error ? e.message : String(e);
+            setBgmError(msg);
+            reject(e);
+          }
+        };
+        void tick();
+        bgmPollRef.current = setInterval(() => void tick(), 3000);
+      });
+    } catch (e) {
+      setBgmBusy(false);
+      setBgmPhase('');
+      const msg = e instanceof Error ? e.message : String(e);
+      if (!msg.includes('BGM 生成失败') && !msg.includes('超时')) setBgmError(msg);
+    }
+  }, [bgmPrompt, props.id, updateNodeData, appendLog]);
+
   const selectedChar = useMemo(
     () => characters.find((c) => c.id === characterId),
     [characters, characterId],
@@ -59,9 +144,16 @@ function SoundGenBlock(props: NodeProps) {
 
   const uploadRefAudio = useCallback(
     async (file: File) => {
-      const res = await api.uploadAsset(file);
-      updateNodeData(props.id, { referenceAudioUrl: res.url });
-      appendLog('参考音频已上传');
+      try {
+        const res = await api.uploadAsset(file);
+        if (!res?.url) throw new Error('参考音频上传失败，禁止空成功');
+        updateNodeData(props.id, { referenceAudioUrl: res.url });
+        appendLog('参考音频已上传');
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : '参考音频上传失败，禁止空成功';
+        toastError(msg);
+        appendLog(msg);
+      }
     },
     [props.id, updateNodeData, appendLog],
   );
@@ -87,11 +179,11 @@ function SoundGenBlock(props: NodeProps) {
     const upstreamText = gathered.prompts.filter(Boolean).join('\n\n');
     const input = upstreamText || text;
     if (!input.trim()) {
-      updateNodeData(props.id, { status: 'error', error: '请输入要配音的文本' });
+      updateNodeData(props.id, { status: 'error', error: '请输入要配音的文本，禁止空成功' });
       return;
     }
     if (provider === 'luxtts' && !luxRef) {
-      updateNodeData(props.id, { status: 'error', error: 'LuxTTS 需要参考音频（上传或选角色）' });
+      updateNodeData(props.id, { status: 'error', error: 'LuxTTS 需要参考音频（上传或选角色），禁止空成功' });
       return;
     }
     updateNodeData(props.id, { status: 'running' });
@@ -107,6 +199,9 @@ function SoundGenBlock(props: NodeProps) {
         speechRate,
         instructions: (props.data?.instructions as string) || undefined,
       });
+      if (!res.url?.trim()) {
+        throw new Error('TTS 未返回音频 URL，禁止空成功');
+      }
       updateNodeData(props.id, {
         status: 'success',
         audioUrl: res.url,
@@ -117,8 +212,10 @@ function SoundGenBlock(props: NodeProps) {
         `AI 配音完成 · ${props.id} · ${res.provider ?? 'tts'} · ${Math.round((res.bytes ?? 0) / 1024)}KB`,
       );
     } catch (e) {
+      const msg = `AI 配音失败 · ${props.id}：${String(e)}`;
       updateNodeData(props.id, { status: 'error', error: String(e) });
-      appendLog(`AI 配音失败 · ${props.id}`);
+      appendLog(msg);
+      toastError(msg);
     }
   }, [
     appendLog,
@@ -184,8 +281,33 @@ function SoundGenBlock(props: NodeProps) {
             ))}
           </div>
           <p className="text-[10px] text-ink/45 bg-surface rounded-lg px-2 py-1">
-            BGM 仅支持导入音频（真生成未接入，禁止假成功）。
+            {bgmReady
+              ? '已配置 BGM 通道：可 AI 生成配乐，或从素材库导入音频。'
+              : '未配置 BGM 通道：仅支持导入音频。到 设置→BGM 填 Suno 兼容端点后可 AI 生成。'}
           </p>
+          {bgmReady && (
+            <div className="space-y-1.5 rounded-lg border border-line bg-surface px-2 py-2">
+              <textarea
+                value={bgmPrompt}
+                onChange={(e) => setBgmPrompt(e.target.value)}
+                placeholder="BGM 描述，如：紧张悬疑的都市夜景铺底，电子合成器，无人声"
+                rows={2}
+                className="w-full resize-none rounded-md border border-line bg-surface px-2 py-1.5 text-[11px] outline-none"
+              />
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  disabled={bgmBusy || !bgmPrompt.trim()}
+                  onClick={() => void generateBgm()}
+                  className="rounded-md bg-brand px-2.5 py-1 text-[11px] font-medium text-white disabled:opacity-45"
+                >
+                  {bgmBusy ? '生成中…' : 'AI 生成'}
+                </button>
+                {bgmPhase && <span className="text-[10px] text-ink/45">{bgmPhase}</span>}
+              </div>
+              {bgmError && <p className="text-[10px] text-red-600">{bgmError}</p>}
+            </div>
+          )}
           <AssetLinkField
             kind="sound"
             assetRef={soundAssetRef}
@@ -206,6 +328,51 @@ function SoundGenBlock(props: NodeProps) {
           )}
           {(props.data?.error as string) && (
             <p className="text-[10px] text-red-600">{props.data.error as string}</p>
+          )}
+        </div>
+      </BlockShell>
+    );
+  }
+
+  if (soundMode === 'sfx') {
+    return (
+      <BlockShell {...props}>
+        <div className="space-y-2 nodrag nopan text-xs">
+          <div className="flex gap-1">
+            {SOUND_MODES.map((m) => (
+              <button
+                key={m.id}
+                type="button"
+                onClick={() => updateNodeData(props.id, { soundMode: m.id })}
+                className={`flex-1 py-1 rounded-lg text-[10px] border ${
+                  soundMode === m.id ? 'border-brand bg-brand/10 text-brand' : 'border-line text-ink/50'
+                }`}
+              >
+                {m.label}
+              </button>
+            ))}
+          </div>
+          <p className="text-[10px] text-ink/45 bg-surface rounded-lg px-2 py-1">
+            SF-19：从声音库导入音效/环境音，编排时自动挂到「音效」轨。
+          </p>
+          <AssetLinkField
+            kind="sound"
+            assetRef={soundAssetRef}
+            onChange={(ref) => {
+              const item = ref
+                ? allItems.find((i) => i.id === ref.id && i.scope === ref.scope)
+                : undefined;
+              updateNodeData(props.id, {
+                soundAssetRef: ref,
+                ...patchWithAssetRef(ref),
+                audioUrl: item?.audioUrl ?? '',
+                soundKind: 'sfx',
+                ...(item?.audioUrl ? { status: 'success' } : {}),
+              });
+            }}
+          />
+          {audioUrl && (
+            <audio src={audioUrl} controls className="w-full" style={{ height: 36 }} />
           )}
         </div>
       </BlockShell>
@@ -385,7 +552,7 @@ function SoundGenBlock(props: NodeProps) {
           disabled={status === 'running'}
           className="w-full rounded-xl bg-accent text-white text-sm py-2 hover:bg-accent/90 disabled:opacity-50"
         >
-          {resolveRunLabel('sound-gen').primary}
+          {resolveRunLabel('sound-gen', status).primary}
         </button>
       </div>
     </BlockShell>

@@ -66,6 +66,7 @@ export function prepareDirectorProjectForShot(
         transform,
         bodyType: (placement?.bodyType as DirectorObject['bodyType']) ?? existing.bodyType ?? 'neutral',
         posePresetId: placement?.posePresetId ?? existing.posePresetId ?? 'stand',
+        poseJoints: placement?.poseJoints ?? existing.poseJoints,
         faceRig: profile?.creative?.faceRig ?? existing.faceRig,
       };
       continue;
@@ -81,6 +82,7 @@ export function prepareDirectorProjectForShot(
       color: COLORS[index % COLORS.length],
       bodyType: (placement?.bodyType as DirectorObject['bodyType']) ?? 'neutral',
       posePresetId: placement?.posePresetId ?? 'stand',
+      poseJoints: placement?.poseJoints,
       transform,
       faceRig: profile?.creative?.faceRig,
     });
@@ -103,5 +105,6 @@ export function extractDirectorCharacterPlacements(
       scale: object.transform.scale,
       bodyType: object.bodyType,
       posePresetId: object.posePresetId,
+      poseJoints: object.poseJoints,
     }));
 }

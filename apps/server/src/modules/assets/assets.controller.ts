@@ -39,7 +39,8 @@ export class AssetsController {
     }),
   )
   async upload(@UploadedFile() file: Express.Multer.File) {
-    if (!file) throw new Error('No file');
+    if (!file) throw new Error('No file，禁止空成功');
+    if (!file.size) throw new Error('上传文件为空，禁止空成功');
     const url = this.assets.publicUrl('uploads', file.filename);
     let thumbUrl: string | null = null;
     if (/\.(jpe?g|png|webp|gif)$/i.test(file.filename)) {

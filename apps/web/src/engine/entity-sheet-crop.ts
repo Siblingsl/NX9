@@ -31,7 +31,7 @@ function cropToBlob(
   canvas.width = Math.max(1, w);
   canvas.height = Math.max(1, h);
   const ctx = canvas.getContext('2d');
-  if (!ctx) return Promise.reject(new Error('Canvas 不可用'));
+  if (!ctx) return Promise.reject(new Error('Canvas 不可用，禁止空成功'));
   ctx.drawImage(img, x, y, w, h, 0, 0, canvas.width, canvas.height);
   return new Promise((resolve, reject) => {
     canvas.toBlob((blob) => (blob ? resolve(blob) : reject(new Error('裁切失败'))), 'image/jpeg', 0.92);

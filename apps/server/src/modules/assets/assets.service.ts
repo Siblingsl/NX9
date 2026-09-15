@@ -43,6 +43,7 @@ export class AssetsService {
           .resize(320, 320, { fit: 'inside', withoutEnlargement: true })
           .jpeg({ quality: 72 })
           .toFile(out);
+        if (!existsSync(out)) return null;
         return this.publicUrl('thumbs', thumbName);
       } catch {
         return null;

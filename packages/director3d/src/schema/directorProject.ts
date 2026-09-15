@@ -58,6 +58,10 @@ export interface DirectorObject {
   geometryType?: GeometryPrimitiveType;
   bodyType?: CharacterBodyType;
   posePresetId?: string;
+  /** Relative joint offsets (deg) on top of posePresetId. */
+  poseJoints?: Partial<
+    Record<'body' | 'torso' | 'head' | 'armL' | 'armR' | 'legL' | 'legR', [number, number, number]>
+  >;
   assetId?: string;
   meshUrl?: string;
   crowdGroupId?: string;
@@ -71,6 +75,7 @@ export interface DirectorCameraCapture {
   imageUrl?: string;
   cameraPrompt?: string;
   cameraPosition?: [number, number, number];
+  cameraTarget?: [number, number, number];
   cameraRotation?: [number, number, number];
   cameraFov?: number;
   createdAt: number;
@@ -113,6 +118,7 @@ export interface Director3dCandidate {
     scale?: [number, number, number];
     bodyType?: CharacterBodyType;
     posePresetId?: string;
+    poseJoints?: DirectorObject['poseJoints'];
   }>;
   prompt: string;
   status: Director3dCandidateStatus;

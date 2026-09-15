@@ -1,6 +1,9 @@
-{
-  "version": 1,
-  "meshContractVersion": 1,
-  "modelPath": "nx9-character-base.glb",
-  "license": "NX9 internal"
+﻿{
+    "meshContractVersion":  1,
+    "version":  1,
+    "source":  "blender-sculpt-morphs-v1",
+    "modelPath":  "nx9-character-base.glb",
+    "note":  "Blender 区域雕刻生成的 72 个身份 morph（美术级平滑衰减位移）",
+    "morphs":  72,
+    "license":  "NX9 internal"
 }

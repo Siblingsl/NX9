@@ -18,7 +18,7 @@ import {
 } from '../../../engine/storyboard-sheet-compose';
 import type { CompositionStats } from '../../../engine/storyboard-desk-runner';
 import { api } from '../../../api/client';
-import { toastSuccess } from '../../../stores/toast';
+import { toastError, toastSuccess } from '../../../stores/toast';
 
 type StoryboardSheetExportDeps = {
   props: NodeProps;
@@ -67,7 +67,9 @@ export function useStoryboardSheetExportOps(deps: StoryboardSheetExportDeps) {
   /** X-13: 导出审片包（CSV + Markdown + 故事板PNG） */
   const exportReviewPackage = useCallback(async () => {
     if (!payload || visibleShots.length === 0) {
-      appendLog('暂无镜表可导出');
+      const msg = '暂无镜表可导出，禁止空成功';
+      appendLog(msg);
+      toastError(msg);
       return;
     }
     const epTitle = visibleEpisodes[0]?.title ?? currentEpisodeId ?? '分镜';
@@ -127,7 +129,9 @@ export function useStoryboardSheetExportOps(deps: StoryboardSheetExportDeps) {
   const generateStoryboardSheet = useCallback(
     async (force = false) => {
       if (!payload || visibleShots.length === 0) {
-        appendLog('分镜台：没有可合成的镜头');
+        const msg = '分镜台：没有可合成的镜头，禁止空成功';
+        appendLog(msg);
+        toastError(msg);
         return;
       }
       if (sheetComposing || batchRunning) return;
@@ -143,7 +147,9 @@ export function useStoryboardSheetExportOps(deps: StoryboardSheetExportDeps) {
       });
       const withImage = cells.filter((c) => c.imageUrl?.trim()).length;
       if (withImage === 0) {
-        appendLog('分镜台：请先生成线稿或上传分镜图，再合成故事板大图');
+        const msg = '分镜台：请先生成线稿或上传分镜图，再合成故事板大图，禁止空成功';
+        appendLog(msg);
+        toastError(msg);
         return;
       }
 
@@ -173,6 +179,7 @@ export function useStoryboardSheetExportOps(deps: StoryboardSheetExportDeps) {
           { type: 'image/png' },
         );
         const uploaded = await api.uploadAsset(file);
+        if (!uploaded?.url) throw new Error('故事板大图上传失败，禁止空成功');
         if (sheetEpochRef.current !== sheetEpoch) {
           appendLog('分镜故事板合成已取消 · 结果未写回');
           return;
@@ -208,7 +215,9 @@ export function useStoryboardSheetExportOps(deps: StoryboardSheetExportDeps) {
         toastSuccess(`故事板大图已生成 · ${withImage} 格`);
         setComposeViewTab('sheet');
       } catch (e) {
-        appendLog(`[SB_SHEET_FAIL] 分镜故事板大图失败: ${String(e)}`);
+        const msg = `分镜故事板大图失败：${e instanceof Error ? e.message : String(e)}`;
+        appendLog(`[SB_SHEET_FAIL] ${msg}`);
+        toastError(msg.includes('禁止空成功') ? msg : `${msg}，禁止空成功`);
       } finally {
         setSheetComposing(false);
       }

@@ -5,9 +5,11 @@ import { describeKeyframeColorCheck, type DirectorKeyframeBatch } from '@nx9/sha
 import { BlockShell } from '../shared/BlockShell';
 import { ScreenModal } from '../../components/ui/ScreenModal';
 import { useActivityLog } from '../../stores/activity-log';
+import { toastError } from '../../stores/toast';
 import { useWorkspaceDocument } from '../../stores/workspace-document';
 import { useStoryboardUi } from '../../stores/flow-runtime';
 import { checkAssetReadinessInEdges } from '../../engine/asset-readiness';
+import { useOpenDeskSignal } from '../../engine/use-open-desk-signal';
 import {
   migrateUpstreamChainStoryboard,
   persistUpstreamChainHygiene,
@@ -60,6 +62,10 @@ function DirectorDeskBlock(props: NodeProps) {
   const nodes = useNodes();
   const edges = useEdges();
   const appendLog = useActivityLog((s) => s.append);
+  const failHonest = useCallback((msg: string) => {
+    appendLog(msg);
+    toastError(msg);
+  }, [appendLog]);
   const storyboard = useWorkspaceDocument((s) => s.storyboard);
   const characters = useWorkspaceDocument((s) => s.characters.characters);
   // 勿在 selector 内 `?? []`：每次新建数组会使 getSnapshot 不稳定 → 无限重渲染
@@ -171,6 +177,9 @@ function DirectorDeskBlock(props: NodeProps) {
   const [phaseHint, setPhaseHint] = useState<string>('');
   const [liveProgress, setLiveProgress] = useState({ done: 0, total: 0, failed: 0 });
   const [studioOpen, setStudioOpen] = useState(false);
+  useOpenDeskSignal((props.data as Record<string, unknown> | undefined)?.openDeskAt, () =>
+    setStudioOpen(true),
+  );
   const [studioTab, setStudioTab] = useState<'produce' | 'stage3d' | 'deliver'>('produce');
   const [previewMode, setPreviewMode] = useState<'keyframe' | 'lineart' | 'guide3d' | 'compare'>('compare');
   const [immersed3d, setImmersed3d] = useState(false);
@@ -317,7 +326,7 @@ function DirectorDeskBlock(props: NodeProps) {
   const patchShot = useCallback(
     (shotId: string, patch: Partial<import('@nx9/shared').StoryboardShot>) => {
       const ok = runContext.patchShot?.(shotId, patch) ?? false;
-      if (!ok) appendLog('导演台：无法写回上游链镜表（未连接分镜台？）');
+      if (!ok) failHonest('导演台：无法写回上游链镜表（未连接分镜台？），禁止空成功');
       return ok;
     },
     [runContext.patchShot, appendLog],
@@ -339,15 +348,15 @@ function DirectorDeskBlock(props: NodeProps) {
       }
       // O-14 / OL-21：门禁未放行时硬阻断（参考锁或 3D 可拍闸）
       if (!ready && (forceCharacterRef || forceSceneRef || prefer3dRef)) {
-        appendLog('导演台：上游设定未就绪，锁参考/3D 可拍模式下禁止批出。请先在编剧台「设定就绪」标记放行。');
-        updateNodeData(props.id, { status: 'error', error: '设定未就绪，锁参考禁止批出' });
+        failHonest('导演台：上游设定未就绪，锁参考/3D 可拍模式下禁止批出。请先在编剧台「设定就绪」标记放行，禁止空成功');
+        updateNodeData(props.id, { status: 'error', error: '设定未就绪，锁参考禁止批出，禁止空成功' });
         return;
       }
       const relevantReferenceGaps = mode === 'one'
         ? referenceGaps.filter((gap) => gap.shotId === oneId)
         : referenceGaps;
       if (relevantReferenceGaps.length > 0 && (forceCharacterRef || forceSceneRef || prefer3dRef)) {
-        appendLog(`导演台：${relevantReferenceGaps.length} 镜不可拍（参考/定妆缺失），已阻止批出`);
+        failHonest(`导演台：${relevantReferenceGaps.length} 镜不可拍（参考/定妆缺失），已阻止批出，禁止空成功`);
         return;
       }
       const selectedShotsForWarning = mode === 'one' && oneId
@@ -383,11 +392,11 @@ function DirectorDeskBlock(props: NodeProps) {
               : undefined;
 
       if (mode === 'selected' && (!shotIds || shotIds.length === 0)) {
-        appendLog('导演台：请先勾选镜头');
+        failHonest('导演台：请先勾选镜头，禁止空成功');
         return;
       }
       if (mode === 'failed' && (!shotIds || shotIds.length === 0)) {
-        appendLog('导演台：没有失败镜头');
+        failHonest('导演台：没有失败镜头，禁止空成功');
         return;
       }
 
@@ -544,6 +553,12 @@ function DirectorDeskBlock(props: NodeProps) {
             (summary.retried ? ` / 含重试 ${summary.retried}` : '') +
             ` · 共 ${summary.total}`,
         );
+        if (summary.failed > 0) {
+          toastError(
+            `导演台批出 · 失败 ${summary.failed}/${summary.total}` +
+              (summary.done === 0 ? '（全部失败，禁止空成功）' : ''),
+          );
+        }
 
         // 批出后：进入审阅（有成功镜或本集已有待审时）
         if (autoOpenReview && (summary.done > 0 || mode !== 'one')) {
@@ -571,7 +586,7 @@ function DirectorDeskBlock(props: NodeProps) {
           status: 'error',
           error: e instanceof Error ? e.message : String(e),
         });
-        appendLog(`导演台批出失败 · ${String(e)}`);
+        failHonest(`导演台批出失败 · ${String(e)}`);
       } finally {
         abortControllerRef.current = null;
         setRunningShotId(null);
@@ -633,7 +648,7 @@ function DirectorDeskBlock(props: NodeProps) {
       negativePrompt: (data.negativePrompt as string | undefined) || undefined,
     });
     if (!sync.synced) {
-      appendLog('导演台：画布上没有图像生成节点，无法写回风格');
+      failHonest('导演台：画布上没有图像生成节点，无法写回风格，禁止空成功');
       return;
     }
     appendLog(
@@ -656,7 +671,7 @@ function DirectorDeskBlock(props: NodeProps) {
   const handleApproveShot = useCallback(
     (shotId: string) => {
        if (!approveDirectorKeyframe(shotId, nodes as any, patchShot)) {
-        appendLog('导演台 · 无法批准（缺关键帧）');
+        failHonest('导演台 · 无法批准（缺关键帧），禁止空成功');
         return;
       }
       const synced = summarizePendingKeyframeGate(undefined, activeShots);
@@ -670,7 +685,7 @@ function DirectorDeskBlock(props: NodeProps) {
 
   const handleApproveAll = useCallback(() => {
     if (reviewStats.missing > 0) {
-      appendLog(`导演台 · 还有 ${reviewStats.missing} 镜缺图，无法全部通过`);
+      failHonest(`导演台 · 还有 ${reviewStats.missing} 镜缺图，无法全部通过，禁止空成功`);
       return;
     }
     const n = approveAllDirectorKeyframes(patchShot, activeShots);
@@ -686,11 +701,11 @@ function DirectorDeskBlock(props: NodeProps) {
 
   const handleUnapproveShot = useCallback((shotId: string) => {
     if (!unapproveDirectorKeyframe(shotId, nodes as any, patchShot)) {
-      appendLog('导演台 · 无法撤回批准');
+      failHonest('导演台 · 无法撤回批准，禁止空成功');
       return;
     }
     appendLog('导演台 · 已撤回批准，可重新审阅');
-  }, [nodes, patchShot, appendLog]);
+  }, [nodes, patchShot, appendLog, failHonest]);
 
   const handleUnapproveAll = useCallback(async () => {
     if (!keyframeGatePassed) return;
@@ -753,7 +768,7 @@ function DirectorDeskBlock(props: NodeProps) {
       edges,
     });
     if (!result.ok) {
-      appendLog(`导演台 · 拆分失败：${result.reason ?? '未知原因'}`);
+      failHonest(`导演台 · 拆分失败：${result.reason ?? '未知原因'}，禁止空成功`);
       return;
     }
     const next = applySplitMixedDirector3dGraph({
@@ -786,7 +801,7 @@ function DirectorDeskBlock(props: NodeProps) {
     async (shotId: string, regenerate: boolean) => {
       const comment = (rejectDrafts[shotId] ?? '').trim();
       if (!comment) {
-        appendLog('导演台 · 打回需填写原因');
+        failHonest('导演台 · 打回需填写原因，禁止空成功');
         return;
       }
       setRejectBusyId(shotId);
@@ -813,7 +828,7 @@ function DirectorDeskBlock(props: NodeProps) {
           },
         });
         if (!res.ok) {
-          appendLog('导演台 · 打回失败');
+          failHonest('导演台 · 打回失败，禁止空成功');
           return;
         }
         setRejectEditingId(null);
@@ -869,11 +884,11 @@ function DirectorDeskBlock(props: NodeProps) {
         episodeId: episodeId ?? undefined,
       });
       if (!pushed.clipGenId) {
-        appendLog('导演台 · 未连接 clip-gen，无法推送关键帧批次');
+        failHonest('导演台 · 未连接 clip-gen，无法推送关键帧批次，禁止空成功');
         return;
       }
       if (pushed.shotCount === 0) {
-        appendLog('导演台 · 没有可交付的视频关键帧');
+        failHonest('导演台 · 没有可交付的视频关键帧，禁止空成功');
         return;
       }
       appendLog(
@@ -927,7 +942,7 @@ function DirectorDeskBlock(props: NodeProps) {
       .filter((shot) => shot.firstFrameAssetId)
       .map((shot) => `#${shot.index}\t${shot.firstFrameAssetId}`);
     if (rows.length === 0) {
-      appendLog('导演台：没有可导出的关键帧 URL');
+      failHonest('导演台：没有可导出的关键帧 URL，禁止空成功');
       return;
     }
     const blob = new Blob([`NX9 关键帧 URL\n${rows.join('\n')}\n`], { type: 'text/plain;charset=utf-8' });
@@ -1203,6 +1218,7 @@ function DirectorDeskBlock(props: NodeProps) {
                    lineArtUrl={currentLineArtUrl}
                   currentShotIndex={currentShot?.index != null ? String(currentShot.index) : '—'}
                   currentShotDesc={currentShot?.descriptionZh as string | undefined}
+                  currentShotId={currentShot?.id}
                   previewMode={previewMode}
                    setPreviewMode={setPreviewMode}
                   setStudioTab={setStudioTab}

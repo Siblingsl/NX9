@@ -4,6 +4,7 @@ import { BookText, X } from 'lucide-react';
 import { useFlowCommands } from '../stores/flow-commands';
 import { useFlowRuntime } from '../stores/flow-runtime';
 import { useActivityLog } from '../stores/activity-log';
+import { toastError } from '../stores/toast';
 
 const FILLABLE_TYPES = new Set(['prompt', 'chat-model', 'memo', 'cinema-prompt', 'camera-prompt']);
 
@@ -21,7 +22,9 @@ export function PromptLibraryPanel({
   const applyToSelection = useCallback(
     (promptEn: string, label: string) => {
       if (!runtime) {
-        appendLog('画布尚未就绪');
+        const msg = '画布尚未就绪，禁止空成功';
+        appendLog(msg);
+        toastError(msg);
         return false;
       }
       const selected = runtime.getNodes().filter((n) => n.selected);

@@ -33,23 +33,30 @@ export async function pollMontageTaskUntilDone(
     await new Promise((r) => setTimeout(r, interval));
     if (kind === 'hyperframes') {
       const st = await api.getTaskStatus(taskId);
-      if (st.status === 'done' && st.url) return st.url;
+      if (st.status === 'done') {
+        if (!st.url) throw new Error('Hyperframes 渲染完成但无输出地址，禁止空成功');
+        return st.url;
+      }
       if (st.status === 'error' || st.status === 'cancelled') {
-        throw new Error(st.message || `${label} 渲染${st.status === 'cancelled' ? '已取消' : '失败'}`);
+        throw new Error(
+          st.message || `${label} 渲染${st.status === 'cancelled' ? '已取消' : '失败'}，禁止空成功`,
+        );
       }
       opts?.onProgress?.(`${label} 渲染中…（${st.status}）`);
     } else {
       const st = await api.getRemotionTaskStatus(taskId);
       if (st.status === 'done') {
         const url = st.outputUrl ?? st.url;
-        if (!url) throw new Error('Remotion 渲染完成但无输出地址');
+        if (!url) throw new Error('Remotion 渲染完成但无输出地址，禁止空成功');
         return url;
       }
-      if (st.status === 'error') throw new Error(st.error || st.message || 'Remotion 渲染失败');
+      if (st.status === 'error') {
+        throw new Error(st.error || st.message || 'Remotion 渲染失败，禁止空成功');
+      }
       opts?.onProgress?.(`Remotion 渲染中… ${st.progress ?? 0}%`);
     }
   }
-  throw new Error(`${label} 渲染超时`);
+  throw new Error(`${label} 渲染超时，禁止空成功`);
 }
 
 export async function renderClipEditorTimeline(
@@ -60,18 +67,20 @@ export async function renderClipEditorTimeline(
     title?: string;
     templateId?: string;
     onProgress?: (msg: string) => void;
+    /** SE-RESUME: 任务提交成功即回调——调用方应立刻持久化 taskId，刷新后才能重挂轮询 */
+    onSubmitted?: (taskId: string, engine: 'remotion' | 'hyperframes') => void;
   },
 ): Promise<{ url: string; taskId?: string; engine: 'ffmpeg' | 'remotion' | 'hyperframes' }> {
   const resolved = resolveEngine(opts?.profile ?? 'drama', engine);
   if (resolved === 'ffmpeg') {
     // SE-02: 仅 concat 视频轨 assetUrl，忽略 trim/转场/音轨——调用方须明示「粗预览」
     const clips = videoUrlsFromTimeline(timeline);
-    if (clips.length === 0) throw new Error('时间线视频轨无可用片段');
+    if (clips.length === 0) throw new Error('时间线视频轨无可用片段，禁止空成功');
     opts?.onProgress?.(
       'FFmpeg 粗预览：仅拼接视频轨素材，不含裁剪、转场与多轨…',
     );
     const res = await api.concatClips(clips, opts?.title || '智能剪辑导出', 'none');
-    if (!res.ok || !res.url) throw new Error(res.message || 'FFmpeg 拼接失败');
+    if (!res.ok || !res.url) throw new Error(res.message || 'FFmpeg 拼接失败，禁止空成功');
     return { url: res.url, engine: 'ffmpeg' };
   }
   if (resolved === 'hyperframes') {
@@ -79,7 +88,8 @@ export async function renderClipEditorTimeline(
       timeline,
       templateId: opts?.templateId ?? 'nx9-vertical-episode',
     });
-    if (!res.ok || !res.taskId) throw new Error('Hyperframes 任务提交失败');
+    if (!res.ok || !res.taskId) throw new Error('Hyperframes 任务提交失败，禁止空成功');
+    opts?.onSubmitted?.(res.taskId, 'hyperframes');
     opts?.onProgress?.('Hyperframes 任务已提交，等待渲染…');
     const url = await pollMontageTaskUntilDone(res.taskId, 'hyperframes', {
       onProgress: opts?.onProgress,
@@ -87,7 +97,8 @@ export async function renderClipEditorTimeline(
     return { url, taskId: res.taskId, engine: 'hyperframes' };
   }
   const res = await api.renderRemotion({ timeline });
-  if (!res.ok || !res.taskId) throw new Error(res.message || 'Remotion 任务提交失败');
+  if (!res.ok || !res.taskId) throw new Error(res.message || 'Remotion 任务提交失败，禁止空成功');
+  opts?.onSubmitted?.(res.taskId, 'remotion');
   opts?.onProgress?.('Remotion 任务已提交，等待渲染…');
   const url = await pollMontageTaskUntilDone(res.taskId, 'remotion', {
     onProgress: opts?.onProgress,

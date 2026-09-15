@@ -248,3 +248,65 @@ export function lookupPose(id?: string): PosePreset {
 export function lookupBody(id?: CharacterBodyType) {
   return BODY_TYPES.find((b) => b.id === id) ?? BODY_TYPES[0];
 }
+
+/** Relative Euler offsets (deg) layered on a pose preset — NX9 self-impl, not AGPL joint drag. */
+export type PoseJointKey = 'body' | 'torso' | 'head' | 'armL' | 'armR' | 'legL' | 'legR';
+
+export type PoseJointOverride = Partial<Record<PoseJointKey, [number, number, number]>>;
+
+export const POSE_JOINT_SLIDERS: {
+  key: PoseJointKey;
+  axis: 0 | 1 | 2;
+  label: string;
+  min: number;
+  max: number;
+}[] = [
+  { key: 'head', axis: 0, label: '头俯仰', min: -45, max: 45 },
+  { key: 'head', axis: 1, label: '头左右', min: -60, max: 60 },
+  { key: 'torso', axis: 0, label: '躯干俯仰', min: -40, max: 40 },
+  { key: 'torso', axis: 1, label: '躯干扭转', min: -50, max: 50 },
+  { key: 'armL', axis: 0, label: '左臂抬落', min: -90, max: 90 },
+  { key: 'armR', axis: 0, label: '右臂抬落', min: -90, max: 90 },
+  { key: 'legL', axis: 0, label: '左腿屈伸', min: -60, max: 90 },
+  { key: 'legR', axis: 0, label: '右腿屈伸', min: -60, max: 90 },
+];
+
+function addEuler(
+  base: [number, number, number],
+  delta?: [number, number, number],
+): [number, number, number] {
+  if (!delta) return base;
+  return [base[0] + delta[0], base[1] + delta[1], base[2] + delta[2]];
+}
+
+/** Merge pose preset with optional per-joint offsets (degrees). */
+export function mergePose(presetId?: string, override?: PoseJointOverride | null): PosePreset {
+  const base = lookupPose(presetId);
+  if (!override) return base;
+  return {
+    ...base,
+    body: addEuler(base.body, override.body),
+    torso: addEuler(base.torso, override.torso),
+    head: addEuler(base.head, override.head),
+    armL: addEuler(base.armL, override.armL),
+    armR: addEuler(base.armR, override.armR),
+    legL: addEuler(base.legL, override.legL),
+    legR: addEuler(base.legR, override.legR),
+  };
+}
+
+export function setJointAxis(
+  override: PoseJointOverride | undefined,
+  key: PoseJointKey,
+  axis: 0 | 1 | 2,
+  value: number,
+): PoseJointOverride {
+  const prev = override?.[key] ?? ([0, 0, 0] as [number, number, number]);
+  const next: [number, number, number] = [...prev];
+  next[axis] = value;
+  const out: PoseJointOverride = { ...(override ?? {}), [key]: next };
+  if (next[0] === 0 && next[1] === 0 && next[2] === 0) {
+    delete out[key];
+  }
+  return out;
+}

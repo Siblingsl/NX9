@@ -6,6 +6,7 @@ import { readFileSync as readSrc } from 'node:fs';
 import { resolve } from 'node:path';
 import {
   loadTaskRecords,
+  markInterruptedOnRestart,
   saveTaskRecords,
 } from '../src/modules/montage/render-task-store';
 import { RemotionRenderer } from '../src/modules/montage/remotion.renderer';
@@ -57,5 +58,37 @@ describe('SRV-04 渲染任务落盘', () => {
     ).commitJob.bind(renderer);
     expect(commit('r-1', { status: 'done' })).toBe(false);
     expect(renderer.getStatus('r-1')?.status).toBe('cancelled');
+  });
+});
+
+describe('SE-DEEP-07 服务重启收口：三类渲染任务不悬挂', () => {
+  it('markInterruptedOnRestart 只改进行中状态，已完成不动', () => {
+    const tasks = new Map([
+      ['q', { status: 'queued' }],
+      ['r', { status: 'rendering' }],
+      ['run', { status: 'running' }],
+      ['d', { status: 'done', url: '/a.mp4' }],
+      ['e', { status: 'error' }],
+      ['c', { status: 'cancelled' }],
+    ]);
+    const marked = markInterruptedOnRestart(tasks, ['queued', 'rendering', 'running'], (t) => {
+      t.status = 'error';
+    });
+    expect(marked).toBe(3);
+    expect(tasks.get('q')?.status).toBe('error');
+    expect(tasks.get('r')?.status).toBe('error');
+    expect(tasks.get('run')?.status).toBe('error');
+    expect(tasks.get('d')?.status).toBe('done');
+    expect(tasks.get('e')?.status).toBe('error');
+    expect(tasks.get('c')?.status).toBe('cancelled');
+  });
+
+  it('HyperFrames / Remotion / video-edit 三服务 constructor 均接重启收口', () => {
+    const root = resolve(__dirname, '../src/modules/montage');
+    for (const file of ['hyperframes.service.ts', 'remotion.renderer.ts', 'video-edit.service.ts']) {
+      const src = readSrc(join(root, file), 'utf8');
+      expect(src, file).toContain('markInterruptedOnRestart');
+      expect(src, file).toContain('服务重启');
+    }
   });
 });

@@ -1,16 +1,24 @@
 /**
  * VideoEditService — 视频级智能替换任务队列（P3）。
  *
- * POST /api/montage/video-edit 提交 { videoUrl, maskUrl, prompt, providerId? }，
+ * POST /api/montage/video-edit 提交 { videoUrl, maskUrl?, maskVideoUrl?, prompt, providerId? }，
  * 走 Fal 队列 API 异步执行（视频重绘耗时远超同步网关 90s 轮询上限），
  * 完成后将成片落盘到 storage/videos，返回 /media/videos/... 地址。
  *
- * 供应商能力位见 @nx9/shared provider-registry 的 VIDEO_EDIT_PROVIDERS。
+ * POST /api/montage/video-trace 提交 { videoUrl, maskUrl, providerId? }，
+ * 用 SAM2 视频分割把「首帧蒙版」传播为「逐帧 mask 视频」（首帧自动跨帧追踪），
+ * 产物可作为 video-edit 的 maskVideoUrl 输入，保证整段替换边缘稳定。
+ *
+ * 供应商能力位见 @nx9/shared provider-registry 的 VIDEO_EDIT_PROVIDERS / VIDEO_TRACE_PROVIDERS。
  */
 import { Injectable, Logger } from '@nestjs/common';
 import * as fs from 'fs';
 import * as path from 'path';
-import { resolveVideoEditProvider, VIDEO_EDIT_PROVIDERS } from '@nx9/shared';
+import {
+  resolveVideoEditProvider,
+  resolveVideoTraceProvider,
+  VIDEO_EDIT_PROVIDERS,
+} from '@nx9/shared';
 import { PATHS } from '../../config/app.config';
 import { resolveMediaUrl } from '../../common/media-path';
 import { SettingsService } from '../settings/settings.service';
@@ -18,6 +26,7 @@ import {
   VIDEO_EDIT_TASKS_FILE,
   loadTaskRecords,
   mapToRecords,
+  markInterruptedOnRestart,
   recordsToMap,
   saveTaskRecords,
 } from './render-task-store';
@@ -28,6 +37,8 @@ export interface VideoEditJob {
   progress: number;
   url?: string;
   message?: string;
+  /** 任务类型：edit=视频重绘；trace=首帧蒙版跨帧追踪 */
+  type?: 'edit' | 'trace';
   /** Fal 队列 request_id，用于取消/追踪 */
   falRequestId?: string;
   falModel?: string;
@@ -50,15 +61,10 @@ export class VideoEditService {
     }
     this.jobs = recordsToMap(loadTaskRecords<VideoEditJob>(VIDEO_EDIT_TASKS_FILE));
     // SE-DEEP-07: 服务重启后排队/进行中任务已无进程，标记中断而不是永远停留在 queued/running。
-    let stale = 0;
-    for (const job of this.jobs.values()) {
-      if (job.status === 'queued' || job.status === 'running') {
-        job.status = 'error';
-        job.message = '服务重启，任务已中断；请重新提交';
-        job.updatedAt = Date.now();
-        stale += 1;
-      }
-    }
+    const stale = markInterruptedOnRestart(this.jobs, ['queued', 'running'], (j) => {
+      j.status = 'error';
+      j.message = '服务重启，任务已中断；请重新提交';
+    });
     if (stale > 0) {
       this.persist();
       this.logger.warn(`video-edit: ${stale} 个重启前任务标记为中断`);
@@ -72,6 +78,8 @@ export class VideoEditService {
   submit(body: {
     videoUrl: string;
     maskUrl?: string;
+    /** 首帧自动跨帧追踪产物：逐帧 mask 视频（SAM2 任务产出） */
+    maskVideoUrl?: string;
     prompt: string;
     providerId?: string;
   }): { ok: boolean; taskId?: string; message?: string } {
@@ -80,14 +88,17 @@ export class VideoEditService {
       return { ok: false, message: '视频级替换需要在设置中配置 Fal API Key（primaryApiKey）' };
     }
     if (!body.videoUrl || !body.prompt?.trim()) {
-      return { ok: false, message: 'videoUrl 与 prompt 必填' };
+      return { ok: false, message: 'videoUrl 与 prompt 必填，禁止空成功' };
     }
     if (body.providerId && !VIDEO_EDIT_PROVIDERS.some((p) => p.id === body.providerId)) {
       return { ok: false, message: `未知视频编辑供应商：${body.providerId}` };
     }
     const provider = resolveVideoEditProvider(body.providerId);
-    if (provider.requiresMask && !body.maskUrl) {
-      return { ok: false, message: `${provider.label} 需要提供 mask` };
+    if (provider.requiresMask && !body.maskUrl && !body.maskVideoUrl) {
+      return {
+        ok: false,
+        message: `${provider.label} 需要提供 mask（首帧蒙版或追踪后的 mask 视频），禁止空成功`,
+      };
     }
 
     const taskId = `vedit-${Date.now()}-${++this.counter}`;
@@ -95,6 +106,7 @@ export class VideoEditService {
       taskId,
       status: 'queued',
       progress: 0,
+      type: 'edit',
       createdAt: Date.now(),
       updatedAt: Date.now(),
     };
@@ -105,6 +117,47 @@ export class VideoEditService {
       if (this.jobs.get(taskId)?.status === 'cancelled') return;
       this.fail(taskId, err instanceof Error ? err.message : String(err));
     });
+
+    return { ok: true, taskId };
+  }
+
+  /**
+   * 首帧自动跨帧追踪：SAM2 视频分割把首帧 mask 传播为逐帧 mask 视频。
+   * 产物 url 可作为 video-edit 的 maskVideoUrl 输入（P3 闭环）。
+   */
+  submitTrace(body: {
+    videoUrl: string;
+    maskUrl: string;
+    providerId?: string;
+  }): { ok: boolean; taskId?: string; message?: string } {
+    const apiKey = this.settings.getRaw().primaryApiKey || '';
+    if (!apiKey) {
+      return { ok: false, message: '跨帧追踪需要在设置中配置 Fal API Key（primaryApiKey）' };
+    }
+    if (!body.videoUrl || !body.maskUrl) {
+      return { ok: false, message: 'videoUrl 与 maskUrl（首帧蒙版）必填，禁止空成功' };
+    }
+    const provider = resolveVideoTraceProvider(body.providerId);
+
+    const taskId = `vtrace-${Date.now()}-${++this.counter}`;
+    const job: VideoEditJob = {
+      taskId,
+      status: 'queued',
+      progress: 0,
+      type: 'trace',
+      falModel: provider.falModel,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    };
+    this.jobs.set(taskId, job);
+    this.persist();
+
+    void this.processTrace(taskId, body, provider.falModel, provider.inputKeys, apiKey).catch(
+      (err) => {
+        if (this.jobs.get(taskId)?.status === 'cancelled') return;
+        this.fail(taskId, err instanceof Error ? err.message : String(err));
+      },
+    );
 
     return { ok: true, taskId };
   }
@@ -186,7 +239,7 @@ export class VideoEditService {
     });
     if (!initRes.ok) {
       const text = await (await initRes.text()).slice(0, 200);
-      throw new Error(`Fal storage 上传初始化失败: ${text}`);
+      throw new Error(`Fal storage 上传初始化失败: ${text}，禁止空成功`);
     }
     const initJson = (await initRes.json()) as {
       upload_url?: string;
@@ -196,7 +249,7 @@ export class VideoEditService {
     const uploadUrl = initJson.upload_url;
     const remoteUrl = initJson.storage_url ?? initJson.file_url;
     if (!uploadUrl || !remoteUrl) {
-      throw new Error('Fal storage 未返回 upload_url/storage_url');
+      throw new Error('Fal storage 未返回 upload_url/storage_url，禁止空成功');
     }
     const putRes = await fetch(uploadUrl, {
       method: 'PUT',
@@ -204,16 +257,16 @@ export class VideoEditService {
       body: fs.createReadStream(local) as unknown as BodyInit,
     });
     if (!putRes.ok) {
-      throw new Error(`Fal storage 上传失败: HTTP ${putRes.status}`);
+      throw new Error(`Fal storage 上传失败，禁止空成功: HTTP ${putRes.status}`);
     }
     return remoteUrl;
   }
 
   private async process(
     taskId: string,
-    body: { videoUrl: string; maskUrl?: string; prompt: string },
+    body: { videoUrl: string; maskUrl?: string; maskVideoUrl?: string; prompt: string },
     falModel: string,
-    inputKeys: { video: string; mask?: string; prompt: string },
+    inputKeys: { video: string; mask?: string; maskVideo?: string; prompt: string },
     apiKey: string,
   ): Promise<void> {
     if (this.jobs.get(taskId)?.status === 'cancelled') return;
@@ -227,6 +280,10 @@ export class VideoEditService {
     if (inputKeys.mask && body.maskUrl) {
       input[inputKeys.mask] = await this.toRemoteInput(body.maskUrl, apiKey);
     }
+    // P3: 首帧自动跨帧追踪产物（SAM2 逐帧 mask 视频）优先于单帧 mask
+    if (inputKeys.maskVideo && body.maskVideoUrl) {
+      input[inputKeys.maskVideo] = await this.toRemoteInput(body.maskVideoUrl, apiKey);
+    }
 
     // Fal 队列 API：提交
     const submitRes = await fetch(`https://queue.fal.run/${falModel}`, {
@@ -238,7 +295,7 @@ export class VideoEditService {
       body: JSON.stringify(input),
     });
     if (!submitRes.ok) {
-      throw new Error(`Fal 提交失败: ${(await submitRes.text()).slice(0, 300)}`);
+      throw new Error(`Fal 提交失败，禁止空成功: ${(await submitRes.text()).slice(0, 300)}`);
     }
     const submitted = (await submitRes.json()) as {
       request_id?: string;
@@ -246,7 +303,7 @@ export class VideoEditService {
       response_url?: string;
     };
     if (!submitted.request_id) {
-      throw new Error('Fal 未返回 request_id');
+      throw new Error('Fal 未返回 request_id，禁止空成功');
     }
     this.update(taskId, { falRequestId: submitted.request_id, falModel });
     if (this.jobs.get(taskId)?.status === 'cancelled') return;
@@ -276,19 +333,19 @@ export class VideoEditService {
         break;
       }
       if (s === 'FAILED' || s === 'ERROR' || s === 'CANCELLED') {
-        throw new Error(`Fal 任务状态: ${s}`);
+        throw new Error(`Fal 任务状态: ${s}，禁止空成功`);
       }
       this.update(taskId, {
         progress: s === 'IN_PROGRESS' ? 50 : Math.min(30, 5 + (stJson.queue_position ?? 0)),
       });
     }
-    if (!completed) throw new Error('视频级替换超时（20 分钟）');
+    if (!completed) throw new Error('视频级替换超时（20 分钟），禁止空成功');
 
     this.update(taskId, { progress: 80 });
     if (this.jobs.get(taskId)?.status === 'cancelled') return;
     const result = await fetch(responseUrl, { headers: { Authorization: `Key ${apiKey}` } });
     if (!result.ok) {
-      throw new Error(`Fal 结果获取失败: ${(await result.text()).slice(0, 300)}`);
+      throw new Error(`Fal 结果获取失败: ${(await result.text()).slice(0, 300)}，禁止空成功`);
     }
     const json = (await result.json()) as Record<string, unknown>;
     const videoUrl =
@@ -297,7 +354,7 @@ export class VideoEditService {
       (json.output as { url?: string })?.url ||
       (typeof json.url === 'string' ? json.url : undefined);
     if (!videoUrl) {
-      throw new Error(`Fal 结果无视频地址: ${JSON.stringify(json).slice(0, 200)}`);
+      throw new Error(`Fal 结果无视频地址: ${JSON.stringify(json).slice(0, 200)}，禁止空成功`);
     }
 
     // 落盘
@@ -307,11 +364,119 @@ export class VideoEditService {
     this.logger.log(`video-edit ${taskId} done: ${saved}`);
   }
 
+  /**
+   * 跨帧追踪任务：SAM2 视频分割，首帧 mask → 逐帧 mask 视频。
+   * 结果解析防御性取 mask_video / video / masks 数组 / output 任一字段。
+   */
+  private async processTrace(
+    taskId: string,
+    body: { videoUrl: string; maskUrl: string },
+    falModel: string,
+    inputKeys: { video: string; mask: string; prompt?: string },
+    apiKey: string,
+  ): Promise<void> {
+    if (this.jobs.get(taskId)?.status === 'cancelled') return;
+    this.update(taskId, { status: 'running', progress: 5 });
+    if (this.jobs.get(taskId)?.status === 'cancelled') return;
+
+    const input: Record<string, unknown> = {
+      [inputKeys.video]: await this.toRemoteInput(body.videoUrl, apiKey),
+      [inputKeys.mask]: await this.toRemoteInput(body.maskUrl, apiKey),
+    };
+    if (inputKeys.prompt) {
+      input[inputKeys.prompt] = '追踪首帧蒙版标注的目标，输出覆盖全片段的逐帧 mask 视频';
+    }
+
+    const submitRes = await fetch(`https://queue.fal.run/${falModel}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Key ${apiKey}`,
+      },
+      body: JSON.stringify(input),
+    });
+    if (!submitRes.ok) {
+      throw new Error(`Fal 追踪提交失败，禁止空成功: ${(await submitRes.text()).slice(0, 300)}`);
+    }
+    const submitted = (await submitRes.json()) as {
+      request_id?: string;
+      status_url?: string;
+      response_url?: string;
+    };
+    if (!submitted.request_id) {
+      throw new Error('Fal 追踪未返回 request_id，禁止空成功');
+    }
+    this.update(taskId, { falRequestId: submitted.request_id, falModel });
+    if (this.jobs.get(taskId)?.status === 'cancelled') return;
+
+    const statusUrl =
+      submitted.status_url ??
+      `https://queue.fal.run/${falModel}/requests/${submitted.request_id}/status`;
+    const responseUrl =
+      submitted.response_url ??
+      `https://queue.fal.run/${falModel}/requests/${submitted.request_id}`;
+
+    const deadline = Date.now() + TIMEOUT_MS;
+    let completed = false;
+    while (Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
+      if (this.jobs.get(taskId)?.status === 'cancelled') {
+        this.logger.log(`video-trace ${taskId} cancelled, stop polling`);
+        return;
+      }
+      const st = await fetch(statusUrl, { headers: { Authorization: `Key ${apiKey}` } });
+      if (!st.ok) continue;
+      const stJson = (await st.json()) as { status?: string; queue_position?: number };
+      const s = (stJson.status ?? '').toUpperCase();
+      if (s === 'COMPLETED') {
+        completed = true;
+        break;
+      }
+      if (s === 'FAILED' || s === 'ERROR' || s === 'CANCELLED') {
+        throw new Error(`Fal 追踪任务状态: ${s}，禁止空成功`);
+      }
+      this.update(taskId, {
+        progress: s === 'IN_PROGRESS' ? 50 : Math.min(30, 5 + (stJson.queue_position ?? 0)),
+      });
+    }
+    if (!completed) throw new Error('跨帧追踪超时（20 分钟），禁止空成功');
+
+    this.update(taskId, { progress: 80 });
+    if (this.jobs.get(taskId)?.status === 'cancelled') return;
+    const result = await fetch(responseUrl, { headers: { Authorization: `Key ${apiKey}` } });
+    if (!result.ok) {
+      throw new Error(`Fal 追踪结果获取失败: ${(await result.text()).slice(0, 300)}，禁止空成功`);
+    }
+    const json = (await result.json()) as Record<string, unknown>;
+    const masksArr = Array.isArray(json.masks)
+      ? (json.masks as Array<{ url?: string }>)
+      : [];
+    const maskVideoUrl =
+      (json.mask_video as { url?: string } | undefined)?.url ||
+      (json.video as { url?: string } | undefined)?.url ||
+      masksArr[0]?.url ||
+      (json.output as { url?: string } | undefined)?.url ||
+      (typeof json.url === 'string' ? json.url : undefined);
+    if (!maskVideoUrl) {
+      throw new Error(`Fal 追踪结果无 mask 视频地址: ${JSON.stringify(json).slice(0, 200)}，禁止空成功`);
+    }
+
+    const saved = await this.saveRemoteVideo(maskVideoUrl, taskId);
+    if (this.jobs.get(taskId)?.status === 'cancelled') return;
+    this.update(taskId, { status: 'done', progress: 100, url: saved });
+    this.logger.log(`video-trace ${taskId} done: ${saved}`);
+  }
+
   private async saveRemoteVideo(url: string, taskId: string): Promise<string> {
     const res = await fetch(url);
-    if (!res.ok) throw new Error(`视频下载失败: HTTP ${res.status}`);
+    if (!res.ok) throw new Error(`视频下载失败: HTTP ${res.status}，禁止空成功`);
+    const buf = Buffer.from(await res.arrayBuffer());
+    if (!buf.length) throw new Error('远程视频内容为空，禁止空成功');
     const name = `${taskId}.mp4`;
-    fs.writeFileSync(path.join(PATHS.videos, name), Buffer.from(await res.arrayBuffer()));
+    const out = path.join(PATHS.videos, name);
+    if (!fs.existsSync(PATHS.videos)) fs.mkdirSync(PATHS.videos, { recursive: true });
+    fs.writeFileSync(out, buf);
+    if (!fs.existsSync(out)) throw new Error('视频编辑产物未写出，禁止空成功');
     return `/media/videos/${encodeURIComponent(name)}`;
   }
 }

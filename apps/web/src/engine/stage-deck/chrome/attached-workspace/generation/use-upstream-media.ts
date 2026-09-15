@@ -30,6 +30,10 @@ export function useUpstreamMedia(blockId: string) {
       pictures: upstream.pictures ?? [],
       clips: upstream.clips ?? [],
       sounds: upstream.sounds ?? [],
+      /** SF-15: 仅 music 模式配乐 */
+      bgmUrls: upstream.bgmUrls ?? [],
+      /** SF-19: sfx 模式音效 */
+      sfxUrls: upstream.sfxUrls ?? [],
       hasMedia: (upstream.pictures?.length ?? 0) > 0 || (upstream.clips?.length ?? 0) > 0 || (upstream.sounds?.length ?? 0) > 0,
     };
   }, [nodes, edges, blockId]);

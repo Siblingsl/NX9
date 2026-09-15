@@ -33,14 +33,21 @@ describe('F-045 acceptance — 导演台 WebGL 生命周期', () => {
       expect(src).toContain('WebGLRenderer');
     });
 
-    it('visibility handler 使用 gl.domElement 替代 document.querySelector', () => {
-      expect(src).toContain('gl.domElement');
+    it('visibility handler 使用 glRef，不经 document.querySelector', () => {
+      expect(src).toContain('glRef');
+      expect(src).toContain('gl.setPixelRatio');
       expect(src).not.toMatch(/document\.querySelector\(.*canvas/);
     });
 
     it('visibility handler 有 setPixelRatio 降分辨率（隐藏时 0.1）', () => {
       expect(src).toContain('setPixelRatio');
       expect(src).toContain('0.1');
+    });
+
+    it('tab 隐藏时不 display:none，保持 GL/scissor 挂载', () => {
+      expect(src).toContain('setRenderPaused(true)');
+      expect(src).toContain('Persist scissor/GL');
+      expect(src).not.toMatch(/canvas\.style\.display\s*=\s*['"]none['"]/);
     });
   });
 

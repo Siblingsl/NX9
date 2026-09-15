@@ -1,11 +1,8 @@
 import { test, expect, type ConsoleMessage } from '@playwright/test';
+import { createCanvasProject } from './helpers';
 
-async function createCanvasProject(page: import('@playwright/test').Page) {
-  await page.goto('/');
-  await page.getByRole('button', { name: /新建|New/i }).first().click();
-  await page.getByRole('button', { name: /创建并开始制作/i }).click();
-  await page.getByRole('button', { name: /前往画布/i }).click();
-  await expect(page.getByRole('button', { name: '打开编剧台' }).first()).toBeVisible({ timeout: 15_000 });
+async function openScriptDesk(page: import('@playwright/test').Page) {
+  await createCanvasProject(page);
   await page.getByRole('button', { name: '打开编剧台' }).first().click();
   await expect(page.getByLabel('共创指令')).toBeVisible({ timeout: 15_000 });
 }
@@ -55,7 +52,7 @@ test.describe('A12 编剧对话区 UI 自检', () => {
       });
 
       await mockChatStream(page);
-      await createCanvasProject(page);
+      await openScriptDesk(page);
 
       await page.getByRole('tab', { name: '选题' }).click();
       await page.getByLabel('共创指令').fill('测试选题：都市成长');

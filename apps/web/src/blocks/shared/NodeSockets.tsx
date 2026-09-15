@@ -28,13 +28,16 @@ export const SideSocketHandle = memo(function SideSocketHandle({
       position={type === 'target' ? Position.Left : Position.Right}
       id={id ?? kind}
       className={`nx9-socket nx9-socket--side${ghost ? ' nx9-socket--anchor' : ''}`}
-      style={{
-        background: ghost ? 'transparent' : SOCKET_COLORS[kind],
-        top: '50%',
-        ...(ghost
-          ? { opacity: 0, pointerEvents: 'none' as const, border: 'none', boxShadow: 'none' }
-          : null),
-      }}
+      style={
+        {
+          background: ghost ? 'transparent' : SOCKET_COLORS[kind],
+          '--socket-color': SOCKET_COLORS[kind],
+          top: '50%',
+          ...(ghost
+            ? { opacity: 0, pointerEvents: 'none' as const, border: 'none', boxShadow: 'none' }
+            : null),
+        } as React.CSSProperties
+      }
       title={ghost ? undefined : kind}
       aria-hidden={ghost || undefined}
     />
@@ -54,6 +57,7 @@ export const VerticalSocketHandle = memo(function VerticalSocketHandle({
   const offset = `${spec.offsetPct ?? 50}%`;
   const commonStyle = {
     background: SOCKET_COLORS[spec.kind],
+    '--socket-color': SOCKET_COLORS[spec.kind],
     left: offset,
   };
   const className = 'nx9-socket nx9-socket--exec';

@@ -10,7 +10,7 @@ import {
   refreshWorkspacePrompts,
 } from '@nx9/shared';
 import { api } from '../../../api/client';
-import { toastSuccess } from '../../../stores/toast';
+import { toastError, toastSuccess } from '../../../stores/toast';
 import { AssetDetailStickyBar } from '../AssetDetailStickyBar';
 import { AssetEditQuickJump } from '../AssetEditQuickJump';
 import AssetLibraryGenSettings from '../AssetLibraryGenSettings';
@@ -217,16 +217,21 @@ export function AssetDetailEntityView() {
             }
             onUploadVariant={(variantId, file) => {
               void (async () => {
-                const res = await api.uploadAsset(file);
-                const ext = getSceneCreative(selectedWorkspaceItem);
-                const base = ext.variants?.length ? ext.variants : DEFAULT_SCENE_VARIANTS;
-                const variants = base.map((v) =>
-                  v.id === variantId ? { ...v, imageUrl: res.url } : v,
-                );
-                saveWorkspaceItem({
-                  ...selectedWorkspaceItem,
-                  creative: { ...ext, variants },
-                });
+                try {
+                  const res = await api.uploadAsset(file);
+                  if (!res.url?.trim()) throw new Error('场景变体图上传失败或未返回 URL，禁止空成功');
+                  const ext = getSceneCreative(selectedWorkspaceItem);
+                  const base = ext.variants?.length ? ext.variants : DEFAULT_SCENE_VARIANTS;
+                  const variants = base.map((v) =>
+                    v.id === variantId ? { ...v, imageUrl: res.url } : v,
+                  );
+                  saveWorkspaceItem({
+                    ...selectedWorkspaceItem,
+                    creative: { ...ext, variants },
+                  });
+                } catch (e) {
+                  toastError(e instanceof Error ? e.message : '场景变体图上传失败，禁止空成功');
+                }
               })();
             }}
           />
@@ -255,16 +260,21 @@ export function AssetDetailEntityView() {
                 onUploadFrontFlat={(f) => void handleUploadWorkspaceMedia(f, selectedWorkspaceItem, 'frontFlatUrl')}
                 onUploadVariant={(variantId, file) => {
                   void (async () => {
-                    const res = await api.uploadAsset(file);
-                    const ext = getCostumeCreative(selectedWorkspaceItem);
-                    const base = ext.variants?.length ? ext.variants : CAC_COSTUME_VARIANT_PRESETS;
-                    const variants = base.map((v) =>
-                      v.id === variantId ? { ...v, imageUrl: res.url } : v,
-                    );
-                    saveWorkspaceItem({
-                      ...selectedWorkspaceItem,
-                      creative: { ...ext, variants },
-                    });
+                    try {
+                      const res = await api.uploadAsset(file);
+                      if (!res.url?.trim()) throw new Error('服装变体图上传失败或未返回 URL，禁止空成功');
+                      const ext = getCostumeCreative(selectedWorkspaceItem);
+                      const base = ext.variants?.length ? ext.variants : CAC_COSTUME_VARIANT_PRESETS;
+                      const variants = base.map((v) =>
+                        v.id === variantId ? { ...v, imageUrl: res.url } : v,
+                      );
+                      saveWorkspaceItem({
+                        ...selectedWorkspaceItem,
+                        creative: { ...ext, variants },
+                      });
+                    } catch (e) {
+                      toastError(e instanceof Error ? e.message : '服装变体图上传失败，禁止空成功');
+                    }
                   })();
                 }}
                 onCropFrontFromSheet={
@@ -315,16 +325,21 @@ export function AssetDetailEntityView() {
             onUploadCover={(f) => void handleUploadWorkspaceMedia(f, selectedWorkspaceItem, 'coverUrl')}
             onUploadVariant={(variantId, file) => {
               void (async () => {
-                const res = await api.uploadAsset(file);
-                const ext = getPropCreative(selectedWorkspaceItem);
-                const base = ext.variants?.length ? ext.variants : DEFAULT_PROP_VARIANTS;
-                const variants = base.map((v) =>
-                  v.id === variantId ? { ...v, imageUrl: res.url } : v,
-                );
-                saveWorkspaceItem({
-                  ...selectedWorkspaceItem,
-                  creative: { ...ext, variants },
-                });
+                try {
+                  const res = await api.uploadAsset(file);
+                  if (!res.url?.trim()) throw new Error('道具变体图上传失败或未返回 URL，禁止空成功');
+                  const ext = getPropCreative(selectedWorkspaceItem);
+                  const base = ext.variants?.length ? ext.variants : DEFAULT_PROP_VARIANTS;
+                  const variants = base.map((v) =>
+                    v.id === variantId ? { ...v, imageUrl: res.url } : v,
+                  );
+                  saveWorkspaceItem({
+                    ...selectedWorkspaceItem,
+                    creative: { ...ext, variants },
+                  });
+                } catch (e) {
+                  toastError(e instanceof Error ? e.message : '道具变体图上传失败，禁止空成功');
+                }
               })();
             }}
             boundSceneItems={propBoundScenes.get(selectedWorkspaceItem.id) ?? []}

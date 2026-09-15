@@ -1,16 +1,30 @@
 import type { FlowBlock, FlowLink } from '../types/workspace';
-import { BLOCK_KIND_MIGRATION_PATCHES, migrateBlockKind } from '../catalog/migrate-block-kinds';
+
+export type WorkflowTemplateStatus = 'ga' | 'beta' | 'deprecated';
 
 export interface WorkflowTemplate {
   id: string;
   label: string;
   description: string;
   category: 'video' | 'image' | 'story' | 'tool';
+  /** ga=启动器默认；beta=可用但实验；deprecated=隐藏于启动器（历史 id 仍可按 id 加载） */
+  status: WorkflowTemplateStatus;
   build: () => { blocks: FlowBlock[]; links: FlowLink[] };
 }
 
+/** 启动器 / 命令面板 / 模板面板只展示非 deprecated */
+export function isWorkflowTemplateListed(tpl: Pick<WorkflowTemplate, 'status'>): boolean {
+  return tpl.status !== 'deprecated';
+}
+
+export function listWorkflowTemplates(includeDeprecated = false): WorkflowTemplate[] {
+  if (includeDeprecated) return WORKFLOW_TEMPLATES;
+  return WORKFLOW_TEMPLATES.filter(isWorkflowTemplateListed);
+}
+
 const DX = 300;
-const DY = 120;
+/** 行距必须大于最高节点卡（图像生成带预览区约 300px），否则同列相邻节点互相遮挡 */
+const DY = 420;
 const BX = 100;
 const BY = 100;
 
@@ -18,19 +32,16 @@ function uid(seed: string) {
   return `${seed}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
 }
 
+/** 模板节点必须直接写活跃 kind；禁止经 migrate 垫片静默改写（F-013） */
 function node(type: string, col: number, row: number, data: Record<string, unknown> = {}): FlowBlock {
-  const migratedType = migrateBlockKind(type);
-  const patch = BLOCK_KIND_MIGRATION_PATCHES[type] ?? {};
   return {
-    id: uid(migratedType),
-    type: migratedType,
+    id: uid(type),
+    type,
     position: { x: BX + col * DX, y: BY + row * DY },
     data: {
       blockIndex: col + row + 1,
       status: 'idle',
-      ...patch,
       ...data,
-      ...(migratedType !== type ? { migratedFrom: type } : {}),
     },
   };
 }
@@ -53,8 +64,9 @@ export const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
   {
     id: 'tpl-nx9-character-pipeline',
     label: '角色设定 → 出图',
-    description: '角色设定 → 提示词 → 图像生成 → 预览（F-013 更新）',
+    description: '编剧台角色设定 → 图像生成 → 素材预览',
     category: 'story',
+    status: 'ga',
     build() {
       const a = node('script-desk', 0, 0, { playbookStepId: 'script-desk' });
       const b = node('picture-gen', 1, 0);
@@ -70,6 +82,7 @@ export const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
     label: '文生图',
     description: '提示词 → 图像生成 → 结果预览',
     category: 'image',
+    status: 'ga',
     build() {
       const a = node('picture-gen', 0, 0, { content: 'cinematic portrait, soft lighting' });
       const b = node('picture-gen', 1, 0);
@@ -82,6 +95,7 @@ export const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
     label: '图生视频',
     description: '参考图 + 运镜提示 → 视频生成',
     category: 'video',
+    status: 'ga',
     build() {
       const a = node('asset-import', 0, 0, { mediaKind: 'picture' });
       const b = node('picture-gen', 0, 1, { studioTab: 'camera', selectedPresetIds: ['cam-dolly-in'] });
@@ -98,6 +112,7 @@ export const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
     label: '分镜九宫格',
     description: '电影感 + 分镜网格 → 切分 → 预览',
     category: 'story',
+    status: 'ga',
     build() {
       const a = node('picture-gen', 0, 0, { studioTab: 'cinema' });
       const b = node('storyboard-desk', 1, 0, { rows: 3, cols: 3 });
@@ -112,8 +127,9 @@ export const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
   {
     id: 'tpl-character-turnaround',
     label: '角色三视图',
-    description: '风格工坊 + 多角度 → 批量出图（LibTV 角色设定流）',
+    description: '参考板风格约束 + 多角度提示 → 批量出图 → 横向拼合',
     category: 'story',
+    status: 'ga',
     build() {
       const a = node('reference-board', 0, 0, { styleLabTab: 'style' });
       const b = node('picture-gen', 1, 0, { studioTab: 'angle' });
@@ -128,8 +144,9 @@ export const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
   {
     id: 'tpl-grid-vision',
     label: '宫格三层反推',
-    description: '分镜网格 → 宫格反推 → 视频生成（moyin/LibTV）',
+    description: '分镜台 → 宫格反推提示 → 视频生成',
     category: 'story',
+    status: 'beta',
     build() {
       const a = node('storyboard-desk', 0, 0);
       const b = node('picture-gen', 1, 0, { rows: 3, cols: 3 });
@@ -145,6 +162,7 @@ export const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
     label: '照片说话',
     description: '素材图 → 口播视频（clip-gen · photo-speak 模式）',
     category: 'video',
+    status: 'ga',
     build() {
       const a = node('asset-import', 0, 0, { mediaKind: 'picture' });
       const b = node('clip-gen', 1, 0, {
@@ -163,6 +181,7 @@ export const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
     label: '镜头脚本 → 分镜台',
     description: '分镜台 → 视频生成 → 交付打包',
     category: 'story',
+    status: 'ga',
     build() {
       const a = node('storyboard-desk', 0, 0);
       const b = node('clip-gen', 1, 0);
@@ -178,6 +197,7 @@ export const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
     label: '分镜 → 导演批审 → 交付',
     description: '分镜台 → 导演台（审阅送出）→ 交付打包',
     category: 'story',
+    status: 'ga',
     build() {
       const a = node('storyboard-desk', 0, 0);
       const b = node('director-desk', 1, 0, { studioTab: 'deliver', queueFilter: 'missing' });
@@ -191,8 +211,9 @@ export const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
   {
     id: 'tpl-reference-picture',
     label: '参考板生图',
-    description: '参考板 + 角色 → 图像生成 + 连贯性检查（F-035 更新）',
+    description: '参考板 + 角色设定 → 图像生成 → 连贯性检查',
     category: 'story',
+    status: 'ga',
     build() {
       const a = node('reference-board', 0, 0);
       const b = node('script-desk', 0, 1, {});
@@ -209,6 +230,7 @@ export const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
     label: '批量生图',
     description: '迭代器 → 图像生成 → 交付',
     category: 'tool',
+    status: 'ga',
     build() {
       const a = node('iterator', 0, 0);
       const b = node('picture-gen', 1, 0);
@@ -222,8 +244,9 @@ export const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
   {
     id: 'tpl-av-post',
     label: '音视频后期',
-    description: '视频 → 字幕烧录 → 调色 → 预览',
+    description: '视频剪辑 → 字幕台烧录 → 调色预览 → 素材预览',
     category: 'tool',
+    status: 'ga',
     build() {
       const a = node('clip-editor', 0, 0);
       const b = node('caption-asr', 1, 0, { captionMode: 'burn' });
@@ -238,8 +261,9 @@ export const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
   {
     id: 'tpl-spatial-pipeline',
     label: '空间生产链',
-    description: '场面调度 → 灯光 → 深度通道 → 生图',
+    description: '导演台场面调度 → 灯光 → 深度 → 生图',
     category: 'tool',
+    status: 'beta',
     build() {
       const a = node('director-desk', 0, 0, { directorMode: 'blocking' });
       const b = node('director-desk', 1, 0, { directorMode: 'light' });
@@ -253,12 +277,18 @@ export const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
   },
   {
     id: 'tpl-sclass-seedance',
-    label: 'S-Class Seedance 连续镜头',
-    description: '分镜台 → Seedance 连续镜头 → 导演台审阅 → 交付  (F-035 更新)',
+    label: 'Seedance 参考生成（Beta）',
+    description:
+      '分镜台 → 视频生成（model=seedance，需参考图/视频，非独立 videoMode）→ 导演台审阅 → 交付',
     category: 'story',
+    status: 'beta',
     build() {
       const a = node('storyboard-desk', 0, 0);
-      const b = node('clip-gen', 1, 0, { videoMode: 'seedance', model: 'seedance' });
+      const b = node('clip-gen', 1, 0, {
+        videoMode: 'single',
+        videoGenMode: 'omni-ref',
+        model: 'seedance',
+      });
       const c = node('director-desk', 2, 0, { queueFilter: 'all' });
       const d = node('export-pack', 3, 0);
       return {
@@ -272,6 +302,7 @@ export const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
     label: '小说拆镜 → 开拍',
     description: '剧本拆分 → 分镜台 → 开拍准备',
     category: 'story',
+    status: 'ga',
     build() {
       const a = node('script-desk', 0, 0);
       const b = node('storyboard-desk', 1, 0);
@@ -286,6 +317,7 @@ export const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
     label: '竖屏单集合成',
     description: '视频 → 智能剪辑 → 交付打包（竖屏 9:16 流程）',
     category: 'video',
+    status: 'ga',
     build() {
       const a = node('clip-gen', 0, 0);
       const b = node('clip-editor', 1, 0, { profile: 'drama' });
@@ -301,6 +333,7 @@ export const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
     label: '宫格联系板',
     description: '分镜台 → 宫格 → 连贯性检查',
     category: 'story',
+    status: 'ga',
     build() {
       const a = node('storyboard-desk', 0, 0, { rows: 3, cols: 3 });
       const b = node('grid-compose', 1, 0, { gridMode: 'split' });
@@ -316,6 +349,7 @@ export const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
     label: '声音剧',
     description: '对白表 → 多角色配音 → 智能剪辑（含 VO 音轨） → 导出交付',
     category: 'story',
+    status: 'ga',
     build() {
       const a = node('script-desk', 0, 0);
       const b = node('sound-gen', 1, 0);
@@ -329,6 +363,7 @@ export const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
     label: '爆款复刻（链接采集 → 参考 → 生成）',
     description: '链接解析素材 → 参考板约束 → 图/视生成 → 导出',
     category: 'video',
+    status: 'ga',
     build() {
       const a = node('link-parser', 0, 0, { url: '', hint: '' });
       const b = node('reference-board', 1, 0);
@@ -351,6 +386,7 @@ export const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
     label: '电商生图',
     description: '商品素材 → 图像生成 → 导出',
     category: 'image',
+    status: 'ga',
     build() {
       const a = node('asset-import', 0, 0, {
         mediaKind: 'picture',
@@ -385,6 +421,7 @@ export const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
     label: '电商生视频',
     description: '商品素材 → 图生视频/口播 → 智能剪辑 → 导出',
     category: 'video',
+    status: 'ga',
     build() {
       const a = node('asset-import', 0, 0, {
         mediaKind: 'picture',
@@ -425,13 +462,14 @@ export const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
   },
   {
     id: 'tpl-bridge-sequence',
-    label: 'Bridge 镜头序列',
-    description: 'Clip → Bridge 续拍 → Clip → 导演台批审',
+    label: 'Bridge 续拍序列（Beta）',
+    description: '单镜出片 → Bridge 续拍（需上游视频尾帧）→ 再单镜 → 导演台批审',
     category: 'video',
+    status: 'beta',
     build() {
-      const a = node('clip-gen', 0, 0);
-      const b = node('clip-gen', 1, 0, { videoMode: 'bridge' });
-      const c = node('clip-gen', 2, 0);
+      const a = node('clip-gen', 0, 0, { videoMode: 'single' });
+      const b = node('clip-gen', 1, 0, { videoMode: 'bridge', videoGenMode: 'bridge' });
+      const c = node('clip-gen', 2, 0, { videoMode: 'single' });
       const d = node('director-desk', 3, 0, { studioTab: 'deliver' });
       return { blocks: [a, b, c, d], links: [edge(a.id, b.id), edge(b.id, c.id), edge(c.id, d.id)] };
     },
@@ -441,6 +479,7 @@ export const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
     label: '封面导出',
     description: '封面制作 → 交付打包（单图封面 + manifest）',
     category: 'image',
+    status: 'deprecated',
     build() {
       const a = node('export-pack', 0, 0);
       const b = node('export-pack', 1, 0);
@@ -452,6 +491,7 @@ export const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
     label: 'AI 编剧流水线',
     description: '剧本拆分 → 分镜台 → 宫格 → 导演台',
     category: 'story',
+    status: 'ga',
     build() {
       const a = node('script-desk', 0, 0);
       const b = node('storyboard-desk', 1, 0, { rows: 3, cols: 3, style: 'line-art' });
@@ -465,9 +505,10 @@ export const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
   },
   {
     id: 'tpl-line-art-storyboard',
-    label: '线稿分镜',
-    description: '分镜台 → 宫格 → 导演台',
+    label: '线稿分镜（Beta）',
+    description: '分镜台线稿风格批量 → 宫格联系板 → 导演台（线稿由分镜台 line-art 批次产出）',
     category: 'story',
+    status: 'beta',
     build() {
       const a = node('storyboard-desk', 0, 0, { rows: 3, cols: 3, style: 'line-art' });
       const b = node('grid-compose', 1, 0, { rows: 3, cols: 3, gridMode: 'split' });
@@ -483,6 +524,7 @@ export const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
     label: '3D 导演预演',
     description: '分镜台 → 导演台 → 出图',
     category: 'story',
+    status: 'ga',
     build() {
       const a = node('storyboard-desk', 0, 0);
       const b = node('director-desk', 1, 0);
@@ -499,6 +541,7 @@ export const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
     description:
       '编剧台 → 分镜台（挂图像生成）→ 导演台批出与审阅 → 视频生成 → 智能剪辑 → 导出交付',
     category: 'story',
+    status: 'ga',
     build() {
       const script = node('script-desk', 0, 2, {
         playbookStepId: 'script-desk',
@@ -579,6 +622,99 @@ export const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
             sourceHandle: 'clip',
             targetHandle: 'clip',
           }),
+        ],
+      };
+    },
+  },
+  {
+    id: 'tpl-ai-short-film',
+    label: 'AI 短片（有声成片）',
+    description:
+      '编剧台 → 分镜台（挂图像生成）→ 导演台 → 视频 → 声音（对白/BGM）→ 智能剪辑 → 导出',
+    category: 'story',
+    status: 'ga',
+    build() {
+      const script = node('script-desk', 0, 2, {
+        playbookStepId: 'script-desk',
+        playbookStepIndex: 1,
+      });
+      const desk = node('storyboard-desk', 2, 2, {
+        playbookStepId: 'storyboard-desk',
+        playbookStepIndex: 2,
+        showExecPorts: true,
+      });
+      // SF-10: 图像生成放在分镜台上方一列，拉开行距避免压住镜台
+      const picture = node('picture-gen', 2, 0, {
+        playbookStepId: 'storyboard-desk',
+        playbookStepIndex: 2,
+        showExecPorts: true,
+      });
+      const directorDesk = node('director-desk', 4, 2, {
+        playbookStepId: 'director-desk',
+        playbookStepIndex: 3,
+        queueFilter: 'missing',
+        autoOpenReview: true,
+        syncStyleToPicture: true,
+        studioTab: 'deliver',
+        showExecPorts: false,
+      });
+      const video = node('clip-gen', 5.5, 2, {
+        playbookStepId: 'video-gen',
+        playbookStepIndex: 4,
+        videoMode: 'single',
+        showExecPorts: false,
+      });
+      // SF-02 / SF-18: 对白 cast + BGM 双节点，一次模板即可两轨进剪辑
+      const soundCast = node('sound-gen', 5.5, 4, {
+        playbookStepId: 'sound-gen',
+        playbookStepIndex: 5,
+        soundMode: 'cast',
+        showExecPorts: false,
+      });
+      const soundBgm = node('sound-gen', 7, 4, {
+        playbookStepId: 'sound-gen',
+        playbookStepIndex: 5,
+        soundMode: 'music',
+        showExecPorts: false,
+      });
+      // SF-19: 可选音效节点（导入挂轨）
+      const soundSfx = node('sound-gen', 5.5, 5.5, {
+        playbookStepId: 'sound-gen',
+        playbookStepIndex: 5,
+        soundMode: 'sfx',
+        showExecPorts: false,
+      });
+      const editor = node('clip-editor', 8.5, 2, {
+        playbookStepId: 'smart-edit',
+        playbookStepIndex: 6,
+        profile: 'drama',
+        showExecPorts: false,
+      });
+      // SF-14: 默认 Remotion 多轨成片（吃时间线 VO/BGM/字幕），不用会丢音轨的 ffmpeg-episode
+      const pack = node('export-pack', 10.5, 2, {
+        playbookStepId: 'export',
+        playbookStepIndex: 7,
+        exportMode: 'remotion-episode',
+      });
+      return {
+        blocks: [script, desk, picture, directorDesk, video, soundCast, soundBgm, soundSfx, editor, pack],
+        links: [
+          edge(script.id, desk.id, { sourceHandle: 'prompt', targetHandle: 'prompt' }),
+          edge(picture.id, desk.id, {
+            sourceHandle: 'exec-picture',
+            targetHandle: 'exec-picture',
+          }),
+          edge(desk.id, directorDesk.id, { sourceHandle: 'prompt', targetHandle: 'prompt' }),
+          edge(directorDesk.id, video.id, {
+            sourceHandle: 'picture',
+            targetHandle: 'picture',
+          }),
+          edge(desk.id, soundCast.id, { sourceHandle: 'prompt', targetHandle: 'prompt' }),
+          edge(video.id, editor.id, { sourceHandle: 'clip', targetHandle: 'clip' }),
+          edge(soundCast.id, editor.id, { sourceHandle: 'sound', targetHandle: 'sound' }),
+          edge(soundBgm.id, editor.id, { sourceHandle: 'sound', targetHandle: 'sound' }),
+          edge(soundSfx.id, editor.id, { sourceHandle: 'sound', targetHandle: 'sound' }),
+          edge(editor.id, pack.id, { sourceHandle: 'clip', targetHandle: 'clip' }),
         ],
       };
     },

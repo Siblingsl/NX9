@@ -68,7 +68,9 @@ export function useStudioDesk() {
         const payload = await api.loadWorkspace(workspaceId);
         if (cancelled) return;
         const parsed = fromPayload(payload);
-        syncGraph(workspaceId, parsed.nodes, parsed.edges);
+        syncGraph(workspaceId, parsed.nodes, parsed.edges, {
+          stageDeck: (payload as { version?: number }).version === 3,
+        });
       } catch (err) {
         console.warn('[F-002] 制作台加载画布镜像失败', err);
       }

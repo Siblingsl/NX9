@@ -4,8 +4,11 @@
 import { describe, expect, it } from 'vitest';
 import {
   DEFAULT_VIDEO_EDIT_PROVIDER,
+  DEFAULT_VIDEO_TRACE_PROVIDER,
   VIDEO_EDIT_PROVIDERS,
+  VIDEO_TRACE_PROVIDERS,
   resolveVideoEditProvider,
+  resolveVideoTraceProvider,
 } from '@nx9/shared';
 
 describe('video-edit provider registry', () => {
@@ -26,5 +29,16 @@ describe('video-edit provider registry', () => {
     expect(VIDEO_EDIT_PROVIDERS.some((p) => p.id === resolved.id)).toBe(true);
     const arbitrary = resolveVideoEditProvider('not-registered');
     expect(VIDEO_EDIT_PROVIDERS.some((p) => p.id === arbitrary.id)).toBe(true);
+  });
+
+  it('P3 闭环：重绘供应商支持跨帧追踪且带 mask 视频键位，追踪供应商已注册', () => {
+    const edit = resolveVideoEditProvider(DEFAULT_VIDEO_EDIT_PROVIDER);
+    expect(edit.supportsFrameTracking).toBe(true);
+    expect(edit.inputKeys.maskVideo).toBeTruthy();
+    expect(VIDEO_TRACE_PROVIDERS.length).toBeGreaterThanOrEqual(1);
+    const trace = resolveVideoTraceProvider();
+    expect(VIDEO_TRACE_PROVIDERS.some((p) => p.id === trace.id)).toBe(true);
+    expect(VIDEO_TRACE_PROVIDERS.some((p) => p.id === DEFAULT_VIDEO_TRACE_PROVIDER)).toBe(true);
+    expect(trace.inputKeys.mask.length).toBeGreaterThan(0);
   });
 });

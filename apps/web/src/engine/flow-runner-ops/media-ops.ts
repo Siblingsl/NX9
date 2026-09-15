@@ -28,8 +28,18 @@ export async function executeMediaOps(deps: FlowExecuteDeps): Promise<void> {
       const res = (await api.proxyLlm({
         messages,
         model: (d.model as string) || 'gpt-4o-mini',
-      })) as { choices?: { message?: { content?: string } }[] };
-      const reply = res.choices?.[0]?.message?.content ?? '';
+      })) as { choices?: { message?: { content?: string } }[]; content?: string };
+      const reply =
+        (typeof res.content === 'string' ? res.content : '') ||
+        res.choices?.[0]?.message?.content ||
+        '';
+      if (!reply.trim()) {
+        updateNodeData(block.id, {
+          status: 'error',
+          error: 'LLM 返回空回复，禁止空成功',
+        });
+        return;
+      }
       updateNodeData(block.id, {
         status: 'success',
         lastReply: reply,
@@ -55,6 +65,14 @@ export async function executeMediaOps(deps: FlowExecuteDeps): Promise<void> {
       updateNodeData(block.id, { status: 'success', audioUrl: url, content: bgmPrompt });
       return;
     }
+    if (soundMode === 'sfx') {
+      const url = typeof d.audioUrl === 'string' ? d.audioUrl.trim() : '';
+      if (!url) {
+        throw new Error('音效模式：请先从声音库导入音频（画布 run 不会自动生成音效），禁止空成功');
+      }
+      updateNodeData(block.id, { status: 'success', audioUrl: url, soundKind: 'sfx' });
+      return;
+    }
     if (soundMode === 'cast') {
       const { lines, source } = resolveVoiceCastLines(
         d.lines as { speaker: string; text: string; emotion?: string }[] | undefined,
@@ -62,7 +80,7 @@ export async function executeMediaOps(deps: FlowExecuteDeps): Promise<void> {
       );
       const profileMap = (d.profileMap as Record<string, string>) ?? {};
       if (lines.length === 0) {
-        throw new Error('无可解析的对白（请连接编剧台或已拆镜的分镜台）');
+        throw new Error('无可解析的对白（请连接编剧台或已拆镜的分镜台），禁止空成功');
       }
       const { results, audioUrls } = await runSoundGenCast(lines, profileMap);
       updateNodeData(block.id, {
@@ -75,11 +93,49 @@ export async function executeMediaOps(deps: FlowExecuteDeps): Promise<void> {
         profileMap,
         meta: { total: results.length, failed: results.filter((r) => r.error).length, lineSource: source },
       });
-      if (audioUrls.length === 0) throw new Error('多角色配音全部失败');
+      if (audioUrls.length === 0) throw new Error('多角色配音全部失败，禁止空成功');
+      try {
+        const { useWorkspaceDocument } = await import('../../stores/workspace-document');
+        const store = useWorkspaceDocument.getState();
+        const existing = store.voice.lines;
+        const toAdd: import('@nx9/shared').VoiceLine[] = [];
+        for (let i = 0; i < results.length; i++) {
+          const r = results[i]!;
+          if (!r.audioUrl) continue;
+          const shotId = r.shotId ?? lines[i]?.shotId ?? null;
+          const hit = existing.find(
+            (l) =>
+              l.text === r.text &&
+              l.speaker === r.speaker &&
+              (shotId ? l.shotId === shotId : true),
+          );
+          if (hit) {
+            store.updateVoiceLine(hit.id, {
+              audioAssetId: r.audioUrl,
+              status: 'ready',
+              shotId: shotId ?? hit.shotId,
+              durationSec: r.durationSec ?? hit.durationSec,
+            });
+          } else {
+            toAdd.push({
+              id: `vl-${Date.now().toString(36)}-${i}-${Math.random().toString(36).slice(2, 6)}`,
+              shotId,
+              speaker: r.speaker,
+              text: r.text,
+              audioAssetId: r.audioUrl,
+              durationSec: r.durationSec ?? null,
+              status: 'ready',
+            });
+          }
+        }
+        if (toAdd.length > 0) store.addVoiceLines(toAdd);
+      } catch {
+        /* 纯测环境无 store */
+      }
       return;
     }
     const text = prompt || (d.content as string) || (d.text as string) || '';
-    if (!text.trim()) throw new Error('配音文本为空');
+    if (!text.trim()) throw new Error('配音文本为空，禁止空成功');
     const provider = (d.provider as string) || 'cloud';
     const referenceAudioUrl = (d.referenceAudioUrl as string) || '';
     const res = await synthesizeTts({
@@ -103,10 +159,11 @@ export async function executeMediaOps(deps: FlowExecuteDeps): Promise<void> {
 
   if (kind === 'grid-split') {
     const sourceUrl = upstream.pictures[0];
-    if (!sourceUrl) throw new Error('缺少 picture 输入');
+    if (!sourceUrl) throw new Error('缺少 picture 输入，禁止空成功');
     const rows = (d.rows as number) ?? 3;
     const cols = (d.cols as number) ?? 3;
     const res = await api.gridSplit({ sourceUrl, rows, cols });
+    if (!res.ok || !res.urls?.length) throw new Error('宫格拆分失败，禁止空成功');
     updateNodeData(block.id, {
       status: 'success',
       splitUrls: res.urls,
@@ -117,10 +174,11 @@ export async function executeMediaOps(deps: FlowExecuteDeps): Promise<void> {
 
   if (kind === 'grid-compose') {
     const imageUrls = upstream.pictures;
-    if (imageUrls.length === 0) throw new Error('缺少 picture 输入');
+    if (imageUrls.length === 0) throw new Error('缺少 picture 输入，禁止空成功');
     const rows = (d.rows as number) ?? 3;
     const cols = (d.cols as number) ?? 3;
     const res = await api.gridCompose({ imageUrls, rows, cols });
+    if (!res.ok || !res.url) throw new Error('宫格合成失败，禁止空成功');
     updateNodeData(block.id, {
       status: 'success',
       composedUrl: res.url,
@@ -131,6 +189,7 @@ export async function executeMediaOps(deps: FlowExecuteDeps): Promise<void> {
 
   if (kind === 'asset-import') {
     const items = resolveAssetImportItems(d as Record<string, unknown>);
+    if (items.length === 0) throw new Error('资产导入列表为空，禁止空成功');
     const pictures = items.filter((i) => i.mediaKind === 'picture').map((i) => i.url);
     updateNodeData(block.id, {
       status: 'success',
@@ -144,8 +203,10 @@ export async function executeMediaOps(deps: FlowExecuteDeps): Promise<void> {
   if (kind === 'text-chunker') {
     const source =
       upstream.prompts.join('\n\n') || (d.content as string) || '';
+    if (!String(source).trim()) throw new Error('文本切分源为空，禁止空成功');
     const mode = ((d.mode as string) || 'paragraph') as TextSplitMode;
     const chunks = splitText(source, mode, d.regex as string | undefined);
+    if (chunks.length === 0) throw new Error('文本切分结果为空，禁止空成功');
     updateNodeData(block.id, {
       status: 'success',
       chunks,
@@ -162,8 +223,17 @@ export async function executeMediaOps(deps: FlowExecuteDeps): Promise<void> {
       ...upstream.clips,
       ...((d.pool as string[]) ?? []),
     ];
-    const idx = ((d.currentIndex as number) ?? 0) % Math.max(pool.length, 1);
-    const next = pool.length ? pool[idx] : '';
+    if (pool.length === 0) {
+      updateNodeData(block.id, {
+        status: 'skipped',
+        noop: true,
+        content: '迭代器：上游池为空，禁止空成功',
+        iterItems: [],
+      });
+      return;
+    }
+    const idx = ((d.currentIndex as number) ?? 0) % pool.length;
+    const next = pool[idx] ?? '';
     updateNodeData(block.id, {
       status: 'success',
       currentIndex: advanceIteratorIndex(idx, pool.length),
@@ -181,9 +251,18 @@ export async function executeMediaOps(deps: FlowExecuteDeps): Promise<void> {
       : upstream.clips.length
         ? upstream.clips
         : upstream.prompts;
+    if (pool.length === 0) {
+      updateNodeData(block.id, {
+        status: 'skipped',
+        noop: true,
+        content: '选择器：上游池为空，禁止空成功',
+        iterItems: [],
+      });
+      return;
+    }
     const pickIndex = Math.min(
       Math.max(0, (d.pickIndex as number) ?? 0),
-      Math.max(0, pool.length - 1),
+      pool.length - 1,
     );
     const picked = pool[pickIndex] ?? '';
     updateNodeData(block.id, {
@@ -204,9 +283,9 @@ export async function executeMediaOps(deps: FlowExecuteDeps): Promise<void> {
     // 智能剪辑主路径走下方 timeline + renderClipEditorTimeline，勿与此混用。
     if (editorMode === 'audio') {
       const tracks = upstream.sounds ?? [];
-      if (tracks.length < 2) throw new Error('至少需要 2 条音频（editorMode=audio 混音工具）');
+      if (tracks.length < 2) throw new Error('至少需要 2 条音频（editorMode=audio 混音工具），禁止空成功');
       const mixRes = await api.mixAudio(tracks, (d.normalize as boolean | undefined) ?? true);
-      if (!mixRes.ok || !mixRes.url) throw new Error(mixRes.message ?? '混音失败');
+      if (!mixRes.ok || !mixRes.url) throw new Error(mixRes.message ?? '混音失败，禁止空成功');
       updateNodeData(block.id, {
         status: 'success',
         outputSound: mixRes.url,
@@ -217,14 +296,14 @@ export async function executeMediaOps(deps: FlowExecuteDeps): Promise<void> {
     }
     if (editorMode === 'grade') {
       const source = upstream.clips?.[0] ?? upstream.pictures?.[0];
-      if (!source) throw new Error('需要上游图像或视频（editorMode=grade 调色工具）');
+      if (!source) throw new Error('需要上游图像或视频（editorMode=grade 调色工具），禁止空成功');
       const gradeRes = await api.colorGrade({
         sourceUrl: source,
         brightness: (d.brightness as number) ?? 0,
         contrast: (d.contrast as number) ?? 1,
         saturation: (d.saturation as number) ?? 1,
       });
-      if (!gradeRes.ok || !gradeRes.url) throw new Error(gradeRes.message ?? '调色失败');
+      if (!gradeRes.ok || !gradeRes.url) throw new Error(gradeRes.message ?? '调色失败，禁止空成功');
       updateNodeData(block.id, {
         status: 'success',
         outputUrl: gradeRes.url,
@@ -241,7 +320,7 @@ export async function executeMediaOps(deps: FlowExecuteDeps): Promise<void> {
     if (!timelineDraft) {
       const { orchestrateDramaTimeline, orchestrateViralTimeline } = await import('../smart-edit-orchestrator');
       if (profile === 'drama') {
-        if (!ctx) throw new Error('智能剪辑缺少画布上下文');
+        if (!ctx) throw new Error('智能剪辑缺少画布上下文，禁止空成功');
         const linkedIds = (d.linkedShotIds as string[] | undefined) ?? [];
         const upstreamShots = resolveUpstreamShotsFromGraph(block.id, ctx.nodes, ctx.edges);
         const shots =
@@ -249,17 +328,32 @@ export async function executeMediaOps(deps: FlowExecuteDeps): Promise<void> {
             ? upstreamShots.shots.filter((s) => linkedIds.includes(s.id))
             : upstreamShots.shots;
         if (shots.length === 0) {
-          throw new Error('智能剪辑未连接镜头上游，无法漫剧编排');
+          throw new Error('智能剪辑未连接镜头上游，无法漫剧编排，禁止空成功');
         }
         const result = await orchestrateDramaTimeline({
           approvedOnly: true,
           shots,
-          bgmUrl: upstream.sounds[0],
+          bgmUrl: upstream.bgmUrls?.[0],
         });
         if (result.timeline) {
-          timelineDraft = migrateTimelinePayload(result.timeline);
+          let timeline = result.timeline;
+          // SF-05/19/20: 画布 run 挂对白+字幕+音效；BGM 已由 orchestrate 注入
+          try {
+            const { buildVoiceDramaTimeline } = await import('@nx9/shared');
+            const { useWorkspaceDocument } = await import('../../stores/workspace-document');
+            const voiceLines = useWorkspaceDocument.getState().voice.lines.filter(
+              (l) => l.audioAssetId && l.shotId,
+            );
+            const sfxUrls = upstream.sfxUrls ?? [];
+            if (voiceLines.length > 0 || sfxUrls.length > 0) {
+              timeline = buildVoiceDramaTimeline(timeline, voiceLines, { sfxUrls });
+            }
+          } catch {
+            /* 无工作区 store 时跳过（纯测路径） */
+          }
+          timelineDraft = migrateTimelinePayload(timeline);
           updateNodeData(block.id, {
-            timelineDraft: result.timeline,
+            timelineDraft: timeline,
             suggestions: result.suggestions,
             pendingSuggestionIds: result.suggestions.map((s) => s.id),
           });
@@ -267,7 +361,7 @@ export async function executeMediaOps(deps: FlowExecuteDeps): Promise<void> {
       } else if (upstream.clips.length > 0) {
         const result = await orchestrateViralTimeline({
           clips: upstream.clips,
-          bgmUrl: upstream.sounds[0],
+          bgmUrl: upstream.bgmUrls?.[0],
         });
         if (result.timeline) {
           timelineDraft = migrateTimelinePayload(result.timeline);
@@ -280,7 +374,7 @@ export async function executeMediaOps(deps: FlowExecuteDeps): Promise<void> {
       }
     }
     const freshTimeline = timelineDraft;
-    if (!freshTimeline) throw new Error('编排未生成时间线');
+    if (!freshTimeline) throw new Error('编排未生成时间线，禁止空成功');
     const engine = resolveEngine(
       profile,
       ((d.engine as string) ?? 'auto') as import('@nx9/shared').SmartEditEngine,
@@ -329,9 +423,9 @@ export async function executeMediaOps(deps: FlowExecuteDeps): Promise<void> {
 
   if (kind === 'frame-endpoints') {
     const videoUrl = upstream.clips[0] || (d.videoUrl as string);
-    if (!videoUrl) throw new Error('缺少视频输入');
+    if (!videoUrl) throw new Error('缺少视频输入，禁止空成功');
     const res = await api.extractFrames(videoUrl, (d.frameCount as number) ?? 2);
-    if (!res.ok || !res.frames?.length) throw new Error(res.message ?? '抽帧失败');
+    if (!res.ok || !res.frames?.length) throw new Error(res.message ?? '抽帧失败，禁止空成功');
     updateNodeData(block.id, {
       status: 'success',
       frameUrls: res.frames,
@@ -345,9 +439,9 @@ export async function executeMediaOps(deps: FlowExecuteDeps): Promise<void> {
 
   if (kind === 'frame-sampler') {
     const videoUrl = upstream.clips[0] || (d.videoUrl as string);
-    if (!videoUrl) throw new Error('缺少视频输入');
+    if (!videoUrl) throw new Error('缺少视频输入，禁止空成功');
     const res = await api.extractFrames(videoUrl, (d.frameCount as number) ?? 6);
-    if (!res.ok || !res.frames?.length) throw new Error(res.message ?? '抽帧失败');
+    if (!res.ok || !res.frames?.length) throw new Error(res.message ?? '抽帧失败，禁止空成功');
     updateNodeData(block.id, {
       status: 'success',
       frameUrls: res.frames,
@@ -359,13 +453,14 @@ export async function executeMediaOps(deps: FlowExecuteDeps): Promise<void> {
 
   if (kind === 'scale-fit') {
     const sourceUrl = upstream.pictures[0];
-    if (!sourceUrl) throw new Error('缺少 picture 输入');
+    if (!sourceUrl) throw new Error('缺少 picture 输入，禁止空成功');
     const res = await api.resizeImage({
       sourceUrl,
       width: (d.width as number) ?? 1024,
       height: (d.height as number) ?? 1024,
       fit: ((d.fit as string) ?? 'cover') as 'cover' | 'contain' | 'fill' | 'inside' | 'outside',
     });
+    if (!res.ok || !res.url) throw new Error('缩放适配失败，禁止空成功');
     updateNodeData(block.id, {
       status: 'success',
       previewUrl: res.url,
@@ -376,12 +471,13 @@ export async function executeMediaOps(deps: FlowExecuteDeps): Promise<void> {
 
   if (kind === 'picture-merge') {
     const imageUrls = upstream.pictures;
-    if (imageUrls.length < 2) throw new Error('至少需要 2 张图片');
+    if (imageUrls.length < 2) throw new Error('至少需要 2 张图片，禁止空成功');
     const res = await api.mergeImages({
       imageUrls,
       direction: ((d.direction as string) ?? 'horizontal') as 'horizontal' | 'vertical' | 'grid',
       cols: (d.cols as number) ?? 2,
     });
+    if (!res.ok || !res.url) throw new Error('图片合并失败，禁止空成功');
     updateNodeData(block.id, {
       status: 'success',
       composedUrl: res.url,
@@ -424,9 +520,10 @@ export async function executeMediaOps(deps: FlowExecuteDeps): Promise<void> {
 
   if (kind === 'thumbnail-maker') {
     const src = upstream.pictures?.[0] || (d.imageUrl as string);
-    if (!src) throw new Error('封面制作：需要上游图片');
+    if (!src) throw new Error('封面制作：需要上游图片，禁止空成功');
     const title = (d.title as string) || '';
     const res = await api.thumbnailCompose({ imageUrl: src, title });
+    if (!res.ok || !res.url) throw new Error('封面合成失败，禁止空成功');
     updateNodeData(block.id, {
       status: 'success',
       previewUrl: res.url,
@@ -457,15 +554,15 @@ export async function executeMediaOps(deps: FlowExecuteDeps): Promise<void> {
     if (captionMode === 'burn') {
       const clip = upstream.clips?.[0];
       const subtitle = (d.subtitle as string) || (d.srtContent as string) || prompt || upstream.prompts?.[0] || '';
-      if (!clip) throw new Error('字幕烧录：需要上游视频');
-      if (!subtitle.trim()) throw new Error('字幕烧录：字幕为空');
+      if (!clip) throw new Error('字幕烧录：需要上游视频，禁止空成功');
+      if (!subtitle.trim()) throw new Error('字幕烧录：字幕为空，禁止空成功');
       const res = await api.renderShotMp4({
         videoUrl: clip,
         subtitle: subtitle.trim(),
         durationSec: (d.durationSec as number) ?? 4,
         skipReview: true,
       });
-      if (!res.ok || !res.url) throw new Error(res.message ?? '字幕烧录失败');
+      if (!res.ok || !res.url) throw new Error(res.message ?? '字幕烧录失败，禁止空成功');
       writeBackSubtitle(subtitle);
       updateNodeData(block.id, {
         status: 'success',
@@ -476,10 +573,13 @@ export async function executeMediaOps(deps: FlowExecuteDeps): Promise<void> {
       return;
     }
     const src = upstream.clips?.[0] || upstream.sounds?.[0] || (d.sourceUrl as string);
-    if (!src) throw new Error('语音转字幕：需要上游音频或视频');
+    if (!src) throw new Error('语音转字幕：需要上游音频或视频，禁止空成功');
     const language = (d.language as string) || 'zh';
     const res = await api.transcribeAudio(src, language);
-    if (res.srtContent) writeBackSubtitle(res.srtContent);
+    if (!res.ok || !String(res.srtContent ?? '').trim()) {
+      throw new Error('语音转字幕失败或结果为空，禁止空成功');
+    }
+    writeBackSubtitle(res.srtContent);
     updateNodeData(block.id, {
       status: 'success',
       srtContent: res.srtContent,
@@ -497,11 +597,11 @@ export async function executeMediaOps(deps: FlowExecuteDeps): Promise<void> {
     if (lines.length === 0) {
       updateNodeData(block.id, {
         status: 'error',
-        error: '无可解析的对白（请连接编剧台或已拆镜的分镜台）',
+        error: '无可解析的对白（请连接编剧台或已拆镜的分镜台），禁止空成功',
         lineSource: source,
         meta: { total: 0, failed: 0, lineSource: source },
       });
-      throw new Error('无可解析的对白（请连接编剧台或已拆镜的分镜台）');
+      throw new Error('无可解析的对白（请连接编剧台或已拆镜的分镜台），禁止空成功');
     }
     const { results, audioUrls } = await runSoundGenCast(lines, profileMap);
     updateNodeData(block.id, {
@@ -513,15 +613,15 @@ export async function executeMediaOps(deps: FlowExecuteDeps): Promise<void> {
       lineSource: source,
       meta: { total: results.length, failed: results.filter((r) => r.error).length, lineSource: source },
     });
-    if (audioUrls.length === 0) throw new Error('多角色配音全部失败');
+    if (audioUrls.length === 0) throw new Error('多角色配音全部失败，禁止空成功');
     return;
   }
 
   if (kind === 'photo-speak') {
     const imageUrl = upstream.pictures[0] || (d.imageUrl as string);
     const text = mergeUpstreamPrompt(upstream, (d.content as string) || (d.script as string));
-    if (!imageUrl) throw new Error('缺少图片');
-    if (!text.trim()) throw new Error('口播文本为空');
+    if (!imageUrl) throw new Error('缺少图片，禁止空成功');
+    if (!text.trim()) throw new Error('口播文本为空，禁止空成功');
     const voiceMode = (d.voiceMode as string) || 'cloud';
     const referenceAudioUrl = (d.referenceAudioUrl as string) || '';
     const res = await api.photoSpeak({
@@ -535,7 +635,7 @@ export async function executeMediaOps(deps: FlowExecuteDeps): Promise<void> {
       referenceAudioUrl: voiceMode === 'luxtts' ? referenceAudioUrl : undefined,
       characterId: (d.characterId as string) || undefined,
     });
-    if (!res.ok || !res.url) throw new Error(res.message ?? '照片说话失败');
+    if (!res.ok || !res.url) throw new Error(res.message ?? '照片说话失败，禁止空成功');
     updateNodeData(block.id, {
       status: 'success',
       videoUrl: res.url,
@@ -547,12 +647,12 @@ export async function executeMediaOps(deps: FlowExecuteDeps): Promise<void> {
 
   if (kind === 'bg-remove') {
     const sourceUrl = upstream.pictures[0];
-    if (!sourceUrl) throw new Error('缺少图片');
+    if (!sourceUrl) throw new Error('缺少图片，禁止空成功');
     const res = await api.proxyFal({
       model: 'fal-ai/birefnet/v2',
       input: { image_url: sourceUrl },
     });
-    if (!res.url) throw new Error('抠图未返回图片');
+    if (!res.ok || !res.url) throw new Error('抠图未返回图片，禁止空成功');
     updateNodeData(block.id, {
       status: 'success',
       previewUrl: res.url,
@@ -563,11 +663,12 @@ export async function executeMediaOps(deps: FlowExecuteDeps): Promise<void> {
 
   if (kind === 'upscale-lite') {
     const sourceUrl = upstream.pictures[0];
-    if (!sourceUrl) throw new Error('缺少图片');
+    if (!sourceUrl) throw new Error('缺少图片，禁止空成功');
     const res = await api.upscaleImage({
       sourceUrl,
       scale: (d.scale as number) ?? 2,
     });
+    if (!res.ok || !res.url) throw new Error('放大失败，禁止空成功');
     updateNodeData(block.id, {
       status: 'success',
       previewUrl: res.url,
@@ -578,8 +679,9 @@ export async function executeMediaOps(deps: FlowExecuteDeps): Promise<void> {
 
   if (kind === 'watermark-clean') {
     const sourceUrl = upstream.pictures[0] || upstream.clips[0];
-    if (!sourceUrl) throw new Error('缺少媒体');
+    if (!sourceUrl) throw new Error('缺少媒体，禁止空成功');
     const res = await api.stripMetadata({ sourceUrl });
+    if (!res.ok || !res.url) throw new Error('元数据清理失败，禁止空成功');
     updateNodeData(block.id, {
       status: 'success',
       previewUrl: res.url,

@@ -106,13 +106,15 @@ export function CharacterFaceRigSection({
         参数只管结构与量，不管颜色（肤/发/瞳色仍在外观细节）。改完点上方「刷新」写入一致性 Prompt。
       </p>
 
-      <button
-        type="button"
-        className="w-full rounded-lg border border-brand/30 bg-brand/5 px-2.5 py-1.5 text-xs text-brand hover:border-brand/50"
-        onClick={() => setSculptOpen(true)}
-      >
-        打开捏模台
-      </button>
+      <div className="flex flex-col gap-1.5">
+        <button
+          type="button"
+          className="w-full rounded-lg border border-brand/30 bg-brand/5 px-2.5 py-1.5 text-xs text-brand hover:border-brand/50"
+          onClick={() => setSculptOpen(true)}
+        >
+          打开全身捏模台
+        </button>
+      </div>
 
       <div className="flex items-center gap-1.5">
         <select

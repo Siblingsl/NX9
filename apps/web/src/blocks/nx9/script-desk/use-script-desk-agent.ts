@@ -17,6 +17,7 @@ import {
   runScriptDeskSkill,
 } from '../../../engine/script-desk-runner';
 import { askConfirm } from '../../../stores/confirm-dialog';
+import { toastError } from '../../../stores/toast';
 import { isBriefReadyForFirstGen, isVisualStyleReady, type RightTab, type SavePkgFn } from './desk-helpers';
 
 export type ScriptDeskAgentDeps = {
@@ -146,6 +147,9 @@ export function useScriptDeskAgentOps(deps: ScriptDeskAgentDeps) {
         ac.signal,
         (chunk) => setStreamPreview((prev) => prev + chunk),
       );
+      if (!result.patch && !String(result.assistantText ?? '').trim()) {
+        throw new Error('编剧台 Agent 无可用产出，禁止空成功');
+      }
       nextSession = appendAgentMessage(nextSession, {
         role: 'assistant',
         content: result.assistantText,
@@ -175,6 +179,7 @@ export function useScriptDeskAgentOps(deps: ScriptDeskAgentDeps) {
         commitAgentSession(nextSession, { status: 'error', error: msg, errorCode: classified.code });
         setTip(msg);
         appendLog(`编剧台 Agent 失败：${msg}`);
+        toastError(`编剧台 Agent 失败：${msg}`);
       }
     } finally {
       if (abortRef.current === ac) abortRef.current = null;
@@ -339,10 +344,14 @@ export function useScriptDeskAgentOps(deps: ScriptDeskAgentDeps) {
       setRightTab('screenplay');
       setRightDrawerOpen(true);
       setFirstGenFloatDeferred(false);
+      if (failed.length > 0 && !aborted) {
+        toastError(`首次生成部分失败 · ${failed.length} 集（第${failed.join(',')}）`);
+      }
     } else {
       setTip(aborted ? '已停止' : '首次生成失败，未成功生成任何集');
       setFirstGenFloatDeferred(false);
       setGenFloatExpanded(true);
+      if (!aborted) toastError('首次生成失败，未成功生成任何集');
     }
     if (abortRef.current === ac) abortRef.current = null;
     setSkeletonIndexes([]);
@@ -383,6 +392,9 @@ export function useScriptDeskAgentOps(deps: ScriptDeskAgentDeps) {
     savePkg(currentPkg);
     if (failed.length > 0) setFailedEpisodeIndexes(failed);
     setTip(`重试完成 · 成功 ${ok}${failed.length > 0 ? ` · 失败 ${failed.length}` : ''}`);
+    if (failed.length > 0) {
+      toastError(`重试失败 ${failed.length} 集（第${failed.join(',')}）`);
+    }
     if (abortRef.current === ac) abortRef.current = null;
     setBusy(false);
   }, [appendLog, pkg, savePkg, setBusy, setFailedEpisodeIndexes, setTip, abortRef]);
@@ -513,14 +525,21 @@ export function useScriptDeskAgentOps(deps: ScriptDeskAgentDeps) {
     if (ok > 0) {
        appendLog(`续写完成 · 新增第 ${startIndex}–${startIndex + ok - 1} 集 · 成功 ${ok} · ${failedIndexes.length > 0 ? `失败 ${failedIndexes.join(', ')}` : '全部成功'}`);
       setTip(aborted ? `已停止 · 新增 ${ok} 集` : `续写完成 · 新增 ${ok} 集`);
+      if (failedIndexes.length > 0 && !aborted) {
+        toastError(`续写部分失败 · 第 ${failedIndexes.join(', ')} 集`);
+      }
     } else {
       setTip(aborted ? '已停止' : '续写失败，未成功生成任何集');
+      if (!aborted) toastError('续写失败，未成功生成任何集');
     }
     if (abortRef.current === ac) abortRef.current = null;
     setStreamPreview('');
     setSkeletonIndexes([]);
     setContinueBusy(false);
-    updateNodeData(propsId, { status: 'success' });
+    updateNodeData(propsId, {
+      status: ok > 0 ? 'success' : aborted ? 'idle' : 'error',
+      ...(ok === 0 && !aborted ? { error: summary } : { error: undefined }),
+    });
     setChatInput('');
   }, [appendLog, chatInput, continueCount, pkg, propsId, savePkg, session, updateNodeData, commitAgentSession, setChatInput, setContinueBusy, setContinueOpen, setFailedEpisodeIndexes, setSkeletonIndexes, setStreamPreview, setTip, abortRef]);
 
@@ -556,6 +575,9 @@ export function useScriptDeskAgentOps(deps: ScriptDeskAgentDeps) {
         signal: ac.signal,
         onChunk: (chunk) => setStreamPreview((prev) => prev + chunk),
       });
+      if (!result.patch) {
+        throw new Error('重写未返回可应用补丁，禁止空成功');
+      }
       nextSession = appendAgentMessage(nextSession, {
         role: 'assistant',
         content: `已重写第 ${episodeIndex} 集（待应用）\n\n` + (result.assistantText || ''),
@@ -589,6 +611,7 @@ export function useScriptDeskAgentOps(deps: ScriptDeskAgentDeps) {
         commitAgentSession(nextSession, { status: 'error', error: errMsg, errorCode: classified.code });
         setTip(`重写失败：${errMsg}`);
         appendLog(`重写第 ${episodeIndex} 集失败：${errMsg}`);
+        toastError(`重写第 ${episodeIndex} 集失败：${errMsg}`);
       }
       return nextSession;
     } finally {

@@ -792,6 +792,25 @@
   padding: 2px 0;
 }
 
+.dd2-cinema__empty-hint {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--desk-muted, color-mix(in srgb, var(--desk-fg, #e8e4dc) 55%, transparent));
+}
+
+.dd2-settings-advanced {
+  margin-top: 8px;
+  border-top: 1px solid color-mix(in srgb, var(--desk-line, #444) 60%, transparent);
+  padding-top: 8px;
+}
+
+.dd2-settings-advanced > summary {
+  cursor: pointer;
+  font-size: 11px;
+  color: var(--desk-muted, color-mix(in srgb, var(--desk-fg, #e8e4dc) 65%, transparent));
+  margin-bottom: 8px;
+}
+
 .dd2-cinema__dock .dd2-btn--batch {
   margin-left: auto;
   min-width: 148px;

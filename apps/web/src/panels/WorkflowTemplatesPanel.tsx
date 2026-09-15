@@ -1,6 +1,12 @@
-import { WORKFLOW_TEMPLATES } from '@nx9/shared';
+import { useState } from 'react';
+import { listWorkflowTemplates } from '@nx9/shared';
 import { LayoutTemplate, X } from 'lucide-react';
 import { useFlowCommands } from '../stores/flow-commands';
+import {
+  filterTemplatesForFirstLane,
+  isFirstLaneUnlocked,
+  unlockFirstLane,
+} from '../engine/first-lane';
 
 export function WorkflowTemplatesPanel({
   open,
@@ -10,6 +16,7 @@ export function WorkflowTemplatesPanel({
   onClose: () => void;
 }) {
   const requestLoad = useFlowCommands((s) => s.requestLoadTemplate);
+  const [unlocked, setUnlocked] = useState(() => isFirstLaneUnlocked());
 
   if (!open) return null;
 
@@ -20,8 +27,14 @@ export function WorkflowTemplatesPanel({
     { key: 'tool', label: '工具' },
   ] as const;
 
+  const listed = filterTemplatesForFirstLane(listWorkflowTemplates());
+
   return (
-    <aside className="w-[320px] shrink-0 border-l border-line bg-surface flex flex-col h-full absolute right-0 top-0 z-20 shadow-panel">
+    <aside
+      className="w-[320px] shrink-0 border-l border-line bg-surface flex flex-col h-full absolute right-0 top-0 z-20 shadow-panel"
+      data-testid="workflow-templates-panel"
+      data-first-lane={unlocked ? 'off' : 'on'}
+    >
       <div className="h-12 shrink-0 border-b border-line flex items-center px-3 gap-2">
         <LayoutTemplate size={18} className="text-brand" />
         <span className="font-semibold text-sm flex-1">工作流模板</span>
@@ -29,9 +42,27 @@ export function WorkflowTemplatesPanel({
           <X size={16} />
         </button>
       </div>
+      {!unlocked && (
+        <div className="px-3 py-2 border-b border-line bg-brand/5">
+          <p className="text-[10px] text-ink/55 leading-relaxed">
+            首用单车道：仅显示「AI 漫剧核心流程」。
+          </p>
+          <button
+            type="button"
+            data-testid="templates-unlock-all"
+            className="mt-1 text-[11px] text-brand font-medium"
+            onClick={() => {
+              unlockFirstLane();
+              setUnlocked(true);
+            }}
+          >
+            解锁全部配方
+          </button>
+        </div>
+      )}
       <div className="flex-1 overflow-y-auto p-3 space-y-4 nx9-scroll">
         {categories.map((cat) => {
-          const items = WORKFLOW_TEMPLATES.filter((t) => t.category === cat.key);
+          const items = listed.filter((t) => t.category === cat.key);
           if (items.length === 0) return null;
           return (
             <section key={cat.key}>

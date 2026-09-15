@@ -88,7 +88,7 @@ export class PrismaWorkspaceStore {
       (existing.links?.length ?? 0) > 0 ||
       (existing.storyboard?.shots?.length ?? 0) > 0;
     if (incomingEmpty && existingHasContent) {
-      throw new BadRequestException('Refusing to overwrite non-empty workspace with empty payload');
+      throw new BadRequestException('Refusing to overwrite non-empty workspace with empty payload，禁止空成功');
     }
 
     const updated = await this.prisma.workspace.update({

@@ -108,7 +108,7 @@ export async function consumeDirectorKeyframeBatch(
     const currentShot = validation.shotsById.get(item.shotId)!;
     try {
       const generated = await options.generateVideo(item, currentShot);
-      if (!generated.videoUrl) throw new Error('视频生成未返回 URL');
+      if (!generated.videoUrl) throw new Error('视频生成未返回 URL，禁止空成功');
       succeeded.add(item.shotId);
       videoUrlsByShotId[item.shotId] = generated.videoUrl;
       const version = {

@@ -1,6 +1,12 @@
 import { useDirectorStore } from '../store/directorStore';
 import type { CharacterBodyType } from '../schema/directorProject';
-import { BODY_TYPES, POSE_PRESETS } from '../presets/characterPresets';
+import {
+  BODY_TYPES,
+  POSE_JOINT_SLIDERS,
+  POSE_PRESETS,
+  setJointAxis,
+  type PoseJointOverride,
+} from '../presets/characterPresets';
 
 export function InspectorCard() {
   const project = useDirectorStore((s) => s.project);
@@ -11,6 +17,8 @@ export function InspectorCard() {
 
   const obj = project.objects.find((o) => o.id === selectedId);
   const cam = project.cameras.find((c) => c.id === selectedId);
+  const joints = (obj?.kind === 'character' ? obj.poseJoints : undefined) as PoseJointOverride | undefined;
+  const hasJointTweaks = Boolean(joints && Object.keys(joints).length > 0);
 
   return (
     <aside className="nx9-stage-inspector">
@@ -50,7 +58,12 @@ export function InspectorCard() {
                     姿势
                     <select
                       value={obj.posePresetId ?? 'stand'}
-                      onChange={(e) => updateCharacter(obj.id, { posePresetId: e.target.value })}
+                      onChange={(e) =>
+                        updateCharacter(obj.id, {
+                          posePresetId: e.target.value,
+                          poseJoints: undefined,
+                        })
+                      }
                     >
                       {POSE_PRESETS.map((p) => (
                         <option key={p.id} value={p.id}>
@@ -59,6 +72,57 @@ export function InspectorCard() {
                       ))}
                     </select>
                   </label>
+                  <label className="nx9-stage-field">
+                    朝向 {Math.round(obj.transform.rotation[1])}°
+                    <input
+                      type="range"
+                      min={-180}
+                      max={180}
+                      value={obj.transform.rotation[1]}
+                      onChange={(e) =>
+                        useDirectorStore.getState().updateObjectTransform(obj.id, {
+                          rotation: [
+                            obj.transform.rotation[0],
+                            Number(e.target.value),
+                            obj.transform.rotation[2],
+                          ],
+                        })
+                      }
+                    />
+                  </label>
+                  <div className="nx9-stage-field nx9-stage-joint-block">
+                    <div className="nx9-stage-joint-head">
+                      <span>关节微调</span>
+                      {hasJointTweaks && (
+                        <button
+                          type="button"
+                          className="nx9-stage-mini-btn"
+                          onClick={() => updateCharacter(obj.id, { poseJoints: undefined })}
+                        >
+                          重置
+                        </button>
+                      )}
+                    </div>
+                    {POSE_JOINT_SLIDERS.map((s) => {
+                      const cur = joints?.[s.key]?.[s.axis] ?? 0;
+                      return (
+                        <label key={`${s.key}-${s.axis}`} className="nx9-stage-joint-row">
+                          {s.label} {Math.round(cur)}°
+                          <input
+                            type="range"
+                            min={s.min}
+                            max={s.max}
+                            value={cur}
+                            onChange={(e) =>
+                              updateCharacter(obj.id, {
+                                poseJoints: setJointAxis(joints, s.key, s.axis, Number(e.target.value)),
+                              })
+                            }
+                          />
+                        </label>
+                      );
+                    })}
+                  </div>
                   <label className="nx9-stage-field">
                     颜色
                     <input

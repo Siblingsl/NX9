@@ -1,4 +1,4 @@
-import { useCallback, type Dispatch, type SetStateAction } from 'react';
+import { useCallback, useRef, type Dispatch, type SetStateAction } from 'react';
 import type { ScreenplayEpisode, ScreenplayPackage, ScriptDeskSkillId } from '@nx9/shared';
 import {
   enrichBibleScenesFromPackage,
@@ -12,6 +12,8 @@ import { api } from '../../../api/client';
 import { askConfirmWithOption } from '../../../stores/confirm-dialog';
 import { useFlowCommands } from '../../../stores/flow-commands';
 import { useFlowRuntime } from '../../../stores/flow-runtime';
+import { useCredentialVault } from '../../../stores/credential-vault';
+import { toastError, useToast } from '../../../stores/toast';
 import { inspectBibleAssets, type AssetReadinessState } from '../../../engine/asset-readiness';
 import {
   applyConsistencyFixes,
@@ -25,6 +27,7 @@ import {
 } from '../../../engine/script-desk-runner';
 import { packageSourceHash } from '../../../engine/storyboard-desk-runner';
 import { resolveConnectedStoryboardDeskId } from '../../../engine/chain-storyboard-utils';
+import { breakdownNextStepHint } from '../../../engine/breakdown-labels';
 import { flushDebouncedFields } from './use-debounced-field';
 import {
   type EntryMode,
@@ -57,10 +60,13 @@ export type ScriptDeskActionDeps = {
   setIngestPreviewOpen: Dispatch<SetStateAction<boolean>>;
   setPendingIngestSource: Dispatch<SetStateAction<'pasted' | 'uploaded'>>;
   setHandoffOpen: Dispatch<SetStateAction<boolean>>;
+  setRightDrawerOpen: Dispatch<SetStateAction<boolean>>;
   setEntryMode: (mode: EntryMode) => void;
   setFirstGenFloatDeferred: Dispatch<SetStateAction<boolean>>;
   setGenEpisodeCount: Dispatch<SetStateAction<number | 'all'>>;
   setGenFloatExpanded: Dispatch<SetStateAction<boolean>>;
+  /** 送分镜后分镜台工作台会自动打开；编剧台全屏层需同时关闭，避免弹窗叠层 */
+  setStudioOpen: Dispatch<SetStateAction<boolean>>;
 };
 
 export function useScriptDeskActions(deps: ScriptDeskActionDeps) {
@@ -86,11 +92,24 @@ export function useScriptDeskActions(deps: ScriptDeskActionDeps) {
     setIngestPreviewOpen,
     setPendingIngestSource,
     setHandoffOpen,
+    setRightDrawerOpen,
     setEntryMode,
     setFirstGenFloatDeferred,
     setGenEpisodeCount,
     setGenFloatExpanded,
+    setStudioOpen,
   } = deps;
+
+  /** 分镜台侧下一步主按钮文案（与拆镜页主 CTA 同源） */
+  const storyboardNextStepHint = useCallback((storyboardDesk: { data?: Record<string, unknown> } | undefined) => {
+    const hasLocalBreakdown = Boolean(storyboardDesk?.data?.scriptBreakdown);
+    return breakdownNextStepHint(hasLocalBreakdown);
+  }, []);
+
+  /** 供确认成稿后微任务调用（doHandoff 定义在后） */
+  const handoffRunnerRef = useRef<() => void>(() => {});
+  /** 同一成稿 hash 的就绪态只自动送一次，避免同步/标记就绪重复交接 */
+  const autoHandoffReadyKeyRef = useRef<string | null>(null);
 
   const handleIngestSave = useCallback(() => {
     const text = ingestText.trim();
@@ -101,6 +120,7 @@ export function useScriptDeskActions(deps: ScriptDeskActionDeps) {
     const preview = episodesFromIngestText(text, { episodeCount: pkg.brief.episodeCount, sourceType: 'pasted' });
     if (preview.length === 0) {
       setTip('未识别到任何分集，请确认格式');
+      toastError('未识别到任何分集，请确认格式');
       return;
     }
     setIngestPreviewEps(preview);
@@ -126,6 +146,7 @@ export function useScriptDeskActions(deps: ScriptDeskActionDeps) {
     const preview = episodesFromIngestText(text, { episodeCount: pkg.brief.episodeCount, sourceType: 'uploaded' });
     if (preview.length === 0) {
       setTip('未识别到任何分集，请确认文件格式（需要含「第N集」分集标记）');
+      toastError('未识别到任何分集，请确认文件格式（需要含「第N集」分集标记）');
       return;
     }
     setIngestPreviewEps(preview);
@@ -153,6 +174,7 @@ export function useScriptDeskActions(deps: ScriptDeskActionDeps) {
       updateNodeData(propsId, { status: 'error', error: msg, errorCode: classified.code });
       setTip(`抽取失败：${msg}`);
       appendLog(`编剧台抽取失败：${msg}`);
+      toastError(`编剧台抽取失败：${msg}`);
     } finally {
       setBusy(false);
     }
@@ -182,7 +204,9 @@ export function useScriptDeskActions(deps: ScriptDeskActionDeps) {
           setBusy(true);
           enriched = await extractBibleFromPackage(enriched);
         } catch (e) {
-          setTip('抽取失败：' + (e instanceof Error ? e.message : String(e)));
+          const msg = e instanceof Error ? e.message : String(e);
+          setTip('抽取失败：' + msg);
+          toastError(`编剧台抽取失败：${msg}`);
           setBusy(false);
           return;
         } finally {
@@ -204,31 +228,29 @@ export function useScriptDeskActions(deps: ScriptDeskActionDeps) {
     const visualGaps =
       (readiness.missingCharacterRefs?.length ?? 0) +
       (readiness.missingCharacterTurnarounds?.length ?? 0);
-    setTip(
-      readiness.ready
-        ? '成稿已确认，设定已就绪 · 可回分镜台点「同步最新成稿」'
-        : `成稿已确认 · 设定缺口：角色 ${readiness.missingCharacters.length} / 场景 ${readiness.missingScenes.length} / 视觉 ${visualGaps} · 请在设定就绪补齐`,
-    );
     appendLog(`编剧台：确认成稿 · ${packageSummaryLine(next)}`);
-  }, [appendLog, propsId, savePkg, setBusy, setRightTab, setTip]);
-
-  // B-07/H-01: 打开送分镜 checklist 或直接送
-  const handleHandoffToStoryboard = useCallback(() => {
-    flushDebouncedFields(propsId);
-    const livePkg = pkgRef.current;
-    const body = screenplayFullText(livePkg).trim();
-    if (livePkg.status !== 'confirmed' || !body) {
-      setTip(
-        !body
-          ? '尚无分集成稿正文：请先用「生成剧本」成功生成并点「应用」，再确认成稿'
-          : '请先点「确认成稿」，再送到分镜台',
-      );
+    const autoAdvance = useCredentialVault.getState().settings?.preferences?.autoAdvanceEnabled ?? true;
+    // 设定已就绪才直送；有缺口时停在就绪页，避免静默送出未补齐稿
+    if (autoAdvance && readiness.ready) {
+      autoHandoffReadyKeyRef.current = `${packageSourceHash(next)}:ready`;
+      queueMicrotask(() => handoffRunnerRef.current());
       return;
     }
-    setHandoffOpen(true);
-  }, [propsId, setHandoffOpen, setTip]);
+    const runtimeNow = useFlowRuntime.getState().runtime;
+    const nodesNow = runtimeNow?.getNodes() ?? [];
+    const storyboardDeskIdNow = resolveConnectedStoryboardDeskId(propsId, nodesNow as any, getEdges() as any);
+    const storyboardDeskNow = storyboardDeskIdNow
+      ? nodesNow.find((node) => node.id === storyboardDeskIdNow)
+      : undefined;
+    const syncHint = storyboardNextStepHint(storyboardDeskNow as { data?: Record<string, unknown> } | undefined);
+    setTip(
+      readiness.ready
+        ? `成稿已确认，设定已就绪 · 可回分镜台点「${syncHint}」`
+        : `成稿已确认 · 设定缺口：角色 ${readiness.missingCharacters.length} / 场景 ${readiness.missingScenes.length} / 视觉 ${visualGaps} · 请在设定就绪补齐后再送分镜`,
+    );
+  }, [appendLog, getEdges, propsId, savePkg, setBusy, setRightTab, setTip, storyboardNextStepHint, updateNodeData]);
 
-  // B-07/H-01: 实际送分镜（从 checklist 触发）
+  // B-07/H-01: 实际送分镜（checklist 确认 / 自动推进直送）
   const doHandoffToStoryboard = useCallback(() => {
     flushDebouncedFields(propsId);
     const livePkg = pkgRef.current;
@@ -257,21 +279,76 @@ export function useScriptDeskActions(deps: ScriptDeskActionDeps) {
     if (storyboardDesk) {
       updateNodeData(storyboardDesk.id, { handoff });
       runtime?.focusBlock(storyboardDesk.id);
-      setTip(`已送到分镜台 · ${livePkg.screenplay.episodes.length} 集 · 请在「拆镜」页点「只拆新增」`);
-      appendLog(`编剧台：送到分镜台 · ${livePkg.screenplay.episodes.length} 集 · 打开拆镜页只拆新增`);
+      // 分镜台工作台会随 handoff 自动打开，这里必须关掉编剧台全屏层，避免两层全屏弹窗叠开
+      setStudioOpen(false);
+      setTip(`已送到分镜台 · ${livePkg.screenplay.episodes.length} 集 · 空台将自动拆镜（预检通过时）`);
+      appendLog(`编剧台：送到分镜台 · ${livePkg.screenplay.episodes.length} 集 · 自动拆镜交接`);
     } else {
       useFlowCommands.getState().requestSpawn('storyboard-desk', undefined, {
         connectToSource: propsId,
         handoff,
       });
-      setTip(`已创建分镜台并连线 · ${livePkg.screenplay.episodes.length} 集 · 打开后请在「拆镜」页点「从成稿拆镜」`);
+      setStudioOpen(false);
+      setTip(`已创建分镜台并连线 · ${livePkg.screenplay.episodes.length} 集 · 打开后空台将自动拆镜`);
       appendLog(`编剧台：送至分镜 · 一键创建并连线分镜台 · ${livePkg.screenplay.episodes.length} 集`);
     }
-  }, [appendLog, propsId, updateNodeData, getEdges, setHandoffOpen, setTip]);
+  }, [appendLog, propsId, updateNodeData, getEdges, setHandoffOpen, setStudioOpen, setTip]);
+
+  handoffRunnerRef.current = doHandoffToStoryboard;
+
+  // B-07/H-01: 自动推进开启时直送；关闭或需人工核对时才弹 checklist
+  const handleHandoffToStoryboard = useCallback(() => {
+    flushDebouncedFields(propsId);
+    const livePkg = pkgRef.current;
+    const body = screenplayFullText(livePkg).trim();
+    if (livePkg.status !== 'confirmed' || !body) {
+      setTip(
+        !body
+          ? '尚无分集成稿正文：请先用「生成剧本」成功生成并点「应用」，再确认成稿'
+          : '请先点「确认成稿」，再送到分镜台',
+      );
+      return;
+    }
+    const auto = useCredentialVault.getState().settings?.preferences?.autoAdvanceEnabled ?? true;
+    if (auto) {
+      const readiness = inspectBibleAssets(livePkg);
+      if (!readiness.ready) {
+        useToast.getState().push({
+          id: 'script-handoff-readiness',
+          message: '设定尚未完全就绪，已直送分镜台（软模式可继续拆镜）',
+          variant: 'info',
+          actionLabel: '去就绪',
+          onAction: () => {
+            setRightTab('readiness');
+            setRightDrawerOpen(true);
+          },
+        });
+      }
+      doHandoffToStoryboard();
+      return;
+    }
+    setHandoffOpen(true);
+  }, [doHandoffToStoryboard, propsId, setHandoffOpen, setRightDrawerOpen, setRightTab, setTip]);
 
   const handleReadinessChange = useCallback((state: AssetReadinessState) => {
     updateNodeData(propsId, { assetReadiness: state });
     if (state.ready) {
+      const livePkg = pkgRef.current;
+      const autoAdvance = useCredentialVault.getState().settings?.preferences?.autoAdvanceEnabled ?? true;
+      const body = screenplayFullText(livePkg).trim();
+      const readyKey = `${packageSourceHash(livePkg)}:ready`;
+      if (
+        autoAdvance &&
+        livePkg.status === 'confirmed' &&
+        body &&
+        autoHandoffReadyKeyRef.current !== readyKey
+      ) {
+        autoHandoffReadyKeyRef.current = readyKey;
+        setTip('设定已就绪 · 正在送到分镜台…');
+        appendLog('编剧台：设定就绪后自动送分镜');
+        queueMicrotask(() => handoffRunnerRef.current());
+        return;
+      }
       setTip('设定已就绪，可交分镜台');
       appendLog('编剧台：已标记设定就绪');
     }
@@ -342,10 +419,12 @@ export function useScriptDeskActions(deps: ScriptDeskActionDeps) {
       const text = await navigator.clipboard.readText();
       if (!text.trim()) {
         setTip('剪贴板为空');
+        toastError('剪贴板为空');
         return;
       }
       if (!textLooksLikeEpisodicScreenplay(text)) {
         setTip('剪贴板不像分集剧本（需含「第N集」）');
+        toastError('剪贴板不像分集剧本（需含「第N集」）');
         return;
       }
       setIngestText(text);
@@ -353,6 +432,7 @@ export function useScriptDeskActions(deps: ScriptDeskActionDeps) {
       setTip('已从剪贴板填入，确认后写入成稿');
     } catch {
       setTip('无法读取剪贴板（需授予权限）');
+      toastError('无法读取剪贴板（需授予权限）');
     }
   }, [setEntryMode, setIngestText, setTip]);
 
@@ -400,6 +480,7 @@ export function useScriptDeskActions(deps: ScriptDeskActionDeps) {
       setTip('剧本包已导出');
     } catch {
       setTip('导出失败，已降级为本地 JSON 导出');
+      toastError('剧本包导出失败，已降级为本地 JSON 导出');
       handleExportJson();
     }
   }, [api, handleExportJson, pkg, setTip, title]);

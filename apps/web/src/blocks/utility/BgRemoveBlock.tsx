@@ -1,8 +1,10 @@
 import { memo, useCallback } from 'react';
 import { type NodeProps, useReactFlow } from '@xyflow/react';
+import { resolveRunLabel } from '@nx9/shared';
 import { BlockShell } from '../shared/BlockShell';
 import { api } from '../../api/client';
 import { useActivityLog } from '../../stores/activity-log';
+import { toastError } from '../../stores/toast';
 
 function BgRemoveBlock(props: NodeProps) {
   const { updateNodeData } = useReactFlow();
@@ -11,10 +13,14 @@ function BgRemoveBlock(props: NodeProps) {
   const sourceUrl = upstream?.pictures?.[0] || (props.data?.sourceUrl as string);
   const outputUrl = (props.data?.previewUrl as string) || (props.data?.outputUrl as string);
   const status = props.data?.status as string | undefined;
+  const runLabel = resolveRunLabel('bg-remove', status).primary;
 
   const run = useCallback(async () => {
     if (!sourceUrl) {
-      appendLog('抠图：请连接上游图片');
+      const msg = '抠图：请连接上游图片，禁止空成功';
+      updateNodeData(props.id, { status: 'error', error: msg });
+      appendLog(msg);
+      toastError(msg);
       return;
     }
     updateNodeData(props.id, { status: 'running' });
@@ -23,7 +29,7 @@ function BgRemoveBlock(props: NodeProps) {
         model: 'fal-ai/birefnet/v2',
         input: { image_url: sourceUrl },
       });
-      if (!res.url) throw new Error('Fal 未返回图片');
+      if (!res.ok || !res.url) throw new Error('Fal 未返回图片，禁止空成功');
       updateNodeData(props.id, {
         status: 'success',
         previewUrl: res.url,
@@ -31,8 +37,10 @@ function BgRemoveBlock(props: NodeProps) {
       });
       appendLog('抠图完成');
     } catch (e) {
+      const msg = `抠图失败: ${String(e)}`;
       updateNodeData(props.id, { status: 'error', error: String(e) });
-      appendLog(`抠图失败: ${String(e)}`);
+      appendLog(msg);
+      toastError(msg);
     }
   }, [sourceUrl, props.id, updateNodeData, appendLog]);
 
@@ -52,7 +60,7 @@ function BgRemoveBlock(props: NodeProps) {
           disabled={status === 'running' || !sourceUrl}
           className="w-full rounded-xl bg-brand text-white py-2 disabled:opacity-50"
         >
-          {status === 'running' ? '抠图中…' : '运行抠图 (Fal)'}
+          {runLabel}
         </button>
       </div>
     </BlockShell>

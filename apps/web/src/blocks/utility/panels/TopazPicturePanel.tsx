@@ -3,6 +3,7 @@ import { type NodeProps, useReactFlow } from '@xyflow/react';
 import { BlockShell } from '../../shared/BlockShell';
 import { api } from '../../../api/client';
 import { useActivityLog } from '../../../stores/activity-log';
+import { toastError } from '../../../stores/toast';
 
 function TopazPictureBlock(props: NodeProps) {
   const { updateNodeData } = useReactFlow();
@@ -23,7 +24,10 @@ function TopazPictureBlock(props: NodeProps) {
 
   const run = useCallback(async () => {
     if (!sourceUrl) {
-      appendLog('Topaz 图像：缺少上游图片');
+      const msg = 'Topaz 图像：缺少上游图片，禁止空成功';
+      updateNodeData(props.id, { status: 'error', error: msg });
+      appendLog(msg);
+      toastError(msg);
       return;
     }
     updateNodeData(props.id, { status: 'running' });
@@ -34,6 +38,7 @@ function TopazPictureBlock(props: NodeProps) {
         model,
         executablePath: exePath || undefined,
       });
+      if (!res.ok || !res.url) throw new Error('Topaz 放大失败，禁止空成功');
       updateNodeData(props.id, {
         status: 'success',
         previewUrl: res.url,
@@ -42,7 +47,9 @@ function TopazPictureBlock(props: NodeProps) {
       appendLog(`Topaz 放大完成 · ${scale}x`);
     } catch (e) {
       updateNodeData(props.id, { status: 'error', error: String(e) });
-      appendLog(`Topaz 图像失败: ${String(e)}`);
+      const msg = `Topaz 图像失败: ${String(e)}`;
+      appendLog(msg);
+      toastError(msg);
     }
   }, [sourceUrl, scale, model, exePath, props.id, updateNodeData, appendLog]);
 

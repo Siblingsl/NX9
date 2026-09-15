@@ -1,5 +1,5 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent } from 'react';
-import { Handle, Position, useReactFlow, useStore, useUpdateNodeInternals, type NodeProps } from '@xyflow/react';
+import { Handle, Position, useReactFlow, useStore, useUpdateNodeInternals, type Node, type NodeProps } from '@xyflow/react';
 import { lookupBlock, SOCKET_COLORS } from '@nx9/shared';
 import { Layers2 } from 'lucide-react';
 import '../../../styles/node-stage-card.css';
@@ -63,9 +63,15 @@ export const SceneGroupNode = memo(function SceneGroupNode({ id, data, selected 
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(label);
   const inputRef = useRef<HTMLInputElement>(null);
+  const dimsRef = useRef<{ width: number; height: number; collapsed: boolean } | null>(null);
 
   // 尺寸变化后刷新 Handle 锚点，否则连线会对不准组边框
   useEffect(() => {
+    const prev = dimsRef.current;
+    if (prev && prev.width === width && prev.height === height && prev.collapsed === collapsed) {
+      return;
+    }
+    dimsRef.current = { width, height, collapsed };
     updateNodeInternals(id);
   }, [id, width, height, collapsed, updateNodeInternals]);
 
@@ -268,13 +274,146 @@ function nodeSize(n: {
   return { w, h };
 }
 
+type MeasuredNode = {
+  position: { x: number; y: number };
+  width?: number | null;
+  height?: number | null;
+  measured?: { width?: number; height?: number };
+};
+
+function memberMeasured(c: Node): boolean {
+  const w = c.width ?? (c as { measured?: { width?: number } }).measured?.width;
+  const h = c.height ?? (c as { measured?: { height?: number } }).measured?.height;
+  return Boolean(w && h);
+}
+
+/** 旧场景组补 padVersion / 包围盒；无变更时返回 null（避免 RF 测量 tick 空 setNodes） */
+export function migrateSceneGroupPadVersion(nodes: Node[]): Node[] | null {
+  const staleIds = nodes
+    .filter(
+      (n) =>
+        n.type === 'scene-group' &&
+        !n.data?.collapsed &&
+        n.data?.padVersion !== SCENE_GROUP_PAD_VERSION,
+    )
+    .map((n) => n.id);
+  if (staleIds.length === 0) return null;
+
+  const parentBounds = new Map<string, { x: number; y: number; width: number; height: number }>();
+  const readyIds = new Set<string>();
+  for (const id of staleIds) {
+    const parent = nodes.find((n) => n.id === id);
+    if (!parent) continue;
+    const members = nodes.filter((c) => c.parentId === id);
+    if (members.length === 0) {
+      parentBounds.set(id, {
+        x: parent.position.x,
+        y: parent.position.y,
+        width: (parent.data?.width as number) || parent.width || 400,
+        height: (parent.data?.height as number) || parent.height || 280,
+      });
+      readyIds.add(id);
+      continue;
+    }
+    if (members.some((c) => !memberMeasured(c))) continue;
+    parentBounds.set(
+      id,
+      computeGroupBounds(
+        members.map((c) => ({
+          position: {
+            x: parent.position.x + c.position.x,
+            y: parent.position.y + c.position.y,
+          },
+          width: c.width,
+          height: c.height,
+          measured: (c as { measured?: { width?: number; height?: number } }).measured,
+        })),
+      ),
+    );
+    readyIds.add(id);
+  }
+  if (readyIds.size === 0) return null;
+
+  return nodes.map((n) => {
+    if (readyIds.has(n.id) && n.type === 'scene-group') {
+      const bounds = parentBounds.get(n.id);
+      if (!bounds) {
+        return {
+          ...n,
+          data: { ...n.data, padVersion: SCENE_GROUP_PAD_VERSION },
+        };
+      }
+      return {
+        ...n,
+        position: { x: bounds.x, y: bounds.y },
+        data: {
+          ...n.data,
+          width: bounds.width,
+          height: bounds.height,
+          padVersion: SCENE_GROUP_PAD_VERSION,
+        },
+        style: {
+          ...(n.style as Record<string, unknown> | undefined),
+          width: bounds.width,
+          height: bounds.height,
+        },
+        width: bounds.width,
+        height: bounds.height,
+      };
+    }
+    if (n.parentId && readyIds.has(n.parentId)) {
+      const parent = nodes.find((p) => p.id === n.parentId);
+      const bounds = parentBounds.get(n.parentId);
+      if (!parent || !bounds) return n;
+      return {
+        ...n,
+        position: {
+          x: parent.position.x + n.position.x - bounds.x,
+          y: parent.position.y + n.position.y - bounds.y,
+        },
+      };
+    }
+    return n;
+  });
+}
+
+/** 旧折叠场景组升到新卡片尺寸；无变更时返回 null */
+export function migrateSceneGroupCollapsedVersion(nodes: Node[]): Node[] | null {
+  let changed = false;
+  const next = nodes.map((n) => {
+    if (
+      n.type !== 'scene-group' ||
+      !n.data?.collapsed ||
+      n.data?.collapsedVersion === SCENE_GROUP_COLLAPSED_VERSION
+    ) {
+      return n;
+    }
+    changed = true;
+    const members = nodes.filter((c) => c.parentId === n.id);
+    return {
+      ...n,
+      data: {
+        ...n.data,
+        width: SCENE_GROUP_COLLAPSED.width,
+        height: SCENE_GROUP_COLLAPSED.height,
+        memberCount: members.length,
+        memberPreview: buildSceneGroupMemberPreview(members),
+        collapsedVersion: SCENE_GROUP_COLLAPSED_VERSION,
+      },
+      style: {
+        ...(n.style as Record<string, unknown> | undefined),
+        width: SCENE_GROUP_COLLAPSED.width,
+        height: SCENE_GROUP_COLLAPSED.height,
+      },
+      width: SCENE_GROUP_COLLAPSED.width,
+      height: SCENE_GROUP_COLLAPSED.height,
+    };
+  });
+  return changed ? next : null;
+}
+
 export function computeGroupBounds(
-  nodes: Array<{
-    position: { x: number; y: number };
-    width?: number | null;
-    height?: number | null;
-    measured?: { width?: number; height?: number };
-  }>,
+  nodes: MeasuredNode[],
 ): { x: number; y: number; width: number; height: number } {
   const pad = SCENE_GROUP_PAD;
   const header = SCENE_GROUP_HEADER;

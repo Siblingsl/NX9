@@ -122,7 +122,11 @@ export const BlockShell = memo(function BlockShell({
       />
 
       <div className="nx9-stage-card__surface">
-        <div className="nx9-stage-card__accent" style={{ background: accent }} aria-hidden />
+        <div
+          className="nx9-stage-card__accent"
+          style={{ background: accent, '--card-accent': accent } as React.CSSProperties}
+          aria-hidden
+        />
 
         <div className="nx9-stage-card__head">
           <span className="nx9-stage-card__title">{meta?.label ?? type}</span>
@@ -140,7 +144,7 @@ export const BlockShell = memo(function BlockShell({
             <span className="nx9-stage-card__badge">#{blockIndex}</span>
           )}
           {status === 'running' ? (
-            <Loader2 size={13} className="animate-spin text-teal-300 shrink-0" />
+            <Loader2 size={13} className="animate-spin nx9-stage-card__spin shrink-0" />
           ) : (
             <span className={`nx9-stage-card__status ${statusClass}`} title={status ?? 'idle'} />
           )}

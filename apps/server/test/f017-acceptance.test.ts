@@ -55,6 +55,19 @@ describe('F-017 构图模板 / 参考板强约束', () => {
     expect(extractReferenceConstraints({})).toBeNull();
   });
 
+  it('extractReferenceConstraints 兼容扁平 UI 字段', () => {
+    const result = extractReferenceConstraints({
+      styleNotes: '胶片感',
+      palette: ['#222', '#eee'],
+      boardImages: ['https://x/a.png'],
+      enforce: false,
+    });
+    expect(result).not.toBeNull();
+    expect(result!.style).toBe('胶片感');
+    expect(result!.palette).toContain('#222');
+    expect(result!.assetUrls).toEqual(['https://x/a.png']);
+  });
+
   // ─── constraintsToPromptSuffix ───
   it('constraintsToPromptSuffix 生成正确后缀', () => {
     const suffix = constraintsToPromptSuffix({

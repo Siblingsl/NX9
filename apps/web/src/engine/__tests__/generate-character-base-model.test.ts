@@ -64,6 +64,31 @@ function parseGlb(bytes: ArrayBuffer): Promise<Group> {
 
 describe('正式身份基模生成与契约回环', () => {
   it('生成 GLB + manifest + LICENSE，并过加载回环契约校验', async () => {
+    // 美术基模（MPFB 等）就位时勿覆盖；仅做磁盘回环校验。
+    if (fs.existsSync(LICENSE_PATH)) {
+      const license = fs.readFileSync(LICENSE_PATH, 'utf-8');
+      if (license.includes('source: mpfb') || license.includes('MPFB art pack')) {
+        expect(fs.existsSync(GLB_PATH)).toBe(true);
+        const disk = fs.readFileSync(GLB_PATH);
+        const diskBuffer = new ArrayBuffer(disk.byteLength);
+        new Uint8Array(diskBuffer).set(disk);
+        const loaded = await parseGlb(diskBuffer);
+        const report = assertSculptMeshContract(loaded, 'builtin');
+        expect(report.viewportSliceMapped).toBe(true);
+        expect(report.warnings.some((w) => w.includes('表情头'))).toBe(false);
+        const result = await loadCharacterModel({
+          fetchManifest: async () => ({
+            version: 1,
+            meshContractVersion: NX9_SCULPT_MESH_CONTRACT,
+            modelPath: 'nx9-character-base.glb',
+          }),
+          loadGltf: async () => loaded,
+        });
+        expect(result.source).toBe('builtin');
+        return;
+      }
+    }
+
     // 1. 内存构建并先行校验契约
     const model = createCharacterBaseModel();
     const inMemory = assertSculptMeshContract(model, 'builtin');

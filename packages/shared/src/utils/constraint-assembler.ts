@@ -27,25 +27,60 @@ export interface CompositionTemplate {
 
 /**
  * 从 reference-board 节点 data 提取约束。
+ * 兼容结构化 `constraints` 与工作区扁平字段（styleNotes / palette / boardImages）。
  */
 export function extractReferenceConstraints(
   nodeData: Record<string, unknown>,
 ): ReferenceConstraint | null {
   const constraints = nodeData.constraints as Record<string, unknown> | undefined;
-  if (!constraints) return null;
+  const styleNotes = typeof nodeData.styleNotes === 'string' ? nodeData.styleNotes.trim() : '';
+  const content = typeof nodeData.content === 'string' ? nodeData.content.trim() : '';
+  const paletteArr = Array.isArray(nodeData.palette)
+    ? (nodeData.palette as unknown[]).filter((c): c is string => typeof c === 'string' && c.trim().length > 0)
+    : [];
+  const boardImages = Array.isArray(nodeData.boardImages)
+    ? (nodeData.boardImages as unknown[]).filter((u): u is string => typeof u === 'string' && u.trim().length > 0)
+    : [];
+  const pictures = Array.isArray(nodeData.pictures)
+    ? (nodeData.pictures as unknown[]).filter((u): u is string => typeof u === 'string' && u.trim().length > 0)
+    : [];
+
+  const style =
+    (typeof constraints?.style === 'string' && constraints.style.trim()) ||
+    styleNotes ||
+    content ||
+    undefined;
+  const palette =
+    (typeof constraints?.palette === 'string' && constraints.palette.trim()) ||
+    (paletteArr.length ? paletteArr.join(', ') : undefined);
+  const mustInclude = Array.isArray(constraints?.mustInclude)
+    ? (constraints!.mustInclude as string[])
+    : undefined;
+  const mustAvoid = Array.isArray(constraints?.mustAvoid)
+    ? (constraints!.mustAvoid as string[])
+    : undefined;
+  const fromStructured = Array.isArray(constraints?.assetUrls)
+    ? (constraints!.assetUrls as string[]).filter((u) => typeof u === 'string' && u.trim())
+    : [];
+  const assetUrls = [...new Set([...fromStructured, ...boardImages, ...pictures])];
+  const enforce = Boolean(nodeData.enforce ?? constraints?.enforce);
+
+  const hasAny =
+    Boolean(style) ||
+    Boolean(palette) ||
+    Boolean(mustInclude?.length) ||
+    Boolean(mustAvoid?.length) ||
+    assetUrls.length > 0 ||
+    enforce;
+  if (!hasAny) return null;
+
   return {
-    style: constraints.style as string | undefined,
-    palette: constraints.palette as string | undefined,
-    mustInclude: Array.isArray(constraints.mustInclude)
-      ? (constraints.mustInclude as string[])
-      : undefined,
-    mustAvoid: Array.isArray(constraints.mustAvoid)
-      ? (constraints.mustAvoid as string[])
-      : undefined,
-    assetUrls: Array.isArray(constraints.assetUrls)
-      ? (constraints.assetUrls as string[])
-      : undefined,
-    enforce: (nodeData.enforce as boolean) ?? false,
+    style: style || undefined,
+    palette: palette || undefined,
+    mustInclude: mustInclude?.length ? mustInclude : undefined,
+    mustAvoid: mustAvoid?.length ? mustAvoid : undefined,
+    assetUrls: assetUrls.length ? assetUrls : undefined,
+    enforce,
   };
 }
 
@@ -96,7 +131,14 @@ export function buildConstrainedPrompt(
   constraints: ReferenceConstraint | null,
   template: CompositionTemplate | undefined,
 ): { prompt: string; blocked: boolean; reason?: string } {
-  if (constraints?.enforce && !constraints.style && !constraints.palette && !(constraints.assetUrls?.length)) {
+  if (
+    constraints?.enforce &&
+    !constraints.style &&
+    !constraints.palette &&
+    !(constraints.mustInclude?.length) &&
+    !(constraints.mustAvoid?.length) &&
+    !(constraints.assetUrls?.length)
+  ) {
     return { prompt: basePrompt, blocked: true, reason: '参考板为强约束模式，但未设置任何约束条件' };
   }
   let prompt = basePrompt;

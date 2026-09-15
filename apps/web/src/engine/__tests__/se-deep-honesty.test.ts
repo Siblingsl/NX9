@@ -49,9 +49,11 @@ describe('SE-DEEP-02/09 预览与导出引擎诚实', () => {
 });
 
 describe('SE-DEEP-03 wipe/shader 转场不再静默', () => {
-  it('检查器旁注仅 fade 生效', () => {
+  it('检查器旁注写明三类转场的真实行为', () => {
     const src = readFileSync(resolve(desk, 'InspectorPanel.tsx'), 'utf8');
-    expect(src).toContain('wipe / shader 暂未接入渲染层');
+    expect(src).toContain('wipe');
+    expect(src).toContain('shader');
+    expect(src).not.toContain('暂未接入渲染层');
   });
 });
 
@@ -122,6 +124,16 @@ describe('SE-DEEP-06 智能替换可取消', () => {
     expect(controller).toContain('video-edit-tasks/:taskId');
     expect(controller).toContain("@Delete('video-edit-tasks/:taskId')");
   });
+
+  it('SE-RESUME: 直接替换任务刷新后可恢复（提交即落 sessionStorage，重开面板重挂轮询）', () => {
+    const panel = readFileSync(resolve(desk, 'SmartReplacePanel.tsx'), 'utf8');
+    expect(panel).toContain('nx9-smart-replace:');
+    expect(panel).toContain('saveReplaceRecover(clip.id, submitted.taskId)');
+    expect(panel).toContain('恢复上次替换任务');
+    expect(panel).toContain('已恢复上次的替换结果');
+    // 完成/取消/采纳/应用内关闭都清条目，不留悬挂恢复源
+    expect(panel).toMatch(/clearReplaceRecover\(clip\.id\)/);
+  });
 });
 
 describe('SE-DEEP-13 对比播放头同步', () => {
@@ -164,20 +176,28 @@ describe('SE-SPEC-04 overlay 位姿', () => {
 });
 
 describe('SE-SPEC-02/05 诚实终态', () => {
-  it('无跨帧追踪供应商时直接替换路径禁用且明示', () => {
+  it('P3 已接入：跨帧追踪供应商注册、工作台追踪流程、门控与提示齐备', () => {
     const registry = readFileSync(
       resolve(webSrc, '../../../../packages/shared/src/data/provider-registry.ts'),
       'utf8',
     );
     expect(registry).toContain('supportsFrameTracking: boolean');
-    expect(registry).toContain('supportsFrameTracking: false');
+    expect(registry).toContain('supportsFrameTracking: true');
+    expect(registry).toContain('VIDEO_TRACE_PROVIDERS');
+    expect(registry).toContain('maskVideo');
+    expect(registry).toContain('fal-ai/sam2/video');
     const src = readFileSync(resolve(desk, 'SmartReplacePanel.tsx'), 'utf8');
     expect(src).toContain('hasVideoEditFrameTracking');
-    expect(src).toContain(
-      "disabled={busy || (replaceMode === 'direct' && !hasVideoEditFrameTracking)}",
+    expect(src).toContain('traceEnabled');
+    expect(src).toContain('api.videoTraceSubmit');
+    expect(src).toContain('首帧自动跨帧追踪（SAM2 分割');
+    const service = readFileSync(
+      resolve(webSrc, '../../../../apps/server/src/modules/montage/video-edit.service.ts'),
+      'utf8',
     );
-    expect(src).toContain('未接入跨帧自动追踪');
-    expect(src).toContain('视频级直接替换当前不可用');
+    expect(service).toContain('submitTrace');
+    expect(service).toContain('maskVideoUrl');
+    expect(service).toContain('resolveVideoTraceProvider');
   });
 
   it('单供应商注册表、UI 与服务端拒绝一致', () => {
@@ -189,7 +209,7 @@ describe('SE-SPEC-02/05 诚实终态', () => {
     expect(registry).toContain("id: 'wan-vace'");
     const panel = readFileSync(resolve(desk, 'SmartReplacePanel.tsx'), 'utf8');
     expect(panel).toContain('videoEditProviders.length < 2');
-    expect(panel).toContain('不会自动切换供应商');
+    expect(panel).toContain('SAM2 追踪产出的逐帧 mask 视频');
     const service = readFileSync(
       resolve(webSrc, '../../../../apps/server/src/modules/montage/video-edit.service.ts'),
       'utf8',
@@ -200,15 +220,23 @@ describe('SE-SPEC-02/05 诚实终态', () => {
 });
 
 describe('SE-DEEP-12 beat-cut 能力诚实元数据', () => {
-  it('beat-cut 建议带算法元数据且 notes 明示未做音频听感', () => {
+  it('真·音频听感踩点已接入（audioAnalyzed: true），参考节奏降级路径仍诚实标注', () => {
     const src = readFileSync(resolve(webSrc, 'smart-edit-orchestrator.ts'), 'utf8');
+    expect(src).toContain('beatAnalyze');
+    expect(src).toContain('audioAnalyzed: true');
     expect(src).toContain("algorithm: 'reference-shot-durations'");
     expect(src).toContain('audioAnalyzed: false');
     expect(src).toContain('未做音频听感');
+    expect(src).toContain('无可编排镜头，禁止空成功');
     const shared = readFileSync(
       resolve(webSrc, '../../../../packages/shared/src/types/smart-edit.ts'),
       'utf8',
     );
     expect(shared).toContain('audioAnalyzed?: boolean');
+    const controller = readFileSync(
+      resolve(webSrc, '../../../../apps/server/src/modules/montage/montage.controller.ts'),
+      'utf8',
+    );
+    expect(controller).toContain("@Post('beat-analyze')");
   });
 });

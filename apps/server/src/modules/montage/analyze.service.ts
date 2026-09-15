@@ -16,7 +16,7 @@ export class AnalyzeService {
     if (!local || !existsSync(local)) {
       return {
         ok: false,
-        message: '无法访问视频文件，请使用已上传或已生成的 /media/videos/ URL',
+        message: '无法访问视频文件，请使用已上传或已生成的 /media/videos/ URL，禁止空成功',
       };
     }
     return { ok: true, path: local };
@@ -99,7 +99,7 @@ export class AnalyzeService {
       markdown,
       shots,
       frameHints,
-      message: shots.length > 0 ? `已反推 ${shots.length} 个镜头` : '未能解析分镜表，请检查 LLM 输出',
+      message: shots.length > 0 ? `已反推 ${shots.length} 个镜头` : '未能解析分镜表，禁止空成功',
     };
   }
 }

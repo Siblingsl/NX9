@@ -14,6 +14,7 @@ import {
   renameLibraryCharacterProfile,
 } from '../../../engine/bible-library-sync';
 import { askConfirm, askConfirmWithOption, confirmDelete } from '../../../stores/confirm-dialog';
+import { toastError } from '../../../stores/toast';
 import { countCharacterRenameHits, type RightTab, type SavePkgFn } from './desk-helpers';
 
 export type ScriptDeskEditDeps = {
@@ -155,7 +156,9 @@ export function useScriptDeskEditOps(deps: ScriptDeskEditDeps) {
       && (item.id === target.libraryCharacterId || item.label === oldName),
     );
     if (publicHit) {
-      setTip('公共素材库角色档案为只读，无法随编剧台改名；如需联动请先在素材库「另存为私有」后重试');
+      const msg = '公共素材库角色档案为只读，无法随编剧台改名；如需联动请先在素材库「另存为私有」后重试';
+      setTip(msg);
+      toastError(msg);
       return;
     }
     const libHit = findLibraryCharacterForRename(workspaceCharacters, {

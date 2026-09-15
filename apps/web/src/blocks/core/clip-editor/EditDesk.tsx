@@ -1,16 +1,20 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { PlayerRef } from '@remotion/player';
 import {
+  Captions,
   Check,
   ChevronDown,
   Loader2,
+  Music,
   Redo2,
   Scissors,
   Sparkles,
   Undo2,
+  Waves,
   X,
 } from 'lucide-react';
 import {
+  buildSubtitleClipsFromCues,
   findTimelineClip,
   nextTrackId,
   type SmartEditEngine,
@@ -23,7 +27,9 @@ import {
   engineLabel,
 } from '@nx9/shared';
 import { api } from '../../../api/client';
+import { toastError } from '../../../stores/toast';
 import { planAcceptAllSuggestions } from '../../../engine/suggestion-conflict';
+import { parseSrt } from '../../../engine/srt-parse';
 import { useTimelineEditor } from './use-timeline-editor';
 import { PreviewPlayer } from './PreviewPlayer';
 import { TimelinePanel, type MediaDropPayload } from './TimelinePanel';
@@ -46,8 +52,13 @@ export interface EditDeskProps {
 
   profile: SmartEditProfile;
   onProfileChange: (p: SmartEditProfile) => void;
+  /** 深度编排：LLM 理解镜头内容决定顺序/时长（默认开） */
+  deepArrange: boolean;
+  onDeepArrangeChange: (v: boolean) => void;
   arrangeHint: string;
-  onOrchestrate: () => Promise<OrchestrateOutcome>;
+  /** 漫剧编排前置未满足时的阻断原因（如视频未批准）；有值则禁用 AI 编排主按钮 */
+  orchestrateBlockedReason?: string;
+  onOrchestrate: (deepArrange: boolean) => Promise<OrchestrateOutcome>;
 
   suggestions: SmartSuggestion[];
   pendingIds: string[];
@@ -55,7 +66,10 @@ export interface EditDeskProps {
 
   shots: MediaBinShot[];
   upstreamClips: string[];
+  /** 上游全部音频 URL（素材箱展示；含对白，勿当 BGM） */
   upstreamSounds: string[];
+  /** SF-15：仅 music 模式配乐 URL，踩点/编排认此字段 */
+  upstreamBgmUrls?: string[];
 
   engine: SmartEditEngine;
   onEngineChange: (e: SmartEditEngine) => void;
@@ -110,6 +124,162 @@ const isEditableTarget = (t: EventTarget | null) => {
   return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || el.isContentEditable;
 };
 
+const ASPECT_PRESETS: Array<{ id: TimelinePayload['aspect']; label: string; width: number; height: number }> = [
+  { id: '9:16', label: '竖屏 9:16', width: 1080, height: 1920 },
+  { id: '16:9', label: '横屏 16:9', width: 1920, height: 1080 },
+  { id: '1:1', label: '方形 1:1', width: 1080, height: 1080 },
+];
+
+const BG_SWATCHES = ['#000000', '#ffffff', '#1e293b', '#7c3aed', '#0ea5e9', '#10b981', '#f59e0b', '#ef4444'];
+
+export interface CanvasMetaPatch {
+  aspect?: TimelinePayload['aspect'];
+  width?: number;
+  height?: number;
+  background?: TimelinePayload['background'] | null;
+}
+
+/** 画布设置：画幅预设/自定义尺寸 + 背景（纯色/渐变）——预览与 Remotion 成片共用时间线字段 */
+function CanvasSettings({
+  timeline,
+  onChange,
+}: {
+  timeline: TimelinePayload;
+  onChange: (patch: CanvasMetaPatch) => void;
+}) {
+  const isPreset = ASPECT_PRESETS.some((p) => p.id === timeline.aspect);
+  const bg = timeline.background;
+  return (
+    <div className="ed-canvas">
+      <div className="ed-chip-row">
+        {ASPECT_PRESETS.map((p) => (
+          <button
+            key={p.id}
+            type="button"
+            className={`ed-chip ${isPreset && timeline.aspect === p.id ? 'is-on' : ''}`}
+            onClick={() => onChange({ aspect: p.id, width: p.width, height: p.height })}
+          >
+            {p.label}
+          </button>
+        ))}
+        <button
+          type="button"
+          className={`ed-chip ${!isPreset ? 'is-on' : ''}`}
+          title="输入任意宽高"
+          onClick={() => onChange({})}
+        >
+          自定义
+        </button>
+      </div>
+      {!isPreset && (
+        <div className="ed-field-row">
+          <label className="ed-field">
+            <span>宽</span>
+            <input
+              type="number"
+              min={16}
+              max={7680}
+              value={timeline.width}
+              onChange={(e) => onChange({ width: Number(e.target.value) })}
+            />
+          </label>
+          <label className="ed-field">
+            <span>高</span>
+            <input
+              type="number"
+              min={16}
+              max={7680}
+              value={timeline.height}
+              onChange={(e) => onChange({ height: Number(e.target.value) })}
+            />
+          </label>
+        </div>
+      )}
+      <p className="ed-field-hint">
+        当前 {timeline.width}×{timeline.height} · 预览与 Remotion 成片同源
+      </p>
+      <h5>背景</h5>
+      <div className="ed-chip-row">
+        <button
+          type="button"
+          className={`ed-chip ${!bg ? 'is-on' : ''}`}
+          onClick={() => onChange({ background: null })}
+        >
+          无
+        </button>
+        <button
+          type="button"
+          className={`ed-chip ${bg?.kind === 'color' ? 'is-on' : ''}`}
+          onClick={() =>
+            onChange({ background: { kind: 'color', color: bg?.kind === 'color' ? bg.color : '#000000' } })
+          }
+        >
+          纯色
+        </button>
+        <button
+          type="button"
+          className={`ed-chip ${bg?.kind === 'gradient' ? 'is-on' : ''}`}
+          onClick={() =>
+            onChange({
+              background: {
+                kind: 'gradient',
+                gradientFrom: bg?.kind === 'gradient' ? bg.gradientFrom : '#0f172a',
+                gradientTo: bg?.kind === 'gradient' ? bg.gradientTo : '#7c3aed',
+              },
+            })
+          }
+        >
+          渐变
+        </button>
+      </div>
+      {bg?.kind === 'color' && (
+        <div className="ed-bg-row">
+          {BG_SWATCHES.map((c) => (
+            <button
+              key={c}
+              type="button"
+              className={`ed-bg-swatch ${bg.color === c ? 'is-on' : ''}`}
+              style={{ background: c }}
+              title={c}
+              onClick={() => onChange({ background: { kind: 'color', color: c } })}
+            />
+          ))}
+          <input
+            type="color"
+            className="ed-bg-custom"
+            value={bg.color ?? '#000000'}
+            onChange={(e) => onChange({ background: { kind: 'color', color: e.target.value } })}
+          />
+        </div>
+      )}
+      {bg?.kind === 'gradient' && (
+        <div className="ed-field-row">
+          <label className="ed-field">
+            <span>起色</span>
+            <input
+              type="color"
+              value={bg.gradientFrom ?? '#0f172a'}
+              onChange={(e) =>
+                onChange({ background: { kind: 'gradient', gradientFrom: e.target.value, gradientTo: bg.gradientTo ?? '#7c3aed' } })
+              }
+            />
+          </label>
+          <label className="ed-field">
+            <span>止色</span>
+            <input
+              type="color"
+              value={bg.gradientTo ?? '#7c3aed'}
+              onChange={(e) =>
+                onChange({ background: { kind: 'gradient', gradientFrom: bg.gradientFrom ?? '#0f172a', gradientTo: e.target.value } })
+              }
+            />
+          </label>
+        </div>
+      )}
+    </div>
+  );
+}
+
 /**
  * 智能剪辑台：素材箱 + 帧精确预览 + 可编辑多轨时间轴 + 检查器 + AI 助剪。
  * 时间线编辑期间以 editor 为 SSOT，每次提交回写节点 timelineDraft。
@@ -120,7 +290,10 @@ export function EditDesk(props: EditDeskProps) {
     onPersist,
     profile,
     onProfileChange,
+    deepArrange,
+    onDeepArrangeChange,
     arrangeHint,
+    orchestrateBlockedReason,
     onOrchestrate,
     suggestions,
     pendingIds,
@@ -128,6 +301,7 @@ export function EditDesk(props: EditDeskProps) {
     shots,
     upstreamClips,
     upstreamSounds,
+    upstreamBgmUrls = [],
     engine,
     onEngineChange,
     rendering,
@@ -146,12 +320,15 @@ export function EditDesk(props: EditDeskProps) {
 
   const [playheadSec, setPlayheadSec] = useState(0);
   const [pxPerSec, setPxPerSec] = useState(40);
-  const [selectedClipId, setSelectedClipId] = useState<string | null>(null);
+  const [selectedClipIds, setSelectedClipIds] = useState<string[]>([]);
+  const [rippleMode, setRippleMode] = useState(false);
   const [rightTab, setRightTab] = useState<'clip' | 'export'>('clip');
   const [suggestOpen, setSuggestOpen] = useState(false);
   const [orchestrating, setOrchestrating] = useState(false);
   const [deskTip, setDeskTip] = useState('');
   const [replaceClipId, setReplaceClipId] = useState<string | null>(null);
+  const [subtitleBusyClipId, setSubtitleBusyClipId] = useState<string | null>(null);
+  const [beatBusy, setBeatBusy] = useState(false);
   const playerRef = useRef<PlayerRef | null>(null);
 
   const pendingItems = useMemo(
@@ -171,11 +348,11 @@ export function EditDesk(props: EditDeskProps) {
   // ── AI 编排 ──
   const runOrchestrate = useCallback(async () => {
     setOrchestrating(true);
-    setDeskTip('AI 编排中…');
+    setDeskTip(deepArrange ? 'AI 深度编排中（LLM 分析镜头）…' : 'AI 编排中…');
     try {
-      const result = await onOrchestrate();
+      const result = await onOrchestrate(deepArrange);
       editor.reset(result.timeline, { keepHistory: !!timeline && clipCount > 0 });
-      setSelectedClipId(null);
+      setSelectedClipIds([]);
       setPlayheadSec(0);
       const noteText = (result.notes ?? []).length > 0 ? ` · ${result.notes.join(' · ')}` : '';
       setDeskTip(
@@ -188,7 +365,7 @@ export function EditDesk(props: EditDeskProps) {
     } finally {
       setOrchestrating(false);
     }
-  }, [onOrchestrate, editor, timeline, clipCount]);
+  }, [onOrchestrate, editor, timeline, clipCount, deepArrange]);
 
   // ── 建议采纳 ──
   const acceptSuggestion = useCallback(
@@ -232,16 +409,12 @@ export function EditDesk(props: EditDeskProps) {
         editor.reset(makeEmptyTimeline());
         tl = makeEmptyTimeline();
       }
-      let wantKind: TimelineTrackKind = payload.mediaType === 'audio' ? 'audio' : 'video';
+      let wantKind: TimelineTrackKind =
+        payload.mediaType === 'audio' ? 'audio' : payload.mediaType === 'image' ? 'overlay' : 'video';
       let targetTrackId = trackId;
       if (targetTrackId) {
         const t = tl.tracks.find((x) => x.id === targetTrackId);
         if (!t || t.kind !== wantKind || t.locked) targetTrackId = null;
-      }
-      // SE-SPEC-04: 图片可拖入贴片轨，作为 overlay clip 使用位姿编辑
-      if (wantKind === 'video' && payload.mediaType === 'image' && targetTrackId) {
-        const targetTrack = tl.tracks.find((x) => x.id === targetTrackId);
-        if (targetTrack?.kind === 'overlay') wantKind = 'overlay';
       }
       if (!targetTrackId) {
         const t = tl.tracks.find((x) => x.kind === wantKind && !x.locked);
@@ -276,13 +449,20 @@ export function EditDesk(props: EditDeskProps) {
         startSec: startSec ?? 0,
         durationSec,
         assetUrl: payload.url,
-        type: payload.mediaType === 'audio' ? 'audio' : payload.mediaType === 'image' ? 'image' : 'video',
+        type:
+          payload.mediaType === 'audio'
+            ? 'audio'
+            : payload.mediaType === 'image'
+              ? wantKind === 'overlay'
+                ? 'overlay'
+                : 'image'
+              : 'video',
         ...(payload.shotId ? { shotId: payload.shotId } : {}),
         ...(sourceDurationSec ? { sourceDurationSec } : {}),
       };
       ops.push({ op: 'add-clip', trackId: targetTrackId, clip, atEnd: startSec == null });
       editor.apply(ops);
-      setSelectedClipId(clip.id);
+      setSelectedClipIds([clip.id]);
       onLog(`已加入素材：${payload.label}`);
     },
     [timeline, editor, onLog],
@@ -325,7 +505,7 @@ export function EditDesk(props: EditDeskProps) {
     [replaceClipId, replaceLoc?.clip.shotId, onWritebackShotVersion, editor, onLog],
   );
 
-  // ── 快捷键 ──
+  // ── 快捷键（多选批量删除/分割；Escape 取消选择） ──
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (isEditableTarget(e.target)) return;
@@ -335,15 +515,24 @@ export function EditDesk(props: EditDeskProps) {
         if (p) (p.isPlaying() ? p.pause() : p.play());
         return;
       }
-      if ((e.key === 'Delete' || e.key === 'Backspace') && selectedClipId) {
+      if ((e.key === 'Delete' || e.key === 'Backspace') && selectedClipIds.length > 0) {
         e.preventDefault();
-        editor.apply({ op: 'remove-clip', clipId: selectedClipId, ripple: e.shiftKey });
-        setSelectedClipId(null);
+        const ripple = rippleMode || e.shiftKey;
+        editor.apply(
+          selectedClipIds.map((id) => ({ op: 'remove-clip' as const, clipId: id, ripple })),
+        );
+        setSelectedClipIds([]);
         return;
       }
-      if ((e.key === 's' || e.key === 'S') && !e.ctrlKey && !e.metaKey && selectedClipId) {
+      if ((e.key === 's' || e.key === 'S') && !e.ctrlKey && !e.metaKey && selectedClipIds.length > 0) {
         e.preventDefault();
-        editor.apply({ op: 'split-clip', clipId: selectedClipId, atSec: playheadSec });
+        editor.apply(
+          selectedClipIds.map((id) => ({ op: 'split-clip' as const, clipId: id, atSec: playheadSec })),
+        );
+        return;
+      }
+      if (e.key === 'Escape') {
+        setSelectedClipIds([]);
         return;
       }
       if ((e.ctrlKey || e.metaKey) && (e.key === 'z' || e.key === 'Z')) {
@@ -359,7 +548,177 @@ export function EditDesk(props: EditDeskProps) {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [editor, selectedClipId, playheadSec]);
+  }, [editor, selectedClipIds, playheadSec, rippleMode]);
+
+  // ── 剪贴板粘贴素材（图片/视频/音频 → 上传 → 入轨） ──
+  useEffect(() => {
+    const onPaste = (e: ClipboardEvent) => {
+      const files = Array.from(e.clipboardData?.files ?? []);
+      if (files.length === 0) return;
+      const media = files.filter((f) =>
+        f.type.startsWith('image/') || f.type.startsWith('video/') || f.type.startsWith('audio/'),
+      );
+      if (media.length === 0) return;
+      e.preventDefault();
+      for (const f of media) {
+        void (async () => {
+          try {
+            const up = await api.uploadAsset(f);
+            if (!up.url?.trim()) {
+              const msg = '粘贴素材上传失败或未返回 URL，禁止空成功';
+              toastError(msg);
+              onLog(msg);
+              return;
+            }
+            const type = f.type.startsWith('image/') ? 'image' : f.type.startsWith('audio/') ? 'audio' : 'video';
+            await addMedia(null, null, { url: up.url, mediaType: type, label: f.name });
+          } catch (err) {
+            const msg = `粘贴素材失败：${err instanceof Error ? err.message : String(err)}`;
+            toastError(msg);
+            onLog(msg);
+          }
+        })();
+      }
+    };
+    window.addEventListener('paste', onPaste);
+    return () => window.removeEventListener('paste', onPaste);
+  }, [addMedia, onLog]);
+
+  // ── AI 字幕：选中音视频片段 → 转写 → 生成字幕轨（时间线自治） ──
+  const appendSubtitleClips = useCallback(
+    (
+      clip: TimelineClip,
+      cues: Array<{ startSec: number; endSec: number; text: string }>,
+      sourceLabel: string,
+    ) => {
+      if (!timeline) return 0;
+      const { clips: subClips, dropped } = buildSubtitleClipsFromCues(clip, cues);
+      if (subClips.length === 0) {
+        onLog(`${sourceLabel}：生成的字幕片段为空`);
+        return 0;
+      }
+      const ops: TimelineOp[] = [];
+      let subTrack = timeline.tracks.find((t) => t.kind === 'subtitle' && !t.locked);
+      if (!subTrack) {
+        const id = nextTrackId(timeline.tracks, 'subtitle');
+        ops.push({ op: 'add-track', track: { id, kind: 'subtitle', label: '字幕', clips: [] } });
+        subTrack = { id, kind: 'subtitle', label: '字幕', clips: [] };
+      }
+      for (const sc of subClips) {
+        ops.push({ op: 'add-clip', trackId: subTrack!.id, clip: sc });
+      }
+      editor.apply(ops);
+      onLog(
+        `${sourceLabel}：${subClips.length} 条字幕已加入字幕轨${dropped > 0 ? `（跳过 ${dropped} 条无效/入点前）` : ''}，可拖拽微调`,
+      );
+      return subClips.length;
+    },
+    [timeline, editor, onLog],
+  );
+
+  const handleGenerateSubtitles = useCallback(
+    async (clipId: string) => {
+      if (!timeline) return;
+      const loc = findTimelineClip(timeline, clipId);
+      if (!loc) return;
+      const clip = loc.clip;
+      if (clip.type !== 'video' && clip.type !== 'audio') return;
+      setSubtitleBusyClipId(clipId);
+      try {
+        const res = await api.transcribeAudio(clip.assetUrl);
+        if (!res.ok || !res.cues || res.cues.length === 0) {
+          onLog('AI 字幕：未识别到语音内容');
+          return;
+        }
+        appendSubtitleClips(
+          clip,
+          res.cues.map((c) => ({ startSec: c.start, endSec: c.end, text: c.text })),
+          'AI 字幕',
+        );
+      } catch (e) {
+        onLog(`AI 字幕失败：${e instanceof Error ? e.message : String(e)}`);
+      } finally {
+        setSubtitleBusyClipId(null);
+      }
+    },
+    [timeline, appendSubtitleClips, onLog],
+  );
+
+  // ── 导入 SRT 转录文件生成字幕轨 ──
+  const handleImportSrt = useCallback(
+    async (clipId: string, file: File) => {
+      if (!timeline) return;
+      const loc = findTimelineClip(timeline, clipId);
+      if (!loc) return;
+      const clip = loc.clip;
+      if (clip.type !== 'video' && clip.type !== 'audio') return;
+      try {
+        const text = await file.text();
+        const cues = parseSrt(text);
+        if (cues.length === 0) {
+          onLog('导入 SRT：未解析到有效字幕条目');
+          return;
+        }
+        appendSubtitleClips(
+          clip,
+          cues.map((c) => ({ startSec: c.start, endSec: c.end, text: c.text })),
+          `导入 SRT（${file.name}）`,
+        );
+      } catch (e) {
+        onLog(`导入 SRT 失败：${e instanceof Error ? e.message : String(e)}`);
+      }
+    },
+    [timeline, appendSubtitleClips, onLog],
+  );
+
+  // ── 踩点对齐：BGM 真·听感节拍 → 视频片段边界吸附到节拍点 ──
+  const applyBeatAlign = useCallback(async () => {
+    if (!timeline) return;
+    const bgm = timeline.tracks
+      .filter((t) => t.kind === 'audio')
+      .flatMap((t) => t.clips)
+      .find((c) => c.label === 'BGM' || (upstreamBgmUrls[0] && c.assetUrl === upstreamBgmUrls[0]));
+    const vTrack = timeline.tracks.find((t) => t.kind === 'video');
+    if (!bgm || !vTrack || vTrack.clips.length < 2) {
+      onLog('踩点对齐需要 BGM 音轨与至少 2 个视频片段（可先「AI 编排」注入 BGM）');
+      return;
+    }
+    setBeatBusy(true);
+    try {
+      const beat = await api.beatAnalyze(bgm.assetUrl);
+      if (!beat.ok || !beat.beats || beat.beats.length === 0) {
+        onLog(`踩点分析失败：${beat.message ?? '未检测到节拍'}`);
+        return;
+      }
+      const ops: TimelineOp[] = [];
+      const sorted = [...vTrack.clips].sort((a, b) => a.startSec - b.startSec);
+      for (let i = 0; i < sorted.length; i++) {
+        const c = sorted[i];
+        const start = Math.max(0, beat.beats[i] ?? 0);
+        const end = beat.beats[i + 1] ?? start + 3;
+        const dur = Math.max(0.3, Math.round((end - start) * 10) / 10);
+        ops.push({ op: 'move-clip', clipId: c.id, startSec: start });
+        ops.push({ op: 'trim-clip', clipId: c.id, edge: 'end', deltaSec: dur - c.durationSec });
+      }
+      editor.apply(ops);
+      onLog(
+        `已按 BGM 节拍对齐 ${sorted.length} 个片段（${beat.tempo ? `约 ${beat.tempo} BPM` : `${beat.beats.length} 个节拍点`} · audioAnalyzed: true），可撤销`,
+      );
+    } catch (e) {
+      onLog(`踩点对齐失败：${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setBeatBusy(false);
+    }
+  }, [timeline, editor, onLog, upstreamBgmUrls]);
+
+  // ── 画幅/画布背景变更（预览与 Remotion 成片同源） ──
+  const setCanvasMeta = useCallback(
+    (patch: CanvasMetaPatch) => {
+      if (!timeline) return;
+      editor.apply({ op: 'set-timeline-meta', patch });
+    },
+    [timeline, editor],
+  );
 
   const hasContent = !!timeline && clipCount > 0;
 
@@ -385,12 +744,30 @@ export function EditDesk(props: EditDeskProps) {
           <button
             type="button"
             className="ed-btn ed-btn--primary"
-            disabled={orchestrating}
-            title={arrangeHint}
+            disabled={orchestrating || Boolean(orchestrateBlockedReason)}
+            title={orchestrateBlockedReason || arrangeHint}
             onClick={() => void runOrchestrate()}
           >
             {orchestrating ? <Loader2 size={13} className="ed-spin" /> : <Sparkles size={13} />}
             AI 编排
+          </button>
+          <button
+            type="button"
+            className={`ed-chip ${deepArrange ? 'is-on' : ''}`}
+            title="深度编排：LLM 分析每个镜头的内容描述/台词后决定播放顺序与时长；关闭则按规则编排。失败自动回退规则编排"
+            onClick={() => onDeepArrangeChange(!deepArrange)}
+          >
+            深度编排
+          </button>
+          <button
+            type="button"
+            className="ed-btn"
+            disabled={beatBusy || !hasContent}
+            title="对 BGM 做真·音频节拍分析，把视频片段边界吸附到节拍点（能量 onset 听感，可撤销）"
+            onClick={() => void applyBeatAlign()}
+          >
+            {beatBusy ? <Loader2 size={13} className="ed-spin" /> : <Music size={13} />}
+            踩点对齐
           </button>
           <div className="ed-suggest">
             <button
@@ -469,12 +846,21 @@ export function EditDesk(props: EditDeskProps) {
           </button>
           <button
             type="button"
+            className={`ed-chip ${rippleMode ? 'is-on' : ''}`}
+            title="波纹编辑模式：删除/裁剪后同轨后续片段自动前移补洞（Shift+Delete 单次波纹删除）"
+            onClick={() => setRippleMode((v) => !v)}
+          >
+            <Waves size={12} /> 波纹
+          </button>
+          <button
+            type="button"
             className="ed-icon-btn"
-            disabled={!selectedClipId}
+            disabled={selectedClipIds.length === 0}
             title="播放头处分割 (S)"
             onClick={() =>
-              selectedClipId &&
-              editor.apply({ op: 'split-clip', clipId: selectedClipId, atSec: playheadSec })
+              editor.apply(
+                selectedClipIds.map((id) => ({ op: 'split-clip' as const, clipId: id, atSec: playheadSec })),
+              )
             }
           >
             <Scissors size={14} />
@@ -501,6 +887,7 @@ export function EditDesk(props: EditDeskProps) {
             shots={shots}
             clips={upstreamClips}
             sounds={upstreamSounds}
+            bgmUrls={upstreamBgmUrls}
             onAdd={(p) => void addMedia(null, null, p)}
           />
         </aside>
@@ -515,20 +902,27 @@ export function EditDesk(props: EditDeskProps) {
               playerRef={playerRef}
               engine={engine}
               profile={profile}
+              selectedClipIds={selectedClipIds}
+              apply={editor.apply}
             />
           ) : (
             <div className="ed-empty ed-empty--stage">
-              <p>{arrangeHint}</p>
+              <p>{orchestrateBlockedReason || arrangeHint}</p>
               <button
                 type="button"
                 className="ed-btn ed-btn--primary"
-                disabled={orchestrating}
+                disabled={orchestrating || Boolean(orchestrateBlockedReason)}
+                title={orchestrateBlockedReason || arrangeHint}
                 onClick={() => void runOrchestrate()}
               >
                 {orchestrating ? <Loader2 size={13} className="ed-spin" /> : <Sparkles size={13} />}
                 AI 编排生成时间线
               </button>
-              <p className="ed-hint">或从左侧素材箱把素材拖入 / 加入时间轴，手动开始剪辑。</p>
+              <p className="ed-hint">
+                {orchestrateBlockedReason
+                  ? '先在上游视频工作区批准镜头，再回来编排；也可从左侧素材箱手动加片。'
+                  : '或从左侧素材箱把素材拖入 / 加入时间轴，手动开始剪辑。'}
+              </p>
             </div>
           )}
         </section>
@@ -553,11 +947,14 @@ export function EditDesk(props: EditDeskProps) {
           {rightTab === 'clip' && timeline ? (
             <InspectorPanel
               timeline={timeline}
-              selectedClipId={selectedClipId}
+              selectedClipIds={selectedClipIds}
               playheadSec={playheadSec}
               apply={editor.apply}
-              onSelect={setSelectedClipId}
+              onSelect={setSelectedClipIds}
               onSmartReplace={(id) => setReplaceClipId(id)}
+              onGenerateSubtitles={handleGenerateSubtitles}
+              onImportSrt={handleImportSrt}
+              subtitleBusyClipId={subtitleBusyClipId}
             />
           ) : rightTab === 'clip' ? (
             <div className="ed-empty">先编排或加入素材</div>
@@ -615,6 +1012,13 @@ export function EditDesk(props: EditDeskProps) {
                   注入对白音轨
                 </button>
               )}
+              <h4>画布</h4>
+              {timeline && (
+                <CanvasSettings
+                  timeline={timeline}
+                  onChange={(patch) => setCanvasMeta(patch)}
+                />
+              )}
               <h4>交付</h4>
               <button
                 type="button"
@@ -655,13 +1059,15 @@ export function EditDesk(props: EditDeskProps) {
           onZoom={setPxPerSec}
           playheadSec={playheadSec}
           onSeek={seek}
-          selectedClipId={selectedClipId}
-          onSelect={(id) => {
-            setSelectedClipId(id);
-            if (id) setRightTab('clip');
+          selectedClipIds={selectedClipIds}
+          onSelect={(ids) => {
+            setSelectedClipIds(ids);
+            if (ids.length > 0) setRightTab('clip');
           }}
           apply={editor.apply}
           onDropMedia={(trackId, sec, payload) => void addMedia(trackId, sec, payload)}
+          suggestions={pendingItems}
+          onSuggestionResolved={onSuggestionResolved}
         />
       )}
 

@@ -11,14 +11,16 @@ import {
 } from '@nx9/shared';
 import { BlockShell } from '../shared/BlockShell';
 import { useActivityLog } from '../../stores/activity-log';
+import { toastError } from '../../stores/toast';
 import { useWorkspaceDocument } from '../../stores/workspace-document';
 import { resolveShotsForBlock } from '../../engine/chain-storyboard-utils';
 import { runExportPack } from '../../engine/export-pack-runner';
 import { generateManifestCsv, generateManifestPdf } from '../../engine/export-manifest-client';
+import { unlockFirstLane } from '../../engine/first-lane';
 import { useTaskPoll } from '../../hooks/use-task-poll';
 import { api } from '../../api/client';
 
-type ExportMode = 'zip' | 'ffmpeg-episode' | 'hyperframes-episode' | 'remotion-bundle' | 'ecom-pack';
+type ExportMode = 'zip' | 'ffmpeg-episode' | 'hyperframes-episode' | 'remotion-episode' | 'remotion-bundle' | 'ecom-pack';
 
 function readUpstreamClipEditorTimeline(
   packId: string,
@@ -100,12 +102,32 @@ function ExportPackBlock(props: NodeProps) {
         episodeUrl: hfTask.url,
         status: 'success',
         exportReady: true,
+        hfTaskId: undefined,
       });
+      unlockFirstLane();
       appendLog(`HF 渲染完成 · ${hfTask.url}`);
     }
+    // F-046: 取消不得写成 success；清掉任务 id 防重入轮询
+    if (hfTask.status === 'cancelled') {
+      updateNodeData(props.id, {
+        status: 'error',
+        exportReady: false,
+        error: hfTask.message || '渲染已取消',
+        hfTaskId: undefined,
+        episodeUrl: undefined,
+      });
+      appendLog(`HF 渲染已取消`);
+      toastError(hfTask.message || 'HF 渲染已取消');
+    }
     if (hfTask.status === 'error') {
-      updateNodeData(props.id, { status: 'error', exportReady: false, error: hfTask.message });
+      updateNodeData(props.id, {
+        status: 'error',
+        exportReady: false,
+        error: hfTask.message,
+        hfTaskId: undefined,
+      });
       appendLog(`HF 渲染失败：${hfTask.message}`);
+      toastError(`HF 渲染失败：${hfTask.message}`);
     }
   }, [hfTask.status, hfTask.url, hfTask.message, props.id, updateNodeData, appendLog]);
 
@@ -114,13 +136,17 @@ function ExportPackBlock(props: NodeProps) {
       case 'zip': return '需连接上游媒资节点';
       case 'ffmpeg-episode': return shots.length > 0 ? `使用连接链 ${shots.length} 镜` : '需连接分镜台链';
       case 'hyperframes-episode':
+      case 'remotion-episode':
       case 'remotion-bundle': return hasEffectiveTimeline ? '使用时间线编排' : '需先编排时间线（智能剪辑）';
       case 'ecom-pack': return selectedSpecs.length > 0 ? `电商规格包导出 ${selectedSpecs.length} 个规格` : '请选择至少一个电商规格';
       default: return '';
     }
   }, [exportMode, hasEffectiveTimeline, shots.length, selectedSpecs.length]);
 
-  const modeNeedsTimeline = exportMode === 'hyperframes-episode' || exportMode === 'remotion-bundle';
+  const modeNeedsTimeline =
+    exportMode === 'hyperframes-episode' ||
+    exportMode === 'remotion-episode' ||
+    exportMode === 'remotion-bundle';
 
   const modeDisabled = useMemo(() => {
     if (exportMode === 'zip') return false;
@@ -141,7 +167,9 @@ function ExportPackBlock(props: NodeProps) {
       nodes.find((n) => n.type === 'clip-editor' && incoming.includes(n.id)) ??
       nodes.find((n) => n.type === 'clip-editor');
     if (!clipNode) {
-      appendLog('画布上无智能剪辑节点');
+      const msg = '画布上无智能剪辑节点，禁止空成功';
+      appendLog(msg);
+      toastError(msg);
       return;
     }
     fitView({ nodes: [{ id: clipNode.id }], duration: 300 });
@@ -151,16 +179,18 @@ function ExportPackBlock(props: NodeProps) {
   const runExport = useCallback(async () => {
     // F-011: 缺前提不得假装成功；时间线模式引导回智能剪辑
     if (modeNeedsTimeline && !hasEffectiveTimeline) {
-      updateNodeData(props.id, { status: 'error', message: '无有效时间线，无法导出成片' });
-      addHistoryEntry({ ok: false, message: '无有效时间线' });
-      appendLog('导出未通过：无有效时间线（请先在智能剪辑编排）');
+      updateNodeData(props.id, { status: 'error', message: '无有效时间线，无法导出成片，禁止空成功' });
+      addHistoryEntry({ ok: false, message: '无有效时间线，禁止空成功' });
+      appendLog('导出未通过：无有效时间线（请先在智能剪辑编排），禁止空成功');
+      toastError('导出未通过：无有效时间线（请先在智能剪辑编排），禁止空成功');
       openSmartEdit();
       return;
     }
     if (exportMode === 'ffmpeg-episode' && shots.length === 0) {
-      updateNodeData(props.id, { status: 'error', message: '无连接链镜表' });
-      addHistoryEntry({ ok: false, message: '无连接链镜表' });
-      appendLog('导出未通过：无连接链镜表');
+      updateNodeData(props.id, { status: 'error', message: '无连接链镜表，禁止空成功' });
+      addHistoryEntry({ ok: false, message: '无连接链镜表，禁止空成功' });
+      appendLog('导出未通过：无连接链镜表，禁止空成功');
+      toastError('导出未通过：无连接链镜表，禁止空成功');
       return;
     }
 
@@ -184,7 +214,23 @@ function ExportPackBlock(props: NodeProps) {
         updateNodeData(props.id, { status: st, message: res.message, exportReady: false });
         addHistoryEntry({ ok: false, message: res.message });
         appendLog(`导出未通过：${res.message}`);
+        toastError(`导出未通过：${res.message}`);
         if (modeNeedsTimeline && res.message?.includes('时间线')) openSmartEdit();
+        return;
+      }
+      // 成片模式：exportReady 必须带有效 URL，禁止无产物假绿
+      const needsUrl =
+        exportMode === 'ffmpeg-episode' ||
+        exportMode === 'remotion-episode';
+      if (res.exportReady === true && needsUrl && !res.url) {
+        updateNodeData(props.id, {
+          status: 'error',
+          message: '导出未返回成片 URL，禁止空成功',
+          exportReady: false,
+        });
+        addHistoryEntry({ ok: false, message: '导出未返回成片 URL，禁止空成功' });
+        appendLog('导出未通过：无成片 URL，禁止空成功');
+        toastError('导出未通过：无成片 URL，禁止空成功');
         return;
       }
       const patch: Record<string, unknown> = {
@@ -202,6 +248,9 @@ function ExportPackBlock(props: NodeProps) {
         resetHfPolling();
       }
       updateNodeData(props.id, patch);
+      if (patch.status === 'success' && patch.exportReady === true) {
+        unlockFirstLane();
+      }
 
       // F-015: 导出成功后生成清单 CSV/PDF
       const manifestUrls: { csvUrl?: string; pdfUrl?: string } = {};
@@ -213,14 +262,18 @@ function ExportPackBlock(props: NodeProps) {
           manifestUrls.csvUrl = csvRes.url;
           appendLog(`清单 CSV 已生成 · ${csvRes.url}`);
         } catch (csvErr) {
-          appendLog(`清单 CSV 生成失败: ${String(csvErr)}`);
+          const msg = `清单 CSV 生成失败: ${String(csvErr)}`;
+          appendLog(msg);
+          toastError(msg);
         }
         try {
           const pdfRes = await generateManifestPdf(rows, prefix);
           manifestUrls.pdfUrl = pdfRes.url;
           appendLog(`清单 PDF 已生成 · ${pdfRes.url}`);
         } catch (pdfErr) {
-          appendLog(`清单 PDF 生成失败: ${String(pdfErr)}`);
+          const msg = `清单 PDF 生成失败: ${String(pdfErr)}`;
+          appendLog(msg);
+          toastError(msg);
         }
       }
 
@@ -240,6 +293,7 @@ function ExportPackBlock(props: NodeProps) {
       updateNodeData(props.id, { status: 'error', error: msg });
       addHistoryEntry({ ok: false, message: msg });
       appendLog(`导出失败: ${msg}`);
+      toastError(`导出失败: ${msg}`);
     }
   }, [
     upstream,
@@ -269,7 +323,10 @@ function ExportPackBlock(props: NodeProps) {
 
   const composeEpisode = useCallback(async () => {
     if (shots.length === 0) {
-      appendLog('单集合成：无连接链镜表');
+      const msg = '单集合成：无连接链镜表，禁止空成功';
+      updateNodeData(props.id, { status: 'error', message: msg });
+      appendLog(msg);
+      toastError(msg);
       return;
     }
     setBusy(true);
@@ -281,26 +338,31 @@ function ExportPackBlock(props: NodeProps) {
         title: prefix,
         audioUrl: audioUrl.trim() || undefined,
       });
-      if (!res.ok) {
+      if (!res.ok || !res.url) {
+        const msg = res.message ?? '单集合成未返回 URL，禁止空成功';
         updateNodeData(props.id, {
           status: res.status === 'blocked' ? 'blocked' : 'error',
           episodeUrl: undefined,
-          message: res.message,
+          message: msg,
         });
-        appendLog(`单集合成未通过：${res.message ?? res.status}`);
+        appendLog(`单集合成未通过：${res.message ?? res.status ?? '无 URL'}`);
+        toastError(msg);
         return;
       }
       updateNodeData(props.id, { status: 'success', episodeUrl: res.url, message: undefined });
+      unlockFirstLane();
       appendLog(`竖屏单集合成完成 · ${res.url}`);
     } catch (e) {
+      const msg = `单集合成失败: ${String(e)}`;
       updateNodeData(props.id, { status: 'error', error: String(e) });
-      appendLog(`单集合成失败: ${String(e)}`);
+      appendLog(msg);
+      toastError(msg);
     } finally {
       setBusy(false);
     }
   }, [shots, prefix, audioUrl, props.id, updateNodeData, appendLog]);
 
-  const exportLabel = resolveRunLabel('export-pack').primary;
+  const exportLabel = resolveRunLabel('export-pack', busy || hfRunning ? 'running' : undefined).primary;
 
   return (
     <BlockShell {...props}>
@@ -331,12 +393,13 @@ function ExportPackBlock(props: NodeProps) {
           {lastExport && (
             <p className="text-[10px] text-brand/70">上次导出 {new Date(lastExport).toLocaleString()}</p>
           )}
-          <div className="flex gap-1">
+          <div className="flex gap-1 flex-wrap">
             {([
               { id: 'zip' as const, label: 'ZIP' },
               { id: 'ffmpeg-episode' as const, label: 'FFmpeg' },
-              { id: 'hyperframes-episode' as const, label: 'HyperFrames' },
-              { id: 'remotion-bundle' as const, label: 'Remotion' },
+              { id: 'remotion-episode' as const, label: '多轨成片' },
+              { id: 'hyperframes-episode' as const, label: 'HF' },
+              { id: 'remotion-bundle' as const, label: 'Studio包' },
             ]).map(({ id, label }) => (
               <button
                 key={id}
@@ -374,9 +437,11 @@ function ExportPackBlock(props: NodeProps) {
               ? '打包下载 ZIP'
               : exportMode === 'ffmpeg-episode'
                 ? 'FFmpeg 快速成片'
-                : exportMode === 'hyperframes-episode'
-                  ? 'HF 精美渲染'
-                  : exportLabel}
+                : exportMode === 'remotion-episode'
+                  ? 'Remotion 多轨成片'
+                  : exportMode === 'hyperframes-episode'
+                    ? 'HF 精美渲染'
+                    : exportLabel}
           </button>
           {hfRunning && (
             <div className="w-full rounded-xl border border-warn/30 bg-warn/5 text-warn py-1.5 text-[10px] text-center">
@@ -388,6 +453,14 @@ function ExportPackBlock(props: NodeProps) {
                 onClick={async () => {
                   if (currentTaskId) {
                     await fetch(`/api/montage/tasks/${currentTaskId}`, { method: 'DELETE' });
+                    // F-046: 本地立即落取消态，禁止随后 done 写 success
+                    updateNodeData(props.id, {
+                      hfTaskId: undefined,
+                      status: 'error',
+                      exportReady: false,
+                      error: '渲染已取消',
+                      episodeUrl: undefined,
+                    });
                     appendLog('HF 渲染已取消');
                     resetHfPolling();
                   }

@@ -623,7 +623,10 @@ export function PictureWorkspace({ blockId, kind, onCollapse }: PictureWorkspace
           const res = await api.uploadAsset(file);
           if (res.url?.trim()) uploaded.push(res.url.trim());
         }
-        if (!uploaded.length) return;
+        if (!uploaded.length) {
+          toastError('参考图上传失败或未返回 URL，禁止空成功');
+          return;
+        }
         const next = [...existing];
         for (const url of uploaded) {
           if (!next.includes(url)) next.push(url);
@@ -632,6 +635,8 @@ export function PictureWorkspace({ blockId, kind, onCollapse }: PictureWorkspace
         if (uploaded.length > 1) {
           toastSuccess(`已添加 ${uploaded.length} 张参考图`);
         }
+      } catch (e) {
+        toastError(e instanceof Error ? e.message : '参考图上传失败，禁止空成功');
       } finally {
         setRefBusy(false);
       }
@@ -648,10 +653,15 @@ export function PictureWorkspace({ blockId, kind, onCollapse }: PictureWorkspace
       try {
         const res = await api.uploadAsset(file);
         const url = res.url?.trim();
-        if (!url) return;
+        if (!url) {
+          toastError('风格参考图上传失败或未返回 URL，禁止空成功');
+          return;
+        }
         handlePatch(patchStyleImageUrl(url, data));
         appendLog('已设置风格参考图 · 风格参考模式');
         toastSuccess('已设置风格参考图：主体写在提示词里，画风由风格图控制');
+      } catch (e) {
+        toastError(e instanceof Error ? e.message : '风格参考图上传失败，禁止空成功');
       } finally {
         setRefBusy(false);
       }
@@ -703,7 +713,7 @@ export function PictureWorkspace({ blockId, kind, onCollapse }: PictureWorkspace
 
     // PG-09: 未配置图片连接时前置拦截，不再发注定失败的请求
     if (!hasPictureConnections) {
-      toastError('未配置图片模型连接：请先在「设置 → 连接」添加图片模型');
+      toastError('未配置图片模型连接：请先在「设置 → 连接」添加图片模型，禁止空成功');
       openConnectionsSettings();
       return;
     }
@@ -730,7 +740,7 @@ export function PictureWorkspace({ blockId, kind, onCollapse }: PictureWorkspace
       const slots = normalizeMultiPrompts(data.multiPrompts, draft);
       const filled = filledMultiPrompts(slots);
       if (filled.length === 0) {
-        toastError('请至少填写一条多图提示词');
+        toastError('请至少填写一条多图提示词，禁止空成功');
         return;
       }
       prePatch.multiPrompts = slots;
@@ -1352,6 +1362,7 @@ export function PictureWorkspace({ blockId, kind, onCollapse }: PictureWorkspace
                     ? data.lastCompiledPrompt
                     : undefined
                 }
+                panoramaMode={pictureGenMode === 'panorama-720'}
               />
             </div>
           )}

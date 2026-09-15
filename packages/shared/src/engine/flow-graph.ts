@@ -18,6 +18,13 @@ export interface UpstreamOutputs {
   pictures: string[];
   clips: string[];
   sounds: string[];
+  /**
+   * SF-15: 仅 sound-gen `soundMode=music` 的配乐 URL。
+   * 剪辑挂 BGM 必须用此字段，禁止把 cast/tts 的对白 audioUrl 当 bgmUrl。
+   */
+  bgmUrls?: string[];
+  /** SF-19: sound-gen `soundMode=sfx` 的音效 URL */
+  sfxUrls?: string[];
   /** 成对 prompt + 参考图，用于批量生成 */
   promptBatch?: PromptBatchJob[];
   /** 提示词节点的分发策略 */
@@ -449,8 +456,23 @@ export function gatherUpstream(
       if (frames.length) out.pictures.push(...frames);
     }
     if (kind === 'sound-gen') {
-      const url = (d.audioUrl as string);
+      const mode = ((d.soundMode as string) || 'tts').trim();
+      const url = typeof d.audioUrl === 'string' ? d.audioUrl.trim() : '';
+      const list = Array.isArray(d.sounds)
+        ? (d.sounds as unknown[]).filter((u): u is string => typeof u === 'string' && u.trim().length > 0)
+        : [];
+      // 媒体箱仍可看到全部上游音频；BGM/SFX 分流见 bgmUrls / sfxUrls
       if (url) out.sounds.push(url);
+      for (const u of list) {
+        if (u !== url) out.sounds.push(u);
+      }
+      if (mode === 'music') {
+        if (url) out.bgmUrls = [...(out.bgmUrls ?? []), url];
+      } else if (mode === 'sfx') {
+        const sfxList = url ? [url, ...list.filter((u) => u !== url)] : list;
+        if (sfxList.length) out.sfxUrls = [...(out.sfxUrls ?? []), ...sfxList];
+      }
+      // cast / tts：对白走 voice.lines，不得进入 bgmUrls
     }
     if (kind === 'batch-runner') {
       const urls = (d.batchResults as string[]) ?? (d.pictures as string[]);
@@ -490,6 +512,8 @@ export function gatherUpstream(
         out.pictures.push(...(up.pictures ?? []));
         out.clips.push(...(up.clips ?? []));
         out.sounds.push(...(up.sounds ?? []));
+        if (up.bgmUrls?.length) out.bgmUrls = [...(out.bgmUrls ?? []), ...up.bgmUrls];
+        if (up.sfxUrls?.length) out.sfxUrls = [...(out.sfxUrls ?? []), ...up.sfxUrls];
         out.scriptBreakdowns = [...(out.scriptBreakdowns ?? []), ...(up.scriptBreakdowns ?? [])];
       }
     }

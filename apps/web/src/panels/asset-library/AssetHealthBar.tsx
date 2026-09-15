@@ -393,7 +393,7 @@ export function AssetHealthBar({
     scope: 'one' | 'all';
   }) => {
     if (!runtime?.updateNodeData || !runtime.getNodes) {
-      toastError('画布未就绪，无法写回分镜');
+      toastError('画布未就绪，无法写回分镜，禁止空成功');
       return;
     }
     const n = rebindInvalidShotRefs(
@@ -408,7 +408,7 @@ export function AssetHealthBar({
       },
     );
     if (n <= 0) {
-      toastError('未找到可修复的镜表引用');
+      toastError('未找到可修复的镜表引用，禁止空成功');
       return;
     }
     toastSuccess(
@@ -429,7 +429,7 @@ export function AssetHealthBar({
     scope: 'one' | 'all';
   }) => {
     if (!runtime?.updateNodeData || !runtime.getNodes) {
-      toastError('画布未就绪，无法写回分镜');
+      toastError('画布未就绪，无法写回分镜，禁止空成功');
       return;
     }
     const upsertCharacter = useWorkspaceDocument.getState().upsertCharacter;
@@ -443,7 +443,7 @@ export function AssetHealthBar({
         n += 1;
       }
       if (n <= 0) {
-        toastError('未找到可修复的声音引用');
+        toastError('未找到可修复的声音引用，禁止空成功');
         return;
       }
       toastSuccess(`已重绑声音 → ${req.newLabel}`, clearFilterAction);
@@ -493,11 +493,11 @@ export function AssetHealthBar({
         }
       }
       if (n <= 0 && req.kind === 'costume') {
-        toastError('未找到可修复的服装引用');
+        toastError('未找到可修复的服装引用，禁止空成功');
         return;
       }
       if (n <= 0 && (req.kind === 'shot' || req.kind === 'style')) {
-        toastError('未找到可修复的引用');
+        toastError('未找到可修复的引用，禁止空成功');
         return;
       }
       toastSuccess(`已重绑 → ${req.newLabel}`, clearFilterAction);

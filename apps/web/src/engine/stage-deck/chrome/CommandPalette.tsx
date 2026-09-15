@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import {
   getDockBlocks,
   getSpawnableBlocks,
-  WORKFLOW_TEMPLATES,
+  listWorkflowTemplates,
   PLAYBOOK_DEFINITIONS,
 } from '@nx9/shared';
 import { Search } from 'lucide-react';
@@ -15,6 +15,10 @@ import { useViewMode } from '../stores/view-mode';
 import { useWorkspaceDocument } from '../../../stores/workspace-document';
 import { isSurfaceEnabled } from '../../../config/product-surface';
 import type { NodeAlignAction } from '../../node-align';
+import {
+  filterPlaybooksForFirstLane,
+  filterTemplatesForFirstLane,
+} from '../../first-lane';
 
 type CommandSection = 'playbook' | 'recipe' | 'dock' | 'advanced' | 'action';
 
@@ -104,7 +108,9 @@ export function CommandPalette({ open, onClose, onAlign }: CommandPaletteProps) 
   const commands = useMemo<CommandItem[]>(() => {
     const dockKinds = new Set(getDockBlocks().map((b) => b.kind));
 
-    const playbookCommands: CommandItem[] = PLAYBOOK_DEFINITIONS.filter((pb) => pb.steps.length > 0).map((pb) => ({
+    const playbookCommands: CommandItem[] = filterPlaybooksForFirstLane(
+      PLAYBOOK_DEFINITIONS.filter((pb) => pb.steps.length > 0),
+    ).map((pb) => ({
       id: `playbook-${pb.id}`,
       label: `剧本 · ${pb.label}`,
       keywords: [pb.id, pb.subtitle, pb.category, 'playbook', '生产剧本', pb.label],
@@ -118,12 +124,12 @@ export function CommandPalette({ open, onClose, onAlign }: CommandPaletteProps) 
       },
     }));
 
-    const recipeCommands: CommandItem[] = WORKFLOW_TEMPLATES.map((tpl) => ({
+    const recipeCommands: CommandItem[] = filterTemplatesForFirstLane(listWorkflowTemplates()).map((tpl) => ({
       id: `recipe-${tpl.id}`,
       label: `配方 · ${tpl.label}`,
-      keywords: [tpl.id, tpl.description, tpl.category, 'recipe', '配方', '模板'],
+      keywords: [tpl.id, tpl.description, tpl.category, 'recipe', '配方', '模板', tpl.status],
       section: 'recipe' as const,
-      badge: tpl.id === 'tpl-nx9-character-pipeline' ? '推荐' : undefined,
+      badge: tpl.status === 'beta' ? 'Beta' : tpl.id === 'tpl-nx9-character-pipeline' ? '推荐' : undefined,
       run: () => requestLoadTemplate(tpl.id, 'merge'),
     }));
 

@@ -630,7 +630,7 @@ describe('patchUpstreamShot integration', () => {
     });
     expect(summary.done).toBe(0);
     expect(summary.failed).toBe(1);
-    expect(summary.results[0]?.error).toBe('缺少上游链镜表写回适配器');
+    expect(summary.results[0]?.error).toBe('缺少上游链镜表写回适配器，禁止空成功');
   });
 
   it('未传 shots 时不读取全局镜表作为批出队列', async () => {

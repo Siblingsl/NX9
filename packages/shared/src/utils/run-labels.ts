@@ -1,8 +1,8 @@
 /**
  * run-labels.ts — 「运行」入口心智统一（F-044）。
  *
- * 字典：节点级「运行本节点」；批出「批出 N 镜」；Playbook「继续下一步」。
- * 禁止都叫「运行」。
+ * 字典：节点级动作名；批出「批出 N 镜」；Playbook「继续下一步」。
+ * 禁止卡面主 CTA 都叫「运行」。
  */
 import type { NodeRunStatus } from '../catalog/node-interaction';
 
@@ -19,7 +19,7 @@ export interface RunLabelDict {
 
 const LABELS: Record<string, RunLabelDict> = {
   default: {
-    primary: '运行',
+    primary: '运行本节点',
     hint: '执行本节点',
     busy: '运行中…',
     done: '已完成',
@@ -84,6 +84,78 @@ const LABELS: Record<string, RunLabelDict> = {
     busy: '执行中…',
     done: '全部完成',
   },
+  prompt: {
+    primary: '生成提示词',
+    hint: '运行提示词节点',
+    busy: '生成中…',
+    done: '已生成',
+  },
+  'upscale-lite': {
+    primary: '放大图像',
+    hint: '提升分辨率',
+    busy: '放大中…',
+    done: '已放大',
+  },
+  'bg-remove': {
+    primary: '抠图',
+    hint: '移除背景',
+    busy: '抠图中…',
+    done: '已抠图',
+  },
+  'continuity-check': {
+    primary: '连贯性检查',
+    hint: '检查镜头间连贯性',
+    busy: '检查中…',
+    done: '已检查',
+  },
+  'inpaint-edit': {
+    primary: '局部重绘',
+    hint: '按蒙版重绘',
+    busy: '重绘中…',
+    done: '已重绘',
+  },
+  'local-enhance': {
+    primary: '局部增强',
+    hint: '增强选区画质',
+    busy: '增强中…',
+    done: '已增强',
+  },
+  'link-parser': {
+    primary: '解析链接',
+    hint: '抽取平台媒体',
+    busy: '解析中…',
+    done: '已解析',
+  },
+  'grid-compose': {
+    primary: '合成宫格',
+    hint: '拼合宫格图',
+    busy: '合成中…',
+    done: '已合成',
+  },
+  'grid-split': {
+    primary: '拆分宫格',
+    hint: '拆成单格',
+    busy: '拆分中…',
+    done: '已拆分',
+  },
+  'caption-asr': {
+    primary: '语音转字幕',
+    hint: 'ASR 字幕',
+    busy: '转写中…',
+    done: '已转写',
+  },
+  iterator: {
+    primary: '执行迭代',
+    hint: '按批次迭代运行',
+    busy: '迭代中…',
+    done: '已迭代',
+  },
+  'reference-board': {
+    primary: '应用参考板',
+    hint: '写入约束到下游',
+    busy: '应用中…',
+    done: '已应用',
+  },
 };
 
 /**
@@ -94,11 +166,11 @@ export function resolveRunLabel(
   status?: NodeRunStatus | string,
   count?: number,
 ): RunLabelDict {
-  const base = LABELS[kind] ?? LABELS['default'];
-  if (kind === 'batch-run' && count && count > 1) {
+  const base = LABELS[kind] ?? LABELS.default;
+  if ((kind === 'batch-run' || kind === 'prompt') && count && count > 1) {
     return {
       ...base,
-      primary: `批出 ${count} 镜`,
+      primary: kind === 'batch-run' ? `批出 ${count} 镜` : `生成 (${count})`,
     };
   }
   if (status === 'running' || status === 'generating') {
@@ -114,4 +186,9 @@ export function resolveRunLabel(
     };
   }
   return base;
+}
+
+/** 已登记的专属文案 kind（测试用）。 */
+export function listedRunLabelKinds(): string[] {
+  return Object.keys(LABELS).filter((k) => k !== 'default');
 }

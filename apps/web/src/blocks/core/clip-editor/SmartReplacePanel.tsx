@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ArrowLeft, Loader2, RefreshCw, Wand2, X } from 'lucide-react';
 import {
-  CLIP_GEN_MODELS,
   DEFAULT_VIDEO_EDIT_PROVIDER,
   VIDEO_EDIT_PROVIDERS,
   enrichPromptWithAssetMentions,
@@ -14,6 +13,8 @@ import { pollVideoUntilDone } from '../../../engine/poll-task';
 import { assertMaskFrameAligned } from '../../../engine/smart-edit-mask';
 import { AssetMentionInput } from '../../../engine/stage-deck/chrome/asset-mention/AssetMentionInput';
 import { useAllAssetLibraryItems } from '../../../hooks/use-asset-library-items';
+import { useConnectedVideoModels } from '../../../hooks/use-connected-video-models';
+import { toastError } from '../../../stores/toast';
 
 const REPLACE_MENTION_KINDS: AssetLibraryKind[] = ['character', 'scene', 'prop', 'costume', 'style'];
 
@@ -24,6 +25,28 @@ type Step = 'frame' | 'edit' | 'video' | 'compare';
 
 const videoEditProviders = VIDEO_EDIT_PROVIDERS;
 const hasVideoEditFrameTracking = videoEditProviders.some((p) => p.supportsFrameTracking);
+
+/** SE-RESUME: 直接替换任务按 clip 落 sessionStorage——刷新后重开面板可恢复轮询；
+ * 手动关闭面板走卸载清理（取消服务端任务并清条目），两者互不冲突 */
+function replaceRecoverKey(clipId: string): string {
+  return `nx9-smart-replace:${clipId}`;
+}
+
+function saveReplaceRecover(clipId: string, taskId: string): void {
+  try {
+    sessionStorage.setItem(replaceRecoverKey(clipId), JSON.stringify({ taskId, createdAt: Date.now() }));
+  } catch {
+    /* sessionStorage 不可用时静默 */
+  }
+}
+
+function clearReplaceRecover(clipId: string): void {
+  try {
+    sessionStorage.removeItem(replaceRecoverKey(clipId));
+  } catch {
+    /* ignore */
+  }
+}
 
 interface Point {
   x: number;
@@ -80,7 +103,17 @@ export function SmartReplacePanel({ clip, onClose, onReplaced }: SmartReplacePan
   const [replaceMode, setReplaceMode] = useState<ReplaceMode>('regen');
 
   const [editedFrame, setEditedFrame] = useState<string>('');
-  const [videoModel, setVideoModel] = useState<string>(CLIP_GEN_MODELS[0]?.id ?? 'magic-hour');
+  const {
+    options: videoModelOptions,
+    preferredModel,
+    hasConnections: hasVideoConnections,
+    selectModel: selectVideoModel,
+  } = useConnectedVideoModels();
+  const [videoModel, setVideoModel] = useState('');
+  useEffect(() => {
+    if (videoModel && videoModelOptions.some((m) => m.id === videoModel)) return;
+    if (preferredModel) setVideoModel(preferredModel);
+  }, [preferredModel, videoModel, videoModelOptions]);
   const [videoEditProviderId, setVideoEditProviderId] = useState<string>(DEFAULT_VIDEO_EDIT_PROVIDER);
   const [motionPrompt, setMotionPrompt] = useState(clip.label);
   const [newVideoUrl, setNewVideoUrl] = useState<string>('');
@@ -88,6 +121,8 @@ export function SmartReplacePanel({ clip, onClose, onReplaced }: SmartReplacePan
   const { privateItems, publicItems } = useAllAssetLibraryItems();
   const abortRef = useRef<AbortController | null>(null);
   const directTaskIdRef = useRef<string | null>(null);
+  const traceTaskIdRef = useRef<string | null>(null);
+  const [traceEnabled, setTraceEnabled] = useState(true);
   const origVideoRef = useRef<HTMLVideoElement | null>(null);
   const newVideoRef = useRef<HTMLVideoElement | null>(null);
   const syncingRef = useRef(false);
@@ -105,13 +140,15 @@ export function SmartReplacePanel({ clip, onClose, onReplaced }: SmartReplacePan
     try {
       const res = await api.extractFrames(clip.assetUrl, 3);
       if (!res.ok || res.frames.length === 0) {
-        throw new Error(res.message || '抽帧失败，请确认 FFmpeg 可用');
+        throw new Error(res.message || '抽帧失败，请确认 FFmpeg 可用，禁止空成功');
       }
       setFrames(res.frames);
       setFrameUrl(res.frames[0]);
       setTip('');
     } catch (e) {
-      setTip(String(e instanceof Error ? e.message : e));
+      const msg = String(e instanceof Error ? e.message : e);
+      setTip(msg);
+      toastError(msg);
     } finally {
       setBusy(false);
     }
@@ -121,23 +158,97 @@ export function SmartReplacePanel({ clip, onClose, onReplaced }: SmartReplacePan
     void extractFrames();
   }, [extractFrames]);
 
+  // ── SE-RESUME: 恢复上次刷新前提交的直接替换任务 ──
+  useEffect(() => {
+    const key = replaceRecoverKey(clip.id);
+    let taskId: string | undefined;
+    try {
+      const raw = sessionStorage.getItem(key);
+      taskId = raw ? (JSON.parse(raw) as { taskId?: string }).taskId : undefined;
+    } catch {
+      return;
+    }
+    if (!taskId) return;
+    directTaskIdRef.current = taskId; // 停止按钮 / 卸载取消可作用到恢复的任务
+    let cancelled = false;
+    setBusy(true);
+    const poll = async () => {
+      const deadline = Date.now() + 15 * 60 * 1000;
+      while (Date.now() < deadline) {
+        await new Promise((r) => setTimeout(r, 4000));
+        if (cancelled) return;
+        try {
+          const st = await api.videoEditStatus(taskId as string);
+          if (st.status === 'done' && st.url) {
+            clearReplaceRecover(clip.id);
+            directTaskIdRef.current = null;
+            setNewVideoUrl(st.url);
+            setStep('compare');
+            setTip('已恢复上次的替换结果，可对比后采纳');
+            setBusy(false);
+            return;
+          }
+          if (st.status === 'done' && !st.url) {
+            clearReplaceRecover(clip.id);
+            directTaskIdRef.current = null;
+            const msg = '上次替换任务完成但无输出地址，禁止空成功';
+            setTip(msg);
+            toastError(msg);
+            setBusy(false);
+            return;
+          }
+          if (st.status === 'error' || st.status === 'cancelled') {
+            clearReplaceRecover(clip.id);
+            directTaskIdRef.current = null;
+            const msg = `上次替换任务${st.status === 'cancelled' ? '已取消' : '失败'}${st.message ? `：${st.message}` : ''}`;
+            setTip(msg);
+            if (st.status === 'error') toastError(msg);
+            setBusy(false);
+            return;
+          }
+          setTip(`恢复上次替换任务… ${st.progress ?? 0}%`);
+        } catch {
+          /* 网络错误继续重试 */
+        }
+      }
+      setTip('恢复轮询超时（15 分钟）');
+      toastError('智能替换：恢复轮询超时（15 分钟）');
+      setBusy(false);
+    };
+    void poll();
+    return () => {
+      cancelled = true;
+    };
+  }, [clip.id]);
+
   const stopTask = useCallback(() => {
     abortRef.current?.abort();
     const taskId = directTaskIdRef.current;
     if (taskId) {
       directTaskIdRef.current = null;
+      clearReplaceRecover(clip.id);
       void api.videoEditCancel(taskId).catch(() => undefined);
     }
-  }, []);
+    const traceId = traceTaskIdRef.current;
+    if (traceId) {
+      traceTaskIdRef.current = null;
+      void api.videoEditCancel(traceId).catch(() => undefined);
+    }
+  }, [clip.id]);
 
-  // SE-DEEP-06: 关闭面板中止轮询；直接替换任务同时通知服务端取消
+  // SE-DEEP-06: 关闭面板中止轮询；直接替换/追踪任务同时通知服务端取消。
+  // SE-RESUME: 卸载清理只在应用内关闭时执行（刷新/关页不触发），此时一并清恢复条目；
+  // 刷新场景条目保留，重开面板由恢复 effect 重新认领。
   useEffect(() => {
     return () => {
       abortRef.current?.abort();
       const taskId = directTaskIdRef.current;
       if (taskId) void api.videoEditCancel(taskId).catch(() => undefined);
+      const traceId = traceTaskIdRef.current;
+      if (traceId) void api.videoEditCancel(traceId).catch(() => undefined);
+      clearReplaceRecover(clip.id);
     };
-  }, []);
+  }, [clip.id]);
 
   // SE-DEEP-13: 对比双视频共享播放头（timeupdate 互锁 + play/pause 镜像）
   useEffect(() => {
@@ -304,15 +415,17 @@ export function SmartReplacePanel({ clip, onClose, onReplaced }: SmartReplacePan
       let resultUrl: string | undefined;
       if (editEngine === 'fal-inpaint') {
         const maskBlob = await buildMaskBlob();
-        if (!maskBlob) throw new Error('蒙版为空');
+        if (!maskBlob) throw new Error('蒙版为空，禁止空成功');
         const maskFile = new File([maskBlob], 'mask.png', { type: 'image/png' });
         const uploaded = await api.uploadAsset(maskFile);
+        if (!uploaded?.url) throw new Error('蒙版上传失败，禁止空成功');
         const res = (await api.pictureEditMasked({
           imageUrl: frameUrl,
           maskUrl: uploaded.url,
           prompt,
           engine: 'fal-inpaint',
         }, { signal: controller.signal })) as { ok?: boolean; url?: string; message?: string };
+        if (!res.ok || !res.url) throw new Error(res.message ?? '局部重绘失败，禁止空成功');
         resultUrl = res.url;
       } else {
         const res = (await api.proxyImage({
@@ -322,15 +435,17 @@ export function SmartReplacePanel({ clip, onClose, onReplaced }: SmartReplacePan
           n: 1,
         }, { signal: controller.signal })) as { ok?: boolean; url?: string; urls?: string[]; message?: string };
         resultUrl = res.url ?? res.urls?.[0];
-        if (!resultUrl && res.message) throw new Error(res.message);
+        if (!res.ok || !resultUrl) throw new Error(res.message ?? '图像编辑无结果，禁止空成功');
       }
-      if (!resultUrl) throw new Error('图像编辑无结果');
+      if (!resultUrl) throw new Error('图像编辑无结果，禁止空成功');
       setEditedFrame(resultUrl);
       setStep('video');
       setTip('');
     } catch (e) {
       const aborted = e instanceof DOMException && e.name === 'AbortError';
-      setTip(aborted ? '已停止' : `编辑失败：${e instanceof Error ? e.message : String(e)}`);
+      const msg = aborted ? '已停止' : `编辑失败：${e instanceof Error ? e.message : String(e)}`;
+      setTip(msg);
+      if (!aborted) toastError(msg);
     } finally {
       if (abortRef.current === controller) abortRef.current = null;
       setBusy(false);
@@ -357,13 +472,15 @@ export function SmartReplacePanel({ clip, onClose, onReplaced }: SmartReplacePan
         setTip('视频生成中，轮询任务…');
         url = await pollVideoUntilDone(res.taskId, { signal: controller.signal });
       }
-      if (!url) throw new Error(res.message ?? '视频生成失败');
+      if (!url) throw new Error(res.message ?? '视频生成失败，禁止空成功');
       setNewVideoUrl(url);
       setStep('compare');
       setTip('');
     } catch (e) {
       const aborted = e instanceof DOMException && e.name === 'AbortError';
-      setTip(aborted ? '已停止' : `生成失败：${e instanceof Error ? e.message : String(e)}`);
+      const msg = aborted ? '已停止' : `生成失败：${e instanceof Error ? e.message : String(e)}`;
+      setTip(msg);
+      if (!aborted) toastError(msg);
     } finally {
       if (abortRef.current === controller) abortRef.current = null;
       setBusy(false);
@@ -374,11 +491,16 @@ export function SmartReplacePanel({ clip, onClose, onReplaced }: SmartReplacePan
   const runDirectVideoEdit = useCallback(async () => {
     const prompt = buildEditPrompt(target, enrichInstruction(instruction));
     if (!hasVideoEditFrameTracking) {
-      setTip('直接替换已禁用：当前没有已注册的跨帧自动追踪供应商（SAM/跟踪），首帧蒙版无法保证整段边缘稳定。');
+      const msg =
+        '直接替换已禁用：当前没有已注册的跨帧自动追踪供应商（SAM/跟踪），首帧蒙版无法保证整段边缘稳定。';
+      setTip(msg);
+      toastError(msg);
       return;
     }
     if (!hasMask) {
-      setTip('直接替换需要先在首帧圈选目标区域');
+      const msg = '直接替换需要先在首帧圈选目标区域';
+      setTip(msg);
+      toastError(msg);
       return;
     }
     setBusy(true);
@@ -387,26 +509,73 @@ export function SmartReplacePanel({ clip, onClose, onReplaced }: SmartReplacePan
     abortRef.current = controller;
     try {
       const maskBlob = await buildMaskBlob();
-      if (!maskBlob) throw new Error('蒙版为空');
+      if (!maskBlob) throw new Error('蒙版为空，禁止空成功');
       const maskFile = new File([maskBlob], 'mask.png', { type: 'image/png' });
       const uploaded = await api.uploadAsset(maskFile);
+      if (!uploaded?.url) throw new Error('蒙版上传失败，禁止空成功');
+
+      // P3 闭环：首帧蒙版 → SAM2 自动跨帧追踪 → 逐帧 mask 视频
+      let maskVideoUrl: string | undefined;
+      if (traceEnabled) {
+        setTip('首帧自动跨帧追踪中（SAM2 分割）…');
+        const traced = await api.videoTraceSubmit({
+          videoUrl: clip.assetUrl,
+          maskUrl: uploaded.url,
+          providerId: 'sam2-video',
+        });
+        if (!traced.ok || !traced.taskId) {
+          throw new Error(traced.message ?? '追踪任务提交失败，禁止空成功');
+        }
+        traceTaskIdRef.current = traced.taskId;
+        const traceDeadline = Date.now() + 10 * 60 * 1000;
+        while (Date.now() < traceDeadline) {
+          await new Promise((r) => setTimeout(r, 4000));
+          if (controller.signal.aborted) {
+            traceTaskIdRef.current = null;
+            void api.videoEditCancel(traced.taskId).catch(() => undefined);
+            throw new DOMException('已停止', 'AbortError');
+          }
+          const st = await api.videoEditStatus(traced.taskId);
+          if (st.status === 'done' && st.url) {
+            maskVideoUrl = st.url;
+            break;
+          }
+          if (st.status === 'done' && !st.url) {
+            throw new Error('跨帧追踪完成但无输出地址，禁止空成功');
+          }
+          if (st.status === 'error') {
+            throw new Error(`跨帧追踪失败：${st.message ?? '未知错误'}，禁止空成功`);
+          }
+          if (st.status === 'cancelled') {
+            traceTaskIdRef.current = null;
+            throw new Error('跨帧追踪任务已取消');
+          }
+          setTip(`跨帧追踪中… ${st.progress ?? 0}%`);
+        }
+        if (!maskVideoUrl) throw new Error('跨帧追踪超时（10 分钟），禁止空成功');
+        traceTaskIdRef.current = null;
+      }
+
       setTip('提交视频级替换任务…');
       const submitted = await api.videoEditSubmit({
         videoUrl: clip.assetUrl,
         maskUrl: uploaded.url,
+        ...(maskVideoUrl ? { maskVideoUrl } : {}),
         prompt,
         providerId: videoEditProviderId,
       });
       if (!submitted.ok || !submitted.taskId) {
-        throw new Error(submitted.message ?? '任务提交失败');
+        throw new Error(submitted.message ?? '任务提交失败，禁止空成功');
       }
       directTaskIdRef.current = submitted.taskId;
+      saveReplaceRecover(clip.id, submitted.taskId);
       const deadline = Date.now() + 15 * 60 * 1000;
       let url: string | undefined;
       while (Date.now() < deadline) {
         await new Promise((r) => setTimeout(r, 4000));
         if (controller.signal.aborted) {
           directTaskIdRef.current = null;
+          clearReplaceRecover(clip.id);
           void api.videoEditCancel(submitted.taskId).catch(() => undefined);
           throw new DOMException('已停止', 'AbortError');
         }
@@ -415,26 +584,47 @@ export function SmartReplacePanel({ clip, onClose, onReplaced }: SmartReplacePan
           url = st.url;
           break;
         }
-        if (st.status === 'error') throw new Error(st.message ?? '视频替换失败');
+        if (st.status === 'done' && !st.url) {
+          clearReplaceRecover(clip.id);
+          throw new Error('视频替换完成但无输出地址，禁止空成功');
+        }
+        if (st.status === 'error') {
+          clearReplaceRecover(clip.id);
+          throw new Error(st.message ?? '视频替换失败，禁止空成功');
+        }
         if (st.status === 'cancelled') {
           directTaskIdRef.current = null;
+          clearReplaceRecover(clip.id);
           throw new Error('任务已取消');
         }
         setTip(`视频替换中… ${st.progress ?? 0}%`);
       }
-      if (!url) throw new Error('视频替换超时');
+      if (!url) throw new Error('视频替换超时，禁止空成功');
       directTaskIdRef.current = null;
+      clearReplaceRecover(clip.id);
       setNewVideoUrl(url);
       setStep('compare');
       setTip('');
     } catch (e) {
       const aborted = e instanceof DOMException && e.name === 'AbortError';
-      setTip(aborted ? '已停止' : `替换失败：${e instanceof Error ? e.message : String(e)}`);
+      const msg = aborted ? '已停止' : `替换失败：${e instanceof Error ? e.message : String(e)}`;
+      setTip(msg);
+      if (!aborted) toastError(msg);
     } finally {
       if (abortRef.current === controller) abortRef.current = null;
       setBusy(false);
     }
-  }, [target, instruction, enrichInstruction, hasMask, buildMaskBlob, clip.assetUrl, videoEditProviderId]);
+  }, [
+    target,
+    instruction,
+    enrichInstruction,
+    hasMask,
+    buildMaskBlob,
+    clip.assetUrl,
+    clip.id,
+    videoEditProviderId,
+    traceEnabled,
+  ]);
 
   const accept = useCallback(async (adopt?: boolean) => {
     setBusy(true);
@@ -446,11 +636,12 @@ export function SmartReplacePanel({ clip, onClose, onReplaced }: SmartReplacePan
       } catch {
         /* probe 失败不阻塞采纳 */
       }
+      clearReplaceRecover(clip.id);
       onReplaced(newVideoUrl, sourceDurationSec, { adopt });
     } finally {
       setBusy(false);
     }
-  }, [newVideoUrl, onReplaced]);
+  }, [newVideoUrl, onReplaced, clip.id]);
 
   return (
     <div className="ed-replace">
@@ -647,6 +838,16 @@ export function SmartReplacePanel({ clip, onClose, onReplaced }: SmartReplacePan
                 视频级直接替换当前不可用：未接入跨帧自动追踪（SAM/跟踪），首帧蒙版无法保证整段边缘稳定。请改用「重生成」路线。
               </p>
             )}
+            {replaceMode === 'direct' && (
+              <label className="ed-field ed-replace__trace">
+                <input
+                  type="checkbox"
+                  checked={traceEnabled}
+                  onChange={(e) => setTraceEnabled(e.target.checked)}
+                />
+                <span>首帧自动跨帧追踪（SAM2 分割，整段边缘稳定）</span>
+              </label>
+            )}
             {replaceMode === 'direct' && videoEditProviders.length > 0 && (
               <label className="ed-field">
                 <span>视频级供应商（已注册 {videoEditProviders.length} 家）</span>
@@ -659,6 +860,7 @@ export function SmartReplacePanel({ clip, onClose, onReplaced }: SmartReplacePan
                   {videoEditProviders.map((p) => (
                     <option key={p.id} value={p.id}>
                       {p.label}
+                      {p.supportsFrameTracking ? '（支持跨帧追踪）' : ''}
                     </option>
                   ))}
                 </select>
@@ -666,7 +868,7 @@ export function SmartReplacePanel({ clip, onClose, onReplaced }: SmartReplacePan
             )}
             {replaceMode === 'direct' && videoEditProviders.length < 2 && (
               <p className="ed-hint">
-                路线 B 当前仅 WAN VACE 单供应商，失败时会明确报错，不会自动切换供应商。
+                路线 B 当前仅 WAN VACE 单供应商；开启「首帧自动跨帧追踪」后，重绘模型接收的是 SAM2 追踪产出的逐帧 mask 视频。
               </p>
             )}
             {tip && <p className="ed-warn">{tip}</p>}
@@ -709,12 +911,23 @@ export function SmartReplacePanel({ clip, onClose, onReplaced }: SmartReplacePan
             <div className="ed-field-row">
               <label className="ed-field">
                 <span>视频模型</span>
-                <select value={videoModel} onChange={(e) => setVideoModel(e.target.value)}>
-                  {CLIP_GEN_MODELS.map((m) => (
-                    <option key={m.id} value={m.id}>
-                      {m.label}
-                    </option>
-                  ))}
+                <select
+                  value={videoModel}
+                  onChange={(e) => {
+                    const next = e.target.value;
+                    setVideoModel(next);
+                    void selectVideoModel(next, setVideoModel);
+                  }}
+                >
+                  {!hasVideoConnections ? (
+                    <option value="">请先在设置 → 连接中配置视频模型</option>
+                  ) : (
+                    videoModelOptions.map((m) => (
+                      <option key={m.id} value={m.id}>
+                        {m.label}
+                      </option>
+                    ))
+                  )}
                 </select>
               </label>
             </div>

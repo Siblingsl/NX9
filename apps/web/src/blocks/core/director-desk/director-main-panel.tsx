@@ -1,6 +1,7 @@
 import { Clapperboard, Play, RotateCcw, Square, Box } from 'lucide-react';
 import { DirectorSettingsDrawer } from './director-settings-drawer';
 import { useConnectedPictureModels } from '../../../hooks/use-connected-picture-models';
+import { DeskUtilityToolsMenu } from '../../shared/DeskUtilityToolsMenu';
 
 interface DirectorMainPanelProps {
   previewUrl: string | undefined;
@@ -49,6 +50,7 @@ interface DirectorMainPanelProps {
   lastResults: Array<{ shotId: string; index?: number; ok?: boolean; error?: string }>;
   focusShot: (shotId: string) => void;
   colorCheckWarning?: string | null;
+  currentShotId?: string | null;
 }
 
 export function DirectorMainPanel({
@@ -98,6 +100,7 @@ export function DirectorMainPanel({
   lastResults,
   focusShot,
   colorCheckWarning,
+  currentShotId,
 }: DirectorMainPanelProps) {
   const pictureModel = typeof pictureNodeData.model === 'string' ? pictureNodeData.model : '';
   const pictureSize = typeof pictureNodeData.size === 'string' ? pictureNodeData.size : '1024x1024';
@@ -145,12 +148,23 @@ export function DirectorMainPanel({
           ) : (
             <div className="dd2-cinema__empty">
               <Box size={28} strokeWidth={1.25} />
-              <strong>无 3D 参考</strong>
-              <span>可切到「3D 舞台」摆机位后截图</span>
-               <button type="button" className="dd2-btn dd2-btn--ghost" onClick={() => setStudioTab('stage3d')} disabled={!director3dEnabled} title={director3dEnabled ? undefined : '3D 导演台暂未开放'}>{director3dEnabled ? '打开 3D 舞台' : '3D 舞台暂未开放'}</button>
               <strong>{guidePendingRepair ? '3D 截图待修复' : '无 3D 参考'}</strong>
-              <span>{guidePendingRepair ? '原截图已隔离清空，请重新摆位上传并提交' : '可切到「3D 舞台」摆机位后截图'}</span>
-               <button type="button" className="dd2-btn dd2-btn--ghost" onClick={() => setStudioTab('stage3d')} disabled={!director3dEnabled} title={director3dEnabled ? undefined : '3D 导演台暂未开放'}>{director3dEnabled ? (guidePendingRepair ? '去 3D 重拍' : '打开 3D 舞台') : '3D 舞台暂未开放'}</button>
+              <span>
+                {guidePendingRepair
+                  ? '原截图已隔离清空，请重新摆位上传并提交'
+                  : '可切到「3D 舞台」摆机位后截图'}
+              </span>
+              <button
+                type="button"
+                className="dd2-btn dd2-btn--ghost"
+                onClick={() => setStudioTab('stage3d')}
+                disabled={!director3dEnabled}
+                title={director3dEnabled ? undefined : '3D 导演台暂未开放'}
+              >
+                {director3dEnabled
+                  ? (guidePendingRepair ? '去 3D 重拍' : '打开 3D 舞台')
+                  : '3D 舞台暂未开放'}
+              </button>
             </div>
           ))}
           {previewMode === 'compare' && (
@@ -172,38 +186,51 @@ export function DirectorMainPanel({
         <button type="button" className="dd2-btn dd2-btn--ghost" onClick={() => setShowSettings((v) => !v)}>
           批出设置{showSettings ? ' ▴' : ''}
         </button>
-        <button
-          type="button"
-          className="dd2-btn dd2-btn--ghost"
-          onClick={() => setStudioTab('stage3d')}
-          disabled={!director3dEnabled}
-          title={director3dEnabled ? undefined : '3D 导演台暂未开放'}
-        >
-          <Box size={13} /> {director3dEnabled ? '3D 机位' : '3D 机位暂未开放'}
-        </button>
-        {!running && stats.failed > 0 && (
-          <button type="button" className="dd2-btn dd2-btn--ghost" onClick={() => void runBatch('failed')}>
-            <RotateCcw size={12} /> 重试失败
-          </button>
+        {stats.total === 0 ? (
+          <span className="dd2-cinema__empty-hint" data-testid="director-empty-hint">
+            暂无镜头 · 先从分镜台确认交接后再批出
+          </span>
+        ) : (
+          <>
+            <DeskUtilityToolsMenu
+              deskId={blockId}
+              shotId={currentShotId ?? (selectedIds.size === 1 ? [...selectedIds][0] : null)}
+              buttonClassName="dd2-btn dd2-btn--ghost"
+            />
+            <button
+              type="button"
+              className="dd2-btn dd2-btn--ghost"
+              onClick={() => setStudioTab('stage3d')}
+              disabled={!director3dEnabled}
+              title={director3dEnabled ? undefined : '3D 导演台暂未开放'}
+            >
+              <Box size={13} /> {director3dEnabled ? '3D 机位' : '3D 机位暂未开放'}
+            </button>
+            {!running && stats.failed > 0 && (
+              <button type="button" className="dd2-btn dd2-btn--ghost" onClick={() => void runBatch('failed')}>
+                <RotateCcw size={12} /> 重试失败
+              </button>
+            )}
+            {!running && selectedIds.size > 0 && (
+              <button type="button" className="dd2-btn dd2-btn--ghost" onClick={() => void runBatch('selected')}>
+                <Play size={13} /> 批出选中（{selectedIds.size}）
+              </button>
+            )}
+            {running && (
+              <button type="button" className="dd2-btn dd2-btn--ghost dd2-btn--warn" onClick={stopBatch}>
+                <Square size={12} /> 停止
+              </button>
+            )}
+            <button
+              type="button"
+              className="dd2-btn dd2-btn--primary dd2-btn--batch"
+              disabled={running || stats.total === 0 || (referenceGaps.length > 0 && (forceCharacterRef || forceSceneRef || prefer3dRef))}
+              onClick={() => void runBatch(filter === 'selected' ? 'selected' : 'filter')}
+            >
+              <Play size={13} /> {primaryLabel}
+            </button>
+          </>
         )}
-        {!running && selectedIds.size > 0 && (
-          <button type="button" className="dd2-btn dd2-btn--ghost" onClick={() => void runBatch('selected')}>
-            <Play size={13} /> 批出选中（{selectedIds.size}）
-          </button>
-        )}
-        {running && (
-          <button type="button" className="dd2-btn dd2-btn--ghost dd2-btn--warn" onClick={stopBatch}>
-            <Square size={12} /> 停止
-          </button>
-        )}
-        <button
-          type="button"
-          className="dd2-btn dd2-btn--primary dd2-btn--batch"
-          disabled={running || stats.total === 0 || (referenceGaps.length > 0 && (forceCharacterRef || forceSceneRef || prefer3dRef))}
-          onClick={() => void runBatch(filter === 'selected' ? 'selected' : 'filter')}
-        >
-          <Play size={13} /> {primaryLabel}
-        </button>
       </div>
 
       {colorCheckWarning ? (
@@ -240,34 +267,37 @@ export function DirectorMainPanel({
         </div>
       ) : null}
 
-      <div className="dd2-output-strip" aria-label="出图参数">
-        <span>出图参数</span>
-        <select
-          value={pictureModel}
-          disabled={!pictureConnected || options.length === 0}
-           onChange={(e) => void selectModel(e.target.value, (model) => {
-             if (pictureGenId) updateNodeData(pictureGenId, { model });
-           })}
-        >
-          {options.length === 0 ? <option value={pictureModel}>{pictureModel || '未连接模型'}</option> : null}
-          {options.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}
-        </select>
-        <select
-          value={pictureSize}
-          disabled={!pictureConnected}
-           onChange={(e) => {
-             if (pictureGenId) updateNodeData(pictureGenId, { size: e.target.value });
-           }}
-        >
-          {['1024x1024', '1536x1024', '1024x1536'].map((size) => <option key={size} value={size}>{size}</option>)}
-        </select>
-        <small>{pictureConnected ? '来自已连接图像生成' : '请连接图像生成节点'}</small>
-      </div>
+      {stats.total > 0 ? (
+        <div className="dd2-output-strip" aria-label="出图参数">
+          <span>出图参数</span>
+          <select
+            value={pictureModel}
+            disabled={!pictureConnected || options.length === 0}
+            onChange={(e) => void selectModel(e.target.value, (model) => {
+              if (pictureGenId) updateNodeData(pictureGenId, { model });
+            })}
+          >
+            {options.length === 0 ? <option value={pictureModel}>{pictureModel || '未连接模型'}</option> : null}
+            {options.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}
+          </select>
+          <select
+            value={pictureSize}
+            disabled={!pictureConnected}
+            onChange={(e) => {
+              if (pictureGenId) updateNodeData(pictureGenId, { size: e.target.value });
+            }}
+          >
+            {['1024x1024', '1536x1024', '1024x1536'].map((size) => <option key={size} value={size}>{size}</option>)}
+          </select>
+          <small>{pictureConnected ? '来自已连接图像生成' : '请连接图像生成节点'}</small>
+        </div>
+      ) : null}
 
       {batchError && <p className="dd2-cinema__error">{batchError}</p>}
 
       <DirectorSettingsDrawer
         showSettings={showSettings}
+        hasShots={stats.total > 0}
         skipExisting={skipExisting}
         skipApproved={skipApproved}
         forceCharacterRef={forceCharacterRef}

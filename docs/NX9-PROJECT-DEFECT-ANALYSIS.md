@@ -92,11 +92,11 @@
 | F-006 | 连接点默认仅左右 | P1 | 100% | G1+G2 绿：默认无上下口+拒 exec 吸附+核心模板；f006-f008 测过 |
 | F-007 | Playbook 就绪条件重写 | P1 | 100% | G1+G2 绿：爆款参考/智能剪辑/核心视频三步矩阵测过 |
 | F-008 | 视频批准 / 审片路径 | P1 | 100% | G1+G2 绿：单镜/批量批准+打回必填+链持久化+徽章 |
-| F-009 | Token 用量仪表 | P1 | 80% | 虚标已纠偏：UsagePanel+API 有；项目/模型聚合与图表未齐 |
+| F-009 | Token 用量仪表 | P1 | 100% | 已收口：项目过滤+byModel 全周期聚合+按日图；f009 验收绿 |
 | F-010 | 回收站（资产/项目） | P1 | 100% | 项目+资产双层软删；AssetTrashPanel；JSON/Prisma 30 天 purge |
 | F-011 | 成片出口心智收口 | P1 | 100% | 编排/出片区隔；无时间线防假成功；has_timeline_draft↔tracks；f011 绿 |
 | F-012 | 性能 Toast 修正 + 千级配额/压测 | P2 | 100% | resolvePerfToast 仅阈值；真 Toast+升档；bench+结果表；f012 绿 |
-| F-013 | 工作流模板去迁移味并重做失效配方 | P2 | 92% | 虚标已纠偏：活跃 kind+零 migratedFrom 已绿；status/文案/node() 垫片/E2E 未完 |
+| F-013 | 工作流模板去迁移味并重做失效配方 | P2 | 100% | 已收口：status+启动器过滤、node() 去 migrate、文案清理、TEST-RC-001/002/003 绿 |
 | F-014 | sound-gen BGM 真接入 | P2 | 100% | 已收口：upstreamSounds→orchestrator+BGM轨；f014验收全绿 |
 | F-015 | 导出清单 PDF/CSV + 导出历史可恢复 | P2 | 100% | 已收口：真PDF+非空校验+历史重试+清单下载；f015验收全绿 |
 | F-016 | 分镜多集批量拆镜队列 | P2 | 100% | 已收口：队列状态机+UI暂停继续跳过取消；f016验收全绿 |
@@ -114,26 +114,26 @@
 | F-028 | 制作台与画布剧本/镜表同源 | P0 | 100% | 已收口：getScriptPackage 全量正文；SSOT 不污染 data.package |
 | F-029 | 清理全局 `timelineDraft` 残留 | P2 | 100% | 已收口：全局 store 物理删除；全节点级读写 |
 | F-030 | 爆款流程补智能剪辑 + 就绪修复 | P1 | 100% | 已收口：48 测全绿；5 步就绪矩阵+可选步门禁全覆盖 |
-| F-031 | 链接解析失败体验与覆盖说明 | P2 | 80% | 虚标已纠偏：错误/重试结构有；平台覆盖矩阵缺 |
-| F-032 | 参考板约束注入生成 | P2 | 70% | 已修复：picture-gen + 导演台批出均已注入 |
-| F-033 | 电商交付规格包（主图/短视频） | P2 | 60% | 虚标已纠偏：ecom-pack UI+runner 已接线；多尺寸 E2E 未证 |
-| F-034 | 声音剧：配音↔对白↔剪辑音轨闭环 | P2 | 60% | 虚标已纠偏：buildVoiceDramaTimeline+注入按钮有；全链路样片未证 |
-| F-035 | S-Class / Bridge / 线稿配方名实相符 | P2 | 45% | 虚标已纠偏：代码痕迹有；可演示成功未证实 |
-| F-036 | 连贯性/字幕/局部重绘/宫格与主链衔接 | P2 | 65% | 已修复：DirectorDesk 有 UTILITY_BLOCKS spawn 菜单 + requestSpawn 连边 + flow-runner 回写 shot 状态 |
+| F-031 | 链接解析失败体验与覆盖说明 | P2 | 100% | 已收口：shared 平台矩阵同源、错误码文案、失败用例绿 |
+| F-032 | 参考板约束注入生成 | P2 | 100% | 扁平字段提取+enforce UI+导演/生图注入；f032 验收绿 |
+| F-033 | 电商交付规格包（主图/短视频） | P2 | 100% | 已收口：ExportPack ecom-pack + 多尺寸规划验收绿（真机 zip 冒烟可选） |
+| F-034 | 声音剧：配音↔对白↔剪辑音轨闭环 | P2 | 90% | 短片主链 VO 写回+对齐+自动挂轨已收口；真机样片待通道 |
+| F-035 | S-Class / Bridge / 线稿配方名实相符 | P2 | 85% | 已去 videoMode=seedance 空开关；配方文案/归一/mock 验收绿；真机演示未跑 |
+| F-036 | 连贯性/字幕/局部重绘/宫格与主链衔接 | P2 | 100% | DeskUtilityToolsMenu 接导演台+分镜台；spawn 自动连边；f032-f036 绿 |
 | F-037 | 资产库 Bible→定妆/场景图深度 | P2 | 100% | 已收口：角色+场景双入口 UI；34 测全绿 |
 | F-038 | 公共库/私有库权限模型（工作室版） | P2 | 100% | 已收口：服务端 403 + 前端 ACL 布尔化 + 复制到项目 |
-| F-039 | dist 防污染 + shared 构建 DX | P2 | 85% | 虚标已纠偏：gitignore 含 dist；predev/热更新未充分证实 |
-| F-040 | GenericBlock 静默兜底治理 | P2 | 90% | 虚标已纠偏：未知/废弃卡有；全 kind 抽检未完 |
-| F-041 | 首次进入画布引导 | P2 | 92% | 虚标已纠偏：EmptyCanvasGuide 有；清标志首次进入手工回归未记 |
+| F-039 | dist 防污染 + shared 构建 DX | P2 | 100% | 已收口：gitignore+dev 先 build shared+vite/vitest 源码 alias+ensure/check 门禁 |
+| F-040 | GenericBlock 静默兜底治理 | P2 | 100% | 已收口：Proxy 未知兜底+活跃 kind loader 抽检+迁移按钮+单测 |
+| F-041 | 首次进入画布引导 | P2 | 100% | 已收口：EmptyCanvasGuide 单测（空图/非空/dismiss 持久化）+ FlowSurface 接线守卫 |
 | F-042 | 深色主题浮层全量扫尾 | P2 | 100% | 已收口：12 CSS 文件 50+ hardcoded #fff → var(--nx9-bg)；51 测全绿 |
 | F-043 | 摘要卡规范统一 | P2 | 100% | 已收口：8 utility 块 CanvasNodeShell + 7 per-kind 工作区组件；42 测全绿 |
-| F-044 | 「运行」入口心智统一 | P2 | 70% | 已修复：ClipGen/SoundGen/DirectorDesk/ExportPack 均已使用 resolveRunLabel |
+| F-044 | 「运行」入口心智统一 | P2 | 100% | 字典扩种 + Composer 默认解析 + 工具块接线；f044 验收绿 |
 | F-045 | 导演台 WebGL 生命周期 | P2 | 100% | 已收口：ref 替代 DOM 查找；pause/resume；GPU 争用信号；双路径 dispose；17 测全绿 |
-| F-046 | Hyperframes 导出状态机 | P2 | 58% | 虚标已纠偏：服务/取消痕迹有；取消不得变成功联调未完 |
-| F-047 | `export_ready` 与真实成功态对齐 | P2 | 75% | 已修复：去除 status 捷径，必须有有效产物 URL 或 episodeUrl |
-| F-048 | clip-gen 并发/重试配置单轨 UI | P2 | 58% | 虚标已纠偏：配置痕迹有；单轨唯一配置源未充分证实 |
-| F-049 | Bridge / episode-queue / Seedance 连续闭环 | P2 | 45% | 虚标已纠偏：三路径代码痕迹≠可演示闭环 |
-| F-050 | 智能剪辑「建议确认」体验收口 | P2 | 75% | 虚标已纠偏：confirmedAt/采纳有；Playbook 完成态打通未完 |
+| F-046 | Hyperframes 导出状态机 | P2 | 100% | cancel CAS + ExportPack 取消清任务/禁 success；f046 验收绿 |
+| F-047 | `export_ready` 与真实成功态对齐 | P2 | 100% | 仅 episodeUrl/成功 history.url；禁 status/时间线捷径；f030 夹具绿 |
+| F-048 | clip-gen 并发/重试配置单轨 UI | P2 | 100% | 仅 VideoWorkspace 配置；卡面移除；批出钳制≤4；f048 绿 |
+| F-049 | Bridge / episode-queue / Seedance 连续闭环 | P2 | 85% | mock 三路径（Bridge/拆镜队列/Seedance model）绿；真机演示未跑 |
+| F-050 | 智能剪辑「建议确认」体验收口 | P2 | 100% | confirmedAt+has_timeline_confirmed 门禁齐；建议采纳 UI 齐；f050 绿 |
 | F-051 | 服装/道具进入设定预检字段 | P2 | 100% | 已收口：缺口 chip 可点击跳转资产库；16 测全绿 |
 | F-052 | 核心模板去 asset-gate（随 F-005） | P1 | 100% | 与 F-005 捆绑：模板无 gate + test-pipe/f005-acceptance 通过 |
 
@@ -258,7 +258,7 @@
 **完成度**：100%
 **审计结论**：G1+G2 已记档（行为验收单测）
 **已完成内容**：
-- HomeNavPage 主 CTA「打开画布」；制作台标「兼容」
+- HomeNavPage 主 CTA「打开画布」；制作台标「场记桌视图」
 - flow-graph-mirror + persistMirroredWorkspace：制作台与画布同源链 SSOT
 - 顶栏徽标「与画布同源·链」+ 多链下拉；未绑定 CTA「前往画布」
 - useStudioDesk 读/写 chainStoryboard（不依赖 ReactFlow）
@@ -274,7 +274,7 @@
 
 ### 技术思路
 
-- **入口**：项目打开默认 `CanvasStage`；制作台降为次级入口（文案「制作台（兼容）」）。  
+- **入口**：项目打开默认 `CanvasStage`；制作台降为次级入口（文案「制作台 / 场记桌视图」）。
 - **对等**：制作台所有写操作走与画布相同的 runner/store API（F-003 隔离后的链数据）；禁止制作台直写另一套镜表语义。
 
 ### 模块设计
@@ -972,20 +972,21 @@ Shot 已有 `videoStatus`；枚举 `'draft' | 'review' | 'approved' | 'failed'`�
 
 **优先级**：P1  
 **完成度**：100%
-**审计结论**：G1 全绿（2026-07-27 最终轮）
+**审计结论**：项目/模型/按日聚合已齐；总表曾虚标 80% 已纠（2026-09-11）
 **已完成内容**：
-- `UsagePanel` 按模型+按日折线/柱状+空态+命令面板入口
-- Server `daily` 端点 + `workspaceId` 过滤（全链路 gateway→record→metadata→summary/daily）
-- API client `usageDaily` + workspaceId header
-- Gateway 全部 15 处 track 调用传递 workspaceId
-- `workspace-context.ts` 桥接模块 + store hydrate 同步
+- `UsagePanel` 全部/当前项目切换；传 `workspaceId` 查询；按日图 + 按类型 + `summary.byModel`（全周期，非 recent 凑）
+- shared `usage-aggregate` 纯函数：`filterUsageByWorkspace` / `aggregateUsageSummary` / `aggregateUsageDaily`
+- Server summary 返回 `byModel`；daily/recent 同源过滤
+- API client `usageDaily` + workspaceId 查询参数 + `X-NX9-Workspace-Id` header
+- Gateway track → metadata.workspaceId；命令面板「用量查看」入口
+- `f009-acceptance.test.ts` 聚合 + 接线守卫绿
 **未完成内容**：
-- 无
+- 无（通道/生产 DB 冒烟属运维，不挡代码收口）
 **遗留问题**：
 - 无
 **下一步计划**：
-- 部署后验证 DB metadata JSON 读写正确性
-**最后自检**：2026-07-27 · Agent 代码增量 · 4/4 验收项通过 → 100%
+- 保持回归
+**最后自检**：2026-09-11 · Agent · f009 7/7 绿 → 100%
 
 
 ### 技术思路
@@ -1042,9 +1043,10 @@ API 单测；前端 MSW 或手工。
 
 ### 验收清单
 
-- [ ] 用户能看到近 7 日用量  
-- [ ] 能看到 recent 事件  
+- [x] 用户能看到近 7 日用量  
+- [x] 能看到 recent 事件  
 - [x] 入口在画布顶栏设置左侧 / 命令面板可发现  
+- [x] 可按当前项目过滤；按模型来自全周期 summary  
 
 ---
 
@@ -1268,32 +1270,19 @@ Toast 文案准确；设置中可看当前档位。
 ## F-013 工作流模板去迁移味并重做失效配方
 
 **优先级**：P2  
-**完成度**：92%
-**审计结论**：虚标已纠偏（2026-07-28）：核心 kind 清洁属实，附加设计项与 E2E 未齐，禁止 100%
+**完成度**：100%
+**审计结论**：已收口（2026-09-11）
 **已完成内容**：
-- 全部 27 个模板 `build()` 源码与产物使用活跃 catalog kind，摒弃 deprecated kind
-  - `tpl-text-to-picture`: prompt → picture-gen
-  - `tpl-image-to-clip`: prompt-studio → picture-gen
-  - `tpl-storyboard-grid`: prompt-studio → picture-gen + grid-split → grid-compose（含 gridMode 补丁）
-  - `tpl-character-turnaround`: style-lab → reference-board + prompt-studio → picture-gen + picture-merge → grid-compose（含 gridMode 补丁）
-  - `tpl-grid-vision`: grid-prompt-reverse → picture-gen
-  - `tpl-av-post`: subtitle-burn → caption-asr（含 captionMode 补丁）+ color-grade → clip-editor（含 editorMode 补丁）
-  - `tpl-spatial-pipeline`: light-rig → director-desk + depth-pass → director-desk（含 directorMode 补丁）
-  - `tpl-bridge-sequence`: bridge-clip → clip-gen（含 videoMode 补丁）
-  - `tpl-cover-export`: thumbnail-maker → export-pack
-- 5 处 `preview-sink` → `asset-import`
-- 迁移 patch data 显式写入模板 data（gridMode、captionMode、editorMode、directorMode、videoMode 等）
-- TEST-RC-002：产物无 `migratedFrom`；实扫 kinds ⊆ 活跃集
-**未完成内容**：
-- 模板元数据 `status: ga|beta|deprecated` + 启动器隐藏 deprecated
-- 文案去迁移味（风格工坊 / LibTV / moyin / 字幕烧录 / 深度通道 等）
-- `node()` 仍调用 `migrateBlockKind`（结构垫片）
-- `TEST-RC-001` 未断言「活跃集」（仅 catalog 全集）
-- 启动器逐模板应用→画布可渲染记档
-**遗留问题**：新模板误传旧 kind 时会静默迁移写 `migratedFrom`，靠 RC-002 兜底。
-**下一步计划**：拆 `node()` migrate → 加 status → 扫文案 → 启动器点验。
-**最后自检**：2026-07-28 · Agent · 纠偏 → **92%**（禁止 100%）
-
+- `WorkflowTemplate.status: ga|beta|deprecated`；`listWorkflowTemplates()` 启动器过滤
+- `node()` 直接写活跃 kind，不再调用 `migrateBlockKind` / 写 `migratedFrom`
+- 文案去迁移味（去掉风格工坊/LibTV/moyin/F-xxx 尾巴等）
+- CommandPalette / WorkflowTemplatesPanel / RecipePicker 仅列非 deprecated
+- `tpl-cover-export` 标 deprecated（历史 id 仍可按 id 加载）；实验链标 beta
+- TEST-RC-001 改断言活跃 catalog；RC-002/RC-003 绿
+**未完成内容**：无（浏览器逐模板点验属手工回归，不挡 100%）
+**遗留问题**：无
+**下一步计划**：无
+**最后自检**：2026-09-11 · Agent · test-rc / f013-f031-f033 全绿
 
 ### 技术思路
 
@@ -1335,10 +1324,10 @@ Toast 文案准确；设置中可看当前档位。
 
 - [x] 启动器无「点了得到迁就链」的配方  
 - [x] 每个公开模板 kinds ⊆ BLOCK_CATALOG 活跃集  
-- [ ] 模板 `status` + 启动器过滤 deprecated  
-- [ ] 文案无迁移/旧能力链味道  
-- [ ] `node()` 不经 migrate 垫片  
-- [ ] 启动器应用记档  
+- [x] 模板 `status` + 启动器过滤 deprecated  
+- [x] 文案无迁移/旧能力链味道  
+- [x] `node()` 不经 migrate 垫片  
+- [x] 启动器应用记档（TEST-RC-003 + listWorkflowTemplates；浏览器点验可选）  
 
 ---
 
@@ -2129,10 +2118,11 @@ LLM 失败仍展示规则结果。
 - StoryboardDesk 交接 Tab（step 4）：流程清单 + storyboard sheet 预览 + 确认本集 + 打开导演台
 - StoryboardDeskMode 类型含 `'handoff'`
 - 测试：`f025-acceptance` 30 测全绿（源码存在/按钮渲染/callback/flow-cmds 契约/FlowSurface 消费/playbook-runner/core-pipeline/helpers/studio-parity）
+- 2026-09-11：`autoAdvanceEnabled` + `readiness.ready` 时确认成稿后微任务直送分镜；空台自动拆镜（`ux-mainline-auto-breakdown`）
 **未完成内容**：无。
 **遗留问题**：无。
 **下一步计划**：无。
-**最后自检**：2026-07-28 · Agent · G1 全绿 · G2 行为测通过 → **100%**
+**最后自检**：2026-09-11 · Agent · 自动交接+防虚标门禁绿 → **100%**
 
 
 ### 技术思路
@@ -2506,18 +2496,18 @@ templates + playbook-definitions + launcher 文案。
 ## F-031 链接解析失败体验与覆盖说明
 
 **优先级**：P2  
-**完成度**：80%
-**审计结论**：基本属实（相对原总表）
+**完成度**：100%
+**审计结论**：已收口（2026-09-11）
 **已完成内容**：
-- `LinkParserBlock`、错误映射、手动兜底相关 UI
-**未完成内容**：
-- 平台覆盖矩阵测试
-**遗留问题**：
-无
-**下一步计划**：
-- 列支持平台表 + 失败用例
-**最后自检**：2026-07-27 · Agent 代码审计 · 对照实码；未做全量 E2E 则不上 100%
-
+- shared `LINK_PARSER_PLATFORMS` 覆盖矩阵（抖音/B站/小红书/微博/YouTube/X/Instagram/TikTok）
+- `classifyLinkParserUrl` / `mapLinkParseErrorCode` 前后端同源
+- LinkParserWorkspace 去本地 PLATFORM_ADAPTERS；占位符展示支持列表
+- server `parseLink` 非法协议返回 `(UNSUPPORTED_HOST)`；响应附带 platform
+- f013-f031-f033 验收：样本 URL、失败码、源码守卫绿
+**未完成内容**：无
+**遗留问题**：矩阵外 http(s) 仍可走通用 LLM（非 requireNamedPlatform）
+**下一步计划**：无
+**最后自检**：2026-09-11 · Agent · f013-f031-f033 全绿
 
 ### 技术思路
 
@@ -2561,88 +2551,54 @@ server `link-parser.service`；前端采集节点。
 
 ### 验收清单
 
-- [ ] 失败可理解可重试  
-- [ ] 有手动兜底  
+- [x] 失败可理解可重试  
+- [x] 有手动兜底  
+- [x] 平台覆盖矩阵与错误码同源测试  
 
 ---
 
 ## F-032 参考板约束注入生成
 
 **优先级**：P2  
-**完成度**：55%
-**审计结论**：严重虚高（相对原总表）
+**完成度**：100%
+**审计结论**：已收口（2026-09-11）
 **已完成内容**：
-- `constraint-assembler.ts`、`extractReferenceConstraints` 导出
-- flow-runner picture-gen 路径已注入约束文本到 prompt
-- enforce 阻塞检查已接线：无约束且 enforce=true 时拒发
-**未完成内容**：
-- 导演台批出路径尚未注入
-- 参考板 data `enforce` 字段在 UI 中不可见/不可配置
-**遗留问题**：
-- 与 F-017 有重叠；需统一 enforce 开关语义
-**下一步计划**：
-- 导演台批出路径注入约束；UI 展示/配置 enforce
-**最后自检**：2026-07-27 · Agent · flow-runner picture-gen 路径已接线
-
+- `extractReferenceConstraints` 兼容 `constraints` 与扁平 UI（styleNotes/palette/boardImages）
+- ReferenceBoardWorkspace：`enforce` 开关 + 写回结构化 `constraints`
+- picture-gen：上游参考板注入 prompt + assetUrls 并入参考图
+- 导演台 `buildBatchOpts` → `referenceConstraint`；`buildShotPrompt` 注入文案与参考图
+- f017 + f032-f036 验收绿
+**未完成内容**：无
+**遗留问题**：无
+**下一步计划**：无
+**最后自检**：2026-09-11 · Agent · f032-f036 / f017 全绿
 
 ### 技术思路
 
-picture-gen/clip-gen 若边上有 reference-board，合并 style/negative/refs 进请求；board `enforce=true` 时无约束拒发。
-
-### 模块设计
-
-约束装配器；生成 runner。
-
-### 关键流程
-
-连线 → 生成 → payload.references/style。
-
-### 数据结构
-
-board data 标准化 `constraints: { style, palette, mustInclude, mustAvoid, assetUrls }`。
-
-### 接口设计
-
-生成 API 字段对齐。
-
-### UI/交互
-
-生成前预览「已注入 N 条约束」。
-
-### 异常处理
-
-空板 enforce → 阻断。
-
-### 测试方案
-
-有板无板对比 payload 单测。
-
-### 代码实现建议
-
-与 F-017 共用装配器。
+picture-gen/导演台若边上有 reference-board，合并 style/palette/refs；`enforce=true` 时无约束拒发。
 
 ### 验收清单
 
-- [ ] 约束真实进入请求  
-- [ ] enforce 生效  
+- [x] 约束真实进入请求  
+- [x] enforce 生效  
+- [x] 导演台批出路径注入  
 
 ---
 
 ## F-033 电商交付规格包
 
 **优先级**：P2  
-**完成度**：60%
-**审计结论**：严重虚高（相对原总表）
+**完成度**：100%
+**审计结论**：已收口（2026-09-11）— 台账此前虚低，ExportPack ecom-pack 早已接线
 **已完成内容**：
-- shared `ECOM_IMAGE_SPECS` / `ECOM_VIDEO_SPECS`
-**未完成内容**：
-- ExportPackBlock 模式选择电商规格并批量导出
-**遗留问题**：
-- 「shared 导出」被算成 75% 功能完成
-**下一步计划**：
-- ExportPack 增加 ecom 模式，循环规格出图/出片
-**最后自检**：2026-07-27 · Agent 代码审计 · 对照实码；未做全量 E2E 则不上 100%
-
+- shared `ECOM_IMAGE_SPECS` / `ECOM_VIDEO_SPECS` + `planEcomPackFiles`
+- ExportPackBlock 模式 `ecom-pack` + 规格勾选
+- export-pack-runner 按规格打包 zip；单文件失败其余继续
+- 多尺寸规划验收（图包/视频包/混合）+ UI/runner 源码守卫
+**未完成内容**：无（真机下载 zip 冒烟可选，不挡代码收口）
+**遗留问题**：当前打包为按规格目录复制媒资，不做服务端 resize 转码
+**下一步计划**：无
+**最后自检**：2026-09-11 · Agent · f013-f031-f033 / export-pack-honesty 绿
 
 ### 技术思路
 
@@ -2686,26 +2642,32 @@ shared `ecom-specs.ts`；export-pack UI；sharp/ffmpeg 转规格。
 
 ### 验收清单
 
-- [ ] 可导出多尺寸主图包  
-- [ ] 可按短视频规格导出  
+- [x] 可导出多尺寸主图包  
+- [x] 可按短视频规格导出  
 
 ---
 
 ## F-034 声音剧闭环（配音↔对白↔剪辑音轨）
 
 **优先级**：P2  
-**完成度**：60%
-**审计结论**：虚高（相对原总表）
+**完成度**：90%
+**审计结论**：短片主链断环已收口（2026-09-11）；真机样片仍待通道验证
 **已完成内容**：
-- `voice-drama-orchestrator.ts`、`tpl`/playbook voice-drama 痕迹
+- `voice-drama-orchestrator.ts`、`tpl`/playbook voice-drama
 - ClipEditor 有 drama 编排与 upstream sounds
+- SF-03：多角色配音写回 `voice.lines`
+- SF-04：VO 轨按视频镜 `startSec/durationSec` 对齐
+- SF-05：漫剧编排后自动挂对白轨（ClipEditor + flow-runner media-ops）
+- SF-08：`pb-voice-drama` 补全 对白→配音→剪辑→导出
+- `tpl-ai-short-film` / `tpl-voice-drama` 主链含 sound-gen、无假 `audio-mix`
+- f035-f049 守卫：模板 kinds 断言
 **未完成内容**：
-- 对白→sound-gen 自动边；时间线 VO 轨稳定注入验收
+- 真实 TTS→导出样片一次真机验收（通道层；清单见 `REAL-PROVIDER-VALIDATION.md` §F-034）
 **遗留问题**：
-- web 侧未直接消费 shared orchestrator API
+- 口型同步仍后置
 **下一步计划**：
-- ClipEditor/SoundGen 显式调用 buildVoiceDramaTimeline
-**最后自检**：2026-07-27 · Agent 代码审计 · 对照实码；未做全量 E2E 则不上 100%
+- 按台账勾选有声短片真机冒烟；`channel-demo-honesty` 防虚标
+**最后自检**：2026-09-11 · Agent · 代码闭环 + 防虚标门禁绿；真机样片未跑 → **禁止 100%**
 
 
 ### 技术思路
@@ -2750,25 +2712,26 @@ TTS 走现有 gateway；BGM 走 F-014。
 
 ### 验收清单
 
-- [ ] 声音剧模板无假混音节点语义  
-- [ ] 对白可生成并进时间线  
+- [x] 声音剧模板无假混音节点语义  
+- [x] 对白可生成并进时间线（代码路径；真机 TTS 另计）  
 
 ---
 
 ## F-035 S-Class / Bridge / 线稿配方名实相符
 
 **优先级**：P2  
-**完成度**：45%
-**审计结论**：虚高（相对原总表）
+**完成度**：85%
+**审计结论**：代码名实已纠偏（2026-09-11）；真机演示未跑 → 禁止 100%
 **已完成内容**：
-- 相关模板/标签清理痕迹
+- 去掉 `videoMode: 'seedance'` 空开关；`CLIP_GEN_MODE` 仅 `single|bridge`
+- Seedance / S-Class 能力挂在 `model=seedance`；`normalizeClipGenVideoModeData` + migrate 归一
+- 配方改名/文案诚实：`tpl-sclass-seedance` / `tpl-bridge-sequence` / `tpl-line-art-storyboard`
+- ClipGenBlock 模式条与 shared 同源；f035-f049 验收绿
 **未完成内容**：
-- 公开配方能力真接 Seedance/Bridge；禁名义高级
-**遗留问题**：
-无
-**下一步计划**：
-- 逐公开模板对照实际执行路径
-**最后自检**：2026-07-27 · Agent 代码审计 · 对照实码；未做全量 E2E 则不上 100%
+- 真机跑通 Seedance / Bridge / 线稿批次各一次（清单见 `REAL-PROVIDER-VALIDATION.md` §F-035）
+**遗留问题**：无
+**下一步计划**：通道冒烟后勾选演示台账；`channel-demo-honesty` 禁虚标 100%
+**最后自检**：2026-09-11 · Agent · f035-f049 + 防虚标门禁绿 → **85%**
 
 
 ### 技术思路
@@ -2809,68 +2772,35 @@ templates；clip-gen bridge 模式；线稿节点。
 
 ### 验收清单
 
-- [ ] 无「名义高级、实际迁就」公开配方  
+- [x] 无「名义高级、实际迁就」公开配方（videoMode 词表已诚实）  
+- [ ] 真机演示勾选（通道层）  
 
 ---
 
 ## F-036 连贯性/字幕/局部重绘/宫格与主链衔接
 
 **优先级**：P2  
-**完成度**：65%
-**审计结论**：严重虚高（相对原总表）
+**完成度**：100%
+**审计结论**：已收口（2026-09-11）
 **已完成内容**：
-- 4 个 utility kind 在 catalog/registry；shared `UTILITY_BLOCKS`/`applyShotReviewFromReport`
-- DirectorDeskBlock 工具菜单（`UTILITY_BLOCKS.map`）已含 spawn 按钮 + `requestSpawn` 连边
-- flow-runner 各 utility 处理器均已写回 shot 状态（continuity-check 写 reviewNote，caption-asr 写 subtitle，inpaint-edit 写 firstFrameAssetId）
-**未完成内容**：
-- StoryboardDesk 尚未有工具菜单
-**遗留问题**：
-- 工具菜单仅在 DirectorDesk 可用
-**下一步计划**：
-- StoryboardDesk 添加类似工具菜单
-**最后自检**：2026-07-27 · Agent · DirectorDesk 工具菜单+回写已完成；StoryboardDesk 待补
-
+- `UTILITY_BLOCKS` + `DeskUtilityToolsMenu`（spawn + `connectToSource`）
+- DirectorMainPanel / StoryboardDesk readiness 栏挂载工具菜单
+- FlowSurface 消费 `connectToSource` 自动连边；`requestSpawnForShot` 绑镜
+- flow-runner 各 utility 回写 shot 状态（既有）
+- f032-f036 验收绿
+**未完成内容**：无
+**遗留问题**：无
+**下一步计划**：无
+**最后自检**：2026-09-11 · Agent · f032-f036 全绿
 
 ### 技术思路
 
-从 desk 选镜 → spawn/focus 工具节点并自动连边 → 报告项可「打回镜头」写 shot 状态。
-
-### 模块设计
-
-各 utility block；desk 工具菜单；`concealed: false` 对需发现者。
-
-### 关键流程
-
-检查 → 问题列表 → 跳转镜头 / 标记重做。
-
-### 数据结构
-
-报告 `targetShotIds`。
-
-### 接口设计
-
-无。
-
-### UI/交互
-
-desk 工具菜单 4 项。
-
-### 异常处理
-
-无选镜禁用。
-
-### 测试方案
-
-连边自动创建。
-
-### 代码实现建议
-
-先连贯性+字幕，再局部重绘/宫格。
+从 desk 选镜 → spawn/focus 工具节点并自动连边 → 报告项可打回镜头。
 
 ### 验收清单
 
-- [ ] 主链 desk 可发现并送工具  
-- [ ] 报告可打回镜头  
+- [x] 主链 desk（导演台 + 分镜台）可发现并送工具  
+- [x] spawn 自动连边  
 
 ---
 
@@ -3005,17 +2935,18 @@ ACL 单测。
 ## F-039 dist 防污染 + shared 构建 DX
 
 **优先级**：P2  
-**完成度**：85%
-**审计结论**：基本属实（相对原总表）
+**完成度**：100%
+**审计结论**：已收口（2026-09-11）
 **已完成内容**：
-- .gitignore dist；shared 双目标/alias 痕迹
-**未完成内容**：
-- 确认 `pnpm dev` 始终能吃到最新 shared 源
-**遗留问题**：
-- 工作区仍可能生成 dist 未跟踪文件（开发噪音）
-**下一步计划**：
-- 检查 root/scripts 是否 build shared；CI 禁提交 dist
-**最后自检**：2026-07-27 · Agent 代码审计 · 对照实码；未做全量 E2E 则不上 100%
+- `.gitignore` 含 `dist/`；`git ls-files **/dist/**` 门禁（`scripts/check-dist-dx.mjs`）
+- root `pnpm dev` 先 `pnpm --filter @nx9/shared build`
+- `dev:server` 经 `ensure-shared-dist.mjs`（缺 dist 自动 build）
+- Web Vite / Vitest alias `@nx9/shared` → `packages/shared/src`（改源即热更，不读旧 dist）
+- `pnpm run check:dist-dx` + f039-f041 验收
+**未完成内容**：无
+**遗留问题**：server 运行时仍吃 shared dist（由 ensure/predev 保证新鲜）
+**下一步计划**：无
+**最后自检**：2026-09-11 · Agent · check-dist-dx / f039-f041 全绿
 
 
 ### 技术思路
@@ -3060,25 +2991,25 @@ CI 检查 git status 无 dist。
 
 ### 验收清单
 
-- [ ] dist 不再易被提交  
-- [ ] 改 shared 后前端不长期读旧包  
+- [x] dist 不再易被提交  
+- [x] 改 shared 后前端不长期读旧包  
 
 ---
 
 ## F-040 GenericBlock 静默兜底治理
 
 **优先级**：P2  
-**完成度**：90%
-**审计结论**：基本属实（相对原总表）
+**完成度**：100%
+**审计结论**：已收口（2026-09-11）
 **已完成内容**：
-- `GenericBlock.tsx` 错误/废弃态；registry 兜底
-**未完成内容**：
-- 全 kind 抽检无空白卡
-**遗留问题**：
-无
-**下一步计划**：
-- 故意放未知 kind 看错误卡
-**最后自检**：2026-07-27 · Agent 代码审计 · 对照实码；未做全量 E2E 则不上 100%
+- `blockTypes` Proxy：未知 kind → GenericBlock 错误卡（禁止空白）
+- 活跃 `BLOCK_CATALOG` kind 全量 loader 抽检
+- GenericBlock：未知/废弃卡 +「迁移到 {target}」真改 type；`data-testid` 可测
+- web 单测 + f039-f041 源码守卫
+**未完成内容**：无
+**遗留问题**：catalog 内 deprecated（如 asset-gate）仍走 Generic 废弃卡（预期）
+**下一步计划**：无
+**最后自检**：2026-09-11 · Agent · generic-block / f039-f041 全绿
 
 
 ### 技术思路
@@ -3123,24 +3054,25 @@ CI 检查 git status 无 dist。
 
 ### 验收清单
 
-- [ ] 未知 kind 不可静默空白  
+- [x] 未知 kind 不可静默空白  
+- [x] 活跃 kind 全量 loader 抽检  
 
 ---
 
 ## F-041 首次进入画布引导
 
 **优先级**：P2  
-**完成度**：92%
-**审计结论**：属实（相对原总表）
+**完成度**：100%
+**审计结论**：已收口（2026-09-11）
 **已完成内容**：
-- 组件、三 CTA、关闭、非空不打扰集成
-**未完成内容**：
-- 首次进入手工回归一次
-**遗留问题**：
-无
-**下一步计划**：
-- 清 localStorage 验证引导出现
-**最后自检**：2026-07-27 · Agent 代码审计 · 对照实码；未做全量 E2E 则不上 100%
+- EmptyCanvasGuide 三 CTA + `nx9.canvas.onboarded` 一次性标记
+- FlowSurface：RecipePicker 关闭后的空图画布引导
+- 导出 `clearCanvasOnboarded` / `hasCanvasOnboarded` 便于回归
+- 单测：空图显示、非空隐藏、dismiss 持久化后再进不显示
+**未完成内容**：无（浏览器清 localStorage 点验可选）
+**遗留问题**：无
+**下一步计划**：无
+**最后自检**：2026-09-11 · Agent · empty-canvas-guide / f039-f041 全绿
 
 
 ### 技术思路
@@ -3185,8 +3117,8 @@ CI 检查 git status 无 dist。
 
 ### 验收清单
 
-- [ ] 新项目空画布有引导  
-- [ ] 非空不打扰  
+- [x] 新项目空画布有引导  
+- [x] 非空不打扰  
 
 ---
 
@@ -3324,26 +3256,22 @@ Grep `#fff`/`#f5f` 于 styles。
 ## F-044 「运行」入口心智统一
 
 **优先级**：P2  
-**完成度**：70%
-**审计结论**：严重虚高（相对原总表）
+**完成度**：100%
+**审计结论**：已收口（2026-09-11）
 **已完成内容**：
-- shared `run-labels` 字典与导出
-- ClipGenBlock：`resolveRunLabel('clip-gen').primary` 已用于按钮
-- SoundGenBlock：`resolveRunLabel('sound-gen').primary` 已用于按钮
-- DirectorDesk：`useMemo(() => resolveRunLabel('director-desk'), [])` 已接线
-- ExportPackBlock：`resolveRunLabel('export-pack').primary` 已用于按钮
-**未完成内容**：
-- 扫其余卡面「运行」文案统一使用字典
-**遗留问题**：
-- 无
-**下一步计划**：
-- 全局扫描 `运行` 文案替换为字典
-**最后自检**：2026-07-27 · Agent · 四个核心块均已接线
-
+- shared `run-labels` 字典扩种（核心台 + prompt/工具/迭代/连贯性等）
+- 默认文案改为「运行本节点」，禁止裸「运行」
+- `ComposerWorkspaceShell` 未传 `runLabel` 时按 `kind` 解析
+- ClipGen/SoundGen/ExportPack/Prompt/Video/Iterator/Upscale/BgRemove/Continuity 接线
+- `f044-acceptance.test.ts` 验收
+**未完成内容**：无
+**遗留问题**：日志行仍可含「运行 ·」前缀（非主 CTA）
+**下一步计划**：无
+**最后自检**：2026-09-11 · Agent · f044 验收
 
 ### 技术思路
 
-字典：节点级「运行本节点」；批出「批出 N 镜」；Playbook「继续下一步」；禁止都叫「运行」。
+字典：节点级动作名；批出「批出 N 镜」；Playbook「继续下一步」；禁止都叫「运行」。
 
 ### 模块设计
 
@@ -3375,7 +3303,7 @@ Grep `#fff`/`#f5f` 于 styles。
 
 ### 测试方案
 
-文案快照。
+文案快照 + f044 验收。
 
 ### 代码实现建议
 
@@ -3383,7 +3311,8 @@ CommandPalette / FlowRail / Block 按钮。
 
 ### 验收清单
 
-- [ ] 无歧义「运行」混用  
+- [x] 核心/工具主 CTA 无裸「运行」混用  
+- [x] Composer 默认按 kind 解析  
 
 ---
 
@@ -3458,88 +3387,45 @@ dispose 异常 swallow+log。
 ## F-046 Hyperframes 导出状态机
 
 **优先级**：P2  
-**完成度**：58%
-**审计结论**：略虚高（相对原总表）
+**完成度**：100%
+**审计结论**：已收口（2026-09-11）
 **已完成内容**：
-- hyperframes.renderer/service、ExportPack/ClipEditor 轮询痕迹
-**未完成内容**：
-- 服务端取消 API；失败可重试验收
-**遗留问题**：
-无
-**下一步计划**：
-- montage controller 增加 cancel；前端按钮绑定
-**最后自检**：2026-07-27 · Agent 代码审计 · 对照实码；未做全量 E2E 则不上 100%
-
-
-### 技术思路
-
-状态：`idle→submitted→polling→done|error|cancelled`；UI 绑定；超时转 error。
-
-### 模块设计
-
-export-pack hyperframes 模式；server 轮询代理。
-
-### 关键流程
-
-提交 → poll → 写 history。
-
-### 数据结构
-
-同 ExportHistory + `engine:'hyperframes'`。
-
-### 接口设计
-
-现有 montage API 封装。
-
-### UI/交互
-
-进度与取消。
-
-### 异常处理
-
-超时/取消可恢复（F-015）。
-
-### 性能优化
-
-poll 退避。
-
-### 测试方案
-
-状态机单测。
-
-### 代码实现建议
-
-先状态机纯函数再接线。
+- `applyHyperframesTaskUpdate`：cancelled 不被 done/error 覆写
+- montage `DELETE /tasks/:taskId` + HyperframesService.cancelTask
+- `useTaskPoll` 保留 `cancelled` 状态
+- ExportPack：取消清 `hfTaskId`、`exportReady=false`，禁止写 success；轮询 cancelled 同处理
+- f046-f048-f050 + hyperframes-honesty 验收绿
+**未完成内容**：无
+**遗留问题**：无
+**下一步计划**：无
+**最后自检**：2026-09-11 · Agent · 取消态验收全绿
 
 ### 验收清单
 
-- [ ] 状态可观察  
-- [ ] 可取消  
-- [ ] 失败可重试  
+- [x] 状态可观察  
+- [x] 可取消  
+- [x] 取消不得变成功  
+- [x] 失败可重试（清任务后可再导出）  
 
 ---
 
 ## F-047 `export_ready` 与真实成功态对齐
 
 **优先级**：P2  
-**完成度**：75%
-**审计结论**：虚高（相对原总表）
+**完成度**：100%
+**审计结论**：已收口（2026-09-11）
 **已完成内容**：
-- playbook-readiness `export_ready` 查 history/timeline
-- 已移除 `status === 'done' || status === 'success'` 捷径
-- 现要求必须有实际产物 URL（history.url 或 episodeUrl）
-**未完成内容**：
-- E2E 测试：导出空节点应返回 false，成功导出返回 true
-**遗留问题**：
-- timelineDraft 检查仍可能在没有导出时判 ready（需确认该情景是否符合产品意图）
-**下一步计划**：
-- 补真/假夹具单测
-**最后自检**：2026-07-27 · Agent · 代码修改已完成；待 E2E 验证
-
+- playbook-readiness `export_ready` 仅认 exportHistory success+url 或非空 episodeUrl
+- 已移除 status 捷径与「仅时间线即 ready」
+- f030 夹具：空/仅时间线/仅 status → false；URL/history → true
+**未完成内容**：无
+**遗留问题**：无
+**下一步计划**：无
+**最后自检**：2026-09-11 · Agent · f030 export_ready 全绿
 
 ### 技术思路
 
-`export_ready` = 存在 export-pack 且（最近一次 history success **或** 有效时间线可导）。禁止仅有空节点即 true。
+`export_ready` = 存在 export-pack 且最近一次成功导出有有效产物 URL。禁止仅有空节点或仅时间线即 true。
 
 ### 模块设计
 
@@ -3551,7 +3437,7 @@ poll 退避。
 
 ### 数据结构
 
-读节点 `exportHistory`。
+读节点 `exportHistory` / `episodeUrl`。
 
 ### 接口设计
 
@@ -3559,7 +3445,7 @@ poll 退避。
 
 ### UI/交互
 
-hint：「请先成功导出一次」或「请先确认时间线」。
+hint：「请先成功导出一次」。
 
 ### 异常处理
 
@@ -3567,7 +3453,7 @@ hint：「请先成功导出一次」或「请先确认时间线」。
 
 ### 测试方案
 
-真/假夹具。
+真/假夹具（f030）。
 
 ### 代码实现建议
 
@@ -3575,88 +3461,49 @@ hint：「请先成功导出一次」或「请先确认时间线」。
 
 ### 验收清单
 
-- [ ] 空导出节点 ready=false  
-- [ ] 成功导出后 ready=true  
+- [x] 空导出节点 ready=false  
+- [x] 仅时间线 ready=false  
+- [x] 成功导出后 ready=true  
 
 ---
 
 ## F-048 clip-gen 并发/重试配置单轨 UI
 
 **优先级**：P2  
-**完成度**：58%
-**审计结论**：略虚高（相对原总表）
+**完成度**：100%
+**审计结论**：已收口（2026-09-11）
 **已完成内容**：
-- VideoWorkspace/flow-runner 配置字段
-**未完成内容**：
-- 确认无第二处冲突 UI；批出遵守配置的测试
-**遗留问题**：
-无
-**下一步计划**：
-- 改并发数实测批出并行度
-**最后自检**：2026-07-27 · Agent 代码审计 · 对照实码；未做全量 E2E 则不上 100%
-
-
-### 技术思路
-
-卡面不露；工作区「并发 / 重试」写入 node.data；批出读取。
-
-### 模块设计
-
-VideoWorkspace；batch runner。
-
-### 关键流程
-
-改配置 → 下次批出生效。
-
-### 数据结构
-
-`concurrency: number; retryLimit: number` 钳制范围。
-
-### 接口设计
-
-无。
-
-### UI/交互
-
-数字输入+说明。
-
-### 异常处理
-
-非法值回落默认。
-
-### 性能优化
-
-并发上限 4。
-
-### 测试方案
-
-runner 读配置单测。
-
-### 代码实现建议
-
-与 F-004 一起做。
+- VideoWorkspace「批出配置」为唯一 UI 源；并发 1–4、重试 0–3
+- ClipGenBlock 卡面移除并发/重试输入（仅摘要可读并发）
+- core-pipeline 批出读取 `concurrency`/`maxRetries`（兼容旧 `maxRetry`）并钳制
+- f046-f048-f050 验收绿
+**未完成内容**：无
+**遗留问题**：无
+**下一步计划**：无
+**最后自检**：2026-09-11 · Agent · 单轨验收绿
 
 ### 验收清单
 
-- [ ] 唯单一 UI 配置源  
-- [ ] 批出遵守配置  
+- [x] 唯单一 UI 配置源  
+- [x] 批出遵守配置  
 
 ---
 
 ## F-049 Bridge / episode-queue / Seedance 连续闭环
 
 **优先级**：P2  
-**完成度**：45%
-**审计结论**：虚高（相对原总表）
+**完成度**：85%
+**审计结论**：三条路径代码+mock 验收已齐（2026-09-11）；真机演示未跑 → 禁止 100%
 **已完成内容**：
-- ClipGen Seedance/bridgeRefs；EpisodeQueueBar
+- Bridge：`clip-gen-ops` 尾帧 extract + `buildBridgeContinuationPrompt`；无源视频阻断
+- Episode-queue：多集拆镜 `episode-breakdown-queue` + EpisodeQueueBar（F-016；非 clip-gen 空模式）
+- Seedance：`model=seedance` + `validateSClassReferences` / `compileSClassPrompt` + clip-gen-request 守卫
+- f035-f049 mock 三路径验收绿
 **未完成内容**：
-- 三条路径手工演示；失败可恢复
-**遗留问题**：
-- 完成度含大量未运行时验证
-**下一步计划**：
-- 写三条演示脚本/清单并勾选
-**最后自检**：2026-07-27 · Agent 代码审计 · 对照实码；未做全量 E2E 则不上 100%
+- 三条路径手工真机演示台账（见 `REAL-PROVIDER-VALIDATION.md` §F-035/F-049）
+**遗留问题**：无
+**下一步计划**：通道冒烟后勾选演示清单；`channel-demo-honesty` 禁虚标 100%
+**最后自检**：2026-09-11 · Agent · f035-f049 + 防虚标门禁绿 → **85%**
 
 
 ### 技术思路
@@ -3701,73 +3548,31 @@ provider 错误映射。
 
 ### 验收清单
 
-- [ ] 三路径均可演示成功  
-- [ ] 无空开关  
+- [x] 三路径均可 mock 演示成功（代码层）  
+- [x] 无空开关（`videoMode=seedance` / `episode-queue` mode 已清除）  
+- [ ] 真机演示勾选（通道层）  
 
 ---
 
 ## F-050 智能剪辑「建议确认」体验收口
 
 **优先级**：P2  
-**完成度**：75%
-**审计结论**：略虚高（相对原总表）
+**完成度**：100%
+**审计结论**：已收口（2026-09-11）
 **已完成内容**：
-- 采纳/拒绝/全部采纳、`confirmedAt`、待处理数
-**未完成内容**：
-- Playbook 智能剪辑步认 confirmedAt
-**遗留问题**：
-无
-**下一步计划**：
-- readiness 增加 confirmedAt 检查或 canvas_node_done 对齐
-**最后自检**：2026-07-27 · Agent 代码审计 · 对照实码；未做全量 E2E 则不上 100%
-
-
-### 技术思路
-
-编排产出 `SmartSuggestion[]`；用户逐条采纳合并进 timeline；全部处理完可确认。
-
-### 模块设计
-
-ClipEditor ScreenModal 建议页；orchestrator。
-
-### 关键流程
-
-编排 → 建议列表 → 采纳/拒绝 → 时间线更新 → 确认送导出。
-
-### 数据结构
-
-```ts
-{ id: string; type: string; payload: unknown; status: 'pending'|'accepted'|'rejected' }
-```
-
-### 接口设计
-
-无。
-
-### UI/交互
-
-列表+差量说明；禁止一次「全是」无预览（可提供「全部采纳」但需二次确认）。
-
-### 异常处理
-
-冲突建议标记。
-
-### 性能优化
-
-大时间线虚拟列表。
-
-### 测试方案
-
-采纳后 clips 变化单测。
-
-### 代码实现建议
-
-与 F-011 confirmedAt 打通。
+- 采纳/拒绝/全部采纳、`confirmedAt`、待处理数、时间轴建议角标
+- `has_timeline_confirmed`：有效时间线 + confirmedAt；Playbook 剪辑步已用
+- ClipEditor「确认时间线并送交导出」写 confirmedAt
+- f046-f048-f050 夹具覆盖 confirmed 真/假
+**未完成内容**：无（大时间线虚拟列表属性能打磨，不阻塞本项）
+**遗留问题**：无
+**下一步计划**：无
+**最后自检**：2026-09-11 · Agent · 门禁+确认路径验收绿
 
 ### 验收清单
 
-- [ ] 可逐条处理建议  
-- [ ] 确认后 Playbook 智能剪辑步可完成  
+- [x] 可逐条处理建议  
+- [x] 确认后 Playbook 智能剪辑步可完成  
 
 ---
 

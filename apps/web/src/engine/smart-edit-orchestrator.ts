@@ -134,7 +134,7 @@ export async function orchestrateDramaTimeline(opts: {
   title?: string;
   aspect?: string;
   approvedOnly?: boolean;
-  /** 本节点连入的镜头；必填。空数组则生成空时间线。 */
+  /** 本节点连入的镜头；必填。空数组或滤空后诚实失败，禁止空时间线假成功。 */
   shots: Array<{
     id: string;
     index: number;
@@ -149,9 +149,26 @@ export async function orchestrateDramaTimeline(opts: {
   }>;
   /** F-014: 上游 sound-gen 生成的 BGM URL */
   bgmUrl?: string;
+  /** 深度编排：LLM 理解镜头内容决定顺序/时长；失败回退规则编排 */
+  deepArrange?: boolean;
+  targetDurationSec?: number;
 }): Promise<OrchestrateResult> {
-  const shots = [...opts.shots]
-    .filter((s) => (opts.approvedOnly ? s.videoStatus === 'approved' : true))
+  const notes: string[] = [];
+  const inputShots = opts.shots ?? [];
+  if (inputShots.length === 0) {
+    throw new Error('无可编排镜头，禁止空成功');
+  }
+
+  // DD-D-01 诚实门禁：approvedOnly 滤空时禁止返回「成功」空时间线（假成功）
+  const pendingApproveCount = inputShots.filter(
+    (s) => Boolean(s.videoAssetId) && s.videoStatus !== 'approved',
+  ).length;
+  let shots = [...inputShots]
+    .filter((s) =>
+      opts.approvedOnly
+        ? s.videoStatus === 'approved' && Boolean(s.videoAssetId)
+        : true,
+    )
     .sort((a, b) => a.index - b.index)
     .map((s) => ({
       id: s.id,
@@ -165,6 +182,53 @@ export async function orchestrateDramaTimeline(opts: {
       audioAssetId: s.audioAssetId,
       subtitleText: s.subtitleText,
     }));
+
+  if (shots.length === 0) {
+    if (opts.approvedOnly && pendingApproveCount > 0) {
+      throw new Error(
+        `有 ${pendingApproveCount} 镜视频尚未批准，无法编排。请先在视频工作区批准后再试。`,
+      );
+    }
+    throw new Error('上游镜头均无可用已批准视频，无法编排空时间线，禁止空成功');
+  }
+
+  // AI 深度编排：LLM 分析镜头内容（描述/台词/状态）重排顺序与时长
+  if (opts.deepArrange) {
+    try {
+      const res = await api.aiArrange({
+        shots: shots.map((s) => ({
+          id: s.id,
+          index: s.index,
+          durationSec: s.durationSec,
+          descriptionZh: s.descriptionZh,
+          subtitleText: s.subtitleText,
+          status: s.status,
+        })),
+        targetDurationSec: opts.targetDurationSec,
+      });
+      if (res.ok && res.order && res.order.length === shots.length) {
+        const byId = new Map(shots.map((s) => [s.id, s]));
+        shots = res.order.map((id) => {
+          const s = byId.get(id);
+          if (!s) return shots[0];
+          const d = res.durations?.[id];
+          return { ...s, durationSec: d && d > 0 ? d : s.durationSec };
+        });
+        notes.push(
+          `AI 深度编排已生效：镜头顺序与时长由模型分析决定${res.title ? `，标题「${res.title}」` : ''}`,
+        );
+        if (res.notes && res.notes.length > 0) {
+          notes.push(...res.notes.map((n) => `AI 思路：${n}`));
+        }
+      } else {
+        notes.push(`AI 深度编排未生效（${res.message ?? '结果非法'}），已回退规则编排`);
+      }
+    } catch (e) {
+      notes.push(
+        `AI 深度编排不可用（${e instanceof Error ? e.message : String(e)}），已回退规则编排`,
+      );
+    }
+  }
 
   let timeline: TimelinePayload = buildTimelineFromShotsV2(shots, opts.title ?? '漫剧成片', {
     aspect: (opts.aspect ?? '9:16') as '9:16' | '16:9' | '1:1',
@@ -214,10 +278,10 @@ export async function orchestrateDramaTimeline(opts: {
   const ducking = buildDuckingSuggestion(timeline);
   if (ducking) suggestions.push(ducking);
 
-  return { timeline, suggestions, notes: [] };
+  return { timeline, suggestions, notes };
 }
 
-/** 爆款编排：从上游 clips 顺序拼轨 */
+/** 爆款编排：从上游 clips 顺序拼轨；有 BGM 时先做真·音频听感踩点 */
 export async function orchestrateViralTimeline(opts: {
   clips: string[];
   templateId?: string;
@@ -230,20 +294,48 @@ export async function orchestrateViralTimeline(opts: {
   const suggestions: SmartSuggestion[] = [];
   const notes: string[] = [];
 
+  // 真·听感踩点：BGM 节拍分析，按节拍点分配每段时长（失败回退等分）
+  let beatPoints: number[] | null = null;
+  if (opts.bgmUrl && clips.length > 0) {
+    try {
+      const beat = await api.beatAnalyze(opts.bgmUrl);
+      if (beat.ok && beat.beats && beat.beats.length >= clips.length) {
+        beatPoints = beat.beats;
+        notes.push(
+          `已按 BGM 节拍踩点：检测到 ${beat.beats.length} 个节拍点${beat.tempo ? `，约 ${beat.tempo} BPM` : ''}（audioAnalyzed: true，能量 onset 听感分析）`,
+        );
+      } else {
+        notes.push(
+          `音频踩点未生效（${beat.message ?? '节拍点不足'}），已回退等分时长编排`,
+        );
+      }
+    } catch (e) {
+      notes.push(
+        `音频踩点不可用（${e instanceof Error ? e.message : String(e)}），已回退等分时长编排`,
+      );
+    }
+  }
+
   let startSec = 0;
   const videoClips: TimelineClip[] = [];
-  for (const url of clips) {
-    const dur = opts.targetDurationSec
-      ? opts.targetDurationSec / Math.max(clips.length, 1)
-      : 3;
+  for (let i = 0; i < clips.length; i++) {
+    const url = clips[i];
+    const dur = beatPoints
+      ? Math.max(
+          0.3,
+          Math.round(((beatPoints[i + 1] ?? beatPoints[i] + 3) - beatPoints[i]) * 10) / 10,
+        )
+      : opts.targetDurationSec
+        ? opts.targetDurationSec / Math.max(clips.length, 1)
+        : 3;
     const ci = buildViralClip({
       id: `clip-${url.slice(-8)}`,
       url,
-      startSec,
+      startSec: beatPoints ? Math.max(0, beatPoints[i]) : startSec,
       durationSec: dur,
     });
     videoClips.push(ci);
-    startSec += ci.durationSec;
+    startSec = ci.startSec + ci.durationSec;
   }
   const fullDur = startSec;
 
@@ -290,7 +382,9 @@ export async function orchestrateViralTimeline(opts: {
   timeline = await calibrateTimeline(timeline);
 
 
-  if (clips.length > 0) {
+  // 真·听感踩点已生效时不再叠加参考视频节奏建议（避免互相冲突）；
+  // 仅未踩点时用参考视频镜头时长生成降级 beat-cut 建议
+  if (!beatPoints && clips.length > 0) {
     try {
       const refResult: AnalyzeReferenceResult = await api.analyzeReferenceVideo({
         videoUrl: clips[0],
@@ -333,7 +427,7 @@ export async function orchestrateViralTimeline(opts: {
     }
   }
 
-  if (clips.length > 0) {
+  if (clips.length > 0 && !beatPoints) {
     notes.push(
       suggestions.some((s) => s.kind === 'beat-cut')
         ? '参考节奏：已按参考视频镜头分析生成 beat-cut 建议（algorithm: reference-shot-durations，未做音频听感）。'

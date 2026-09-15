@@ -16,8 +16,8 @@ export async function runInpaintEdit(input: {
   model?: string;
 }): Promise<{ url: string; model: string }> {
   const prompt = input.prompt.trim();
-  if (!input.imageUrl) throw new Error('局部重绘：需要上游图片');
-  if (!prompt) throw new Error('局部重绘：请输入 prompt');
+  if (!input.imageUrl) throw new Error('局部重绘：需要上游图片，禁止空成功');
+  if (!prompt) throw new Error('局部重绘：请输入 prompt，禁止空成功');
   const model = input.model?.trim() || DEFAULT_INPAINT_MODEL;
   const res = (await api.proxyFal({
     model,
@@ -27,7 +27,7 @@ export async function runInpaintEdit(input: {
       prompt,
     },
   })) as { ok?: boolean; url?: string };
-  if (!res.url) throw new Error('重绘失败');
+  if (!res.ok || !res.url) throw new Error('重绘失败，禁止空成功');
   return { url: res.url, model };
 }
 

@@ -1045,3 +1045,312 @@
   background: var(--desk-warn, #e8b04b);
   box-shadow: 0 0 0 2px rgba(232, 176, 75, 0.4);
 }
+
+/* ── SE-EDIT: 多选 / 框选 / 建议角标 / 效果标记 / 波纹 ── */
+
+.ed-clip.is-group-ghost {
+  opacity: 0.55;
+  z-index: 19;
+  border-color: rgba(232, 176, 75, 0.8);
+}
+
+.ed-tl__marquee {
+  position: absolute;
+  top: 2px;
+  bottom: 2px;
+  border: 1px solid var(--desk-warn, #e8b04b);
+  background: rgba(232, 176, 75, 0.14);
+  pointer-events: none;
+  z-index: 15;
+  border-radius: 3px;
+}
+
+.ed-clip__suggest {
+  position: absolute;
+  right: 2px;
+  top: 2px;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 1px 4px;
+  border-radius: 8px;
+  font-size: 9px;
+  line-height: 1.3;
+  color: #1c1917;
+  background: linear-gradient(135deg, #fbbf24, #f59e0b);
+  cursor: pointer;
+  pointer-events: auto;
+  z-index: 8;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.45);
+}
+
+.ed-clip__suggest:hover {
+  filter: brightness(1.1);
+}
+
+.ed-clip__effect {
+  position: absolute;
+  left: 2px;
+  bottom: 2px;
+  padding: 0 3px;
+  border-radius: 3px;
+  font-size: 8px;
+  line-height: 1.4;
+  color: rgba(255, 255, 255, 0.85);
+  background: rgba(30, 41, 59, 0.8);
+  pointer-events: none;
+}
+
+.ed-toolbar__group .ed-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* 画布设置（导出面板） */
+.ed-canvas h5 {
+  margin: 8px 0 4px;
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.65);
+}
+
+.ed-bg-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+  flex-wrap: wrap;
+}
+
+.ed-bg-swatch {
+  width: 22px;
+  height: 22px;
+  border-radius: 5px;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  cursor: pointer;
+  padding: 0;
+}
+
+.ed-bg-swatch.is-on {
+  outline: 2px solid var(--desk-warn, #e8b04b);
+  outline-offset: 1px;
+}
+
+.ed-bg-custom {
+  width: 30px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  border-radius: 5px;
+  background: transparent;
+  cursor: pointer;
+}
+
+/* ── SE-EDIT: 预览画布直接操作手柄 ── */
+
+.ed-preview__stage {
+  position: relative;
+}
+
+.ed-cv {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 30;
+}
+
+.ed-cv > img {
+  position: absolute;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  visibility: hidden;
+}
+
+.ed-cv__box {
+  position: absolute;
+  border: 1.5px dashed rgba(232, 176, 75, 0.95);
+  background: rgba(232, 176, 75, 0.06);
+  pointer-events: auto;
+  cursor: move;
+  touch-action: none;
+  z-index: 31;
+}
+
+.ed-cv__box:hover {
+  border-style: solid;
+  background: rgba(232, 176, 75, 0.1);
+}
+
+.ed-cv__tag {
+  position: absolute;
+  left: 2px;
+  bottom: 2px;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-size: 9px;
+  color: #1c1917;
+  background: rgba(232, 176, 75, 0.9);
+  pointer-events: none;
+}
+
+.ed-cv__handle {
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #fbbf24;
+  border: 1.5px solid #1c1917;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #1c1917;
+  pointer-events: auto;
+  z-index: 32;
+}
+
+.ed-cv__handle--rotate {
+  top: -20px;
+  left: 50%;
+  margin-left: -7px;
+  cursor: grab;
+  background: #e0e7ff;
+}
+
+.ed-cv__handle--rotate::after {
+  content: '';
+  position: absolute;
+  top: -12px;
+  left: 50%;
+  width: 1.5px;
+  height: 13px;
+  background: rgba(232, 176, 75, 0.85);
+}
+
+.ed-cv__handle--scale {
+  right: -7px;
+  bottom: -7px;
+  cursor: nwse-resize;
+  border-radius: 3px;
+}
+
+/* ── 预览缩放 / 平移 ── */
+.ed-preview__zoom {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  transform-origin: center center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  touch-action: none;
+}
+
+.ed-preview__zoom-ctl {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: auto;
+  padding-left: 10px;
+  border-left: 1px solid var(--desk-line, rgba(255, 255, 255, 0.12));
+}
+
+.ed-preview__zoom-ctl .ed-icon-btn.is-on {
+  background: var(--desk-warn, #e8b04b);
+  color: #1c1917;
+}
+
+/* ── 贴纸 ── */
+.ed-bin__stickers {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+}
+
+.ed-bin__sticker {
+  aspect-ratio: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.05);
+  cursor: grab;
+}
+
+.ed-bin__sticker:hover {
+  border-color: var(--desk-warn, #e8b04b);
+}
+
+.ed-bin__sticker img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  pointer-events: none;
+}
+
+/* ── 检查器：动画 / 蒙版 / 混合模式 / 文件按钮 ── */
+.ed-anim-row {
+  margin-bottom: 6px;
+  padding: 6px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.ed-select {
+  width: 100%;
+  padding: 4px 6px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: var(--desk-panel, #1b1d22);
+  color: inherit;
+  font-size: 11px;
+}
+
+.ed-mini-select {
+  padding: 1px 2px;
+  font-size: 10px;
+  border-radius: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: var(--desk-panel, #1b1d22);
+  color: inherit;
+}
+
+.ed-btn--file {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.ed-btn--file input {
+  display: none;
+}
+
+.ed-hint--err {
+  color: #f87171;
+}
+
+.ed-replace__trace {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  padding: 8px;
+  border-radius: 8px;
+  background: rgba(94, 234, 212, 0.08);
+  border: 1px solid rgba(94, 234, 212, 0.25);
+}
+
+.ed-replace__trace input {
+  width: auto;
+}
+
+.ed-replace__trace span {
+  font-size: 11px;
+}

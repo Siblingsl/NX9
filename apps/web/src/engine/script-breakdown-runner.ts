@@ -206,7 +206,7 @@ export async function runProductionScriptBreakdown(args: {
 }): Promise<ScriptBreakdownPayload> {
   const runtime = useFlowRuntime.getState().runtime;
   const sourceText = args.sourceText.trim();
-  if (!sourceText) throw new Error('请先输入剧本原文');
+  if (!sourceText) throw new Error('请先输入剧本原文，禁止空成功');
   if (args.signal?.aborted) {
     const err = new DOMException('拆镜已取消', 'AbortError');
     throw err;
@@ -354,10 +354,10 @@ export async function runProductionScriptBreakdownForEpisodes(args: {
   signal?: AbortSignal;
 }): Promise<ScriptBreakdownPayload> {
   const runtime = useFlowRuntime.getState().runtime;
-  if (!args.episodes.length) throw new Error('请至少选择一集再生成');
+  if (!args.episodes.length) throw new Error('请至少选择一集再生成，禁止空成功');
   if (args.signal?.aborted) throw new DOMException('拆镜已取消', 'AbortError');
   const sliceText = composeEpisodeSourceText(args.episodes);
-  if (!sliceText.trim()) throw new Error('所选分集没有正文');
+  if (!sliceText.trim()) throw new Error('所选分集没有正文，禁止空成功');
   const config = normalizeScriptBreakdownConfig(args.config);
   const prompts = normalizeScriptBreakdownPrompts(args.prompts);
   const titles = args.episodes.map((ep) => ep.title.trim() || `第${ep.listIndex + 1}集`).join('、');
@@ -416,7 +416,7 @@ export async function runProductionScriptBreakdownForEpisodes(args: {
       };
     }
 
-    if (!existing) throw new Error('生成结果为空');
+    if (!existing) throw new Error('生成结果为空，禁止空成功');
     applyScriptBreakdownPayload(args.blockId, existing);
     useActivityLog.getState().append(
       `分集生成完成 · ${args.episodes.length} 集写入 / 本批 ${batchShotCount} 镜 · 全表 ${existing.episodes.length} 集`,

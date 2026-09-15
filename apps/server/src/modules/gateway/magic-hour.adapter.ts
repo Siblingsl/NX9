@@ -80,7 +80,7 @@ export class MagicHourAdapter {
 
   private headers(json = true): Record<string, string> {
     const key = this.apiKey();
-    if (!key) throw new BadRequestException('未配置 MAGIC_HOUR_API_KEY（apps/server/.env）');
+    if (!key) throw new BadRequestException('未配置 MAGIC_HOUR_API_KEY（apps/server/.env），禁止空成功');
     const h: Record<string, string> = {
       Authorization: `Bearer ${key}`,
       Accept: 'application/json',
@@ -124,7 +124,7 @@ export class MagicHourAdapter {
     try {
       return JSON.parse(text) as T;
     } catch {
-      throw new ServiceUnavailableException(`Magic Hour 返回非 JSON: ${text.slice(0, 200)}`);
+      throw new ServiceUnavailableException(`Magic Hour 返回非 JSON: ${text.slice(0, 200)}，禁止空成功`);
     }
   }
 
@@ -135,7 +135,7 @@ export class MagicHourAdapter {
     orientation?: MagicHourOrientation;
   }): Promise<{ id: string; creditsCharged?: number }> {
     const prompt = opts.prompt.trim();
-    if (!prompt) throw new BadRequestException('Image prompt is required');
+    if (!prompt) throw new BadRequestException('Image prompt is required，禁止空成功');
     const json = await this.request<{ id: string; credits_charged?: number }>(
       'POST',
       '/v1/ai-image-generator',
@@ -146,7 +146,7 @@ export class MagicHourAdapter {
         style: { prompt },
       },
     );
-    if (!json.id) throw new ServiceUnavailableException('Magic Hour 未返回 image project id');
+    if (!json.id) throw new ServiceUnavailableException('Magic Hour 未返回 image project id，禁止空成功');
     return { id: json.id, creditsCharged: json.credits_charged };
   }
 
@@ -164,7 +164,7 @@ export class MagicHourAdapter {
     audio?: boolean;
   }): Promise<{ id: string; creditsCharged?: number }> {
     const prompt = opts.prompt.trim();
-    if (!prompt) throw new BadRequestException('Video prompt is required');
+    if (!prompt) throw new BadRequestException('Video prompt is required，禁止空成功');
     const model = this.normalizeVideoModel(opts.model);
     const json = await this.request<{ id: string; credits_charged?: number }>(
       'POST',
@@ -179,7 +179,7 @@ export class MagicHourAdapter {
         style: { prompt },
       },
     );
-    if (!json.id) throw new ServiceUnavailableException('Magic Hour 未返回 video project id');
+    if (!json.id) throw new ServiceUnavailableException('Magic Hour 未返回 video project id，禁止空成功');
     return { id: json.id, creditsCharged: json.credits_charged };
   }
 
@@ -193,7 +193,7 @@ export class MagicHourAdapter {
     audio?: boolean;
   }): Promise<{ id: string; creditsCharged?: number }> {
     const prompt = opts.prompt.trim();
-    if (!prompt) throw new BadRequestException('Video prompt is required');
+    if (!prompt) throw new BadRequestException('Video prompt is required，禁止空成功');
     const model = this.normalizeVideoModel(opts.model);
     const json = await this.request<{ id: string; credits_charged?: number }>(
       'POST',
@@ -208,7 +208,7 @@ export class MagicHourAdapter {
         assets: { image_file_path: opts.imageFilePath },
       },
     );
-    if (!json.id) throw new ServiceUnavailableException('Magic Hour 未返回 video project id');
+    if (!json.id) throw new ServiceUnavailableException('Magic Hour 未返回 video project id，禁止空成功');
     return { id: json.id, creditsCharged: json.credits_charged };
   }
 
@@ -219,7 +219,7 @@ export class MagicHourAdapter {
   /** Upload a local /media/... file (or remote http URL) and return Magic Hour file_path. */
   async resolveImageFilePath(imageUrl: string): Promise<string> {
     const url = imageUrl.trim();
-    if (!url) throw new BadRequestException('imageUrl is required');
+    if (!url) throw new BadRequestException('imageUrl is required，禁止空成功');
 
     // Already a Magic Hour asset path
     if (url.startsWith('api-assets/') || url.startsWith('video/') || url.startsWith('image/')) {
@@ -234,7 +234,7 @@ export class MagicHourAdapter {
     const local = resolveMediaUrl(url);
     if (!local || !existsSync(local)) {
       throw new BadRequestException(
-        `Magic Hour 无法读取参考图（需本地 /media/... 或公网 URL）: ${url}`,
+        `Magic Hour 无法读取参考图，禁止空成功（需本地 /media/... 或公网 URL）: ${url}`,
       );
     }
 
@@ -246,7 +246,7 @@ export class MagicHourAdapter {
     });
     const item = upload.items?.[0];
     if (!item?.upload_url || !item.file_path) {
-      throw new ServiceUnavailableException('Magic Hour upload-urls 返回为空');
+      throw new ServiceUnavailableException('Magic Hour upload-urls 返回为空，禁止空成功');
     }
 
     const buf = readFileSync(local);

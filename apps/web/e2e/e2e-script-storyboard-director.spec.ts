@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { createCanvasProject } from './helpers';
 
 const breakdownPayload = {
   version: 1,
@@ -51,16 +52,6 @@ async function mockProductionApis(page: import('@playwright/test').Page, options
   await page.route('**/api/gateway/video/poll', async (route) => {
     await route.fulfill({ json: { ok: true, status: 'success', url: 'https://mock.nx9/video-1.mp4' } });
   });
-}
-
-async function createCanvasProject(page: import('@playwright/test').Page) {
-  await page.goto('/');
-  await page.getByRole('button', { name: /新建|New/i }).first().click();
-  const projectTitle = (await page.getByRole('textbox', { name: '项目名称' }).inputValue()).trim();
-  await page.getByRole('button', { name: /创建并开始制作/i }).click();
-  await page.getByRole('button', { name: /前往画布/i }).click();
-  await expect(page.getByRole('button', { name: '打开编剧台' }).first()).toBeVisible({ timeout: 15_000 });
-  return projectTitle;
 }
 
 test.describe('编剧台 → 分镜台 → 导演台 → 视频生成浏览器链路', () => {

@@ -14,6 +14,8 @@ import {
 import { setMediaPinDragData } from '../../../../../media-pin-drag';
 import type { PictureGenerationHistoryEntry } from '../../../../../picture-gen-history';
 import { ComposerPopover } from '../../composer/ComposerPopover';
+import { PanoramaViewer } from '../../../../../../blocks/shared/PanoramaViewer';
+import '../../../../../../blocks/utility/media-pin.css';
 
 function stop(e: React.SyntheticEvent) {
   e.stopPropagation();
@@ -63,6 +65,8 @@ export interface PictureResultGalleryProps {
   compiledPrompt?: string;
   /** 每张生成图自己的发送稿（url → prompt） */
   compiledPromptsByUrl?: Record<string, string>;
+  /** 720° 全景：主预览与放大用球幕查看器，而非扁图 */
+  panoramaMode?: boolean;
   /** @deprecated 空列表直接不渲染，保留以免调用方报错 */
   emptyHint?: string;
   showLabel?: boolean;
@@ -84,6 +88,7 @@ export function PictureResultGallery({
   sourceBlockId,
   compiledPrompt,
   compiledPromptsByUrl,
+  panoramaMode = false,
   showLabel = true,
 }: PictureResultGalleryProps) {
   const [lightbox, setLightbox] = useState<string | null>(null);
@@ -284,6 +289,15 @@ export function PictureResultGallery({
           ) : null}
         </div>
       )}
+      {selectedUrl && panoramaMode ? (
+        <div
+          className="mb-1.5 overflow-hidden rounded-lg border border-line/30"
+          style={{ height: 160 }}
+          onMouseDown={stop}
+        >
+          <PanoramaViewer url={selectedUrl} className="nx9-panorama-viewer--fill" />
+        </div>
+      ) : null}
       <div className="flex items-center gap-1.5 overflow-x-auto nx9-scroll nx9-picture-strip-scroll pb-0.5">
         {urls.map((url, i) => {
           const active = i === selectedIndex;
@@ -415,12 +429,21 @@ export function PictureResultGallery({
           onClick={() => setLightbox(null)}
           onMouseDown={stop}
         >
-          <img
-            src={lightbox}
-            alt=""
-            className="max-w-full max-h-full rounded-xl shadow-2xl object-contain"
-            onClick={(e) => e.stopPropagation()}
-          />
+          {panoramaMode ? (
+            <div
+              className="w-full max-w-4xl h-[70vh] rounded-xl overflow-hidden shadow-2xl"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <PanoramaViewer url={lightbox} className="nx9-panorama-viewer--fill" />
+            </div>
+          ) : (
+            <img
+              src={lightbox}
+              alt=""
+              className="max-w-full max-h-full rounded-xl shadow-2xl object-contain"
+              onClick={(e) => e.stopPropagation()}
+            />
+          )}
         </div>
       )}
 

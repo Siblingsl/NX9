@@ -1,19 +1,13 @@
 /**
  * UsagePanel — Token 用量仪表（F-009）。
  *
- * 展示近 7/30/90 日用量统计，按模型/类型/日聚合。
+ * 展示近 7/30/90 日用量统计，按模型/类型/日聚合；可按当前项目过滤。
  * 入口：设置抽屉 / 命令面板。
  */
 import { memo, useEffect, useMemo, useState } from 'react';
 import { BarChart3, Loader2, TrendingUp } from 'lucide-react';
 import { api } from '../api/client';
-
-interface UsageSummaryResponse {
-  totalEvents: number;
-  byKind: Record<string, number>;
-  estimatedCostUnits: number;
-  periodDays: number;
-}
+import { getCurrentWorkspaceId } from '../api/workspace-context';
 
 type UsageSummary = Awaited<ReturnType<typeof api.usageSummary>>;
 type UsageRecentItem = Awaited<ReturnType<typeof api.usageRecent>>[number];
@@ -33,6 +27,8 @@ const KIND_COLORS: Record<string, string> = {
   tts: '#1E3A5F',
 };
 
+type Scope = 'all' | 'project';
+
 export const UsagePanel = memo(function UsagePanel() {
   const [summary, setSummary] = useState<UsageSummary | null>(null);
   const [recent, setRecent] = useState<UsageRecentItem[]>([]);
@@ -41,16 +37,34 @@ export const UsagePanel = memo(function UsagePanel() {
   const [error, setError] = useState<string | null>(null);
   const [days, setDays] = useState(7);
   const [chartMode, setChartMode] = useState<'bar' | 'line'>('bar');
+  const [scope, setScope] = useState<Scope>('all');
+  const [workspaceId, setWorkspaceId] = useState<string | null>(() => getCurrentWorkspaceId());
+
+  useEffect(() => {
+    setWorkspaceId(getCurrentWorkspaceId());
+  }, [scope, days]);
 
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
     setError(null);
 
+    const wsFilter = scope === 'project' ? (workspaceId ?? undefined) : undefined;
+    if (scope === 'project' && !wsFilter) {
+      setSummary(null);
+      setRecent([]);
+      setDaily([]);
+      setError('当前无打开项目，无法按项目过滤');
+      setLoading(false);
+      return () => {
+        cancelled = true;
+      };
+    }
+
     Promise.all([
-      api.usageSummary(days),
-      api.usageRecent(30),
-      api.usageDaily(days),
+      api.usageSummary(days, undefined, wsFilter),
+      api.usageRecent(50, undefined, wsFilter),
+      api.usageDaily(days, undefined, wsFilter),
     ] as const)
       .then(([s, r, d]) => {
         if (cancelled) return;
@@ -66,12 +80,20 @@ export const UsagePanel = memo(function UsagePanel() {
         if (!cancelled) setLoading(false);
       });
 
-    return () => { cancelled = true; };
-  }, [days]);
+    return () => {
+      cancelled = true;
+    };
+  }, [days, scope, workspaceId]);
 
   const totalByKind = summary?.byKind ?? {};
   const kindEntries = Object.entries(totalByKind).sort((a, b) => (b[1] ?? 0) - (a[1] ?? 0));
   const maxCount = Math.max(...kindEntries.map(([, count]) => count), 1);
+
+  const modelEntries = useMemo(() => {
+    const byModel = summary?.byModel ?? {};
+    return Object.entries(byModel).sort((a, b) => b[1] - a[1]);
+  }, [summary]);
+  const maxModel = modelEntries[0]?.[1] ?? 1;
 
   // F-009: 按日聚合数据，供折线/柱状图
   const dailyByDay = useMemo(() => {
@@ -88,22 +110,59 @@ export const UsagePanel = memo(function UsagePanel() {
   const dailyMaxTotal = Math.max(...dailyByDay.map(([, v]) => v.total), 1);
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
+    <div className="space-y-4" data-testid="usage-panel">
+      <div className="flex items-center justify-between gap-2 flex-wrap">
         <h2 className="text-sm font-semibold text-ink flex items-center gap-1.5">
           <BarChart3 size={14} className="text-brand" />
           Token 用量仪表
         </h2>
-        <select
-          value={days}
-          onChange={(e) => setDays(Number(e.target.value))}
-          className="rounded-lg border border-line px-2 py-1 text-[10px] bg-surface"
-        >
-          <option value={7}>近 7 天</option>
-          <option value={30}>近 30 天</option>
-          <option value={90}>近 90 天</option>
-        </select>
+        <div className="flex items-center gap-1.5">
+          <div
+            className="inline-flex rounded-lg border border-line overflow-hidden"
+            data-testid="usage-scope-toggle"
+            role="group"
+            aria-label="用量范围"
+          >
+            <button
+              type="button"
+              data-testid="usage-scope-all"
+              className={`px-2 py-1 text-[10px] ${
+                scope === 'all' ? 'bg-brand/15 text-brand' : 'text-ink/50 hover:text-ink'
+              }`}
+              onClick={() => setScope('all')}
+            >
+              全部
+            </button>
+            <button
+              type="button"
+              data-testid="usage-scope-project"
+              className={`px-2 py-1 text-[10px] border-l border-line ${
+                scope === 'project' ? 'bg-brand/15 text-brand' : 'text-ink/50 hover:text-ink'
+              }`}
+              onClick={() => setScope('project')}
+              title={workspaceId ? `项目 ${workspaceId}` : '需先打开项目'}
+            >
+              当前项目
+            </button>
+          </div>
+          <select
+            value={days}
+            onChange={(e) => setDays(Number(e.target.value))}
+            className="rounded-lg border border-line px-2 py-1 text-[10px] bg-surface"
+            data-testid="usage-days-select"
+          >
+            <option value={7}>近 7 天</option>
+            <option value={30}>近 30 天</option>
+            <option value={90}>近 90 天</option>
+          </select>
+        </div>
       </div>
+
+      {scope === 'project' && workspaceId && (
+        <p className="text-[9px] text-ink/40" data-testid="usage-project-hint">
+          已按当前项目过滤 · {workspaceId.slice(0, 8)}…
+        </p>
+      )}
 
       {loading && (
         <div className="flex items-center justify-center py-8">
@@ -120,7 +179,7 @@ export const UsagePanel = memo(function UsagePanel() {
       {!loading && !error && summary && (
         <>
           {/* 概览卡片 */}
-          <div className="grid grid-cols-3 gap-2">
+          <div className="grid grid-cols-3 gap-2" data-testid="usage-summary-cards">
             <div className="rounded-xl border border-line/50 bg-surface/30 p-3 text-center">
               <p className="text-[9px] text-ink/40 uppercase tracking-wide">总调用</p>
               <p className="text-lg font-bold text-ink mt-0.5">{summary.totalEvents}</p>
@@ -139,7 +198,7 @@ export const UsagePanel = memo(function UsagePanel() {
           </div>
 
           {/* F-009: 按日聚合折线/柱状图 */}
-          <div className="space-y-1.5">
+          <div className="space-y-1.5" data-testid="usage-daily-chart">
             <div className="flex items-center justify-between">
               <p className="text-[10px] font-medium text-ink/50">按日期</p>
               <button
@@ -172,12 +231,11 @@ export const UsagePanel = memo(function UsagePanel() {
                         style={{
                           height: `${h}%`,
                           background: chartMode === 'line'
-                            ? '#6366F1'
-                            : `linear-gradient(to top, #6366F1, #818CF8)`,
+                            ? '#0F766E'
+                            : `linear-gradient(to top, #0F766E, #14B8A6)`,
                           opacity: chartMode === 'line' ? 0.85 : 1,
                         }}
                       />
-                      {/* tooltip */}
                       <div className="absolute bottom-full mb-1 hidden group-hover:block bg-surface border border-line rounded px-1.5 py-0.5 text-[8px] text-ink/70 whitespace-nowrap z-10">
                         {day.slice(5)} · {val.total}次
                       </div>
@@ -186,7 +244,6 @@ export const UsagePanel = memo(function UsagePanel() {
                 })}
               </div>
             )}
-            {/* 日期标签 */}
             {dailyByDay.length > 0 && (
               <div className="flex justify-between text-[7px] text-ink/25 px-0.5">
                 <span>{dailyByDay[0]?.[0]?.slice(5)}</span>
@@ -196,7 +253,7 @@ export const UsagePanel = memo(function UsagePanel() {
           </div>
 
           {/* 按类型柱状图 */}
-          <div className="space-y-1.5">
+          <div className="space-y-1.5" data-testid="usage-by-kind">
             <p className="text-[10px] font-medium text-ink/50">按类型</p>
             {kindEntries.map(([kind, count]) => (
               <div key={kind} className="flex items-center gap-2">
@@ -220,41 +277,34 @@ export const UsagePanel = memo(function UsagePanel() {
             )}
           </div>
 
-          {/* F-009: 按模型聚合 */}
-          {recent.length > 0 && (() => {
-            const byModel: Record<string, number> = {};
-            for (const ev of recent) {
-              const key = ev.model || '未知';
-              byModel[key] = (byModel[key] ?? 0) + ev.units;
-            }
-            const modelEntries = Object.entries(byModel).sort((a, b) => b[1] - a[1]);
-            const maxModel = modelEntries[0]?.[1] ?? 1;
-            return (
-              <div className="space-y-1.5">
-                <p className="text-[10px] font-medium text-ink/50">按模型</p>
-                {modelEntries.map(([model, units]) => (
-                  <div key={model} className="flex items-center gap-2">
-                    <span className="w-24 text-[9px] text-ink/60 truncate shrink-0" title={model}>
-                      {model}
-                    </span>
-                    <div className="flex-1 h-3 rounded-full bg-surface/50 overflow-hidden">
-                      <div
-                        className="h-full rounded-full"
-                        style={{
-                          width: `${(units / maxModel) * 100}%`,
-                          background: '#6366F1',
-                        }}
-                      />
-                    </div>
-                    <span className="w-10 text-right text-[9px] text-ink/40">{units}</span>
+          {/* F-009: 按模型聚合（来自 summary.byModel，覆盖全周期） */}
+          <div className="space-y-1.5" data-testid="usage-by-model">
+            <p className="text-[10px] font-medium text-ink/50">按模型</p>
+            {modelEntries.length === 0 ? (
+              <p className="text-[10px] text-ink/30 text-center py-3">暂无调用记录</p>
+            ) : (
+              modelEntries.map(([model, units]) => (
+                <div key={model} className="flex items-center gap-2">
+                  <span className="w-24 text-[9px] text-ink/60 truncate shrink-0" title={model}>
+                    {model}
+                  </span>
+                  <div className="flex-1 h-3 rounded-full bg-surface/50 overflow-hidden">
+                    <div
+                      className="h-full rounded-full"
+                      style={{
+                        width: `${(units / maxModel) * 100}%`,
+                        background: '#0F766E',
+                      }}
+                    />
                   </div>
-                ))}
-              </div>
-            );
-          })()}
+                  <span className="w-10 text-right text-[9px] text-ink/40">{units}</span>
+                </div>
+              ))
+            )}
+          </div>
 
           {/* 最近事件 */}
-          <div className="space-y-1">
+          <div className="space-y-1" data-testid="usage-recent">
             <p className="text-[10px] font-medium text-ink/50">最近调用</p>
             {recent.length === 0 ? (
               <p className="text-[10px] text-ink/30 text-center py-3">暂无调用记录</p>

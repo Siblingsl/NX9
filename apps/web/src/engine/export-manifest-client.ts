@@ -20,9 +20,13 @@ export async function generateManifestCsv(
   });
   if (!res.ok) {
     const text = await res.text().catch(() => res.statusText);
-    throw new Error(`CSV 生成失败: ${text}`);
+    throw new Error(`CSV 生成失败，禁止空成功: ${text}`);
   }
-  return res.json();
+  const body = (await res.json()) as ManifestGenerateResult;
+  if (!String(body?.url ?? '').trim()) {
+    throw new Error('CSV 清单未返回下载地址，禁止空成功');
+  }
+  return body;
 }
 
 export async function generateManifestPdf(
@@ -37,7 +41,11 @@ export async function generateManifestPdf(
   });
   if (!res.ok) {
     const text = await res.text().catch(() => res.statusText);
-    throw new Error(`PDF 生成失败: ${text}`);
+    throw new Error(`PDF 生成失败，禁止空成功: ${text}`);
   }
-  return res.json();
+  const body = (await res.json()) as ManifestGenerateResult;
+  if (!String(body?.url ?? '').trim()) {
+    throw new Error('PDF 清单未返回下载地址，禁止空成功');
+  }
+  return body;
 }

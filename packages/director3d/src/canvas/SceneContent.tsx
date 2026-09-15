@@ -111,7 +111,18 @@ function SceneObject({
 }) {
   const groupRef = useRef<Group>(null);
   const transformMode = useDirectorStore((s) => s.transformMode);
+  const interactionMode = useDirectorStore((s) => s.interactionMode);
   const updateTransform = useDirectorStore((s) => s.updateObjectTransform);
+  const dragging = useRef(false);
+  const planeY = useRef(0);
+  const { gl, camera } = useThree();
+
+  useEffect(() => {
+    if (interactionMode !== 'subject') {
+      dragging.current = false;
+      gl.domElement.style.cursor = '';
+    }
+  }, [interactionMode, gl]);
 
   if (!object.visible) return null;
 
@@ -133,6 +144,24 @@ function SceneObject({
     });
   };
 
+  const subjectDrag = interactionMode === 'subject' && !object.locked;
+
+  const projectToGround = (clientX: number, clientY: number) => {
+    const rect = gl.domElement.getBoundingClientRect();
+    const ndcX = ((clientX - rect.left) / rect.width) * 2 - 1;
+    const ndcY = -((clientY - rect.top) / rect.height) * 2 + 1;
+    const from = new Vector3(ndcX, ndcY, 0).unproject(camera);
+    const to = new Vector3(ndcX, ndcY, 1).unproject(camera);
+    const dir = to.sub(from).normalize();
+    if (Math.abs(dir.y) < 1e-6) return null;
+    const t = (planeY.current - from.y) / dir.y;
+    if (t < 0) return null;
+    return {
+      x: from.x + dir.x * t,
+      z: from.z + dir.z * t,
+    };
+  };
+
   return (
     <>
       <group
@@ -144,12 +173,37 @@ function SceneObject({
           e.stopPropagation();
           onSelect();
         }}
+        onPointerDown={(e) => {
+          if (!subjectDrag) return;
+          e.stopPropagation();
+          onSelect();
+          dragging.current = true;
+          planeY.current = groupRef.current?.position.y ?? py;
+          gl.domElement.style.cursor = 'grabbing';
+          const onMove = (ev: PointerEvent) => {
+            if (!dragging.current || !groupRef.current) return;
+            const hit = projectToGround(ev.clientX, ev.clientY);
+            if (!hit) return;
+            groupRef.current.position.x = hit.x;
+            groupRef.current.position.z = hit.z;
+            sync();
+          };
+          const onUp = () => {
+            dragging.current = false;
+            gl.domElement.style.cursor = '';
+            window.removeEventListener('pointermove', onMove);
+            window.removeEventListener('pointerup', onUp);
+          };
+          window.addEventListener('pointermove', onMove);
+          window.addEventListener('pointerup', onUp);
+        }}
       >
         {object.kind === 'character' ? (
           <StageActor
             color={object.color}
             bodyType={object.bodyType as CharacterBodyType}
             posePresetId={object.posePresetId}
+            poseJoints={object.poseJoints}
             faceRig={object.faceRig}
           />
         ) : object.kind === 'mesh' && object.meshUrl ? (
@@ -160,7 +214,7 @@ function SceneObject({
       </group>
       <ObjectGizmo
         groupRef={groupRef}
-        enabled={selected && !object.locked}
+        enabled={selected && !object.locked && interactionMode !== 'navigate'}
         mode={transformMode}
         onChange={sync}
       />

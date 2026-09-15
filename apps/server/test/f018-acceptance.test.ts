@@ -104,7 +104,10 @@ describe('F-018 导演台多机位预设', () => {
     expect(bar).toContain('p.name');
     expect(bar).toContain('p.position');
     expect(bar).toContain('applyCamera');
-    expect(store).toContain('cameraPrompt: buildCameraPrompt(camera)');
+    expect(store).toContain('buildCameraPrompt(camera');
+    expect(store).toContain('skinCameraPrompt(basePrompt');
+    expect(store).toContain('cameraPrompt:');
+    expect(store).toContain('cameraMove');
   });
 
   it('用户预设保存时含 captureUrl', () => {

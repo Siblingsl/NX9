@@ -42,4 +42,5 @@ export interface AppSettings {
     preferences?: AppPreferences;
     bgmProvider?: string;
     bgmApiKey?: string;
+    bgmBaseUrl?: string;
 }

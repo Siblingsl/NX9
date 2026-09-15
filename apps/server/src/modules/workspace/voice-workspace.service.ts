@@ -22,7 +22,7 @@ export class VoiceWorkspaceService {
     const payload = await this.workspaces.load(workspaceId);
     if (body?.voice) payload.voice = body.voice;
     if (!payload.voice?.lines?.length) {
-      throw new BadRequestException('No voice lines in workspace');
+      throw new BadRequestException('No voice lines in workspace，禁止空成功');
     }
 
     const voice = payload.voice;

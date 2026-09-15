@@ -6,6 +6,7 @@ import { ComposerWorkspaceShell } from '../composer/ComposerWorkspaceShell';
 import { useAttachedNodeData } from '../generation/use-attached-node-data';
 import { useActivityLog } from '../../../../../stores/activity-log';
 import { api } from '../../../../../api/client';
+import { toastError } from '../../../../../stores/toast';
 
 export interface GridComposeWorkspaceProps {
   blockId: string;
@@ -32,11 +33,14 @@ export function GridComposeWorkspace({ blockId, kind, onCollapse }: GridComposeW
     async (file: File) => {
       try {
         const res = await api.uploadAsset(file);
+        if (!res?.url) throw new Error('上传失败，禁止空成功');
         const next = [...uploadedUrls, res.url];
         updateNodeData(blockId, { uploadedUrls: next, imageUrls: next });
         appendLog(`已上传: ${file.name}`);
       } catch (e) {
-        appendLog(`上传失败: ${String(e)}`);
+        const msg = `上传失败: ${String(e)}`;
+        appendLog(msg);
+        toastError(msg);
       }
     },
     [uploadedUrls, blockId, updateNodeData, appendLog],
@@ -52,12 +56,16 @@ export function GridComposeWorkspace({ blockId, kind, onCollapse }: GridComposeW
 
   const run = useCallback(async () => {
     if (allUrls.length === 0) {
-      appendLog('宫格拼接：请上传图片或连接上游');
+      const msg = '宫格拼接：请上传图片或连接上游，禁止空成功';
+      updateNodeData(blockId, { status: 'error', error: msg });
+      appendLog(msg);
+      toastError(msg);
       return;
     }
     updateNodeData(blockId, { status: 'running' });
     try {
       const res = await api.gridCompose({ imageUrls: allUrls, rows, cols });
+      if (!res.ok || !res.url) throw new Error('宫格合成失败，禁止空成功');
       updateNodeData(blockId, {
         status: 'success',
         composedUrl: res.url,
@@ -65,8 +73,10 @@ export function GridComposeWorkspace({ blockId, kind, onCollapse }: GridComposeW
       });
       appendLog('宫格拼接完成');
     } catch (e) {
+      const msg = `宫格拼接失败: ${String(e)}`;
       updateNodeData(blockId, { status: 'error', error: String(e) });
-      appendLog(`宫格拼接失败: ${String(e)}`);
+      appendLog(msg);
+      toastError(msg);
     }
   }, [allUrls, rows, cols, blockId, updateNodeData, appendLog]);
 

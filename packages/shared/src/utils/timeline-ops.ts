@@ -1,4 +1,5 @@
 import type {
+  TimelineBackground,
   TimelineClip,
   TimelinePayload,
   TimelineTrack,
@@ -11,6 +12,7 @@ import {
   splitVolumeKeyframes,
   upsertVolumeKeyframe,
 } from './timeline-volume';
+import { splitAnimKeyframes } from './timeline-anim';
 
 /** 片段最小时长（秒） */
 export const MIN_CLIP_SEC = 0.1;
@@ -45,7 +47,14 @@ export type TimelineOp =
   | { op: 'set-volume-keyframe'; clipId: string; atSec: number; volume: number }
   | { op: 'remove-volume-keyframe'; clipId: string; atSec: number }
   /** 智能替换回写：换素材并记录溯源 */
-  | { op: 'replace-clip-asset'; clipId: string; assetUrl: string; replacedFrom?: string; takeId?: string };
+  | { op: 'replace-clip-asset'; clipId: string; assetUrl: string; replacedFrom?: string; takeId?: string }
+  /** 时间线级元数据（画幅/画布背景/标题）；不触发片段级重算；background: null = 清除背景 */
+  | {
+      op: 'set-timeline-meta';
+      patch: Partial<Pick<TimelinePayload, 'aspect' | 'width' | 'height' | 'title'>> & {
+        background?: TimelineBackground | null;
+      };
+    };
 
 export interface ClipLocation {
   track: TimelineTrack;
@@ -98,6 +107,69 @@ function maxDurationBySource(clip: TimelineClip): number {
   return Math.max(MIN_CLIP_SEC, remain / speed);
 }
 
+/** 同轨在片段 startSec 之前的最近片段结束点；无则 0 */
+function prevClipEnd(track: TimelineTrack, clipId: string, startSec: number): number {
+  let end = 0;
+  for (const c of track.clips) {
+    if (c.id === clipId) continue;
+    const e = c.startSec + c.durationSec;
+    if (e <= startSec + 1e-6 && e > end) end = e;
+  }
+  return end;
+}
+
+/** 同轨在片段 startSec 之后最近的片段起点；无则 Infinity */
+function nextClipStart(track: TimelineTrack, clipId: string, startSec: number): number {
+  let s = Number.POSITIVE_INFINITY;
+  for (const c of track.clips) {
+    if (c.id === clipId) continue;
+    if (c.startSec >= startSec - 1e-6 && c.startSec < s) s = c.startSec;
+  }
+  return s;
+}
+
+/**
+ * SE-EDIT-01：把 [start, start+dur) 约束到目标轨的空隙内（不与任何其它片段重叠）。
+ * 与 OpenCut 同轨防重叠一致：拖移/延伸不能压到相邻片段。
+ * - 请求位置本就在空隙内 → 原样返回；
+ * - 否则 → 就近贴近最近的「放得下」的空隙（优先右侧推入，其次左侧拉回）。
+ */
+export function clampStartToTrackGap(
+  track: TimelineTrack,
+  clipId: string,
+  start: number,
+  durationSec: number,
+): number {
+  const dur = Math.max(MIN_CLIP_SEC, durationSec);
+  const others = track.clips
+    .filter((c) => c.id !== clipId)
+    .sort((a, b) => a.startSec - b.startSec);
+  const gaps: Array<{ s: number; e: number }> = [];
+  let cursor = 0;
+  for (const o of others) {
+    if (o.startSec > cursor + 1e-6) gaps.push({ s: cursor, e: o.startSec });
+    cursor = Math.max(cursor, o.startSec + o.durationSec);
+  }
+  gaps.push({ s: cursor, e: Number.POSITIVE_INFINITY });
+
+  const raw = Math.max(0, start);
+  for (const g of gaps) {
+    if (raw >= g.s - 1e-6 && raw + dur <= g.e + 1e-6) return round3(raw);
+  }
+  let best = raw;
+  let bestDist = Number.POSITIVE_INFINITY;
+  for (const g of gaps) {
+    if (g.e - g.s + 1e-6 < dur) continue; // 空隙放不下
+    const pushIn = Math.max(g.s, Math.min(g.e - dur, raw));
+    const dist = Math.abs(pushIn - raw);
+    if (dist < bestDist) {
+      bestDist = dist;
+      best = pushIn;
+    }
+  }
+  return bestDist === Number.POSITIVE_INFINITY ? round3(raw) : round3(Math.max(0, best));
+}
+
 export function applyTimelineOp(timeline: TimelinePayload, op: TimelineOp): TimelinePayload {
   switch (op.op) {
     case 'set-transition': {
@@ -141,11 +213,16 @@ export function applyTimelineOp(timeline: TimelinePayload, op: TimelineOp): Time
       if (!loc) return timeline;
       const startSec = round3(Math.max(0, op.startSec));
       if (!op.toTrackId || op.toTrackId === loc.track.id) {
-        return withDuration(replaceClip(timeline, op.clipId, (c) => ({ ...c, startSec })));
+        // SE-EDIT-01: 同轨移动 clamp 到空隙，避免与相邻片段重叠
+        const clamped = clampStartToTrackGap(loc.track, op.clipId, startSec, loc.clip.durationSec);
+        return withDuration(replaceClip(timeline, op.clipId, (c) => ({ ...c, startSec: clamped })));
       }
       const target = timeline.tracks.find((t) => t.id === op.toTrackId);
       if (!target || target.kind !== loc.track.kind || target.locked) return timeline;
-      const moved = { ...loc.clip, startSec };
+      const moved = {
+        ...loc.clip,
+        startSec: clampStartToTrackGap(target, op.clipId, startSec, loc.clip.durationSec),
+      };
       return withDuration({
         ...timeline,
         tracks: timeline.tracks.map((track) => {
@@ -168,17 +245,18 @@ export function applyTimelineOp(timeline: TimelinePayload, op: TimelineOp): Time
       if (!loc) return timeline;
       const clip = loc.clip;
       const speed = clip.speed ?? 1;
-      const maxDur = maxDurationBySource(clip);
+      const maxDur = Math.min(maxDurationBySource(clip), nextClipStart(loc.track, clip.id, clip.startSec) - clip.startSec);
 
       if (op.edge === 'start') {
         // 左边缘：delta>0 向右收（掐头），delta<0 向左放
         let delta = op.deltaSec;
         // 不越过右边缘
         delta = Math.min(delta, clip.durationSec - MIN_CLIP_SEC);
-        // 入点不为负、不早于 0 时刻
+        // 入点不为负、不早于 0 时刻、不越过上一片段右边缘（SE-EDIT-01）
         const minDelta = Math.max(
           -(clip.trimInSec ?? 0) / speed,
           -clip.startSec,
+          prevClipEnd(loc.track, clip.id, clip.startSec) - clip.startSec,
         );
         delta = Math.max(delta, minDelta);
         if (delta === 0) return timeline;
@@ -192,7 +270,7 @@ export function applyTimelineOp(timeline: TimelinePayload, op: TimelineOp): Time
         );
       }
 
-      // 右边缘：delta>0 向右放，delta<0 收尾
+      // 右边缘：delta>0 向右放，delta<0 收尾；不越过下一片段起点（SE-EDIT-01）
       let newDur = clip.durationSec + op.deltaSec;
       newDur = Math.max(MIN_CLIP_SEC, Math.min(newDur, maxDur));
       if (newDur === clip.durationSec) return timeline;
@@ -210,11 +288,13 @@ export function applyTimelineOp(timeline: TimelinePayload, op: TimelineOp): Time
       const speed = clip.speed ?? 1;
       const rightId = op.newClipId ?? makeSplitClipId(timeline, clip.id);
       const splitKeys = splitVolumeKeyframes(clip.volumeKeyframes, rel);
+      const splitAnims = splitAnimKeyframes(clip.animations, rel);
       const left: TimelineClip = {
         ...clip,
         durationSec: round3(rel),
         transitionOut: undefined,
         volumeKeyframes: splitKeys.left,
+        animations: splitAnims.left,
       };
       const right: TimelineClip = {
         ...clip,
@@ -224,6 +304,7 @@ export function applyTimelineOp(timeline: TimelinePayload, op: TimelineOp): Time
         trimInSec: round3((clip.trimInSec ?? 0) + rel * speed),
         fadeInSec: undefined,
         volumeKeyframes: splitKeys.right,
+        animations: splitAnims.right,
       };
       // 左半段不再淡出
       left.fadeOutSec = undefined;
@@ -329,6 +410,18 @@ export function applyTimelineOp(timeline: TimelinePayload, op: TimelineOp): Time
           ...(op.takeId ? { takeId: op.takeId } : {}),
         })),
       );
+    }
+
+    case 'set-timeline-meta': {
+      const { aspect, width, height, background, title } = op.patch;
+      return {
+        ...timeline,
+        ...(aspect !== undefined ? { aspect } : {}),
+        ...(width !== undefined && width > 0 ? { width: Math.round(width) } : {}),
+        ...(height !== undefined && height > 0 ? { height: Math.round(height) } : {}),
+        ...(background !== undefined ? { background: background ?? undefined } : {}),
+        ...(title !== undefined && title.trim() ? { title: title.trim() } : {}),
+      };
     }
 
     default:

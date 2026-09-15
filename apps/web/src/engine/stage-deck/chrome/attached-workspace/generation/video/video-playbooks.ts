@@ -29,7 +29,7 @@ export const VIDEO_PLAYBOOK_CATEGORIES: VideoPlaybookCategoryDef[] = [
 
 function byId(id: string): ReferencePlaybookDef {
   const pb = BUILTIN_REFERENCE_PLAYBOOKS.find((p) => p.id === id);
-  if (!pb) throw new Error(`missing playbook ${id}`);
+  if (!pb) throw new Error(`missing playbook ${id}，禁止空成功`);
   return pb;
 }
 

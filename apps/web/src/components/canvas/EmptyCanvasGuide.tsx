@@ -7,19 +7,27 @@
 import { memo, useEffect, useState } from 'react';
 import { Sparkles, LayoutGrid, Command } from 'lucide-react';
 
-const STORAGE_KEY = 'nx9.canvas.onboarded';
+export const CANVAS_ONBOARD_STORAGE_KEY = 'nx9.canvas.onboarded';
 
-function hasOnboarded(): boolean {
+export function hasCanvasOnboarded(): boolean {
   try {
-    return localStorage.getItem(STORAGE_KEY) === '1';
+    return localStorage.getItem(CANVAS_ONBOARD_STORAGE_KEY) === '1';
   } catch {
     return false;
   }
 }
 
-function markOnboarded() {
+export function markCanvasOnboarded() {
   try {
-    localStorage.setItem(STORAGE_KEY, '1');
+    localStorage.setItem(CANVAS_ONBOARD_STORAGE_KEY, '1');
+  } catch {
+    /* noop */
+  }
+}
+
+export function clearCanvasOnboarded() {
+  try {
+    localStorage.removeItem(CANVAS_ONBOARD_STORAGE_KEY);
   } catch {
     /* noop */
   }
@@ -39,7 +47,7 @@ export const EmptyCanvasGuide = memo(function EmptyCanvasGuide({
   const [visible, setVisible] = useState(false);
 
   useEffect(() => {
-    if (nodeCount === 0 && !hasOnboarded()) {
+    if (nodeCount === 0 && !hasCanvasOnboarded()) {
       setVisible(true);
     } else {
       setVisible(false);
@@ -49,12 +57,15 @@ export const EmptyCanvasGuide = memo(function EmptyCanvasGuide({
   if (!visible) return null;
 
   const handleDismiss = () => {
-    markOnboarded();
+    markCanvasOnboarded();
     setVisible(false);
   };
 
   return (
-    <div className="absolute inset-0 z-10 flex items-center justify-center pointer-events-none">
+    <div
+      className="absolute inset-0 z-10 flex items-center justify-center pointer-events-none"
+      data-testid="empty-canvas-guide"
+    >
       <div className="pointer-events-auto max-w-sm w-full mx-4">
         <div className="rounded-2xl border border-brand/20 bg-surface/95 backdrop-blur-sm shadow-xl p-6 space-y-4">
           <h3 className="text-base font-bold text-ink tracking-tight">欢迎使用画布</h3>

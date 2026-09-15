@@ -33,7 +33,7 @@ export const TrashPanel = memo(function TrashPanel({
     setLoading(true);
     try {
       const res = await fetch('/api/workspaces/trash/list');
-      if (!res.ok) throw new Error('Failed to load trash');
+      if (!res.ok) throw new Error('加载回收站失败，禁止空成功');
       const data = await res.json();
       setItems(data);
     } catch {
@@ -54,7 +54,7 @@ export const TrashPanel = memo(function TrashPanel({
     setRestoring(id);
     try {
       const res = await fetch(`/api/workspaces/${id}/restore`, { method: 'POST' });
-      if (!res.ok) throw new Error('恢复失败');
+      if (!res.ok) throw new Error('恢复失败，禁止空成功');
       setItems((prev) => prev.filter((item) => item.id !== id));
       toastSuccess('项目已恢复');
       onRestore?.(id);
@@ -69,7 +69,7 @@ export const TrashPanel = memo(function TrashPanel({
     setPurging(id);
     try {
       const res = await fetch(`/api/workspaces/${id}/purge`, { method: 'DELETE' });
-      if (!res.ok) throw new Error('删除失败');
+      if (!res.ok) throw new Error('删除失败，禁止空成功');
       setItems((prev) => prev.filter((item) => item.id !== id));
       toastSuccess('已彻底删除');
     } catch (err) {

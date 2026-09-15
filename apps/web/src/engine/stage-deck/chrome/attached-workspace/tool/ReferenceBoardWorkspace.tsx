@@ -23,37 +23,51 @@ export function ReferenceBoardWorkspace({ blockId, kind, onCollapse }: Reference
   const palette = (data.palette as string[] | undefined) ?? ['#0F766E', '#1E3A5F', '#F4F1EA'];
   const styleNotes = (data.styleNotes as string) ?? '';
   const content = (data.content as string) ?? '';
+  const enforce = data.enforce === true;
   const status = data.status as string | undefined;
-
-  const addImage = useCallback(
-    (url: string) => {
-      const next = [...new Set([url, ...boardImages, ...(upstream?.pictures ?? [])])].filter(Boolean);
-      updateNodeData(blockId, { boardImages: next, pictures: next });
-    },
-    [boardImages, upstream?.pictures, blockId, updateNodeData],
-  );
 
   const allImages = useMemo(() => {
     const set = new Set<string>([...boardImages, ...(upstream?.pictures ?? [])]);
     return [...set].filter(Boolean);
   }, [boardImages, upstream?.pictures]);
 
-  const syncContent = useCallback(
-    (notes: string) => {
+  const persistBoard = useCallback(
+    (patch: Record<string, unknown>) => {
+      const nextNotes = typeof patch.styleNotes === 'string' ? patch.styleNotes : styleNotes;
+      const nextPalette = Array.isArray(patch.palette) ? (patch.palette as string[]) : palette;
+      const nextImages = Array.isArray(patch.boardImages) ? (patch.boardImages as string[]) : allImages;
+      const nextEnforce = typeof patch.enforce === 'boolean' ? patch.enforce : enforce;
       const parts = [
         upstream?.prompts?.[0],
-        notes.trim(),
-        palette.length ? `palette: ${palette.join(', ')}` : '',
-        allImages.length ? `references: ${allImages.length} images` : '',
+        nextNotes.trim(),
+        nextPalette.length ? `palette: ${nextPalette.join(', ')}` : '',
+        nextImages.length ? `references: ${nextImages.length} images` : '',
       ].filter(Boolean);
+      const nextContent = parts.join(' | ');
       updateNodeData(blockId, {
-        styleNotes: notes,
-        content: parts.join(' | '),
-        boardImages: allImages,
-        pictures: allImages,
+        styleNotes: nextNotes,
+        palette: nextPalette,
+        boardImages: nextImages,
+        pictures: nextImages,
+        enforce: nextEnforce,
+        content: nextContent,
+        // F-032: 结构化约束与扁平字段同步，供 extractReferenceConstraints 读取
+        constraints: {
+          style: nextNotes.trim() || undefined,
+          palette: nextPalette.length ? nextPalette.join(', ') : undefined,
+          assetUrls: nextImages,
+        },
       });
     },
-    [allImages, palette, upstream?.prompts, blockId, updateNodeData],
+    [allImages, blockId, enforce, palette, styleNotes, updateNodeData, upstream?.prompts],
+  );
+
+  const addImage = useCallback(
+    (url: string) => {
+      const next = [...new Set([url, ...boardImages, ...(upstream?.pictures ?? [])])].filter(Boolean);
+      persistBoard({ boardImages: next });
+    },
+    [boardImages, persistBoard, upstream?.pictures],
   );
 
   return (
@@ -84,8 +98,7 @@ export function ReferenceBoardWorkspace({ blockId, kind, onCollapse }: Reference
               onChange={(e) => {
                 const next = [...palette];
                 next[i] = e.target.value;
-                updateNodeData(blockId, { palette: next });
-                syncContent(styleNotes);
+                persistBoard({ palette: next });
               }}
               className="w-7 h-7 rounded border border-line cursor-pointer"
             />
@@ -93,10 +106,18 @@ export function ReferenceBoardWorkspace({ blockId, kind, onCollapse }: Reference
         </div>
         <textarea
           value={styleNotes}
-          onChange={(e) => syncContent(e.target.value)}
+          onChange={(e) => persistBoard({ styleNotes: e.target.value })}
           placeholder="风格约束：材质、光影、情绪…"
           className="w-full min-h-[56px] rounded-xl border border-line px-2 py-1.5 resize-y bg-surface"
         />
+        <label className="flex items-center gap-2 text-[11px] text-ink/70">
+          <input
+            type="checkbox"
+            checked={enforce}
+            onChange={(e) => persistBoard({ enforce: e.target.checked })}
+          />
+          强约束（无风格/色板/参考图时阻断下游生成）
+        </label>
         {content && <p className="text-[10px] text-ink/60 line-clamp-2">{content}</p>}
       </div>
     </ComposerWorkspaceShell>

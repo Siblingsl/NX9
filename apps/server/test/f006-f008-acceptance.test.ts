@@ -260,7 +260,7 @@ describe('F-007 Playbook 就绪条件', () => {
     expect(evaluatePlaybookStep(refStep!, falseCtx).ready).toBe(false);
   });
 
-  it('智能剪辑步要时间线（has_timeline_draft）', () => {
+  it('智能剪辑步要时间线且已确认（has_timeline_confirmed）', () => {
     const noDraft = emptyCtx({
       nodes: [{ id: 'ed', type: 'clip-editor', data: {} }],
     });
@@ -277,10 +277,24 @@ describe('F-007 Playbook 就绪条件', () => {
     });
     expect(has_timeline_draft(withDraft)).toBe(true);
 
+    const withConfirmed = emptyCtx({
+      nodes: [
+        {
+          id: 'ed',
+          type: 'clip-editor',
+          data: {
+            timelineDraft: { clips: [{ id: 'c1' }] },
+            confirmedAt: '2026-09-11T00:00:00.000Z',
+          },
+        },
+      ],
+    });
+
     const core = PLAYBOOK_DEFINITIONS.find((p) => p.id === 'pb-ai-comic-live');
     const editStep = core?.steps.find((s) => s.id === 'smart-edit');
-    expect(editStep?.readinessKey).toBe('has_timeline_draft');
-    expect(evaluatePlaybookStep(editStep!, withDraft).ready).toBe(true);
+    expect(editStep?.readinessKey).toBe('has_timeline_confirmed');
+    expect(evaluatePlaybookStep(editStep!, withConfirmed).ready).toBe(true);
+    expect(evaluatePlaybookStep(editStep!, withDraft).ready).toBe(false);
     expect(evaluatePlaybookStep(editStep!, noDraft).ready).toBe(false);
   });
 

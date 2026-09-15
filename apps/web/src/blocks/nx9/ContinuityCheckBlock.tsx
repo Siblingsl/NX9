@@ -11,10 +11,13 @@ import {
   CONTINUITY_IMAGE_CAP,
   CONTINUITY_SYSTEM_PROMPT,
   buildContinuityUserText,
+  parseContinuityLlmJson,
   resolveContinuityModel,
   sliceContinuityImages,
 } from '../../engine/continuity-check-runner';
+import { resolveRunLabel } from '@nx9/shared';
 import { useActivityLog } from '../../stores/activity-log';
+import { toastError } from '../../stores/toast';
 import { useFlowRuntime, useStoryboardUi } from '../../stores/flow-runtime';
 import { useWorkspaceDocument } from '../../stores/workspace-document';
 import '../../styles/stage-bible.css';
@@ -40,7 +43,8 @@ function ContinuityCheckBlock(props: NodeProps) {
       runtime?.focusBlock?.(upstreamDeskId);
       return true;
     }
-    appendLog('[连贯性] 未找到连线上游分镜台');
+    appendLog('[连贯性] 未找到连线上游分镜台，禁止空成功');
+    toastError('[连贯性] 未找到连线上游分镜台，禁止空成功');
     return false;
   }, [appendLog, runtime, upstreamDeskId]);
   const updateShot = useWorkspaceDocument((s) => s.updateShot);
@@ -54,6 +58,7 @@ function ContinuityCheckBlock(props: NodeProps) {
   } | undefined;
   const report = (props.data?.continuityReport as string) ?? '';
   const issues = (props.data?.continuityIssues as string[] | undefined) ?? [];
+  const parseFailed = Boolean(props.data?.continuityParseFailed);
   const status = (props.data?.status as string | undefined) ?? 'idle';
 
   const runCheck = useCallback(async () => {
@@ -62,7 +67,10 @@ function ContinuityCheckBlock(props: NodeProps) {
       .map((s) => s.firstFrameAssetId!);
     const images = upstream?.pictures?.length ? upstream.pictures : shotImages;
     if (images.length < 2) {
-      appendLog('连贯性检查：至少需要 2 张图像（上游图片或故事板线稿）');
+      const msg = '连贯性检查：至少需要 2 张图像（上游图片或故事板线稿），禁止空成功';
+      updateNodeData(props.id, { status: 'error', error: msg });
+      appendLog(msg);
+      toastError(msg);
       return;
     }
     updateNodeData(props.id, { status: 'running' });
@@ -94,26 +102,39 @@ function ContinuityCheckBlock(props: NodeProps) {
       if (continuityModel) llmBody.model = continuityModel;
       const res = await api.proxyLlm(llmBody);
       const raw = (res as { content?: string }).content ?? JSON.stringify(res);
-      let summary = raw;
-      let parsedIssues: string[] = [];
-      try {
-        const json = JSON.parse(raw) as { summary?: string; issues?: string[] };
-        summary = json.summary ?? raw;
-        parsedIssues = json.issues ?? [];
-      } catch {
-        parsedIssues = raw.split('\n').filter((l) => l.trim().startsWith('-'));
-      }
+      // DR-04：与画布 Run 共用 parseContinuityLlmJson，禁止裸 JSON.parse 丢围栏 / 假零问题
+      const parsed = parseContinuityLlmJson(raw);
+      const summary =
+        parsed.summary?.trim() ||
+        (parsed.parseFailed ? 'LLM 返回无法解析为结构化报告，已保留原文' : raw);
+      const parsedIssues = parsed.issues.map((issue) => issue.message);
       updateNodeData(props.id, {
-        status: 'success',
-        continuityReport: summary,
+        // 解析失败禁止假绿：保留原文，status=error
+        status: parsed.parseFailed ? 'error' : 'success',
+        continuityReport: parsed.parseFailed ? raw : summary,
         continuityIssues: parsedIssues,
-        content: summary,
+        continuityIssueRefs: parsed.issues,
+        continuityParseFailed: parsed.parseFailed || undefined,
+        content: parsed.parseFailed ? raw : summary,
+        error: parsed.parseFailed ? '连贯性检查解析失败，禁止空成功' : undefined,
         imagesChecked: images.length,
         imagesOmitted: sliced.omitted,
         continuityCapNote: sliced.note,
-        meta: { issueCount: parsedIssues.length, checkedImages: images.length, omitted: sliced.omitted },
+        meta: {
+          issueCount: parsedIssues.length,
+          checkedImages: images.length,
+          omitted: sliced.omitted,
+          parseFailed: parsed.parseFailed,
+        },
       });
-      appendLog(`连贯性检查完成 · ${parsedIssues.length} 项${sliced.note ? ` · ${sliced.note}` : ''}`);
+      appendLog(
+        parsed.parseFailed
+          ? '连贯性检查：LLM 返回无法解析为 JSON，已保留原文报告（禁止空成功）'
+          : `连贯性检查完成 · ${parsedIssues.length} 项${sliced.note ? ` · ${sliced.note}` : ''}`,
+      );
+      if (parsed.parseFailed) {
+        toastError('连贯性检查解析失败，禁止空成功');
+      }
       setReportOpen(true);
     } catch (e) {
       const partialText = `## 连贯性检查失败 (partial)\n\nLLM 调用中断：${String(e)}`;
@@ -124,6 +145,7 @@ function ContinuityCheckBlock(props: NodeProps) {
         partialReport: partialText,
         continuityIssues: [],
       });
+      toastError(`连贯性检查失败: ${String(e)}`);
     }
   }, [upstream, storyboardShots, props.data, props.id, updateNodeData, appendLog]);
 
@@ -180,14 +202,16 @@ function ContinuityCheckBlock(props: NodeProps) {
           {
             value: issues.length,
             label: '问题',
-            tone: issues.length ? 'warn' : report ? 'ok' : 'default',
+            tone: parseFailed ? 'warn' : issues.length ? 'warn' : report ? 'ok' : 'default',
           },
         ]}
         summary={
           report
-            ? issues.length
-              ? `发现 ${issues.length} 项不一致，点击查看报告`
-              : '检查完成，暂无明显问题'
+            ? parseFailed
+              ? 'LLM 返回未能结构化解析 · 已保留原文（未假装零问题）'
+              : issues.length
+                ? `发现 ${issues.length} 项不一致，点击查看报告`
+                : '检查完成，暂无明显问题'
             : `上游 ${picN} 图 · ${clipN} 视频 · 至少 2 张图可检${
                 picN > CONTINUITY_IMAGE_CAP ? `（超出 ${CONTINUITY_IMAGE_CAP} 张将提示并截取）` : ''
               }`
@@ -195,7 +219,15 @@ function ContinuityCheckBlock(props: NodeProps) {
         summaryClickable={Boolean(report)}
         onSummaryClick={() => setReportOpen(true)}
         statusLabel={
-          status === 'running' ? '检查中' : status === 'success' ? '已完成' : status === 'error' ? '失败' : '待运行'
+          status === 'running'
+            ? '检查中'
+            : parseFailed
+              ? '解析失败'
+              : status === 'success'
+                ? '已完成'
+                : status === 'error'
+                  ? '失败'
+                  : '待运行'
         }
         secondary={
           report
@@ -211,7 +243,7 @@ function ContinuityCheckBlock(props: NodeProps) {
             : []
         }
         primary={{
-          label: status === 'running' ? '检查中' : '运行检查',
+          label: resolveRunLabel('continuity-check', status).primary,
           loading: status === 'running',
           disabled: status === 'running',
           onClick: (e) => {
@@ -225,18 +257,29 @@ function ContinuityCheckBlock(props: NodeProps) {
         open={reportOpen}
         onClose={() => setReportOpen(false)}
         title="连贯性报告"
-        subtitle={issues.length ? `${issues.length} 项问题` : '检查结果'}
+        subtitle={
+          parseFailed
+            ? '解析失败 · 原文报告'
+            : issues.length
+              ? `${issues.length} 项问题`
+              : '检查结果'
+        }
         width={520}
         variant="stage"
       >
         <div className="sb">
+          {parseFailed && (
+            <p className="sb-hint" style={{ marginBottom: 10, color: 'var(--nx9-warn, #b45309)' }}>
+              未能解析为结构化 issues；下方为 LLM 原文。请勿当作「零问题」通过。
+            </p>
+          )}
           {report && (
             <p className="sb-hint" style={{ whiteSpace: 'pre-wrap', marginBottom: 12 }}>
               {report}
             </p>
           )}
           {issues.length === 0 ? (
-            <div className="sb-empty">暂无条目化问题</div>
+            <div className="sb-empty">{parseFailed ? '无条目化问题（解析失败）' : '暂无条目化问题'}</div>
           ) : (
             issues.map((issue, i) => (
               <div key={i} className="sb-panel">
@@ -271,7 +314,10 @@ function ContinuityCheckBlock(props: NodeProps) {
                         issueDescription: issue,
                       }).then((res) => {
                         if (res.ok) appendLog(`自动修复完成: ${res.repairedUrl}`);
-                        else appendLog(`修复失败: ${res.message}`);
+                        else {
+                          appendLog(`修复失败: ${res.message}`);
+                          toastError(`连贯性修复失败: ${res.message}`);
+                        }
                       });
                     }}
                   >

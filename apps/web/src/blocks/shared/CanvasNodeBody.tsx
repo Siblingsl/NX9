@@ -4,7 +4,9 @@ import { Box, FileText, ImageIcon, Loader2, Maximize2, Music, Play, Video } from
 import {
   lookupBlock,
   mediaPinKindLabel,
+  resolveMediaPinItems,
   normalizeNodeStatus,
+  resolveRunLabel,
   resolveMediaPinKind,
   resolveNodeAssetTags,
   resolveNodeOutputCount,
@@ -48,12 +50,14 @@ function MediaPinOnlyBody({
   pinKind,
   label,
   textContent,
+  itemCount,
   onOpen,
 }: {
   url: string;
   pinKind: MediaPinKind;
   label?: string;
   textContent?: string;
+  itemCount: number;
   onOpen?: () => void;
 }) {
   const kindLabel = mediaPinKindLabel(pinKind);
@@ -91,41 +95,44 @@ function MediaPinOnlyBody({
           </div>
         </div>
       ) : (
-        <button
-          type="button"
-          className="nx9-media-pin__frame"
-          onClick={open}
-          onMouseDown={(e) => e.stopPropagation()}
-          title={title}
-          disabled={!canOpen}
-        >
-          {pinKind === 'picture' && url ? (
-            <img src={url} alt="" className="nx9-media-pin__img" draggable={false} />
-          ) : pinKind === 'clip' && url ? (
-            <video
-              src={url}
-              muted
-              playsInline
-              preload="metadata"
-              className="nx9-media-pin__img"
-              draggable={false}
-            />
-          ) : pinKind === 'text' ? (
-            <div className="nx9-media-pin__badge nx9-media-pin__badge--text">
-              <FileText size={18} strokeWidth={1.4} />
-              <span className="nx9-media-pin__text-preview">
-                {(textContent || label || '文本').slice(0, 120)}
-              </span>
-            </div>
-          ) : pinKind === 'mesh' && url ? (
-            <div className="nx9-media-pin__badge">
-              <Box size={22} strokeWidth={1.4} />
-              <span>{label || kindLabel}</span>
-            </div>
-          ) : (
-            <div className="nx9-media-pin__empty">暂无{kindLabel}</div>
-          )}
-        </button>
+        <>
+          <button
+            type="button"
+            className="nx9-media-pin__frame"
+            onClick={open}
+            onMouseDown={(e) => e.stopPropagation()}
+            title={title}
+            disabled={!canOpen}
+          >
+            {pinKind === 'picture' && url ? (
+              <img src={url} alt="" className="nx9-media-pin__img" draggable={false} />
+            ) : pinKind === 'clip' && url ? (
+              <video
+                src={url}
+                muted
+                playsInline
+                preload="metadata"
+                className="nx9-media-pin__img"
+                draggable={false}
+              />
+            ) : pinKind === 'text' ? (
+              <div className="nx9-media-pin__badge nx9-media-pin__badge--text">
+                <FileText size={18} strokeWidth={1.4} />
+                <span className="nx9-media-pin__text-preview">
+                  {(textContent || label || '文本').slice(0, 120)}
+                </span>
+              </div>
+            ) : pinKind === 'mesh' && url ? (
+              <div className="nx9-media-pin__badge">
+                <Box size={22} strokeWidth={1.4} />
+                <span>{label || kindLabel}</span>
+              </div>
+            ) : (
+              <div className="nx9-media-pin__empty">暂无{kindLabel}</div>
+            )}
+          </button>
+          {itemCount > 1 ? <span className="nx9-media-pin-count">{itemCount}</span> : null}
+        </>
       )}
     </div>
   );
@@ -301,19 +308,20 @@ export const CanvasNodeBody = memo(function CanvasNodeBody({
 
   /* 画布钉板：按媒体类型展示 */
   if (isMediaPin) {
+    const pinItems = resolveMediaPinItems(data);
     const pinUrl =
-      (data.pinUrl as string | undefined) ||
-      (data.previewUrl as string | undefined) ||
-      (data.assetUrl as string | undefined) ||
+      pinItems[0]?.url ||
       thumb ||
       '';
-    const pinKind = resolveMediaPinKind(data.pinKind, pinUrl);
+    const activePin = pinItems[0];
+    const pinKind = activePin?.pinKind ?? resolveMediaPinKind(data.pinKind, pinUrl);
     return (
       <MediaPinOnlyBody
         url={pinUrl}
         pinKind={pinKind}
-        label={(data.pinLabel as string | undefined) || (data.filename as string | undefined)}
-        textContent={data.textContent as string | undefined}
+        label={activePin?.label ?? activePin?.filename ?? data.pinLabel as string | undefined}
+        textContent={activePin?.textContent ?? data.textContent as string | undefined}
+        itemCount={pinItems.length}
         onOpen={onPreviewOpen}
       />
     );
@@ -385,7 +393,7 @@ export const CanvasNodeBody = memo(function CanvasNodeBody({
       primary={
         onRun && status !== 'running'
           ? {
-              label: '运行',
+              label: resolveRunLabel(kind).primary,
               icon: <Play size={11} fill="currentColor" />,
               onClick: (e) => {
                 e.stopPropagation();

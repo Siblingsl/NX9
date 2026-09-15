@@ -12,6 +12,7 @@ describe('SND-01/02/03 sound-gen 画布与卡参数对齐', () => {
     expect(branch).toContain('runSoundGenBgm');
     expect(branch).toContain("soundMode === 'cast'");
     expect(branch).toContain('runSoundGenCast');
+    expect(branch).toContain("soundMode === 'sfx'");
     expect(branch).toContain('synthesizeTts');
     expect(branch).toContain('instructions');
     expect(branch).toContain('audioFormat');
@@ -24,5 +25,12 @@ describe('SND-01/02/03 sound-gen 画布与卡参数对齐', () => {
     expect(src).toContain('instructions:');
     expect(src).toContain('audioFormat');
     expect(src).toContain('speechRate');
+  });
+
+  it('synthesizeTts 空 url / ok:false 禁止空成功', () => {
+    const src = readFileSync(resolve(webSrc, 'sound-gen-runner.ts'), 'utf8');
+    expect(src).toContain('TTS 未返回音频 URL，禁止空成功');
+    expect(src).toContain('!res?.ok');
+    expect(src).toContain('TTS 音频字节数为 0，禁止空成功');
   });
 });

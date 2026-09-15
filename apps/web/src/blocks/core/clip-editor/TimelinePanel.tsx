@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Lock, LockOpen, Plus, Volume2, VolumeX } from 'lucide-react';
+import { Check, Lock, LockOpen, Plus, Sparkles, Volume2, VolumeX, X } from 'lucide-react';
 import {
   MIN_CLIP_SEC,
+  clampStartToTrackGap,
   nextTrackId,
+  type SmartSuggestion,
   type TimelineClip,
   type TimelineOp,
   type TimelinePayload,
@@ -48,6 +50,17 @@ interface DragState {
   deltaSec: number;
   hoverTrackId: string | null;
   moved: boolean;
+  /** Shift 按住时临时关闭磁吸 */
+  snapDisabled: boolean;
+}
+
+interface MarqueeState {
+  startClientX: number;
+  startClientY: number;
+  currentClientX: number;
+  currentClientY: number;
+  trackId: string;
+  moved: boolean;
 }
 
 interface VolumeDragState {
@@ -67,10 +80,14 @@ export interface TimelinePanelProps {
   onZoom: (pxPerSec: number) => void;
   playheadSec: number;
   onSeek: (sec: number) => void;
-  selectedClipId: string | null;
-  onSelect: (clipId: string | null) => void;
+  /** 多选：Ctrl/Shift 点选追加，框选批量选择 */
+  selectedClipIds: string[];
+  onSelect: (clipIds: string[]) => void;
   apply: (ops: TimelineOp | TimelineOp[]) => unknown;
   onDropMedia: (trackId: string, startSec: number, payload: MediaDropPayload) => void;
+  /** 建议在时间轴上定位显示（对应片段角标，点击采纳） */
+  suggestions?: SmartSuggestion[];
+  onSuggestionResolved?: (id: string, accepted: boolean) => void;
 }
 
 function pickRulerStep(pxPerSec: number): number {
@@ -206,16 +223,17 @@ function useAudioPeaks(urls: string[]): Map<string, AudioPeakData> {
   return peaks;
 }
 export function TimelinePanel({
-
   timeline,
   pxPerSec,
   onZoom,
   playheadSec,
   onSeek,
-  selectedClipId,
+  selectedClipIds,
   onSelect,
   apply,
   onDropMedia,
+  suggestions,
+  onSuggestionResolved,
 }: TimelinePanelProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [drag, setDrag] = useState<DragState | null>(null);
@@ -224,6 +242,23 @@ export function TimelinePanel({
   const [volumeDrag, setVolumeDrag] = useState<VolumeDragState | null>(null);
   const volumeDragRef = useRef<VolumeDragState | null>(null);
   volumeDragRef.current = volumeDrag;
+  const [marquee, setMarquee] = useState<MarqueeState | null>(null);
+  const marqueeRef = useRef<MarqueeState | null>(null);
+  marqueeRef.current = marquee;
+  const selectedSet = useMemo(() => new Set(selectedClipIds), [selectedClipIds]);
+
+  // 建议按片段定位（一条建议可能涉及多个片段）
+  const suggestionsByClip = useMemo(() => {
+    const map = new Map<string, SmartSuggestion[]>();
+    for (const sg of suggestions ?? []) {
+      for (const clipId of sg.targetClipIds ?? []) {
+        const list = map.get(clipId) ?? [];
+        list.push(sg);
+        map.set(clipId, list);
+      }
+    }
+    return map;
+  }, [suggestions]);
 
   // Ctrl+滚轮缩放（native 监听，preventDefault 需要非 passive）
   useEffect(() => {
@@ -266,7 +301,8 @@ export function TimelinePanel({
   }, [timeline, playheadSec, drag?.clipId]);
 
   const snap = useCallback(
-    (startSec: number, durationSec: number): number => {
+    (startSec: number, durationSec: number, enabled: boolean): number => {
+      if (!enabled) return Math.max(0, startSec);
       const thr = SNAP_PX / pxPerSec;
       let best = startSec;
       let bestDist = thr;
@@ -287,14 +323,22 @@ export function TimelinePanel({
     [snapTargets, pxPerSec],
   );
 
-  // ── 片段拖拽 ──
+  // ── 片段拖拽（多选：Ctrl/Shift 追加，拖动时同轨多选一起移动） ──
   const onClipPointerDown = useCallback(
     (e: React.PointerEvent, clip: TimelineClip, track: TimelineTrack, mode: DragState['mode']) => {
       if (e.button !== 0) return;
       if (track.locked) return;
       e.stopPropagation();
       (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
-      onSelect(clip.id);
+      const additive = e.ctrlKey || e.metaKey || e.shiftKey;
+      if (additive) {
+        const next = new Set(selectedClipIds);
+        if (next.has(clip.id)) next.delete(clip.id);
+        else next.add(clip.id);
+        onSelect([...next]);
+      } else {
+        onSelect([clip.id]);
+      }
       setDrag({
         mode,
         clipId: clip.id,
@@ -303,9 +347,10 @@ export function TimelinePanel({
         deltaSec: 0,
         hoverTrackId: null,
         moved: false,
+        snapDisabled: e.shiftKey,
       });
     },
-    [onSelect],
+    [onSelect, selectedClipIds],
   );
 
   const onClipPointerMove = useCallback(
@@ -319,7 +364,13 @@ export function TimelinePanel({
         const lane = under?.closest?.('[data-lane-track]') as HTMLElement | null;
         hoverTrackId = lane?.dataset.laneTrack ?? null;
       }
-      setDrag({ ...d, deltaSec, hoverTrackId, moved: d.moved || Math.abs(deltaSec * pxPerSec) > 3 });
+      setDrag({
+        ...d,
+        deltaSec,
+        hoverTrackId,
+        moved: d.moved || Math.abs(deltaSec * pxPerSec) > 3,
+        snapDisabled: e.shiftKey,
+      });
     },
     [pxPerSec],
   );
@@ -335,10 +386,22 @@ export function TimelinePanel({
     if (!loc) return;
     if (d.mode === 'move') {
       const raw = Math.max(0, loc.c.startSec + d.deltaSec);
-      const snapped = snap(raw, loc.c.durationSec);
+      const snapped = snap(raw, loc.c.durationSec, !d.snapDisabled);
       const toTrackId =
         d.hoverTrackId && d.hoverTrackId !== d.trackId ? d.hoverTrackId : undefined;
-      apply({ op: 'move-clip', clipId: d.clipId, startSec: snapped, toTrackId });
+      const ops: TimelineOp[] = [{ op: 'move-clip', clipId: d.clipId, startSec: snapped, toTrackId }];
+      // 批量移动：同轨其它选中片段保持相对位置一起移动（同一次 apply，一步撤销）
+      if (!toTrackId && selectedSet.size > 1) {
+        const sameTrack = timeline.tracks.find((t) => t.id === d.trackId);
+        const shift = snapped - loc.c.startSec;
+        if (sameTrack && Math.abs(shift) > 1e-6) {
+          for (const c of sameTrack.clips) {
+            if (c.id === d.clipId || !selectedSet.has(c.id)) continue;
+            ops.push({ op: 'move-clip', clipId: c.id, startSec: c.startSec + shift });
+          }
+        }
+      }
+      apply(ops);
     } else {
       apply({
         op: 'trim-clip',
@@ -347,7 +410,80 @@ export function TimelinePanel({
         deltaSec: d.deltaSec,
       });
     }
-  }, [apply, snap, timeline]);
+  }, [apply, snap, timeline, selectedSet]);
+
+  // ── 框选（轨道空白处按下拖动；未拖动 = 点击空白 seek） ──
+  const onLanePointerDown = useCallback(
+    (e: React.PointerEvent, track: TimelineTrack) => {
+      if (e.button !== 0) return;
+      if (e.target !== e.currentTarget) return;
+      if (track.locked) return;
+      (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+      setMarquee({
+        startClientX: e.clientX,
+        startClientY: e.clientY,
+        currentClientX: e.clientX,
+        currentClientY: e.clientY,
+        trackId: track.id,
+        moved: false,
+      });
+    },
+    [],
+  );
+
+  const onLanePointerMove = useCallback((e: React.PointerEvent) => {
+    const m = marqueeRef.current;
+    if (!m) return;
+    const moved = m.moved || Math.abs(e.clientX - m.startClientX) > 3 || Math.abs(e.clientY - m.startClientY) > 3;
+    setMarquee({ ...m, currentClientX: e.clientX, currentClientY: e.clientY, moved });
+  }, []);
+
+  const onLanePointerUp = useCallback(
+    (e: React.PointerEvent) => {
+      const m = marqueeRef.current;
+      if (!m) return;
+      setMarquee(null);
+      if (!m.moved) {
+        // 点击空白：取消选择 + 播放头 seek
+        onSelect([]);
+        const el = scrollRef.current;
+        if (el) {
+          const rect = el.getBoundingClientRect();
+          const x = e.clientX - rect.left + el.scrollLeft - HEAD_W;
+          onSeek(Math.max(0, x / pxPerSec));
+        }
+        return;
+      }
+      const el = scrollRef.current;
+      if (!el) return;
+      const rect = el.getBoundingClientRect();
+      const x0 = Math.min(m.startClientX, m.currentClientX) - rect.left + el.scrollLeft - HEAD_W;
+      const x1 = Math.max(m.startClientX, m.currentClientX) - rect.left + el.scrollLeft - HEAD_W;
+      const sec0 = Math.max(0, x0 / pxPerSec);
+      const sec1 = Math.max(0, x1 / pxPerSec);
+      const track = timeline.tracks.find((t) => t.id === m.trackId);
+      const picked: string[] = [];
+      if (track) {
+        for (const c of track.clips) {
+          const cs = c.startSec;
+          const ce = c.startSec + c.durationSec;
+          if (cs <= sec1 && ce >= sec0) picked.push(c.id);
+        }
+      }
+      if (picked.length === 0) {
+        onSelect([]);
+        return;
+      }
+      if (e.ctrlKey || e.metaKey || e.shiftKey) {
+        const next = new Set(selectedClipIds);
+        for (const id of picked) next.add(id);
+        onSelect([...next]);
+      } else {
+        onSelect(picked);
+      }
+    },
+    [onSelect, onSeek, pxPerSec, timeline, selectedClipIds],
+  );
 
   // ── 音量包络关键帧（DR-06：拖动只改 atSec，音量保持） ──
   const onVolumeKeyframeDown = useCallback(
@@ -355,7 +491,7 @@ export function TimelinePanel({
       if (e.button !== 0) return;
       e.stopPropagation();
       (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
-      onSelect(clip.id);
+      onSelect([clip.id]);
       setVolumeDrag({
         clipId: clip.id,
         keyframeAtSec: kf.atSec,
@@ -421,18 +557,39 @@ export function TimelinePanel({
 
   const [seeking, setSeeking] = useState(false);
 
+  /** 同轨在 clip 之后最近的片段起点（trim-r 防重叠视觉用） */
+  const nextClipStartSec = useCallback((track: TimelineTrack, clip: TimelineClip): number => {
+    let s = Number.POSITIVE_INFINITY;
+    for (const c of track.clips) {
+      if (c.id !== clip.id && c.startSec > clip.startSec + 1e-6 && c.startSec < s) s = c.startSec;
+    }
+    return s;
+  }, []);
+
   // ── 视觉位置（拖拽 transient 预览） ──
   const clipVisual = useCallback(
-    (clip: TimelineClip): { left: number; width: number; ghost: boolean } => {
+    (clip: TimelineClip, track: TimelineTrack): { left: number; width: number; ghost: boolean } => {
       const d = drag;
-      if (!d || d.clipId !== clip.id || !d.moved) {
+      const isMain = d?.clipId === clip.id;
+      const isGroup = d?.mode === 'move' && selectedSet.has(clip.id) && !isMain;
+      if (!d || (!isMain && !isGroup) || !d.moved) {
         return { left: clip.startSec * pxPerSec, width: clip.durationSec * pxPerSec, ghost: false };
       }
       const speed = clip.speed ?? 1;
       if (d.mode === 'move') {
+        if (isGroup) {
+          // 批量移动：与主片段保持相同位移（op 层会 clamp 防重叠）
+          return {
+            left: Math.max(0, (clip.startSec + d.deltaSec) * pxPerSec),
+            width: clip.durationSec * pxPerSec,
+            ghost: true,
+          };
+        }
         const raw = Math.max(0, clip.startSec + d.deltaSec);
-        const snapped = snap(raw, clip.durationSec);
-        return { left: snapped * pxPerSec, width: clip.durationSec * pxPerSec, ghost: true };
+        const snapped = snap(raw, clip.durationSec, !d.snapDisabled);
+        // SE-EDIT-01: 视觉同步 clamp 到同轨空隙（拖动中即可见边界）
+        const clamped = clampStartToTrackGap(track, clip.id, snapped, clip.durationSec);
+        return { left: clamped * pxPerSec, width: clip.durationSec * pxPerSec, ghost: true };
       }
       if (d.mode === 'trim-l') {
         let delta = Math.min(d.deltaSec, clip.durationSec - MIN_CLIP_SEC);
@@ -443,14 +600,15 @@ export function TimelinePanel({
           ghost: true,
         };
       }
-      const maxDur =
+      const sourceMax =
         clip.sourceDurationSec != null && (clip.type === 'video' || clip.type === 'audio')
           ? Math.max(MIN_CLIP_SEC, (clip.sourceDurationSec - (clip.trimInSec ?? 0)) / speed)
           : Number.POSITIVE_INFINITY;
+      const maxDur = Math.min(sourceMax, nextClipStartSec(track, clip) - clip.startSec);
       const newDur = Math.max(MIN_CLIP_SEC, Math.min(clip.durationSec + d.deltaSec, maxDur));
       return { left: clip.startSec * pxPerSec, width: newDur * pxPerSec, ghost: true };
     },
-    [drag, pxPerSec, snap],
+    [drag, pxPerSec, snap, selectedSet, nextClipStartSec],
   );
 
   // ── 素材拖入 ──
@@ -525,6 +683,7 @@ export function TimelinePanel({
         {/* 轨道 */}
         {timeline.tracks.map((track) => {
           const h = TRACK_HEIGHT[track.kind] ?? 40;
+          const mq = marquee && marquee.trackId === track.id ? marquee : null;
           return (
             <div key={track.id} className="ed-tl__row" style={{ height: h }}>
               <div
@@ -567,18 +726,21 @@ export function TimelinePanel({
                 data-lane-track={track.id}
                 onDragOver={onLaneDragOver}
                 onDrop={(e) => onLaneDrop(e, track)}
-                onPointerDown={(e) => {
-                  if (e.target === e.currentTarget) onSelect(null);
-                }}
+                onPointerDown={(e) => onLanePointerDown(e, track)}
+                onPointerMove={onLanePointerMove}
+                onPointerUp={onLanePointerUp}
               >
                 {track.clips.map((clip) => {
-                  const vis = clipVisual(clip);
+                  const vis = clipVisual(clip, track);
+                  const isSelected = selectedSet.has(clip.id);
+                  const clipSgs = suggestionsByClip.get(clip.id);
+                  const isGroupMove = drag?.mode === 'move' && isSelected && drag.clipId !== clip.id;
                   return (
                     <div
                       key={clip.id}
                       className={`ed-clip ed-clip--${clip.type} ${
-                        selectedClipId === clip.id ? 'is-selected' : ''
-                      } ${vis.ghost ? 'is-ghost' : ''}`}
+                        isSelected ? 'is-selected' : ''
+                      } ${vis.ghost ? 'is-ghost' : ''} ${isGroupMove ? 'is-group-ghost' : ''}`}
                       style={{ left: vis.left, width: Math.max(6, vis.width) }}
                       onPointerDown={(e) => onClipPointerDown(e, clip, track, 'move')}
                       onPointerMove={onClipPointerMove}
@@ -600,7 +762,25 @@ export function TimelinePanel({
                         <span className="ed-clip__transition" title={`转场 ${clip.transitionOut.kind} ${clip.transitionOut.durationSec}s`} />
                       )}
                       {clip.replacedFrom && <span className="ed-clip__replaced" title="已智能替换" />}
-                      {selectedClipId === clip.id && (clip.volumeKeyframes?.length ?? 0) > 0 && (
+                      {clip.effects?.blur && clip.effects.blur > 0 && (
+                        <span className="ed-clip__effect" title={`效果：模糊 ${clip.effects.blur}px`}>fx</span>
+                      )}
+                      {/* SE-EDIT-04: 建议在时间轴定位显示，点击直接采纳 */}
+                      {clipSgs && clipSgs.length > 0 && (
+                        <span
+                          className="ed-clip__suggest"
+                          title={`${clipSgs[0].message}（点击采纳）`}
+                          onPointerDown={(e) => e.stopPropagation()}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onSuggestionResolved?.(clipSgs[0].id, true);
+                          }}
+                        >
+                          <Sparkles size={10} />
+                          {clipSgs.length > 1 ? clipSgs.length : ''}
+                        </span>
+                      )}
+                      {isSelected && (clip.volumeKeyframes?.length ?? 0) > 0 && (
                         <VolumeEnvelope
                           clip={clip}
                           pxPerSec={pxPerSec}
@@ -629,6 +809,17 @@ export function TimelinePanel({
                     </div>
                   );
                 })}
+                {/* 框选矩形（单轨内按时间区间选择） */}
+                {mq && mq.moved && (() => {
+                  const el = scrollRef.current;
+                  if (!el) return null;
+                  const rect = el.getBoundingClientRect();
+                  const sx = Math.min(mq.startClientX, mq.currentClientX) - rect.left + el.scrollLeft - HEAD_W;
+                  const ex = Math.max(mq.startClientX, mq.currentClientX) - rect.left + el.scrollLeft - HEAD_W;
+                  const left = Math.max(0, sx);
+                  const width = Math.max(0, ex - sx);
+                  return <div className="ed-tl__marquee" style={{ left, width }} />;
+                })()}
               </div>
             </div>
           );

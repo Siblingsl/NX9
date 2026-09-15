@@ -116,7 +116,7 @@ export function AssetDetailSoundView() {
               ? (characterId) => {
                   const target = characters.find((c) => c.id === characterId);
                   if (!target) {
-                    toastError('未找到目标角色');
+                    toastError('未找到目标角色，禁止空成功');
                     return;
                   }
                   void saveCharacter({

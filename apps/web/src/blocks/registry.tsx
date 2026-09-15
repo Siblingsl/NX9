@@ -21,7 +21,7 @@ const blockLoaders: Record<string, () => Promise<{ default: ComponentType<NodePr
   // F-005: asset-gate 已由 stripAssetGateFromGraph + migrateBlockKinds 迁移为 script-desk
   'asset-import': () => import('./input/AssetImportBlock').then((m) => ({ default: m.default })),
   'link-parser': () => import('./utility/LinkParserBlock').then((m) => ({ default: m.default })),
-  /** 内部钉板：不进 BLOCK_CATALOG，仅拖出 / 本地投放创建 */
+  /** 内部钉板：不进 BLOCK_CATALOG，仅拖出 / 本地投放 */
   'media-pin': () => import('./utility/MediaPinBlock').then((m) => ({ default: m.default })),
 
   'script-desk': () => import('./nx9/ScriptDeskBlock').then((m) => ({ default: m.default })),
@@ -36,6 +36,9 @@ const blockLoaders: Record<string, () => Promise<{ default: ComponentType<NodePr
   'grid-compose': () => import('./utility/GridComposeBlock').then((m) => ({ default: m.default })),
   iterator: () => import('./utility/IteratorBlock').then((m) => ({ default: m.default })),
 };
+
+/** F-040：供抽检 —— 有专用 UI 的 kind（非 GenericBlock） */
+export const BLOCK_LOADER_KINDS = Object.freeze(Object.keys(blockLoaders));
 
 const GenericBlock = lazyBlock(() => import('./shared/GenericBlock'));
 
@@ -70,6 +73,8 @@ function withBlockSuspense(Inner: LazyExoticComponent<ComponentType<NodeProps>>)
   return Wrapped;
 }
 
+const genericWithSuspense = withBlockSuspense(GenericBlock);
+
 /** 应用模板前预加载块 chunk，减少首帧 suspend */
 export async function preloadBlockTypes(types: string[]) {
   const unique = [...new Set(types.filter(Boolean))];
@@ -81,7 +86,7 @@ export async function preloadBlockTypes(types: string[]) {
   );
 }
 
-export const blockTypes = Object.fromEntries([
+const catalogBlockTypes = Object.fromEntries([
   ...BLOCK_CATALOG.map((def) => [
     def.kind,
     withBlockSuspense(
@@ -93,4 +98,20 @@ export const blockTypes = Object.fromEntries([
     'media-pin',
     withBlockSuspense(lazyBlock(blockLoaders['media-pin'])),
   ],
-]);
+]) as Record<string, ComponentType<NodeProps>>;
+
+/**
+ * F-040：未知 kind 不得静默空白 —— Proxy 兜底到 GenericBlock 错误卡。
+ * 跳过 then 避免被当成 Promise thenable。
+ */
+export const blockTypes: Record<string, ComponentType<NodeProps>> = new Proxy(catalogBlockTypes, {
+  get(target, prop, receiver) {
+    if (prop === 'then' || typeof prop === 'symbol') {
+      return Reflect.get(target, prop, receiver);
+    }
+    if (typeof prop === 'string' && !(prop in target)) {
+      return genericWithSuspense;
+    }
+    return Reflect.get(target, prop, receiver);
+  },
+});

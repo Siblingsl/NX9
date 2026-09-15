@@ -29,6 +29,8 @@
   --desk-stage-bg: #e8e4db;
   --desk-btn-primary-ink: #fffaf3;
   --desk-panel: rgba(42, 36, 28, 0.04);
+  /* 浅色节点卡形态 token · 简洁描边卡 */
+  --desk-card-radius: 12px;
 }
 
 /* 浅色作用域（可被深色父级覆盖） */
@@ -58,6 +60,8 @@
   --desk-panel: rgba(42, 36, 28, 0.04);
   --nx9-brand: #a67c4a;
   --nx9-accent: #a67c4a;
+  /* 浅色节点卡形态 token · 简洁描边卡 */
+  --desk-card-radius: 12px;
 }
 
 .nx9-theme-dark,
@@ -86,6 +90,8 @@
   --desk-stage-bg: #0c0e12;
   --desk-btn-primary-ink: #1a1610;
   --desk-panel: rgba(255, 255, 255, 0.04);
+  /* 深色节点卡形态 token · 简洁悬浮卡 */
+  --desk-card-radius: 14px;
 
   /* 全局 token 对齐 desk */
   --nx9-brand: #c4a574;

@@ -46,9 +46,19 @@ export async function pollVideoUntilDone(taskId: string, opts: PollOptions = {})
       throw new DOMException('轮询已中止', 'AbortError');
     }
     const res = await api.pollVideo(taskId, opts.baseUrl, { signal: opts.signal });
-    if (res.status === 'success' && res.url) return res.url;
+    if (res.status === 'success') {
+      if (!res.url) {
+        throw new Error(
+          res.message
+            ?? (opts.mediaKind === 'image'
+              ? '图片任务完成但无输出地址，禁止空成功'
+              : '视频任务完成但无输出地址，禁止空成功'),
+        );
+      }
+      return res.url;
+    }
     if (res.status === 'failed') {
-      throw new Error(res.message ?? (opts.mediaKind === 'image' ? '图片生成任务失败' : '视频生成任务失败'));
+      throw new Error(res.message ?? (opts.mediaKind === 'image' ? '图片生成任务失败，禁止空成功' : '视频生成任务失败，禁止空成功'));
     }
     lastMessage = res.message;
     // 停止须立刻打断间隔等待，不能干等到下一轮才感知 abort
@@ -102,5 +112,5 @@ export async function awaitProxyVideo(
       throw error;
     }
   }
-  throw new Error(res.message ?? '视频生成失败');
+  throw new Error(res.message ?? '视频生成失败，禁止空成功');
 }

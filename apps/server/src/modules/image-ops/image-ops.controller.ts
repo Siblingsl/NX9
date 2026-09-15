@@ -54,4 +54,10 @@ export class ImageOpsController {
   keyframeColorCheck(@Body() body: { sourceUrl: string }) {
     return this.imageOps.assessKeyframeColor(body.sourceUrl);
   }
+
+  @Post('separate-layers')
+  separateLayers(@Body() body: { sourceUrl: string; tolerance?: number }) {
+    const tolerance = Math.max(8, Math.min(96, Math.round(body.tolerance ?? 34)));
+    return this.imageOps.separateLayers(body.sourceUrl, tolerance);
+  }
 }

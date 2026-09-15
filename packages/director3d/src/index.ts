@@ -39,8 +39,15 @@ export {
   sceneTemplateFromProject,
   shotStateFromProject,
 } from './schema/directorProject';
-export { buildCameraPrompt } from './schema/cameraGeometry';
-export { POSE_PRESETS, BODY_TYPES, lookupPose, lookupBody } from './presets/characterPresets';
+export { buildCameraPrompt, describeCameraShot, getOrbit, setOrbit, angleLabel, shotLabel, focalLengthMm, fovFromFocalMm, applyOrbitToCamera, interpolateCamera, viewLabel, DEFAULT_PROMPT_DETAILS, PROMPT_DETAIL_LABELS } from './schema/cameraGeometry';
+export type { CameraMoveId, CameraOrbit, BuildCameraPromptOptions, PromptDetailFlags } from './schema/cameraGeometry';
+export { skinCameraPrompt, PROMPT_PLATFORMS } from './schema/promptSkin';
+export type { PromptPlatformId } from './schema/promptSkin';
+export { buildTimelineKeys, sampleTimeline } from './ui/ShotPreviewTimeline';
+export { listQuadPanes } from './canvas/DirectorCanvas';
+export type { StageQuadPane, StageMobileSheet, StageInteractionMode, StageViewportLayout } from './store/directorStore';
+export { POSE_PRESETS, BODY_TYPES, lookupPose, lookupBody, mergePose, setJointAxis, POSE_JOINT_SLIDERS } from './presets/characterPresets';
+export type { PosePreset, PoseJointKey, PoseJointOverride } from './presets/characterPresets';
 export { Director3dShell, Director3dViewport } from './app/Director3dShell';
 export { DirectorCanvas } from './canvas/DirectorCanvas';
 export { useDirectorStore } from './store/directorStore';
@@ -72,10 +79,12 @@ export {
   type MaterialDriverDef,
 } from './sculpt/material-drivers';
 export { computeStageBodyScales, type StageBodyScales } from './runtime/stage-body-bridge';
+export { applyPoseToArmature } from './runtime/stage-actor-pose';
 export { applyFaceRigToObject, readBoneScale, readMorphInfluence } from './sculpt/apply-face-rig';
 export { createBareSculptRoot, createProxyCharacter } from './sculpt/procedural-body';
 export { createProxyHeadMesh } from './sculpt/procedural-head';
 export { createCharacterBaseModel } from './sculpt/procedural-base-model';
+export { packMpfbIntoCharacterBase } from './sculpt/pack-mpfb-character-base';
 export {
   CANONICAL_FACE_VIEW_WIDTH,
   CANONICAL_FACE_VIEW_HEIGHT,

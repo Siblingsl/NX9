@@ -1,4 +1,5 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, HttpException, HttpStatus } from '@nestjs/common';
+import { classifyLinkParserUrl, detectLinkParserPlatform } from '@nx9/shared';
 import { GatewayService } from '../gateway/gateway.service';
 import { extractUrlFromText, fetchRemote } from '../../common/url-utils';
 
@@ -8,6 +9,13 @@ export class LinkParserService {
 
   async parseLink(url: string, hint?: string) {
     const trimmed = extractUrlFromText(url);
+    const classified = classifyLinkParserUrl(trimmed);
+    if (!classified.ok) {
+      throw new HttpException(
+        `${classified.message} (${classified.code})`,
+        HttpStatus.UNPROCESSABLE_ENTITY,
+      );
+    }
 
     let title = '';
     let description = '';
@@ -59,13 +67,25 @@ export class LinkParserService {
       parsed = { title: title || trimmed, summary: description, prompt: hint ?? title };
     }
 
+    const platform = classified.platform ?? detectLinkParserPlatform(trimmed);
+    const outPrompt = String(parsed.prompt || parsed.summary || title || hint || '').trim();
+    if (!outPrompt) {
+      // 无可用 prompt 时禁止 ok:true 空成功（前端也会拒，此处双端门禁）
+      throw new HttpException(
+        '链接解析失败或结果为空，禁止空成功 (PARSE_EMPTY)',
+        HttpStatus.UNPROCESSABLE_ENTITY,
+      );
+    }
+
     return {
       ok: true,
       url: trimmed,
       title: parsed.title || title || trimmed,
       summary: parsed.summary || description || '',
-      prompt: parsed.prompt || parsed.summary || title || hint || '',
+      prompt: outPrompt,
       mediaKind: parsed.mediaKind || 'none',
+      platform: platform?.id ?? null,
+      platformLabel: platform?.label ?? null,
     };
   }
 }

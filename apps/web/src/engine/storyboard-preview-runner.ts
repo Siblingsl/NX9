@@ -9,6 +9,7 @@ import {
   type StoryboardPreviewPictureSettings,
 } from '@nx9/shared';
 import { api } from '../api/client';
+import { extractLlmJsonObject } from './continuity-check-runner';
 import { runPictureGenJob } from './picture-gen-runner';
 
 export function findConnectedPictureGenNode(
@@ -54,7 +55,7 @@ export async function generateStoryboardFrameImage(
     ? { ...frame, stylePreset: 'line-art' }
     : frame;
   const prompt = buildStoryboardFramePrompt(effectiveFrame);
-  if (!prompt.trim()) throw new Error('Prompt 为空');
+  if (!prompt.trim()) throw new Error('Prompt 为空，禁止空成功');
 
   const { modelId, size } = resolvePictureGenSettings(pictureNodeData, previewSettings);
   // PG-44: 分镜预览域直调 runPictureGenJob，不冒充 picture-gen 节点 result；
@@ -68,7 +69,7 @@ export async function generateStoryboardFrameImage(
     signal,
   });
   const imageUrl = urls[0];
-  if (!imageUrl) throw new Error('图像生成失败');
+  if (!imageUrl) throw new Error('图像生成失败，禁止空成功');
   return imageUrl;
 }
 
@@ -77,7 +78,7 @@ export async function generateStoryboardPanorama720(
   prompt: string,
   pictureNodeData: Record<string, unknown>,
 ): Promise<string> {
-  if (!prompt.trim()) throw new Error('请先描述全景场景');
+  if (!prompt.trim()) throw new Error('请先描述全景场景，禁止空成功');
   const configuredModel = (pictureNodeData.model as string) || 'gemini-2.5-flash-image';
   const modelId = configuredModel === 'flux-i2i' ? 'flux-dev' : configuredModel;
   const urls = await runPictureGenJob({
@@ -88,7 +89,7 @@ export async function generateStoryboardPanorama720(
     mode: 'panorama-720',
   });
   const imageUrl = urls[0];
-  if (!imageUrl) throw new Error('全景图生成失败');
+  if (!imageUrl) throw new Error('全景图生成失败，禁止空成功');
   return imageUrl;
 }
 
@@ -109,7 +110,7 @@ export async function checkStoryboardConsistencyWithAi(
         id: dimension,
         label,
         score: 0,
-        issues: [{ frameId: frames[0]?.id ?? 'none', message: '尚无预览图，无法检查' }],
+        issues: [{ frameId: frames[0]?.id ?? 'none', message: '尚无预览图，无法检查，禁止空成功' }],
       }],
       threshold: 80,
       suggestRegenerateFrameIds: [],
@@ -156,16 +157,30 @@ export async function checkStoryboardConsistencyWithAi(
   })) as { content?: string; choices?: { message?: { content?: string } }[] };
 
   const raw = res.content ?? res.choices?.[0]?.message?.content ?? '{}';
-  let score = 85;
+  // 禁止解析失败时落默认 85 分（假高分）；围栏 JSON 用 extractLlmJsonObject
+  const parsedObj = extractLlmJsonObject(raw);
+  let score = 0;
   const issues: Array<{ frameId: string; message: string }> = [];
   const frameScoreMap = new Map<string, number>();
-  try {
-    const parsed = JSON.parse(raw) as {
+  if (!parsedObj) {
+    issues.push({
+      frameId: withImages[0].id,
+        message: `LLM 返回无法解析为评分 JSON，禁止空成功（已保留原文片段）：${raw.slice(0, 120)}`,
+    });
+  } else {
+    const parsed = parsedObj as {
       score?: number;
       frameScores?: Array<{ frameLabel?: string; frameId?: string; score?: number }>;
       issues?: Array<{ frameLabel?: string; frameId?: string; message?: string }>;
     };
-    score = Math.max(0, Math.min(100, Math.round(parsed.score ?? score)));
+    if (typeof parsed.score === 'number' && Number.isFinite(parsed.score)) {
+      score = Math.max(0, Math.min(100, Math.round(parsed.score)));
+    } else {
+      issues.push({
+        frameId: withImages[0].id,
+        message: 'LLM JSON 缺少有效 score 字段，综合分记 0（未假装通过）',
+      });
+    }
     for (const item of parsed.frameScores ?? []) {
       const frame =
         withImages.find((f) => f.label === item.frameLabel)
@@ -183,11 +198,9 @@ export async function checkStoryboardConsistencyWithAi(
         message: issue.message ?? '一致性问题',
       });
     }
-  } catch {
-    issues.push({ frameId: withImages[0].id, message: raw.slice(0, 120) });
   }
 
-  // 无逐帧分时，用综合分回填
+  // 无逐帧分时，用综合分回填（解析失败则为 0）
   if (frameScoreMap.size === 0) {
     for (const f of withImages) frameScoreMap.set(f.id, score);
   }

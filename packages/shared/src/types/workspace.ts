@@ -185,6 +185,8 @@ export interface UserSummary {
 export interface UsageSummary {
   totalEvents: number;
   byKind: Record<string, number>;
+  /** F-009: 按模型聚合消耗单元（无 model 记为「未知」） */
+  byModel: Record<string, number>;
   estimatedCostUnits: number;
   periodDays: number;
 }

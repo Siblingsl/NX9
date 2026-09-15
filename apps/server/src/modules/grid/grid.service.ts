@@ -1,5 +1,5 @@
-import { Injectable } from '@nestjs/common';
-import { readFileSync } from 'fs';
+import { Injectable, ServiceUnavailableException } from '@nestjs/common';
+import { existsSync, readFileSync } from 'fs';
 import { join } from 'path';
 import sharp from 'sharp';
 import type { GridCellPrompt } from '@nx9/shared';
@@ -10,6 +10,28 @@ import { AssetsService } from '../assets/assets.service';
 import { GatewayService } from '../gateway/gateway.service';
 import { SettingsService } from '../settings/settings.service';
 
+/** 去围栏提取 JSON；失败返回 null（格子反推不得 silently 空成功）。 */
+function extractLlmJsonObject(text: string): Record<string, unknown> | null {
+  const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  const candidate = (fenced?.[1] ?? text).trim();
+  const tryParse = (input: string): Record<string, unknown> | null => {
+    try {
+      const parsed = JSON.parse(input) as unknown;
+      return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+        ? (parsed as Record<string, unknown>)
+        : null;
+    } catch {
+      return null;
+    }
+  };
+  const direct = tryParse(candidate);
+  if (direct) return direct;
+  const start = candidate.indexOf('{');
+  const end = candidate.lastIndexOf('}');
+  if (start >= 0 && end > start) return tryParse(candidate.slice(start, end + 1));
+  return null;
+}
+
 @Injectable()
 export class GridService {
   constructor(
@@ -19,11 +41,11 @@ export class GridService {
 
   async splitGrid(sourceUrl: string, rows = 3, cols = 3) {
     const local = resolveMediaUrl(sourceUrl);
-    if (!local) throw new Error(`无法解析图片路径: ${sourceUrl}`);
+    if (!local) throw new Error(`无法解析图片路径，禁止空成功: ${sourceUrl}`);
     const meta = await sharp(local).metadata();
     const w = meta.width ?? 0;
     const h = meta.height ?? 0;
-    if (w < cols || h < rows) throw new Error('图片尺寸不足以切分');
+    if (w < cols || h < rows) throw new Error('图片尺寸不足以切分，禁止空成功');
 
     const cellW = Math.floor(w / cols);
     const cellH = Math.floor(h / rows);
@@ -38,6 +60,9 @@ export class GridService {
           .extract({ left: c * cellW, top: r * cellH, width: cellW, height: cellH })
           .jpeg({ quality: 90 })
           .toFile(out);
+        if (!existsSync(out)) {
+          throw new Error(`宫格拆分产物未写出（${r},${c}），禁止空成功`);
+        }
         urls.push(this.assets.publicUrl('images', name));
       }
     }
@@ -55,7 +80,7 @@ export class GridService {
     labels?: string[],
   ) {
     const paths = imageUrls.map((u) => resolveMediaUrl(u)).filter(Boolean) as string[];
-    if (paths.length === 0) throw new Error('无有效图片');
+    if (paths.length === 0) throw new Error('无有效图片，禁止空成功');
     const count = Math.min(paths.length, Math.max(1, rows) * Math.max(1, cols));
     const safeCols = Math.max(1, cols);
     const safeRows = Math.max(1, rows, Math.ceil(count / safeCols));
@@ -103,6 +128,7 @@ export class GridService {
       .composite(composites)
       .jpeg({ quality: 92 })
       .toFile(out);
+    if (!existsSync(out)) throw new Error('宫格合成产物未写出，禁止空成功');
 
     return {
       ok: true,
@@ -130,6 +156,9 @@ export class GridService {
       model: 'dall-e-3',
       size: rows * cols > 6 ? '1792x1024' : '1024x1024',
     });
+    if (!generated?.url) {
+      throw new ServiceUnavailableException('宫格生成未返回图片，禁止空成功');
+    }
 
     return {
       ok: true,
@@ -161,6 +190,9 @@ export class GridService {
       model: 'dall-e-3',
       size: '1024x1024',
     });
+    if (!generated?.url) {
+      throw new ServiceUnavailableException('单镜线稿未返回图片，禁止空成功');
+    }
 
     return {
       ok: true,
@@ -223,11 +255,22 @@ needsEndFrame 在人物走位、镜头推拉摇移、状态变化时为 true。`
       ],
     })) as { choices?: { message?: { content?: string } }[] };
 
-    let data: Record<string, unknown> = {};
-    try {
-      data = JSON.parse(res.choices?.[0]?.message?.content ?? '{}');
-    } catch {
-      data = {};
+    const raw = res.choices?.[0]?.message?.content ?? '';
+    const data = extractLlmJsonObject(raw);
+    if (!data) {
+      return {
+        index,
+        row,
+        col,
+        cellImageUrl: cellUrl,
+        imagePrompt: '',
+        imagePromptZh: 'LLM 返回无法解析为 JSON，本格反推失败（未假装成功）',
+        needsEndFrame: false,
+        endFramePrompt: '',
+        endFramePromptZh: '',
+        videoPrompt: '',
+        videoPromptZh: '',
+      };
     }
 
     return {

@@ -23,9 +23,9 @@ export function useBibleImageGen() {
       if (res.url) {
         return res.url;
       }
-      throw new Error(res.message || '生成失败');
+      throw new Error(res.message || 'Bible 图像生成未返回 URL，禁止空成功');
     } catch (err) {
-      const msg = err instanceof Error ? err.message : '生成失败';
+      const msg = err instanceof Error ? err.message : 'Bible 图像生成失败，禁止空成功';
       setError(msg);
       return null;
     } finally {

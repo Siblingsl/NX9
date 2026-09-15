@@ -38,18 +38,23 @@ class NodeFileReader {
  * （方案 B：Blender 精修输出），输出到 output/sculpt-preview-refined/。
  */
 const GLB_PREVIEW = process.env.NX9_GLB_PREVIEW;
+// 头部 GLB 单独渲染头部机位；未设置时头部机位回退到 GLB_PREVIEW
+const GLB_PREVIEW_HEAD = process.env.NX9_GLB_PREVIEW_HEAD;
 const OUT_DIR = GLB_PREVIEW
   ? path.resolve(process.cwd(), '../../output/sculpt-preview-refined')
   : path.resolve(process.cwd(), '../../output/sculpt-preview');
 
-let externalRoot: Group | null = null;
-async function getPreviewRoot(): Promise<unknown> {
+const HEAD_VIEWS = new Set(['headClose', 'glabella', 'chinMouth', 'headFace', 'headSide', 'headQuarter']);
+const previewRoots: Record<string, Group | null> = { body: null, head: null };
+async function getPreviewRoot(kind: 'body' | 'head' = 'body'): Promise<unknown> {
   if (!GLB_PREVIEW) return createCharacterBaseModel();
-  if (externalRoot) return externalRoot;
-  const disk = fs.readFileSync(path.resolve(process.cwd(), GLB_PREVIEW));
+  const cached = previewRoots[kind];
+  if (cached) return cached;
+  const file = kind === 'head' && GLB_PREVIEW_HEAD ? GLB_PREVIEW_HEAD : GLB_PREVIEW;
+  const disk = fs.readFileSync(path.resolve(process.cwd(), file));
   const diskBuffer = new ArrayBuffer(disk.byteLength);
   new Uint8Array(diskBuffer).set(disk);
-  externalRoot = await new Promise<Group>((resolve, reject) => {
+  const root = await new Promise<Group>((resolve, reject) => {
     new GLTFLoader().parse(
       diskBuffer,
       '',
@@ -57,7 +62,8 @@ async function getPreviewRoot(): Promise<unknown> {
       (err) => reject(err instanceof Error ? err : new Error(String(err))),
     );
   });
-  return externalRoot;
+  previewRoots[kind] = root;
+  return root;
 }
 
 // ── 最小 PNG 编码器（zlib + CRC32）──────────────────────────────────────────
@@ -107,7 +113,7 @@ function encodePng(width: number, height: number, rgb: Uint8Array): Buffer {
 }
 
 // ── 软渲染器 ────────────────────────────────────────────────────────────────
-interface Cam {
+export interface Cam {
   pos: Vector3;
   target: Vector3;
   fov: number;
@@ -117,10 +123,16 @@ interface Tri {
   v: [number, number, number, number][]; // [x,y,z,viewZ] 屏幕坐标
   n: number[][]; // 三个顶点的世界法线（Gouraud 插值，mesh 多为纯平移，本地≈世界）
   base: [number, number, number]; // 材质基础色（未受光）
-  c: number[][]; // 可选顶点色（0-255），像素处重心插值后与 base 相乘
+  c: number[][] | null; // 可选顶点色（0-255），像素处重心插值后与 base 相乘
 }
 
-function renderScene(root: unknown, cam: Cam, width: number, height: number): Uint8Array {
+export function renderScene(
+  root: unknown,
+  cam: Cam,
+  width: number,
+  height: number,
+  bg?: { top: number[]; bottom: number[] },
+): Uint8Array {
   const aspect = width / height;
   const fovRad = (cam.fov * Math.PI) / 180;
   const projScale = 1 / Math.tan(fovRad / 2);
@@ -206,13 +218,13 @@ function renderScene(root: unknown, cam: Cam, width: number, height: number): Ui
         });
       }
     }
-    for (const c of obj.children ?? []) walk(c);
+    for (const c of obj.children ?? []) walk(c as never);
   };
   walk(root as { children?: unknown[] });
 
-  // 背景（顶部浅蓝灰 → 底部近白的垂直渐变，影棚感）
-  const bgTop = [205, 215, 226];
-  const bgBottom = [238, 242, 246];
+  // 背景（顶部浅蓝灰 → 底部近白的垂直渐变，影棚感；可传纯色背景供剪影蒙版）
+  const bgTop = bg?.top ?? [205, 215, 226];
+  const bgBottom = bg?.bottom ?? [238, 242, 246];
   const img = new Uint8Array(width * height * 3);
   for (let y = 0; y < height; y++) {
     const t = y / (height - 1);
@@ -288,20 +300,63 @@ function renderScene(root: unknown, cam: Cam, width: number, height: number): Ui
 }
 
 async function renderAndWrite(name: string, cam: Cam, width = 1024, height = 1536): Promise<void> {
-  const root = await getPreviewRoot();
+  const root = await getPreviewRoot(HEAD_VIEWS.has(name) ? 'head' : 'body');
   const img = renderScene(root, cam, width, height);
   fs.mkdirSync(OUT_DIR, { recursive: true });
   fs.writeFileSync(path.join(OUT_DIR, `${name}.png`), encodePng(width, height, img));
 }
 
-const CAM_PRESETS: Record<string, Cam> = {
+export const CAM_PRESETS: Record<string, Cam> = {
   face: { pos: new Vector3(0, 1.25, 2.55), target: new Vector3(0, 1.15, 0), fov: 32 },
   side: { pos: new Vector3(2.6, 1.25, 0.15), target: new Vector3(0, 1.15, 0), fov: 32 },
   quarter: { pos: new Vector3(1.9, 1.35, 1.9), target: new Vector3(0, 1.15, 0), fov: 32 },
   back: { pos: new Vector3(0, 1.25, -2.55), target: new Vector3(0, 1.15, 0), fov: 32 },
   body: { pos: new Vector3(0, 1.05, 3.6), target: new Vector3(0, 0.95, 0), fov: 32 },
   headClose: { pos: new Vector3(0, 1.64, 0.85), target: new Vector3(0, 1.64, 0), fov: 40 },
+  glabella: { pos: new Vector3(0, 1.59, 0.3), target: new Vector3(0, 1.587, 0.146), fov: 40 },
+  chinMouth: { pos: new Vector3(0, 1.493, 0.3), target: new Vector3(0, 1.493, 0.135), fov: 40 },
+  // 头部轮廓专用机位（剪影验收：颅骨椭圆 / 下颌收窄 / 下巴圆弧）
+  headFace: { pos: new Vector3(0, 1.585, 0.9), target: new Vector3(0, 1.565, 0), fov: 36 },
+  headSide: { pos: new Vector3(1.1, 1.585, 0.15), target: new Vector3(0, 1.565, 0), fov: 36 },
+  headQuarter: { pos: new Vector3(0.85, 1.6, 0.85), target: new Vector3(0, 1.565, 0), fov: 36 },
 };
+
+// ── 剪影 ASCII（整体比例验收：无图像视觉时的轮廓检查）───────────────────────
+export const SIL_BG = { top: [38, 42, 50], bottom: [38, 42, 50] };
+
+function silhouetteAscii(root: unknown, cam: Cam, cols: number, rows: number, name: string): string {  const W = cols * 2;
+  const H = rows * 2;
+  const img = renderScene(root, cam, W, H, SIL_BG);
+  const mask = new Uint8Array(W * H);
+  for (let y = 0; y < H; y++) {
+    const t = y / (H - 1);
+    const r = SIL_BG.top[0] + (SIL_BG.bottom[0] - SIL_BG.top[0]) * t;
+    const g = SIL_BG.top[1] + (SIL_BG.bottom[1] - SIL_BG.top[1]) * t;
+    const b = SIL_BG.top[2] + (SIL_BG.bottom[2] - SIL_BG.top[2]) * t;
+    for (let x = 0; x < W; x++) {
+      const o = (y * W + x) * 3;
+      const dr = Math.abs(img[o] - r);
+      const dg = Math.abs(img[o + 1] - g);
+      const db = Math.abs(img[o + 2] - b);
+      if (dr > 4 || dg > 4 || db > 4) mask[y * W + x] = 1;
+    }
+  }
+  const RAMPS = [' ', '.', ':', '+', '#', '@'];
+  let out = `=== ${name} silhouette ${cols}x${rows} ===\n`;
+  for (let cy = 0; cy < rows; cy++) {
+    let line = '';
+    for (let cx = 0; cx < cols; cx++) {
+      let hit = 0;
+      for (let dy = 0; dy < 2; dy++) {
+        for (let dx = 0; dx < 2; dx++) hit += mask[(cy * 2 + dy) * W + cx * 2 + dx];
+      }
+      line += RAMPS[Math.min(RAMPS.length - 1, Math.round((hit / 4) * (RAMPS.length - 1)))];
+    }
+    out += line + '\n';
+  }
+  fs.writeFileSync(path.join(OUT_DIR, `${name}-silhouette.txt`), out);
+  return out;
+}
 
 describe('捏模基模软渲染预览', () => {
   it('渲染 6 个机位 PNG 到 output/sculpt-preview', async () => {
@@ -317,8 +372,8 @@ describe('捏模基模软渲染预览', () => {
 
   it('输出低分辨率 ASCII 预览（控制台可读形态）', async () => {
     const RAMPS = [' ', '.', ':', '-', '=', '+', '*', '#', '%', '@'];
-    const root = await getPreviewRoot();
-    for (const name of ['face', 'side', 'quarter', 'headClose']) {
+    for (const name of ['face', 'side', 'quarter', 'headClose', 'glabella', 'chinMouth']) {
+      const root = await getPreviewRoot(HEAD_VIEWS.has(name) ? 'head' : 'body');
       const img = renderScene(root, CAM_PRESETS[name], 64, 88);
       // eslint-disable-next-line no-console
       console.log(`\n=== ${name} ASCII 64x88 ===`);
@@ -343,9 +398,26 @@ describe('捏模基模软渲染预览', () => {
     }
   }, 30000);
 
+  it('输出剪影 ASCII（整体比例/轮廓验收，写入 *-silhouette.txt）', async () => {
+    const views: [string, Cam, number, number][] = [
+      ['body', CAM_PRESETS.body, 72, 110],
+      ['face', CAM_PRESETS.face, 72, 110],
+      ['side', CAM_PRESETS.side, 72, 110],
+      ['quarter', CAM_PRESETS.quarter, 72, 110],
+      ['headFace', CAM_PRESETS.headFace, 64, 76],
+      ['headSide', CAM_PRESETS.headSide, 64, 76],
+      ['headQuarter', CAM_PRESETS.headQuarter, 64, 76],
+    ];
+    for (const [name, cam, cols, rows] of views) {
+      const root = await getPreviewRoot(HEAD_VIEWS.has(name) ? 'head' : 'body');
+      // eslint-disable-next-line no-console
+      console.log(silhouetteAscii(root, cam, cols, rows, name));
+    }
+  }, 120000);
+
   it('输出世界包围盒（诊断分段位置）', async () => {
     const root = await getPreviewRoot();
-    root.updateMatrixWorld(true);
+    (root as { updateMatrixWorld?: (f: boolean) => void }).updateMatrixWorld?.(true);
     const out: string[] = [];
     const walk = (obj: unknown) => {
       const o = obj as { isMesh?: boolean; name?: string; children?: unknown[] };
@@ -357,7 +429,7 @@ describe('捏模基模软渲染预览', () => {
       }
       for (const c of o.children ?? []) walk(c);
     };
-    for (const c of root.children) walk(c);
+    for (const c of (root as { children?: unknown[] }).children ?? []) walk(c);
     // eslint-disable-next-line no-console
     console.log('AABB:\n' + out.sort().join('\n'));
   }, 30000);

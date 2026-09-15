@@ -221,7 +221,7 @@ export async function runPictureGenExecutor(ctx: BlockExecutorContext): Promise<
   const multiPromptRun = isPictureMultiPromptAction(d.pictureProAction as string | undefined);
   if (multiPromptRun) {
     const filled = filledMultiPrompts(d.multiPrompts);
-    if (filled.length === 0) throw new Error('请至少填写一条多图提示词');
+    if (filled.length === 0) throw new Error('请至少填写一条多图提示词，禁止空成功');
     finalJobs = filled.map((p) => ({ prompt: p }));
   }
   const composeAction = upstream.promptDispatch?.composeAction ?? 'generate';
@@ -253,6 +253,12 @@ export async function runPictureGenExecutor(ctx: BlockExecutorContext): Promise<
   const multiRefs = Array.isArray(d.referenceImageUrls)
     ? (d.referenceImageUrls as string[]).filter((u) => typeof u === 'string' && u.trim())
     : [];
+  // F-032: 上游参考板图并入参考列表
+  if (referenceConstraint?.assetUrls?.length) {
+    for (const url of referenceConstraint.assetUrls) {
+      if (url && !multiRefs.includes(url)) multiRefs.push(url);
+    }
+  }
   const excludedRefs = new Set(
     Array.isArray(d.excludedRefUrls) ? (d.excludedRefUrls as string[]) : [],
   );
@@ -324,7 +330,7 @@ export async function runPictureGenExecutor(ctx: BlockExecutorContext): Promise<
       const job = finalJobs[i];
       const checked = buildConstrainedPrompt(job.prompt, referenceConstraint, undefined);
       if (checked.blocked) {
-        throw new Error(`参考板约束阻塞：${checked.reason ?? '未通过约束检查'}`);
+        throw new Error(`参考板约束阻塞：${checked.reason ?? '未通过约束检查'}，禁止空成功`);
       }
       if (checked.prompt !== job.prompt) {
         finalJobs[i] = { ...job, prompt: checked.prompt };
@@ -365,7 +371,7 @@ export async function runPictureGenExecutor(ctx: BlockExecutorContext): Promise<
   if (pictureGenMode === 'upscale-hd') {
     const refImage =
       mentionedMediaUrls[0] || nodeRef || multiRefs[0] || upstreamPics[0] || characterRefUrl;
-    if (!refImage) throw new Error('图片放大需要参考图：请上传或连接上游');
+    if (!refImage) throw new Error('图片放大需要参考图：请上传或连接上游，禁止空成功');
     try {
       const batchUrls = await runPictureGenJob({
         prompt: 'upscale',
@@ -568,7 +574,7 @@ export async function runPictureGenExecutor(ctx: BlockExecutorContext): Promise<
     return;
   }
   if (urls.length === 0) {
-    throw new Error(failures[0]?.error ?? '图像生成失败');
+    throw new Error(failures[0]?.error ?? '图像生成失败，禁止空成功');
   }
 
   // ── OL-01/OL-03: 出图 usedAssetIds + 角色 revision pin ──

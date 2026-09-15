@@ -78,13 +78,17 @@ export const CardShell = memo(function CardShell({
         title="双击展开"
       >
         <div className="nx9-stage-card__surface">
-          <div className="nx9-stage-card__accent" style={{ background: accent }} aria-hidden />
+          <div
+            className="nx9-stage-card__accent"
+            style={{ background: accent, '--card-accent': accent } as React.CSSProperties}
+            aria-hidden
+          />
           <div className="nx9-stage-card__head">
             <span className="nx9-stage-card__title">{displayName}</span>
             {status === 'running' && pendingSince ? (
               <span className="nx9-stage-card__badge">{formatPendingElapsed(pendingSince)}</span>
             ) : status === 'running' ? (
-              <Loader2 size={12} className="animate-spin text-teal-300" />
+              <Loader2 size={12} className="animate-spin nx9-stage-card__spin" />
             ) : (
               <span className={`nx9-stage-card__status ${statusClass}`} />
             )}
@@ -116,11 +120,15 @@ export const CardShell = memo(function CardShell({
         hidden={hideSockets || hideSocketInProduce}
       />
       <div className="nx9-stage-card__surface">
-        <div className="nx9-stage-card__accent" style={{ background: accent }} aria-hidden />
+        <div
+          className="nx9-stage-card__accent"
+          style={{ background: accent, '--card-accent': accent } as React.CSSProperties}
+          aria-hidden
+        />
         <div className="nx9-stage-card__head">
           <span className="nx9-stage-card__title">{displayName}</span>
           {status === 'running' ? (
-            <Loader2 size={13} className="animate-spin text-teal-300" />
+            <Loader2 size={13} className="animate-spin nx9-stage-card__spin" />
           ) : (
             <span className={`nx9-stage-card__status ${statusClass}`} />
           )}

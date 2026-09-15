@@ -73,9 +73,9 @@ export function applyPoseTransaction(
   request: Director3dPoseRequest,
   confirmed: boolean,
 ): Director3dPoseTransactionResult {
-  if (!confirmed) return { ok: false, error: '未确认 Agent 摆位变更' };
-  if (request.shotId !== state.shotId) return { ok: false, error: 'Agent 摆位镜头已切换' };
-  if (request.baseStateVersion !== state.stateVersion) return { ok: false, error: 'Agent 摆位基准版本已过期，请重新生成' };
+  if (!confirmed) return { ok: false, error: '未确认 Agent 摆位变更，禁止空成功' };
+  if (request.shotId !== state.shotId) return { ok: false, error: 'Agent 摆位镜头已切换，禁止空成功' };
+  if (request.baseStateVersion !== state.stateVersion) return { ok: false, error: 'Agent 摆位基准版本已过期，请重新生成，禁止空成功' };
 
   const byId = new Map(state.objects.map((object) => [object.sourceCharacterId, object]));
   const byName = new Map(state.objects.map((object) => [object.name, object]));
@@ -94,7 +94,7 @@ export function applyPoseTransaction(
   for (const pose of request.command.characters) {
     if (!byId.has(pose.characterId) && !byName.has(pose.name)) missing.push(pose.name);
   }
-  if (missing.length > 0) return { ok: false, error: `未绑定当前镜头角色：${missing.join('、')}` };
+  if (missing.length > 0) return { ok: false, error: `未绑定当前镜头角色：${missing.join('、')}，禁止空成功` };
 
   const nextState: Director3dShotState = {
     ...state,

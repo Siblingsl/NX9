@@ -41,10 +41,29 @@ export function BrandMark({ size = 44 }: { size?: number }) {
   );
 }
 
+const SIGNED_IN_FLAG = 'nx9.hasSignedIn';
+
+function hasPriorSignedIn(): boolean {
+  try {
+    return localStorage.getItem(SIGNED_IN_FLAG) === '1';
+  } catch {
+    return false;
+  }
+}
+
+function markSignedIn(): void {
+  try {
+    localStorage.setItem(SIGNED_IN_FLAG, '1');
+  } catch {
+    /* ignore quota */
+  }
+}
+
 export function LoginPage() {
   const login = useUserSession((s) => s.login);
   const register = useUserSession((s) => s.register);
-  const [mode, setMode] = useState<Mode>('login');
+  // UX P2-1：本机从未登录过时默认注册，避免新用户看到「欢迎回来」
+  const [mode, setMode] = useState<Mode>(() => (hasPriorSignedIn() ? 'login' : 'register'));
   const [name, setName] = useState('');
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
@@ -98,6 +117,7 @@ export function LoginPage() {
           mode === 'login'
             ? await login(clean, password)
             : await register(clean, password);
+        markSignedIn();
         if (adoptedLegacy) {
           toastSuccess('已接管本机原有项目数据，欢迎回来');
         } else if (mode === 'register') {
