@@ -7,13 +7,16 @@ import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib';
 import type {
   CharacterBodyType,
   DirectorCameraShot,
+  DirectorLight,
   DirectorObject,
   GeometryPrimitiveType,
 } from '../schema/directorProject';
 import { getCameraViewFromShot } from '../schema/cameraGeometry';
+import { defaultLightingFallback, lightPosition } from '../presets/lightingPresets';
 import { useDirectorStore } from '../store/directorStore';
 import { StageActor } from '../runtime/StageActor';
 import { ImportedMesh } from '../runtime/ImportedMesh';
+import { BuiltinPropMesh } from '../runtime/BuiltinPropMesh';
 import { PanoramaBackground } from '../runtime/PanoramaBackground';
 import { clearAssetLoaderCache } from '../loaders/clearAssetLoader';
 
@@ -79,6 +82,85 @@ function PropMesh({ type, color }: { type: GeometryPrimitiveType; color: string 
         </mesh>
       );
   }
+}
+
+/**
+ * 单盏场景灯。球坐标 → 世界坐标由 presets/lightingPresets 统一换算，
+ * 保证灯光面板里的读数与画面里的实际灯位一致。
+ *
+ * 点光源与聚光灯使用 decay=0（常量衰减）：面板上同一根 intensity 滑块
+ * 在方向光 / 点光 / 聚光灯下量纲一致，便于按预置数值复现布光。
+ */
+function SceneLight({ light }: { light: DirectorLight }) {
+  const position = lightPosition(light);
+  switch (light.type) {
+    case 'ambient':
+      return <ambientLight intensity={light.intensity} color={light.color} />;
+    case 'spot':
+      return (
+        <spotLight
+          position={position}
+          color={light.color}
+          intensity={light.intensity}
+          /* coneAngle 为全锥角（度），three 需要半角（弧度） */
+          angle={MathUtils.degToRad(Math.min(90, Math.max(2, light.coneAngle ?? 45)) / 2)}
+          penumbra={light.penumbra ?? 0.4}
+          decay={0}
+          castShadow={light.castShadow}
+        />
+      );
+    case 'point':
+      return (
+        <pointLight
+          position={position}
+          color={light.color}
+          intensity={light.intensity}
+          decay={0}
+          castShadow={light.castShadow}
+        />
+      );
+    default:
+      return (
+        <directionalLight
+          position={position}
+          color={light.color}
+          intensity={light.intensity}
+          castShadow={light.castShadow}
+        />
+      );
+  }
+}
+
+/**
+ * 场景灯光组：按 project.scene.lights 渲染；灯光被清空时回退默认两灯
+ * （老版本硬编码的环境基线 + 主光），保证任何路径下画面都不会全黑。
+ */
+function LightingRig() {
+  const lights = useDirectorStore((s) => s.project.scene.lights);
+  const ambientIntensity = useDirectorStore((s) => s.project.scene.ambientIntensity);
+  const hasRig = lights.length > 0;
+  const fallback = useMemo(() => defaultLightingFallback(), []);
+  const rig = hasRig ? lights : fallback.lights;
+  const ambient = hasRig ? ambientIntensity : fallback.ambientIntensity;
+  return (
+    <>
+      {ambient > 0 && <ambientLight intensity={ambient} />}
+      {rig.filter((light) => light.visible).map((light) => (
+        <SceneLight key={light.id} light={light} />
+      ))}
+    </>
+  );
+}
+
+/** 曝光联动：toneMappingExposure 只在 r3f 已启用 tone mapping 时生效。 */
+function ExposureSync() {
+  const exposure = useDirectorStore((s) => s.project.scene.exposure);
+  const gl = useThree((s) => s.gl);
+  useEffect(() => {
+    if (typeof exposure !== 'number' || !Number.isFinite(exposure)) return;
+    gl.toneMappingExposure = exposure;
+  }, [gl, exposure]);
+  return null;
 }
 
 function ObjectGizmo({
@@ -208,6 +290,8 @@ function SceneObject({
           />
         ) : object.kind === 'mesh' && object.meshUrl ? (
           <AssetLoadBoundary label={object.name} url={object.meshUrl}><ImportedMesh url={object.meshUrl} /></AssetLoadBoundary>
+        ) : object.builtinAssetId ? (
+          <BuiltinPropMesh assetId={object.builtinAssetId} />
         ) : (
           <PropMesh type={object.geometryType ?? 'box'} color={object.color ?? '#888'} />
         )}
@@ -313,8 +397,8 @@ export function SceneContent({
       {project.panorama?.url && (
         <AssetLoadBoundary label="全景图" url={project.panorama.url}><PanoramaBackground url={project.panorama.url} yaw={project.panorama.yaw} /></AssetLoadBoundary>
       )}
-      <ambientLight intensity={project.panorama ? 0.35 : 0.55} />
-      <directionalLight position={[5, 10, 4]} intensity={0.9} castShadow />
+      <LightingRig />
+      <ExposureSync />
       {project.scene.showGrid && (
         <Grid args={[24, 24]} cellSize={0.5} sectionSize={2} fadeDistance={28} position={[0, 0, 0]} />
       )}

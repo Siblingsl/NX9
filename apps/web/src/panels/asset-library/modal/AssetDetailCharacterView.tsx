@@ -1,5 +1,6 @@
 import { formatAssetMention, newSoundAsset, refreshCharacterPrompts, refreshVoicePrompts } from '@nx9/shared';
 import { toastSuccess } from '../../../stores/toast';
+import { useWorkspaceDocument } from '../../../stores/workspace-document';
 import { AssetDetailStickyBar } from '../AssetDetailStickyBar';
 import { AssetEditQuickJump } from '../AssetEditQuickJump';
 import AssetLibraryGenSettings from '../AssetLibraryGenSettings';
@@ -33,6 +34,8 @@ export function AssetDetailCharacterView() {
     saveSound,
     jumpToAsset,
   } = useAssetLibraryModal();
+  /** 声线档案（=`voice.profiles`）供角色绑定引擎音色；只写既有字段 voiceProfileId */
+  const voiceProfiles = useWorkspaceDocument((s) => s.voice.profiles);
 
   if (!selectedChar) return null;
 
@@ -125,6 +128,7 @@ export function AssetDetailCharacterView() {
           onUploadAudio={(f) => void handleUploadAudio(f, { kind: 'character', id: selectedChar.id })}
           onUploadView={(view, f) => void handleUploadCharacterView(f, selectedChar, view)}
           costumeOptions={costumeBindOptions}
+          voiceProfiles={voiceProfiles}
           chromeOwnsPrimaryGen
           onGenerateMasterSheet={canWrite ? () => {
             if (canCreateAsset) void generateCharacterMasterSheet(selectedChar);

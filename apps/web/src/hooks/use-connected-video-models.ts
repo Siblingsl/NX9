@@ -1,17 +1,24 @@
 import { useCallback, useEffect, useMemo } from 'react';
 import {
+  isBuiltinVideoModelId,
   listConnectedVideoModels,
+  listMergedVideoModelOptions,
   listVideoGenModelOptions,
   resolveActiveVideoConnectionModel,
   type AppSettings,
   type ConnectedVideoModelOption,
+  type MergedModelOption,
   type ModelConnection,
 } from '@nx9/shared';
 import { useCredentialVault } from '../stores/credential-vault';
 
 /**
- * 视频生成模型下拉：仅「设置 → 连接」里视频连接的默认模型与 availableModels。
- * 选中时同步激活该连接，并回写 videoApiKey / videoBaseUrl。
+ * 视频生成模型下拉：内置目录（NX9 自带）+「设置 → 连接」里视频连接的默认模型与 availableModels。
+ *
+ * - `options` / `connected` 保持既有语义（仅连接），兼容老调用方；
+ * - `mergedOptions` 供新下拉使用：内置在前、带 source 与分组标题；
+ * - 选中内置模型只写节点 model（由调用方 patch），不会改动/激活任何连接；
+ *   选中连接模型时行为与既有完全一致（激活连接并回写 videoApiKey/videoBaseUrl）。
  */
 export function useConnectedVideoModels(currentModel?: string) {
   const settings = useCredentialVault((s) => s.settings);
@@ -33,14 +40,20 @@ export function useConnectedVideoModels(currentModel?: string) {
     [settings?.connections],
   );
 
+  const mergedOptions = useMemo(
+    (): MergedModelOption[] => listMergedVideoModelOptions(settings?.connections),
+    [settings?.connections],
+  );
+
   const resolveConnected = useCallback(
     (modelId: string): ConnectedVideoModelOption | undefined =>
       connected.find((m) => m.id === modelId || m.connectionModel === modelId),
     [connected],
   );
 
+  /** 已知模型 = 用户连接模型 ∪ 内置目录模型（内置同样不能被回落逻辑覆盖） */
   const isKnownModel = useCallback(
-    (modelId: string) => Boolean(resolveConnected(modelId)),
+    (modelId: string) => Boolean(resolveConnected(modelId)) || isBuiltinVideoModelId(modelId),
     [resolveConnected],
   );
 
@@ -89,8 +102,11 @@ export function useConnectedVideoModels(currentModel?: string) {
 
   return {
     options,
+    mergedOptions,
     connected,
     hasConnections: connected.length > 0,
+    /** 内置目录始终可用（与是否有连接无关） */
+    hasBuiltins: mergedOptions.some((m) => m.source === 'builtin'),
     preferredModel,
     isKnownModel,
     selectModel,

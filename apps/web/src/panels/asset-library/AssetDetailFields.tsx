@@ -71,6 +71,12 @@ export interface CharacterDetailFieldsProps {
   onBumpRevision?: () => void;
   /** 从表情格发布到情绪库 — 已弃用（情绪库降级） */
   onPublishExpressionsToEmotion?: () => void;
+  /**
+   * 声线档案候选（`workspace.voice.profiles`）。
+   * 角色详情只写既有字段 `CharacterProfile.voiceProfileId`（值为声线档案 id），
+   * 引擎音色仍是该档案的 `voiceId` —— 不在此处新建第二套音色真源。
+   */
+  voiceProfiles?: Array<{ id: string; name: string; voiceId: string; provider?: string }>;
 }
 
 export function CharacterDetailFields({
@@ -88,6 +94,7 @@ export function CharacterDetailFields({
   chromeOwnsPrimaryGen = false,
   onPublishAudioToSound,
   onBumpRevision,
+  voiceProfiles = [],
 }: CharacterDetailFieldsProps) {
   const ext = getCharacterCreative(c);
   const bible = c.bible ?? {};
@@ -381,6 +388,31 @@ export function CharacterDetailFields({
                   发布到声音库
                 </button>
               ) : null}
+            </div>
+            <div className="space-y-2">
+              <Field label="声线档案（引擎音色）">
+                <select
+                  className="w-full rounded-lg border border-line bg-surface px-2 py-1.5 text-xs"
+                  value={c.voiceProfileId ?? ''}
+                  onChange={(e) => patch({ voiceProfileId: e.target.value || null })}
+                  disabled={voiceProfiles.length === 0}
+                >
+                  <option value="">
+                    {voiceProfiles.length === 0 ? '暂无声线档案可绑定' : '未绑定（配音节点缺省 alloy）'}
+                  </option>
+                  {voiceProfiles.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name} · {p.voiceId}
+                      {p.provider ? `（${p.provider}）` : ''}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+              <p className="text-[10px] text-ink/45 leading-snug">
+                声线档案 = 引擎 voiceId（写入 <code className="rounded bg-surface px-1">voiceProfileId</code>），
+                与上方「角色参考音」= 克隆源（<code className="rounded bg-surface px-1">referenceAudioUrl</code>）分工不同；
+                绑定后可在「多角色配音」节点一键按声线档案匹配。
+              </p>
             </div>
             <div className="space-y-2">
               <Field label="绑定服装库">

@@ -88,6 +88,10 @@ export function InspectorPanel({
 
   const [speedPitchBusy, setSpeedPitchBusy] = useState(false);
   const [speedPitchError, setSpeedPitchError] = useState('');
+  const [denoiseBusy, setDenoiseBusy] = useState(false);
+  const [denoiseMode, setDenoiseMode] = useState<'afftdn' | 'anlmdn'>('afftdn');
+  const [denoiseStrength, setDenoiseStrength] = useState(0.6);
+  const [denoiseError, setDenoiseError] = useState('');
 
   const setClip = useCallback(
     (patch: Record<string, unknown>) => {
@@ -121,6 +125,7 @@ export function InspectorPanel({
           { op: 'replace-clip-asset', clipId: clip.id, assetUrl: res.url },
           { op: 'set-clip', clipId: clip.id, patch },
         ]);
+
       } catch (e) {
         setSpeedPitchError(e instanceof Error ? e.message : String(e));
       } finally {
@@ -128,6 +133,32 @@ export function InspectorPanel({
       }
     },
     [apply],
+  );
+
+
+  /** 音频降噪：对片段音频做 afftdn/anlmdn 处理，成功后替换片段素材（与保音调渲染同口径） */
+  const handleDenoise = useCallback(
+    async (clip: TimelineClip) => {
+      if (!clip.assetUrl) {
+        setDenoiseError('当前片段没有音频素材，禁止空成功');
+        return;
+      }
+      setDenoiseBusy(true);
+      setDenoiseError('');
+      try {
+        const res = await api.audioDenoise({ audioUrl: clip.assetUrl, strength: denoiseStrength, mode: denoiseMode });
+        if (!res.ok || !res.url) {
+          setDenoiseError(res.message || '降噪失败：服务端未返回结果，禁止空成功');
+          return;
+        }
+        apply([{ op: 'replace-clip-asset', clipId: clip.id, assetUrl: res.url }]);
+      } catch (e) {
+        setDenoiseError(e instanceof Error ? e.message : String(e));
+      } finally {
+        setDenoiseBusy(false);
+      }
+    },
+    [apply, denoiseMode, denoiseStrength],
   );
 
   const clipEffects = (clip: TimelineClip): { blur: number } => ({
@@ -437,7 +468,49 @@ export function InspectorPanel({
         </section>
       )}
 
-      {(clip.type === 'video' || clip.type === 'image') && (
+      {isMedia && (
+        <section className="ed-inspector__section">
+          <h4>音频降噪</h4>
+          <div className="ed-chip-row">
+            <select
+              className="rounded border border-line bg-surface px-1 py-0.5 text-[10px]"
+              value={denoiseMode}
+              onChange={(e) => setDenoiseMode(e.target.value === 'anlmdn' ? 'anlmdn' : 'afftdn')}
+              disabled={denoiseBusy}
+            >
+              <option value="afftdn">afftdn（快）</option>
+              <option value="anlmdn">anlmdn（平滑）</option>
+            </select>
+            <label className="text-[9px] text-ink/45">强度</label>
+            <input
+              type="number"
+              min={0}
+              max={1}
+              step={0.1}
+              value={denoiseStrength}
+              onChange={(e) => setDenoiseStrength(Number(e.target.value))}
+              disabled={denoiseBusy}
+              className="w-16 rounded border border-line bg-surface px-1 py-0.5 text-[10px]"
+            />
+          </div>
+          <button
+            type="button"
+            className="ed-btn ed-btn--block"
+            disabled={denoiseBusy || !clip.assetUrl}
+            title={!clip.assetUrl ? '当前片段没有音频素材' : '用 FFmpeg 对片段音频做降噪处理，成功后替换素材（可回滚）'}
+            onClick={() => void handleDenoise(clip)}
+          >
+            {denoiseBusy ? <Loader2 size={12} className="ed-spin" /> : null}
+            {denoiseBusy ? '降噪渲染中…' : '降噪渲染（替换素材）'}
+          </button>
+          {denoiseError && <p className="ed-hint ed-hint--err">{denoiseError}</p>}
+          <p className="ed-field-hint">
+            适合去除 TTS / 实录音的底噪；afftdn 快、anlmdn 更平滑但慢。强度越高降噪越狠，也越可能伤人声。
+          </p>
+        </section>
+      )}
+
+{(clip.type === 'video' || clip.type === 'image') && (
         <section className="ed-inspector__section">
           <h4>转场（出）</h4>
           <div className="ed-chip-row">

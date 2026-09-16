@@ -668,6 +668,12 @@ export const api = {
       { method: 'POST', body: JSON.stringify(body) },
     ),
 
+  audioDenoise: (body: { audioUrl: string; strength?: number; mode?: 'afftdn' | 'anlmdn' }) =>
+    request<{ ok: boolean; url?: string; status: string; message?: string; mode?: string; strength?: number; filter?: string }>(
+      '/api/montage/audio-denoise',
+      { method: 'POST', body: JSON.stringify(body) },
+    ),
+
   thumbnailCompose: (body: { imageUrl: string; title?: string; safeZone?: string }) =>
     request<{ ok: boolean; url: string }>('/api/image-ops/thumbnail-compose', { method: 'POST', body: JSON.stringify(body) }),
 

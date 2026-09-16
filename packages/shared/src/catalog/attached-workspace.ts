@@ -438,6 +438,42 @@ export const ATTACHED_WORKSPACE_REGISTRY: Record<string, AttachedWorkspaceSpec> 
     showPreview: true,
     phase: 'P2',
   },
+  /** 多格推演：模式切换 + 计划编辑 + 批量出图 + 逐格送视频，走 tool 壳层 */
+  'multi-grid': {
+    kind: 'multi-grid',
+    functionalClass: 'processing-tool',
+    workspaceType: 'tool',
+    attachToNode: true,
+    compactCanvas: true,
+    showRun: true,
+    showPreview: true,
+    phase: 'P2',
+    note: '多机位 9/25 宫格 · 剧情四宫格 · 画面推演；产出为逐格图 + 逐格视频提示词',
+  },
+  /** 角色设定表：版面切换 + 一致性强度 + 逐格提示词编辑 + 批量出图 + 登记为角色参考图 */
+  'character-sheet-desk': {
+    kind: 'character-sheet-desk',
+    functionalClass: 'processing-tool',
+    workspaceType: 'tool',
+    attachToNode: true,
+    compactCanvas: true,
+    showRun: true,
+    showPreview: true,
+    phase: 'P2',
+    note: '三视图 / 表情表 / 动作表 / 整套设定表；逐格复述同一段一致性锁定短语，产出为逐格设定图',
+  },
+  /** 逐帧拉片：抽帧策略 + 逐帧反推 + 拉片表编辑 + 导出 / 送分镜，走 tool 壳层 */
+  'frame-study': {
+    kind: 'frame-study',
+    functionalClass: 'processing-tool',
+    workspaceType: 'tool',
+    attachToNode: true,
+    compactCanvas: true,
+    showRun: true,
+    showPreview: true,
+    phase: 'P2',
+    note: '参考视频逐帧拆解：时间码 + 逐帧反推提示词，产出为拉片表（可导出 JSON/CSV、可送分镜）',
+  },
   'frame-endpoints': {
     kind: 'frame-endpoints',
     functionalClass: 'processing-tool',

@@ -6,6 +6,9 @@ import { PromptWorkspace } from './prompt/PromptWorkspace';
 import { ToolWorkspace } from './tool/ToolWorkspace';
 import { LinkParserWorkspace } from './tool/LinkParserWorkspace';
 import { GridComposeWorkspace } from './tool/GridComposeWorkspace';
+import { MultiGridWorkspace } from './tool/MultiGridWorkspace';
+import { CharacterSheetWorkspace } from './tool/CharacterSheetWorkspace';
+import { FrameStudyWorkspace } from './tool/FrameStudyWorkspace';
 import { ReferenceBoardWorkspace } from './tool/ReferenceBoardWorkspace';
 import { LocalEnhanceWorkspace } from './tool/LocalEnhanceWorkspace';
 import { ReportWorkspace } from './report/ReportWorkspace';
@@ -56,6 +59,15 @@ export function AttachedWorkspaceRouter({ blockId, kind, onCollapse }: AttachedW
       }
       if (kind === 'grid-compose') {
         return <GridComposeWorkspace blockId={blockId} kind={kind} onCollapse={onCollapse} />;
+      }
+      if (kind === 'multi-grid') {
+        return <MultiGridWorkspace blockId={blockId} kind={kind} onCollapse={onCollapse} />;
+      }
+      if (kind === 'character-sheet-desk') {
+        return <CharacterSheetWorkspace blockId={blockId} kind={kind} onCollapse={onCollapse} />;
+      }
+      if (kind === 'frame-study') {
+        return <FrameStudyWorkspace blockId={blockId} kind={kind} onCollapse={onCollapse} />;
       }
       if (kind === 'reference-board') {
         return <ReferenceBoardWorkspace blockId={blockId} kind={kind} onCollapse={onCollapse} />;

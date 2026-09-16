@@ -1,0 +1,33 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "jsx": "react-jsx",
+    "strict": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "esModuleInterop": true,
+    "isolatedModules": true,
+    "allowImportingTsExtensions": true,
+    "baseUrl": ".",
+    "paths": {
+      "@nx9/shared": ["../../packages/shared/src/index.ts"],
+      "@nx9/director3d": ["../../packages/director3d/src/index.ts"],
+      "@/*": ["src/*"]
+    }
+  },
+  "include": [
+    "src/engine/__tests__/director3d-multi-camera-persist.test.ts",
+    "../../packages/director3d/src/schema/directorProject.ts",
+    "../../packages/director3d/src/schema/cameraMoveTimelineKeys.ts",
+    "../../packages/director3d/src/schema/cameraGeometry.ts",
+    "../../packages/director3d/src/store/directorStore.ts",
+    "../../packages/director3d/src/store/moveTimelineStore.ts",
+    "../../packages/director3d/src/ui/CameraMoveTimelineRail.tsx",
+    "../../packages/director3d/src/ui/StageDeckShell.tsx",
+    "../../packages/shared/src/types/camera-move-timeline.ts",
+    "../../packages/shared/src/utils/camera-move-timeline.ts"
+  ]
+}

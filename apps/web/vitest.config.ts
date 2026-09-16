@@ -26,6 +26,8 @@ export default defineConfig({
       'src/blocks/shared/__tests__/**/*.test.{ts,tsx}',
       'src/components/**/__tests__/**/*.test.{ts,tsx}',
       'src/engine/__tests__/**/*.test.ts',
+      // 增量：engine 目录下的组件级回归（大师运镜库面板等 UI 交互）
+      'src/engine/__tests__/**/*.test.tsx',
     ],
     testTimeout: 30000,
   },

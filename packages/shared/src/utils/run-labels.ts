@@ -138,6 +138,24 @@ const LABELS: Record<string, RunLabelDict> = {
     busy: '拆分中…',
     done: '已拆分',
   },
+  'multi-grid': {
+    primary: '批量推演出图',
+    hint: '多机位 / 剧情 / 画面推演逐格出图',
+    busy: '推演出图中…',
+    done: '已出图',
+  },
+  'character-sheet-desk': {
+    primary: '批量出设定图',
+    hint: '三视图 / 表情表 / 动作表逐格出图',
+    busy: '出设定图中…',
+    done: '已出图',
+  },
+  'frame-study': {
+    primary: '抽帧并逐帧反推',
+    hint: '参考视频逐帧拆解为时间码 + 提示词',
+    busy: '拉片中…',
+    done: '已拉片',
+  },
   'caption-asr': {
     primary: '语音转字幕',
     hint: 'ASR 字幕',

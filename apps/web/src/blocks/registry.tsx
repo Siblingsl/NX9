@@ -15,6 +15,10 @@ const blockLoaders: Record<string, () => Promise<{ default: ComponentType<NodePr
   'clip-editor': () => import('./core/ClipEditorBlock').then((m) => ({ default: m.default })),
   'director-desk': () => import('./core/DirectorDeskBlock').then((m) => ({ default: m.default })),
   'director-3d': () => import('./core/Director3dBlock').then((m) => ({ default: m.default })),
+  'multi-grid': () => import('./core/MultiGridBlock').then((m) => ({ default: m.default })),
+  'character-sheet-desk': () =>
+    import('./core/CharacterSheetBlock').then((m) => ({ default: m.default })),
+  'frame-study': () => import('./core/FrameStudyBlock').then((m) => ({ default: m.default })),
 
   'storyboard-desk': () =>
     import('./craft/StoryboardDeskBlock').then((m) => ({ default: m.default })),

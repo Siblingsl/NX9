@@ -11,6 +11,7 @@ import {
   type PromptDetailFlags,
 } from '../schema/cameraGeometry';
 import { PROMPT_PLATFORMS, skinCameraPrompt, type PromptPlatformId } from '../schema/promptSkin';
+import { buildSceneLightingPrompt } from '../presets/lightingPresets';
 
 const MOVES: { id: CameraMoveId; label: string }[] = [
   { id: 'static', label: '固定' },
@@ -59,8 +60,9 @@ export function CameraRigPanel() {
       subjectYawDeg: subjectYaw,
       move: cameraMove,
       details: promptDetails,
+      lightingPrompt: buildSceneLightingPrompt(project.scene),
     });
-  }, [camera, cameraMove, subjectYaw, promptDetails]);
+  }, [camera, cameraMove, subjectYaw, promptDetails, project.scene]);
 
   if (!camera || !desc) {
     return (

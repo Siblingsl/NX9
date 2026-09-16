@@ -3,6 +3,7 @@ import { useDirectorStore } from '../store/directorStore';
 import { exportProjectJson, importProjectJson, exportSceneTemplateJson, importSceneTemplateJson } from '../io/projectIo';
 import { loadLocalLibrary } from '../io/localLibrary';
 import { projectFromSceneTemplate, sceneTemplateFromProject, type Director3dSceneTemplate } from '../schema/directorProject';
+import { BUILTIN_SCENES, applyBuiltinScene } from '../presets/builtinScenes';
 
 export function EnvDrawer({
   onUploadFile,
@@ -152,6 +153,22 @@ export function EnvDrawer({
             ))}
           </>
         )}
+
+        <p className="nx9-stage-hint" style={{ marginTop: 14 }}>
+          内置场景模板（一键搭景，保留当前角色）
+        </p>
+        {BUILTIN_SCENES.map((scene) => (
+          <button
+            key={scene.id}
+            type="button"
+            className="nx9-stage-layer"
+            title={scene.description}
+            onClick={() => replaceProject(applyBuiltinScene(project, scene))}
+          >
+            <span>{scene.label}</span>
+            <span className="nx9-stage-chip">{scene.objects.length} 件</span>
+          </button>
+        ))}
 
         <p className="nx9-stage-hint" style={{ marginTop: 14 }}>
           视口辅助

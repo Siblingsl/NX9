@@ -13,6 +13,9 @@ import { executeClipGenOps } from './flow-runner-ops/clip-gen-ops';
 import { executeMediaOps } from './flow-runner-ops/media-ops';
 import { executeStoryOps } from './flow-runner-ops/story-ops';
 import { executeToolOps } from './flow-runner-ops/tool-ops';
+import { executeMultiGridOps } from './flow-runner-ops/multi-grid-ops';
+import { executeCharacterSheetOps } from './flow-runner-ops/character-sheet-ops';
+import { executeFrameStudyOps } from './flow-runner-ops/frame-study-ops';
 import { executeLegacyOps } from './flow-runner-ops/legacy-honesty-ops';
 import type { FlowExecuteDeps } from './flow-runner-ops/types';
 import { DirectorRunBlockedError, ReviewGateBlockedError } from './flow-runner-ops/errors';
@@ -80,6 +83,9 @@ export const RUNNABLE_BLOCKS = new Set([
   'depth-pass',
   'picture-diff',
   'storyboard-preview',
+  'multi-grid',
+  'character-sheet-desk',
+  'frame-study',
 ]);
 
 function toBlocks(nodes: Node[]): FlowBlock[] {
@@ -145,6 +151,24 @@ async function executeBlock(
 
   if (kind === 'clip-gen') {
     await executeClipGenOps(deps);
+    return;
+  }
+
+  /** 多格推演：自有执行器（计划组装 + 逐格批量出图 + 回写） */
+  if (kind === 'multi-grid') {
+    await executeMultiGridOps(deps);
+    return;
+  }
+
+  /** 角色设定表：自有执行器（版面组装 + 逐格批量出图 + 一致性回写） */
+  if (kind === 'character-sheet-desk') {
+    await executeCharacterSheetOps(deps);
+    return;
+  }
+
+  /** 逐帧拉片：自有执行器（抽帧计划 + 抽帧 + 逐帧反推 + 拉片表落盘） */
+  if (kind === 'frame-study') {
+    await executeFrameStudyOps(deps);
     return;
   }
 

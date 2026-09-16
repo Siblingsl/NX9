@@ -8,6 +8,12 @@ import { PATHS } from '../../config/app.config';
 import { resolveMediaUrl } from '../../common/media-path';
 import type { StoryboardShot } from '@nx9/shared';
 import { detectBeats } from './beat-detection';
+import {
+  buildAudioDenoiseArgs,
+  buildAudioDenoiseFilter,
+  buildAudioDenoiseOutputName,
+  normalizeAudioDenoiseParams,
+} from './audio-denoise';
 import { GatewayService } from '../gateway/gateway.service';
 import { SettingsService } from '../settings/settings.service';
 
@@ -769,6 +775,56 @@ export class MontageService {
         return { ok: false, status: 'failed', message: '变速产物未写出，禁止空成功' };
       }
       return { ok: true, status: 'done', url: `/media/exports/${outName}`, speed };
+    } catch (e) {
+      return {
+        ok: false,
+        status: 'failed',
+        message: e instanceof Error ? e.message : String(e),
+      };
+    }
+  }
+
+  /**
+   * 音频降噪：afftdn（快，默认）/ anlmdn（慢，更平滑）。
+   * 滤镜与强度映射见 audio-denoise.ts（纯函数层，已单测）；失败禁止空成功。
+   */
+  async audioDenoise(body: { audioUrl: string; strength?: number; mode?: 'afftdn' | 'anlmdn' }) {
+    const sourcePath = resolveMediaUrl(body.audioUrl);
+    if (!sourcePath || !existsSync(sourcePath)) {
+      return { ok: false, status: 'failed', message: '无法读取源音频，禁止空成功' };
+    }
+    const params = normalizeAudioDenoiseParams(body);
+    const hasFfmpeg = await this.checkFfmpeg();
+    if (!hasFfmpeg) {
+      return { ok: false, status: 'failed', message: '未检测到 FFmpeg，禁止空成功' };
+    }
+    const outName = buildAudioDenoiseOutputName(Date.now(), params.mode);
+    const outPath = join(PATHS.exports, outName);
+    const args = buildAudioDenoiseArgs(sourcePath, outPath, params.mode, params.strength);
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const proc = spawn('ffmpeg', args);
+        let stderr = '';
+        proc.stderr.on('data', (d) => {
+          stderr += String(d);
+        });
+        proc.on('error', reject);
+        proc.on('close', (code) => {
+          if (code === 0) resolve();
+          else reject(new Error(stderr.slice(-600) || `ffmpeg denoise exit ${code}`));
+        });
+      });
+      if (!existsSync(outPath)) {
+        return { ok: false, status: 'failed', message: '降噪产物未写出，禁止空成功' };
+      }
+      return {
+        ok: true,
+        status: 'done',
+        url: `/media/exports/${outName}`,
+        mode: params.mode,
+        strength: params.strength,
+        filter: buildAudioDenoiseFilter(params.mode, params.strength),
+      };
     } catch (e) {
       return {
         ok: false,

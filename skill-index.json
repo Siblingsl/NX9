@@ -143,7 +143,7 @@
   {
     "id": "script-skill-generate",
     "name": "分集成稿生成",
-    "description": "根据 brief/bible 生成分集成稿 JSON patch；bodyMd 体例与 agent-screenplay 锁死一致；禁镜头表。",
+    "description": "根据 brief/bible 生成分集成稿 JSON patch；bodyMd 体例锁死；禁镜头表。",
     "version": "2.1.0",
     "status": "stable",
     "tags": [
@@ -159,7 +159,7 @@
   {
     "id": "agent-screenplay",
     "name": "分集剧本写作",
-    "description": "根据 brief/策略/原文写出分集剧本正文；场次+动作+对白；体例锁死；禁镜头表与 JSON。",
+    "description": "根据 brief/策略写出分集纯文本剧本；场景头+动作+对白体例锁死；禁 JSON/镜头表。",
     "version": "2.1.0",
     "status": "stable",
     "tags": [
@@ -249,7 +249,7 @@
   {
     "id": "gen-character-sheet-master",
     "name": "角色设定板 Master",
-    "description": "两步角色 ID 锁定：先生成独立版式「角色完整设定板」（色彩/要点/全身三视/脸部六角/表情3×3/细节12），确认后再生成五张分类母图；完整设定板与五类版式脱钩；禁乱码、禁漂移、锁一致性。",
+    "description": "两步角色 ID 锁定：先独立版式「角色完整设定板」（色彩/要点/三视/六角/表情3×3/细节12），确认后再生成五张分类母图；版式脱钩；禁乱码、禁漂移。",
     "version": "3.1.0",
     "status": "stable",
     "tags": [
@@ -441,7 +441,7 @@
   {
     "id": "agent-extract-assets",
     "name": "资产抽取",
-    "description": "从文本提取角色与场景；角色六层设定；场景写入 locations（兼容 environments）。",
+    "description": "从文本提取角色与场景；locations 必填；兼容 environments。",
     "version": "2.1.0",
     "status": "stable",
     "tags": [

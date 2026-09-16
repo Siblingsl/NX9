@@ -1,6 +1,6 @@
 import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { type NodeProps, useEdges, useNodes, useReactFlow } from '@xyflow/react';
-import { gatherUpstream, AUDIO_FORMAT_OPTIONS, SPEECH_RATE_OPTIONS, resolveRunLabel, resolveCharacterReferenceAudio } from '@nx9/shared';
+import { gatherUpstream, AUDIO_FORMAT_OPTIONS, SPEECH_RATE_OPTIONS, resolveRunLabel, resolveCharacterReferenceAudio, listMergedAudioVoiceOptions } from '@nx9/shared';
 import { BlockShell } from '../shared/BlockShell';
 import { GenUpstreamHint } from '../shared/upstream-hints';
 import { useUpstreamPrompt } from '../shared/use-upstream-prompt';
@@ -15,7 +15,6 @@ import { useCredentialVault } from '../../stores/credential-vault';
 import { useWorkspaceDocument } from '../../stores/workspace-document';
 import GenSettingsPills from '../shared/GenSettingsPills';
 
-const CLOUD_VOICES = ['alloy', 'echo', 'fable', 'onyx', 'nova', 'shimmer'] as const;
 const SOUND_MODES = [
   { id: 'tts', label: '单轨 TTS' },
   { id: 'cast', label: '多角色' },
@@ -54,6 +53,21 @@ function SoundGenBlock(props: NodeProps) {
   const { allItems } = useAllAssetLibraryItems('sound');
   const bgmChannel = useCredentialVault((s) => s.settings);
   const bgmReady = Boolean((bgmChannel?.bgmBaseUrl ?? '').trim()) && Boolean((bgmChannel?.bgmApiKey ?? '').trim());
+
+  // 内置音色目录 +「我的连接」：只写入既有 data.voice 字段，缺省仍是 alloy
+  const audioVoiceGroups = useMemo(() => {
+    const map = new Map<string, ReturnType<typeof listMergedAudioVoiceOptions>>();
+    for (const opt of listMergedAudioVoiceOptions(bgmChannel?.connections)) {
+      const list = map.get(opt.groupLabel);
+      if (list) list.push(opt);
+      else map.set(opt.groupLabel, [opt]);
+    }
+    return [...map.entries()];
+  }, [bgmChannel?.connections]);
+  const hasCurrentVoiceOption = useMemo(
+    () => audioVoiceGroups.some(([, items]) => items.some((o) => o.id === voice)),
+    [audioVoiceGroups, voice],
+  );
   const [bgmPrompt, setBgmPrompt] = useState('');
   const [bgmBusy, setBgmBusy] = useState(false);
   const [bgmPhase, setBgmPhase] = useState('');
@@ -63,7 +77,40 @@ function SoundGenBlock(props: NodeProps) {
     if (bgmPollRef.current) clearInterval(bgmPollRef.current);
   }, []);
 
-  const generateBgm = useCallback(async () => {
+    const [denoiseBusy, setDenoiseBusy] = useState(false);
+  const [denoiseMode, setDenoiseMode] = useState<'afftdn' | 'anlmdn'>('afftdn');
+  const [denoiseStrength, setDenoiseStrength] = useState(0.6);
+  const [denoiseError, setDenoiseError] = useState('');
+
+  /** 音频降噪：对当前配音产物做 afftdn/anlmdn 处理，成功后替换 audioUrl */
+  const handleDenoise = useCallback(async () => {
+    const url = (audioUrl ?? '').trim();
+    if (!url) {
+      setDenoiseError('还没有可降噪的音频：请先生成配音，禁止空成功');
+      return;
+    }
+    setDenoiseBusy(true);
+    setDenoiseError('');
+    try {
+      const res = await api.audioDenoise({ audioUrl: url, strength: denoiseStrength, mode: denoiseMode });
+      if (!res.ok || !res.url) {
+        const msg = res.message || '降噪失败：服务端未返回结果，禁止空成功';
+        setDenoiseError(msg);
+        appendLog('音频降噪失败：' + msg);
+        return;
+      }
+      updateNodeData(props.id, { audioUrl: res.url, status: 'success' });
+      appendLog('音频降噪完成 · ' + res.mode + ' · 强度 ' + res.strength + ' → ' + res.url);
+    } catch (e) {
+      const msg = String(e);
+      setDenoiseError(msg);
+      appendLog('音频降噪失败：' + msg);
+    } finally {
+      setDenoiseBusy(false);
+    }
+  }, [appendLog, audioUrl, denoiseMode, denoiseStrength, props.id]);
+
+const generateBgm = useCallback(async () => {
     const prompt = bgmPrompt.trim();
     if (!prompt) {
       setBgmError('请先填写 BGM 描述，禁止空成功');
@@ -326,6 +373,40 @@ function SoundGenBlock(props: NodeProps) {
           {audioUrl && (
             <audio src={audioUrl} controls className="w-full" style={{ height: 36 }} />
           )}
+          <div className="space-y-1 rounded border border-line/40 bg-surface/60 px-2 py-1.5">
+            <div className="flex items-center gap-1 flex-wrap">
+              <span className="text-[10px] font-medium text-ink/70">音频降噪</span>
+              <select
+                className="rounded border border-line bg-surface px-1 py-0.5 text-[10px]"
+                value={denoiseMode}
+                onChange={(e) => setDenoiseMode(e.target.value === 'anlmdn' ? 'anlmdn' : 'afftdn')}
+                disabled={denoiseBusy}
+              >
+                <option value="afftdn">afftdn（快）</option>
+                <option value="anlmdn">anlmdn（平滑）</option>
+              </select>
+              <label className="text-[9px] text-ink/45">强度</label>
+              <input
+                type="number"
+                min={0}
+                max={1}
+                step={0.1}
+                value={denoiseStrength}
+                onChange={(e) => setDenoiseStrength(Number(e.target.value))}
+                disabled={denoiseBusy}
+                className="w-16 rounded border border-line bg-surface px-1 py-0.5 text-[10px]"
+              />
+              <button
+                type="button"
+                className="rounded border border-line bg-surface px-2 py-0.5 text-[10px] disabled:opacity-50"
+                onClick={handleDenoise}
+                disabled={denoiseBusy || !audioUrl}
+                title={!audioUrl ? '请先生成配音' : '对当前配音产物做降噪处理（成功后替换音频）'}
+              >
+                {denoiseBusy ? '降噪中…' : '降噪'}</button>
+            </div>
+            {denoiseError && <p className="text-[10px] text-red-600">{denoiseError}</p>}
+          </div>
           {(props.data?.error as string) && (
             <p className="text-[10px] text-red-600">{props.data.error as string}</p>
           )}
@@ -487,11 +568,19 @@ function SoundGenBlock(props: NodeProps) {
               onChange={(e) => updateNodeData(props.id, { voice: e.target.value })}
               className="flex-1 rounded-lg border border-line bg-surface px-2 py-1 text-xs"
             >
-              {CLOUD_VOICES.map((v) => (
-                <option key={v} value={v}>
-                  {v}
-                </option>
+              {audioVoiceGroups.map(([groupLabel, items]) => (
+                <optgroup key={groupLabel} label={groupLabel}>
+                  {items.map((o) => (
+                    <option key={o.key} value={o.id}>
+                      {o.hint ? `${o.label} · ${o.hint}` : o.label}
+                    </option>
+                  ))}
+                </optgroup>
               ))}
+              {/* 既有节点可能存了目录外音色，保留原值可回显，避免静默改写 */}
+              {!hasCurrentVoiceOption && voice && (
+                <option value={voice}>{voice}（自定义）</option>
+              )}
             </select>
           </label>
         ) : (

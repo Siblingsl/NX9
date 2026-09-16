@@ -1,0 +1,35 @@
+// 跨格一致性校验「隔离验证」用的最小 tsconfig（**不是构建配置**，不参与 pnpm build / typecheck）。
+//
+// 用途：packages/shared 的 barrel（src/index.ts）当前引用了 8 个尚不存在的 data/* 模块（既有缺陷），
+// apps/web/tsconfig.json 又把 @nx9/shared 指向过期的 dist，因此 app 级 typecheck 无法用来验证本批新增文件。
+// 这里把 @nx9/shared 指到 **barrel 源码**，只列入本次交付的 5 个文件（及其依赖），
+// 用 `npx tsc -p tsconfig.verify-consistency.json` 得到「本次文件 0 错误」的可复现证据。
+// 详见 docs/NX9-CONSISTENCY-CHECK.md「验证口径」。
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "jsx": "react-jsx",
+    "strict": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "isolatedModules": true,
+    "moduleDetection": "force",
+    "allowImportingTsExtensions": true,
+    "types": [],
+    "baseUrl": ".",
+    "paths": {
+      "@nx9/shared": ["./packages/shared/src/index.ts"],
+      "@/*": ["./apps/web/src/*"]
+    }
+  },
+  "files": [
+    "packages/shared/src/utils/consistency-report.ts",
+    "apps/web/src/engine/consistency-check.ts",
+    "apps/web/src/engine/stage-deck/chrome/attached-workspace/consistency/ConsistencyCheckSection.tsx",
+    "apps/web/src/engine/stage-deck/chrome/attached-workspace/tool/MultiGridWorkspace.tsx",
+    "apps/web/src/engine/stage-deck/chrome/attached-workspace/tool/CharacterSheetWorkspace.tsx"
+  ]
+}

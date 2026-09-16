@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { buildCameraPrompt } from '../schema/cameraGeometry';
 import { skinCameraPrompt } from '../schema/promptSkin';
+import { buildSceneLightingPrompt } from '../presets/lightingPresets';
 import { useDirectorStore } from '../store/directorStore';
 
 /** 与 @nx9/shared CAMERA_PRESETS 对齐的内置机位（director3d 不依赖 shared）。 */
@@ -59,6 +60,7 @@ export function CameraPresetBar() {
           subjectYawDeg: subject?.transform.rotation[1] ?? 0,
           move: cameraMove,
           details: promptDetails,
+          lightingPrompt: buildSceneLightingPrompt(project.scene),
         }),
         promptPlatform,
         cameraMove,

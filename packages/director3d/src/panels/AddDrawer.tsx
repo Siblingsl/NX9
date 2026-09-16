@@ -1,12 +1,14 @@
 import { useState } from 'react';
 import { useDirectorStore } from '../store/directorStore';
 import { BODY_TYPES } from '../presets/characterPresets';
+import { BUILTIN_ASSET_CATEGORIES, builtinAssetsByCategory } from '../presets/builtinAssets';
 
 export function AddDrawer() {
   const addCharacter = useDirectorStore((s) => s.addCharacter);
   const addGeometry = useDirectorStore((s) => s.addGeometry);
   const addCamera = useDirectorStore((s) => s.addCamera);
   const addCrowd = useDirectorStore((s) => s.addCrowd);
+  const addBuiltinObject = useDirectorStore((s) => s.addBuiltinObject);
   const [crowdRows, setCrowdRows] = useState(3);
   const [crowdCols, setCrowdCols] = useState(4);
 
@@ -38,6 +40,33 @@ export function AddDrawer() {
             </button>
           ))}
         </div>
+
+        <p className="nx9-stage-hint" style={{ marginTop: 14 }}>
+          内置模型（点击即放置，无需外部文件）
+        </p>
+        {BUILTIN_ASSET_CATEGORIES.map((category) => {
+          const assets = builtinAssetsByCategory(category.id);
+          if (assets.length === 0) return null;
+          return (
+            <div key={category.id} style={{ marginBottom: 8 }}>
+              <p className="nx9-stage-hint">{category.label}</p>
+              <div className="nx9-stage-btn-row">
+                {assets.map((asset) => (
+                  <button
+                    key={asset.id}
+                    type="button"
+                    className="nx9-stage-mini-btn"
+                    title={`${asset.label} · 约 ${asset.size[0]}×${asset.size[1]}×${asset.size[2]} m`}
+                    style={{ borderLeft: `4px solid ${asset.color}` }}
+                    onClick={() => addBuiltinObject(asset.id, asset.label)}
+                  >
+                    {asset.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          );
+        })}
 
         <p className="nx9-stage-hint" style={{ marginTop: 14 }}>
           群演阵列（上限 20）

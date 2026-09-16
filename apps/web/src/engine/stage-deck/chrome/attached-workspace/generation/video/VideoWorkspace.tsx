@@ -37,6 +37,9 @@ import { VideoParamChips } from './VideoParamChips';
 import { VideoFrameStrip, VideoSourceStrip } from './VideoFrameStrip';
 import { VideoPlaybookMenu } from './VideoPlaybookMenu';
 import { VideoPlaybookTools } from './VideoPlaybookTools';
+import { CameraMovePicker } from '../CameraMovePicker';
+import { PresetSectionPicker } from '../PresetSectionPicker';
+import { CameraMoveTimelineEditor } from '../CameraMoveTimelineEditor';
 import { lookupVideoPlaybookAction, type VideoPlaybookActionDef } from './video-playbooks';
 import {
   patchVideoGenMode,
@@ -87,7 +90,20 @@ export function VideoWorkspace({ blockId, kind, onCollapse }: VideoWorkspaceProp
 
   const data = useAttachedNodeData(blockId);
   const { hasUpstream, shots, shotIds } = useUpstreamShots(blockId);
-  const { clips: upstreamClips } = useUpstreamMedia(blockId);
+  const {
+    clips: upstreamClips,
+    sounds: upstreamSounds,
+    bgmUrls: upstreamBgmUrls,
+    sfxUrls: upstreamSfxUrls,
+  } = useUpstreamMedia(blockId);
+  /** 真实节拍分析的 BGM 候选（上游音频 / 配乐 / 音效） */
+  const timelineAudioCandidates = useMemo(
+    () =>
+      [...upstreamSounds, ...upstreamBgmUrls, ...upstreamSfxUrls]
+        .map((u) => (u ?? '').trim())
+        .filter(Boolean),
+    [upstreamBgmUrls, upstreamSfxUrls, upstreamSounds],
+  );
   const runAbortRef = useRef<AbortController | null>(null);
   const nodes = useNodes();
   const edges = useEdges();
@@ -171,13 +187,27 @@ export function VideoWorkspace({ blockId, kind, onCollapse }: VideoWorkspaceProp
 
   const model = (data.model as string) ?? '';
   const {
-    options: videoModelOptions,
+    mergedOptions: videoModelOptions,
     hasConnections: hasVideoConnections,
     preferredModel,
     isKnownModel,
     selectModel: selectVideoModel,
     openConnectionsSettings,
   } = useConnectedVideoModels(model);
+
+  // 内置目录 + 我的连接：内置在前并分节；末尾保留通往「设置 → 连接」的入口
+  const videoModelSelectOptions = useMemo(
+    () => [
+      ...videoModelOptions.map((m) => ({
+        id: m.id,
+        label: m.label,
+        groupLabel: m.groupLabel,
+        hint: m.hint,
+      })),
+      { id: '', label: '配置视频连接…' },
+    ],
+    [videoModelOptions],
+  );
 
   useEffect(() => {
     if (!preferredModel || preferredModel === model) return;
@@ -453,6 +483,14 @@ export function VideoWorkspace({ blockId, kind, onCollapse }: VideoWorkspaceProp
 
   const videoUrl = (data.videoUrl as string | undefined) || undefined;
 
+  // 运镜时间轴编排：绑定「当前镜」的时长（上游链镜表口径，缺省则用编辑器默认时长）
+  const shotDurationForTimeline = useMemo(() => {
+    const id = (data.linkedShotId as string | undefined)?.trim();
+    const shot = (id ? shots.find((s) => s.id === id) : undefined) ?? (shots.length === 1 ? shots[0] : undefined);
+    const sec = (shot as { durationSec?: number } | undefined)?.durationSec;
+    return typeof sec === 'number' && Number.isFinite(sec) && sec > 0 ? sec : undefined;
+  }, [data.linkedShotId, shots]);
+
   const toolbarLeft = (
     <div className="flex items-center gap-1" onMouseDown={stop}>
       <VideoGenModeChip
@@ -461,6 +499,25 @@ export function VideoWorkspace({ blockId, kind, onCollapse }: VideoWorkspaceProp
       />
       <span className="w-px h-3.5 bg-line/50" />
       <VideoParamChips blockId={blockId} onPatch={handlePatch} />
+      {/* 大师运镜：把运镜库片段注入既有提示词字段（不新增持久化字段） */}
+      <CameraMovePicker
+        value={draft}
+        resetKey={blockId}
+        onApply={applyText}
+      />
+      {/* 运镜时间轴：多段运镜按时间串成运动轨，注入同一提示词行槽位 */}
+      <CameraMoveTimelineEditor
+        value={draft}
+        resetKey={blockId}
+        onApply={applyText}
+        audioCandidates={timelineAudioCandidates}
+        shotDurationSec={shotDurationForTimeline}
+        handoffSourceLabel="视频工作台"
+      />
+      {/* 前缀预设（原为「有数据、没入口」）：电影感 / 灯光 / 人像，各自成行幂等注入既有提示词字段 */}
+      <PresetSectionPicker section="cinema" value={draft} resetKey={blockId} onApply={applyText} />
+      <PresetSectionPicker section="lighting" value={draft} resetKey={blockId} onApply={applyText} />
+      <PresetSectionPicker section="portrait" value={draft} resetKey={blockId} onApply={applyText} />
     </div>
   );
 
@@ -595,11 +652,7 @@ export function VideoWorkspace({ blockId, kind, onCollapse }: VideoWorkspaceProp
           />
           <ComposerModelSelect
             value={model || preferredModel}
-            options={
-              hasVideoConnections
-                ? videoModelOptions.map((m) => ({ id: m.id, label: m.label }))
-                : [{ id: '', label: '请配置视频连接' }]
-            }
+            options={videoModelSelectOptions}
             onChange={(v) => {
               if (!v) {
                 openConnectionsSettings();

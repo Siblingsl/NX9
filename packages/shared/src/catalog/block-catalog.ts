@@ -71,6 +71,33 @@ export const BLOCK_CATALOG: BlockDefinition[] = [
     accent: '#A13D63',
     nx9Native: true,
   },
+  {
+    kind: 'multi-grid',
+    label: '多格推演',
+    category: 'generate',
+    hint: '多机位 9/25 宫格 · 剧情四宫格 · 画面推演（N 秒前 / M 秒后）',
+    glyph: 'Grid3x3',
+    accent: '#A13D63',
+    nx9Native: true,
+  },
+  {
+    kind: 'character-sheet-desk',
+    label: '角色设定表',
+    category: 'generate',
+    hint: '三视图 · 表情表 · 动作表 · 整套设定表（角色一致性锁定）',
+    glyph: 'UserSquare',
+    accent: '#c4a574',
+    nx9Native: true,
+  },
+  {
+    kind: 'frame-study',
+    label: '逐帧拉片',
+    category: 'generate',
+    hint: '参考视频逐帧拆解 · 时间码 + 逐帧反推提示词 · 导出拉片表 / 送分镜',
+    glyph: 'Frame',
+    accent: '#c4a574',
+    nx9Native: true,
+  },
 
   // ── 创作主路径（含 ScreenModal 弹窗，UI 冻结） ──
   {

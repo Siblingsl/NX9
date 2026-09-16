@@ -1,0 +1,26 @@
+{
+  // 隔离验证配置（工作流模板非法连线修复）：只编译本次新增/改动的文件。
+  // 走**相对路径直取 shared 源码**，绕开 `apps/web/tsconfig.json` 把 `@nx9/shared`
+  // 指向过期 `dist/esm/index.d.ts` 的既有缺陷，也不触碰 `packages/shared/src/index.ts`
+  // 里引用 8 个不存在模块的 barrel 缺陷。
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "jsx": "react-jsx",
+    "strict": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "esModuleInterop": true,
+    "isolatedModules": true,
+    "allowImportingTsExtensions": true,
+    "types": ["vitest/globals"],
+    "baseUrl": "."
+  },
+  "include": [
+    "../../packages/shared/src/data/workflow-templates.ts",
+    "../../packages/shared/src/catalog/socket-registry.ts",
+    "src/engine/__tests__/workflow-templates-links.test.ts"
+  ]
+}

@@ -92,6 +92,12 @@ export const SOCKET_REGISTRY: Record<string, SocketProfile> = {
   'upscale-lite': { accepts: ['picture'], emits: ['picture'] },
   'grid-split': { accepts: ['picture'], emits: ['picture'] },
   'grid-compose': { accepts: ['picture'], emits: ['picture'] },
+  /** 多格推演：源图入、逐格出图 + 逐格视频提示词出 */
+  'multi-grid': { accepts: ['picture', 'prompt'], emits: ['picture', 'prompt'] },
+  /** 角色设定表：角色参考图 / 设定文本入，逐格设定图 + 逐格提示词出 */
+  'character-sheet-desk': { accepts: ['picture', 'prompt'], emits: ['picture', 'prompt'] },
+  /** 逐帧拉片：上游视频入（参考文本可选），逐帧参考图 + 逐帧提示词出 */
+  'frame-study': { accepts: ['clip', 'prompt'], emits: ['picture', 'prompt'] },
 
   'touch-up': { accepts: ['prompt', 'picture'], emits: ['picture'] },
   memo: { accepts: [], emits: ['prompt'] },

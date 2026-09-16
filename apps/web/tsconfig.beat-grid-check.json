@@ -1,0 +1,38 @@
+{
+  // 隔离验证配置（音频节拍网格接入）：只编译本次新增 / 改动的文件，
+  // 把 `@nx9/shared` 指到**源码 barrel**，从而绕开 `apps/web/tsconfig.json` 里
+  // 指向过期 `dist/esm/index.d.ts` 的类型解析（dist 落后于源码，既有缺陷）。
+  //
+  // 预期噪声：`packages/shared/src/index.ts` 自身引用的 8 个尚不存在的
+  // data/* 模块（emotion-presets / shot-move-families / creative-asset-presets /
+  // character-face-rig-presets / playbook-definitions / camera-presets /
+  // shot-lexicon-taxonomy / provider-registry）会各报一条 TS2307 —— 这是**既有缺陷**，
+  // 不在本次改动范围内。除此之外，本文件 include 的路径不应出现任何错误。
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "jsx": "react-jsx",
+    "strict": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "esModuleInterop": true,
+    "isolatedModules": true,
+    "allowImportingTsExtensions": true,
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["src/*"],
+      "@nx9/shared": ["../../packages/shared/src/index.ts"],
+      "@nx9/director3d": ["../../packages/director3d/src/index.ts"]
+    }
+  },
+  "include": [
+    "../../packages/shared/src/utils/beat-grid-plan.ts",
+    "src/engine/beat-grid.ts",
+    "src/engine/__tests__/beat-grid.test.ts",
+    "src/blocks/craft/__tests__/CameraMoveTimelineEditor.test.tsx",
+    "src/engine/stage-deck/chrome/attached-workspace/generation/CameraMoveTimelineEditor.tsx",
+    "src/engine/stage-deck/chrome/attached-workspace/tool/MultiGridWorkspace.tsx"
+  ]
+}

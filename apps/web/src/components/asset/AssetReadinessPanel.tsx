@@ -22,6 +22,7 @@ import {
 import { toastSuccess, toastError } from '../../stores/toast';
 import { useAssetLibraryModalUi } from '../../stores/asset-library-modal-ui';
 import { useWorkspaceDocument } from '../../stores/workspace-document';
+import { AssetCandidatePromptCopy } from './AssetCandidatePromptCopy';
 
 function characterReadyLabel(
   name: string,
@@ -439,6 +440,14 @@ export const AssetReadinessPanel = memo(function AssetReadinessPanel({
           </div>
         </div>
       )}
+
+      {/* 候选设定 Prompt 一键复制（R2）：把 script-asset-candidates 中此前零入口的
+          buildCharacterCandidatePrompt / buildSceneCandidatePrompt / copyTextWithLog
+          接到既有就绪名单上；只读复制，不写任何字段。 */}
+      <AssetCandidatePromptCopy
+        requiredCharacters={report.requiredCharacters}
+        requiredScenes={report.requiredScenes}
+      />
 
       {/* 操作按钮 */}
       <div className="sd2-ready-actions">

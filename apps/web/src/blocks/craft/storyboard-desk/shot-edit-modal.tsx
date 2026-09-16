@@ -3,20 +3,41 @@
  *
  * 纯受控组件：编辑草稿与保存逻辑仍由 useStoryboardDesk 持有，
  * 本组件只负责表单渲染与 draft 字段写入。
+ *
+ * 增量追加：底部「运镜合流」区块把镜表 `videoPrompt` 的运镜与 3D 导演台
+ * `director3dGuide.cameraPrompt` 的机位合流成一条**只读**摘要 + 冲突提示
+ * （`mergeCameraMoveChannels`）；两通道的既有字段值一概不改写。
  */
+import { useMemo } from 'react';
 import { Clock } from 'lucide-react';
 import {
   BUILTIN_COMPOSITION_TEMPLATES,
   buildLineArtShotPrompt,
   getSceneCreative,
   mapShotLexiconToDeskEnums,
+  mergeCameraMoveChannels,
   type BacklotWorkspaceItem,
+  type CameraMoveChannelSource,
   type CharacterProfile,
   type ScriptBreakdownShot,
 } from '@nx9/shared';
 import { ScreenModal } from '../../../components/ui/ScreenModal';
+import { CameraMovePicker } from '../../../engine/stage-deck/chrome/attached-workspace/generation/CameraMovePicker';
+import { CameraMoveTimelineEditor } from '../../../engine/stage-deck/chrome/attached-workspace/generation/CameraMoveTimelineEditor';
 import { AssetMentionInput } from '../../../engine/stage-deck/chrome/asset-mention/AssetMentionInput';
+import { suggestCameraPosition } from '../../../engine/director-desk-runner';
+import {
+  SHOT_BLOCKING_PREFIX,
+  buildShotBlockingHint,
+  readShotBlockingHint,
+  withShotBlockingHint,
+  type ShotBlockingHintSource,
+} from '../../../engine/shot-blocking-hint';
 import { toastSuccess } from '../../../stores/toast';
+import {
+  describeCharacterReferenceCoverageZh,
+  planCharacterReferenceCoverage,
+} from '../../../engine/multi-character-ref-coverage';
 import {
   CAMERA_MOVES,
   CHARACTER_MENTION_KINDS,
@@ -52,7 +73,19 @@ export interface ShotEditModalProps {
   shotLexiconById: ReadonlyMap<string, { label: string; cameraMove?: string; shotSize?: string }>;
   workspaceScenes: BacklotWorkspaceItem[];
   toggleDraftCharacter: (name: string) => void;
+  /**
+   * 本镜 3D 导演台写回的机位描述（`director3dGuide.cameraPrompt`）。
+   * 仅供「运镜合流」只读呈现；本组件不会写入该字段。
+   */
+  director3dCameraPrompt?: string | null;
 }
+
+/** 合流摘要来源标签 */
+const MERGE_SOURCE_LABELS: Record<CameraMoveChannelSource, string> = {
+  video: '镜表 videoPrompt',
+  director3d: '3D 导演台 cameraPrompt',
+  both: '镜表 + 3D 导演台',
+};
 
 export default function ShotEditModal({
   editingShot,
@@ -69,7 +102,77 @@ export default function ShotEditModal({
   shotLexiconById,
   workspaceScenes,
   toggleDraftCharacter,
+  director3dCameraPrompt,
 }: ShotEditModalProps) {
+  /**
+   * 运镜合流（只读）：镜表 videoPrompt 的运镜 × 3D 导演台 cameraPrompt 的机位。
+   * 冲突只呈现、不裁决，也不回写任一字段。
+   */
+  const cameraMoveMerge = useMemo(
+    () =>
+      mergeCameraMoveChannels({
+        videoPrompt: editDraft?.videoPrompt ?? null,
+        director3dCameraPrompt: director3dCameraPrompt ?? null,
+        shotDurationSec: editDraft?.durationSec ?? null,
+      }),
+    [editDraft?.videoPrompt, editDraft?.durationSec, director3dCameraPrompt],
+  );
+
+  /**
+   * 机位建议（R2）：把 `suggestCameraPosition`（此前全仓零调用方）接到既有
+   * `videoPrompt` 字段，按 `机位建议：` 前缀幂等注入 / 可清除。
+   * 只读预览与写入同源，均走 `buildShotBlockingHint`。
+   */
+  const blockingHintSource = useMemo(
+    (): ShotBlockingHintSource => ({
+      scene: editDraft?.scene,
+      characters: editDraft?.characters,
+      shotSize: editDraft?.shotSize,
+      cameraMove: editDraft?.cameraMove,
+      cameraAngle: editDraft?.cameraAngle,
+      shotAssetId: editDraft?.shotAssetId ?? null,
+      descriptionZh: editDraft?.visual || editDraft?.title,
+    }),
+    [
+      editDraft?.scene,
+      editDraft?.characters,
+      editDraft?.shotSize,
+      editDraft?.cameraMove,
+      editDraft?.cameraAngle,
+      editDraft?.shotAssetId,
+      editDraft?.visual,
+      editDraft?.title,
+    ],
+  );
+
+  const blockingHintSuggestion = useMemo(
+    () => buildShotBlockingHint(blockingHintSource, suggestCameraPosition),
+    [blockingHintSource],
+  );
+
+  const injectedBlockingHint = readShotBlockingHint(editDraft?.videoPrompt);
+
+  /**
+   * 多角色同框的**参考图覆盖**只读体检。
+   *
+   * 事实依据（见 docs/NX9-DIGITAL-HUMAN-AUDIT.md）：出图的角色参考图注入是单槽的
+   * （`pickReferenceImage` 只返回第一位有图角色，`resolvePictureSendRefs` 只收单个
+   * `characterRef`）。本镜挂多位角色时，第 2..N 位的定妆图进不了生成请求，
+   * 此前界面完全看不出这件事。此处如实报出，只读、不写任何字段。
+   */
+  const characterRefCoverage = useMemo(() => {
+    const selected = new Set(
+      (editDraft?.characters ?? []).map((n) => stripMentionToken(n).trim().toLowerCase()),
+    );
+    const picked = characters.filter((c) => selected.has(c.name.trim().toLowerCase()));
+    return planCharacterReferenceCoverage(picked);
+  }, [characters, editDraft?.characters]);
+
+  const characterRefCoverageNote = useMemo(
+    () => describeCharacterReferenceCoverageZh(characterRefCoverage),
+    [characterRefCoverage],
+  );
+
   return (
     <ScreenModal
       open={Boolean(editingShot && editDraft)}
@@ -165,6 +268,152 @@ export default function ShotEditModal({
                   placeholder="广角 / 标准 / 长焦"
                 />
               </label>
+            </div>
+
+            {/* 大师运镜库：只读浏览 + 插入既有 videoPrompt（不新增分镜字段） */}
+            <div className="sg-field">
+              <span className="sg-label">大师运镜库（浏览 / 插入视频提示词）</span>
+              <CameraMovePicker
+                variant="inline"
+                value={editDraft.videoPrompt}
+                resetKey={editingShot.id}
+                onApply={(next) => setEditDraft({ ...editDraft, videoPrompt: next })}
+              />
+              <p style={{ marginTop: 4, fontSize: 10, opacity: 0.55 }}>
+                按家族分组、可搜索、可多选叠加；插入只写回既有 videoPrompt。
+              </p>
+            </div>
+
+            {/* 运镜时间轴：把多段运镜按时间串成运动轨，绑定本镜时长后注入既有 videoPrompt */}
+            <div className="sg-field">
+              <span className="sg-label">运镜时间轴编排（多段运镜 · 绑定镜头时长 / 节拍）</span>
+              <CameraMoveTimelineEditor
+                variant="inline"
+                value={editDraft.videoPrompt}
+                resetKey={editingShot.id}
+                onApply={(next) => setEditDraft({ ...editDraft, videoPrompt: next })}
+                shotDurationSec={editDraft.durationSec}
+                handoffSourceLabel="分镜镜编辑"
+              />
+              <p style={{ marginTop: 4, fontSize: 10, opacity: 0.55 }}>
+                按顺序铺开各段运镜、可拖拽改时长、可绑定本镜时长（{editDraft.durationSec}s）与节拍；
+                注入只写回既有 videoPrompt 的运镜行，不新增分镜字段。
+              </p>
+            </div>
+
+            {/* 运镜合流：镜表 videoPrompt × 3D 导演台 cameraPrompt（只呈现 + 冲突提示，不改写任何字段） */}
+            <div className="sg-field">
+              <span className="sg-label">
+                运镜合流（镜表 × 3D 导演台 · 只读）
+                {cameraMoveMerge.conflicts.length > 0 && (
+                  <span className="is-req">{cameraMoveMerge.conflicts.length} 项冲突</span>
+                )}
+              </span>
+              <div
+                style={{
+                  border: `1px solid ${cameraMoveMerge.conflicts.length > 0 ? '#f59e0b' : 'var(--nx9-line, #333)'}`,
+                  borderRadius: 8,
+                  padding: '6px 8px',
+                  fontSize: 11,
+                  lineHeight: 1.55,
+                }}
+              >
+                <p style={{ margin: 0 }}>
+                  <span style={{ opacity: 0.5 }}>
+                    [{MERGE_SOURCE_LABELS[cameraMoveMerge.source]}
+                    {cameraMoveMerge.videoField ? ` · 字段 ${cameraMoveMerge.videoField}` : ''}]
+                    {' '}
+                  </span>
+                  {cameraMoveMerge.summaryZh}
+                </p>
+                <p style={{ margin: '2px 0 0', fontSize: 10, opacity: 0.45 }}>{cameraMoveMerge.summaryEn}</p>
+                {cameraMoveMerge.conflicts.length > 0 && (
+                  <ul style={{ margin: '4px 0 0', paddingLeft: 16, color: '#f59e0b' }}>
+                    {cameraMoveMerge.conflicts.map((conflict) => (
+                      <li key={conflict}>{conflict}</li>
+                    ))}
+                  </ul>
+                )}
+                {cameraMoveMerge.notes.length > 0 && (
+                  <ul style={{ margin: '4px 0 0', paddingLeft: 16, opacity: 0.5 }}>
+                    {cameraMoveMerge.notes.map((note) => (
+                      <li key={note}>{note}</li>
+                    ))}
+                  </ul>
+                )}
+                {cameraMoveMerge.director3d.hasText && (
+                  <p style={{ margin: '4px 0 0', fontSize: 10, opacity: 0.45 }}>
+                    3D 机位原文：
+                    {director3dCameraPrompt}
+                  </p>
+                )}
+                <p style={{ margin: '4px 0 0', fontSize: 10, opacity: 0.45 }}>
+                  只呈现与提示：不会自动改写 videoPrompt 或 director3dGuide.cameraPrompt，冲突以哪条为准由你决定。
+                </p>
+              </div>
+            </div>
+
+            {/* 机位建议：suggestCameraPosition 的入口（此前有实现、零调用方）。
+                写入走既有 videoPrompt，按 `机位建议：` 前缀幂等注入 / 可清除，不新增分镜字段。 */}
+            <div className="sg-field">
+              <span className="sg-label">
+                机位建议（由景别 / 运镜 / 角度 / 镜头库推导 · 注入视频提示词）
+                {injectedBlockingHint && <span className="is-req">已注入</span>}
+              </span>
+              <div
+                style={{
+                  border: '1px solid var(--nx9-line, #333)',
+                  borderRadius: 8,
+                  padding: '6px 8px',
+                  fontSize: 11,
+                  lineHeight: 1.55,
+                }}
+              >
+                <p style={{ margin: 0 }}>
+                  {blockingHintSuggestion
+                    ? `${SHOT_BLOCKING_PREFIX} ${blockingHintSuggestion}`
+                    : '当前镜头没有可推导的景别 / 运镜 / 角度信息，暂不生成机位建议。'}
+                </p>
+                <p style={{ margin: '4px 0 0', fontSize: 10, opacity: 0.45 }}>
+                  只写 `{SHOT_BLOCKING_PREFIX}` 这一行；大师运镜、运镜时间轴与预设段落行原样保留。
+                </p>
+                <div style={{ marginTop: 6, display: 'flex', gap: 6 }}>
+                  <button
+                    type="button"
+                    className="sg-btn sg-btn--ghost"
+                    disabled={!blockingHintSuggestion}
+                    onClick={() =>
+                      setEditDraft({
+                        ...editDraft,
+                        videoPrompt: withShotBlockingHint(
+                          editDraft.videoPrompt,
+                          blockingHintSource,
+                          suggestCameraPosition,
+                        ),
+                      })
+                    }
+                  >
+                    {injectedBlockingHint ? '更新为当前建议' : '写入机位建议'}
+                  </button>
+                  <button
+                    type="button"
+                    className="sg-btn sg-btn--ghost"
+                    disabled={!injectedBlockingHint}
+                    onClick={() =>
+                      setEditDraft({
+                        ...editDraft,
+                        videoPrompt: withShotBlockingHint(
+                          editDraft.videoPrompt,
+                          null,
+                          suggestCameraPosition,
+                        ),
+                      })
+                    }
+                  >
+                    清除机位建议
+                  </button>
+                </div>
+              </div>
             </div>
 
             <label className="sg-field">
@@ -547,6 +796,12 @@ export default function ShotEditModal({
                     })}
                   </div>
                 )}
+                {characterRefCoverageNote ? (
+                  <p className="sg-warn" style={{ margin: '6px 0 0' }}>
+                    参考图覆盖（只读）：{characterRefCoverageNote}。角色参考图为单槽注入，
+                    如需多位同框锁脸，建议改用「多格推演 / 角色设定表」按格出图。
+                  </p>
+                ) : null}
               </div>
               <div className="sg-panel">
                 <div className="sg-panel__head">

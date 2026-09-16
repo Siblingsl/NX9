@@ -3,8 +3,10 @@ import { useDirectorStore, type StageMobileSheet } from '../store/directorStore'
 const DOCK: { id: StageMobileSheet; label: string }[] = [
   { id: 'shots', label: '镜头' },
   { id: 'rig', label: '机位' },
+  { id: 'move', label: '运镜' },
   { id: 'layers', label: '层' },
   { id: 'add', label: '添加' },
+  { id: 'light', label: '灯光' },
   { id: 'env', label: '环境' },
   { id: 'film', label: '候选' },
 ];

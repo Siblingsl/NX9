@@ -216,6 +216,10 @@ interface Director3dShotState {
   };
   objects: DirectorShotObject[];
   camera: DirectorShotCamera;
+  /** 一镜多机位 / 多关键帧机位序列；缺省 / 空 = 单机位（老数据形状，向后兼容） */
+  cameraKeys?: Director3dCameraKey[];
+  /** 激活机位对应的 key id；`camera` 始终是激活机位（与 key 一一对应） */
+  activeCameraKeyId?: string | null;
   candidates: Director3dCandidate[];
   selectedCandidateId?: string | null;
   committedCandidateId?: string | null;
@@ -225,6 +229,10 @@ interface Director3dShotState {
 ```
 
 `DirectorShotObject` 必须保留 `sourceCharacterId` 或 `sourceAssetId`。不能只依赖显示名称。
+
+`cameraKeys` / `activeCameraKeyId` 是**可选增量字段**（不升版）：缺省即单机位，读取路径与老 `version: 2`
+数据完全一致；多机位（含运镜时间轴生成的 `movetl-*` 关键帧机位）时按它还原 `project.cameras` 多机位与激活机位，
+结构、落盘口径与边界见 `docs/NX9-CAMERA-MOVE-TIMELINE.md` §5.4。
 
 `DirectorShotCamera` 必须同时保存：
 

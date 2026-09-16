@@ -1,6 +1,7 @@
 import { memo, useCallback, useMemo, useState } from 'react';
 import { type NodeProps, useEdges, useNodes, useReactFlow } from '@xyflow/react';
 import {
+  AUDIO_VOICES,
   gatherUpstream,
   resolveCharacterReferenceAudio,
   resolveVoiceCastLines,
@@ -10,6 +11,11 @@ import { BlockShell } from '../shared/BlockShell';
 import { useActivityLog } from '../../stores/activity-log';
 import { useWorkspaceDocument } from '../../stores/workspace-document';
 import { runSoundGenCast } from '../../engine/sound-gen-runner';
+import {
+  buildSpeakerVoiceMapFromCharacters,
+  mergeSpeakerVoiceMap,
+  stripSpeakerVoiceMapForCharacters,
+} from '../../engine/character-voice-binding';
 
 const LINE_SOURCE_LABEL = {
   local: '本节点',
@@ -59,6 +65,49 @@ function VoiceCastBlock(props: NodeProps) {
   const lines = resolved.lines;
   const lineSource = resolved.source;
   const speakers = useMemo(() => [...new Set(lines.map((l) => l.speaker).filter(Boolean))], [lines]);
+
+  /**
+   * 角色 ↔ 声线档案绑定下沉：把 `CharacterProfile.voiceProfileId` 解析出的引擎音色
+   * **只补空位**地写入既有 `data.profileMap`（用户手选优先，可重复点击；幂等由纯函数保证）。
+   */
+  const applyAutoVoiceProfiles = useCallback(() => {
+    const incoming = buildSpeakerVoiceMapFromCharacters(characters, speakers, profiles);
+    const { map, added, kept, pruned } = mergeSpeakerVoiceMap(profileMap, incoming, speakers);
+    if (added.length === 0 && pruned.length === 0) {
+      const msg =
+        speakers.length === 0
+          ? '配音：无可解析的对白说话人'
+          : Object.keys(incoming).length === 0
+            ? '角色均未绑定声线档案：请先在素材库角色详情「声音与服装」绑定声线档案'
+            : '音色映射无需变更：已全部手选或已匹配';
+      appendLog(msg);
+      return;
+    }
+    setProfileMap(map);
+    updateNodeData(props.id, { profileMap: map });
+    appendLog(
+      `已按角色声线档案匹配音色 ${added.length} 处` +
+        (kept.length > 0 ? `（保留手选 ${kept.length} 处）` : '') +
+        (pruned.length > 0 ? `（清理失效 ${pruned.length} 处）` : ''),
+    );
+  }, [appendLog, characters, profileMap, profiles, props.id, speakers, updateNodeData]);
+
+  /** 上一步的逆运算：只清除「与角色当前绑定音色相同」的条目，手选其他音色的不动。 */
+  const clearAutoVoiceProfiles = useCallback(() => {
+    const { map, removed } = stripSpeakerVoiceMapForCharacters(
+      profileMap,
+      characters,
+      speakers,
+      profiles,
+    );
+    if (removed.length === 0) {
+      appendLog('没有可清除的「按角色声线档案自动匹配」条目');
+      return;
+    }
+    setProfileMap(map);
+    updateNodeData(props.id, { profileMap: map });
+    appendLog(`已清除自动匹配音色 ${removed.length} 处`);
+  }, [appendLog, characters, profileMap, profiles, props.id, speakers, updateNodeData]);
 
   const run = useCallback(async () => {
     if (lines.length === 0) {
@@ -150,11 +199,12 @@ function VoiceCastBlock(props: NodeProps) {
                   }}
                   className="flex-1 rounded border border-line px-1 py-0.5 text-[10px] bg-surface"
                 >
-                  <option value="alloy">Alloy（默认引擎音色）</option>
-                  <option value="echo">Echo</option>
-                  <option value="fable">Fable</option>
-                  <option value="nova">Nova</option>
-                  <option value="shimmer">Shimmer</option>
+                  {/* 内置音色目录：id 与既有云端音色一致，仅补中文标签 */}
+                  {AUDIO_VOICES.map((v) => (
+                    <option key={v.id} value={v.id}>
+                      {v.label}
+                    </option>
+                  ))}
                   {profiles.map((p) => (
                     <option key={p.id} value={p.voiceId}>
                       档案·{p.name}
@@ -170,6 +220,24 @@ function VoiceCastBlock(props: NodeProps) {
                 </select>
               </div>
             ))}
+            <div className="flex gap-1 pt-1">
+              <button
+                type="button"
+                onClick={applyAutoVoiceProfiles}
+                title="按「素材库角色详情 → 声音与服装 → 声线档案」的绑定，只补未手选的说话人；可重复点击"
+                className="flex-1 rounded border border-line px-1.5 py-0.5 text-[10px] text-ink/70 hover:border-brand/40"
+              >
+                按声线档案匹配
+              </button>
+              <button
+                type="button"
+                onClick={clearAutoVoiceProfiles}
+                title="只清除与角色当前绑定音色相同的条目；手选其他音色的保持不变"
+                className="flex-1 rounded border border-line px-1.5 py-0.5 text-[10px] text-ink/55 hover:border-brand/40"
+              >
+                清除自动匹配
+              </button>
+            </div>
           </div>
         )}
         {lines.length > 0 && (

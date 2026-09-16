@@ -23,6 +23,10 @@ const frames: StoryboardPreviewFrame[] = [
     endSec: 2,
     promptSummary: '角色站立',
     imageUrl: 'https://example.com/a.png',
+      order: 1,
+      sourceShotId: 'shot-1',
+      status: 'success',
+      locked: false,
   },
   {
     id: 'f2',
@@ -31,6 +35,10 @@ const frames: StoryboardPreviewFrame[] = [
     endSec: 4,
     promptSummary: '角色坐下',
     imageUrl: 'https://example.com/b.png',
+      order: 1,
+      sourceShotId: 'shot-1',
+      status: 'success',
+      locked: false,
   },
 ];
 

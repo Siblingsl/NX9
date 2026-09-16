@@ -186,6 +186,8 @@ export interface PromptDetailFlags {
   framing: boolean;
   subjectFacing: boolean;
   atmosphere: boolean;
+  /** 场景灯光描述（由 buildLightingPromptFragment 生成） */
+  lighting: boolean;
 }
 
 export const DEFAULT_PROMPT_DETAILS: PromptDetailFlags = {
@@ -199,6 +201,7 @@ export const DEFAULT_PROMPT_DETAILS: PromptDetailFlags = {
   framing: false,
   subjectFacing: false,
   atmosphere: false,
+  lighting: true,
 };
 
 export const PROMPT_DETAIL_LABELS: { id: keyof PromptDetailFlags; label: string }[] = [
@@ -212,6 +215,7 @@ export const PROMPT_DETAIL_LABELS: { id: keyof PromptDetailFlags; label: string 
   { id: 'framing', label: '构图' },
   { id: 'subjectFacing', label: '主体朝向' },
   { id: 'atmosphere', label: '氛围' },
+  { id: 'lighting', label: '灯光' },
 ];
 
 export interface BuildCameraPromptOptions {
@@ -220,6 +224,8 @@ export interface BuildCameraPromptOptions {
   move?: CameraMoveId | string | null;
   subjectKind?: 'person' | 'object';
   details?: Partial<PromptDetailFlags>;
+  /** 场景灯光英文片段；仅在 details.lighting 打开且非空时进入 prompt */
+  lightingPrompt?: string;
 }
 
 function dofPhrase(dist: number, lensMm: number): string {
@@ -279,6 +285,9 @@ export function describeCameraShot(
   }
   if (details.atmosphere) {
     parts.push(lensMm >= 50 ? 'cinematic intimate atmosphere' : 'cinematic open atmosphere');
+  }
+  if (details.lighting && opts.lightingPrompt?.trim()) {
+    parts.push(opts.lightingPrompt.trim());
   }
   if (details.movement) parts.push(`camera movement: ${movePhrase}`);
 

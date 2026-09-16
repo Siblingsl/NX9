@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { Fragment, useRef, useState } from 'react';
 import { ChevronDown } from 'lucide-react';
 import { ComposerPopover, PopoverItem } from './ComposerPopover';
 
@@ -6,9 +6,18 @@ function stop(e: React.SyntheticEvent) {
   e.stopPropagation();
 }
 
+export interface ComposerModelOption {
+  id: string;
+  label: string;
+  /** 分组标题：与前一项不同时渲染小节标题（未提供则不分组） */
+  groupLabel?: string;
+  /** 能力说明（可选，随分组项展示） */
+  hint?: string;
+}
+
 export interface ComposerModelSelectProps {
   value: string;
-  options: { id: string; label: string }[];
+  options: ComposerModelOption[];
   onChange: (id: string) => void;
   width?: number;
   tone?: 'default' | 'desk';
@@ -52,18 +61,31 @@ export function ComposerModelSelect({
         width={width}
         tone={tone}
       >
-        {options.map((o) => (
-          <PopoverItem
-            key={o.id}
-            active={o.id === value}
-            onClick={() => {
-              onChange(o.id);
-              setOpen(false);
-            }}
-          >
-            {o.label}
-          </PopoverItem>
-        ))}
+        {options.map((o, i) => {
+          const showGroup =
+            Boolean(o.groupLabel) && o.groupLabel !== options[i - 1]?.groupLabel;
+          return (
+            <Fragment key={o.id}>
+              {showGroup && (
+                <p className="px-3 pt-1.5 pb-0.5 text-[9px] font-medium uppercase tracking-wide text-ink/35">
+                  {o.groupLabel}
+                </p>
+              )}
+              <PopoverItem
+                active={o.id === value}
+                onClick={() => {
+                  onChange(o.id);
+                  setOpen(false);
+                }}
+              >
+                <span className="block truncate">{o.label}</span>
+                {o.hint && (
+                  <span className="block truncate text-[9px] text-ink/40">{o.hint}</span>
+                )}
+              </PopoverItem>
+            </Fragment>
+          );
+        })}
       </ComposerPopover>
     </>
   );

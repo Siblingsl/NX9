@@ -41,6 +41,10 @@ import {
 } from './PictureUpstreamStrip';
 import { PictureMultiPromptEditor } from './PictureMultiPromptEditor';
 import { PictureProActionMenu } from './PictureProActionMenu';
+import { CameraMovePicker } from '../CameraMovePicker';
+import { CameraMoveTimelineEditor } from '../CameraMoveTimelineEditor';
+import { PresetSectionPicker } from '../PresetSectionPicker';
+import { PictureSizePresetChip } from './PictureSizePresetChip';
 import {
   buildClearPictureProActionPatch,
   buildPictureProActionPatch,
@@ -103,7 +107,20 @@ export function PictureWorkspace({ blockId, kind, onCollapse }: PictureWorkspace
   const { updateNodeData } = useReactFlow();
   const nodes = useNodes();
   const edges = useEdges();
-  const { pictures: upstreamPictures } = useUpstreamMedia(blockId);
+  const {
+    pictures: upstreamPictures,
+    sounds: upstreamSounds,
+    bgmUrls: upstreamBgmUrls,
+    sfxUrls: upstreamSfxUrls,
+  } = useUpstreamMedia(blockId);
+  /** 真实节拍分析的 BGM 候选（上游音频 / 配乐 / 音效） */
+  const timelineAudioCandidates = useMemo(
+    () =>
+      [...upstreamSounds, ...upstreamBgmUrls, ...upstreamSfxUrls]
+        .map((u) => (u ?? '').trim())
+        .filter(Boolean),
+    [upstreamBgmUrls, upstreamSfxUrls, upstreamSounds],
+  );
   const { hasUpstream, shotIds, shots } = useUpstreamShots(blockId);
   const libraryCharacters = useWorkspaceDocument((s) => s.characters.characters);
   const environments = useWorkspaceDocument((s) => s.environments);
@@ -1124,6 +1141,33 @@ export function PictureWorkspace({ blockId, kind, onCollapse }: PictureWorkspace
       <span className="w-px h-3.5 bg-line/50" />
 
       <PictureParamChips blockId={blockId} onPatch={handlePatch} />
+      {/* 大师运镜：把运镜库片段注入既有提示词字段（不新增持久化字段） */}
+      <CameraMovePicker
+        value={draft}
+        resetKey={blockId}
+        onApply={applyText}
+      />
+      {/* 运镜时间轴：多段运镜按时间串成运动轨，注入同一提示词行槽位 */}
+      <CameraMoveTimelineEditor
+        value={draft}
+        resetKey={blockId}
+        onApply={applyText}
+        audioCandidates={timelineAudioCandidates}
+        shotDurationSec={
+          typeof (linkedShotForPreview as { durationSec?: number } | undefined)?.durationSec === 'number'
+            ? (linkedShotForPreview as { durationSec?: number }).durationSec
+            : undefined
+        }
+        handoffSourceLabel="图片工作台"
+      />
+      {/* 前缀预设（原为「有数据、没入口」）：电影感 / 灯光 / 人像，各自成行幂等注入既有提示词字段 */}
+      <PresetSectionPicker section="cinema" value={draft} resetKey={blockId} onApply={applyText} />
+      <PresetSectionPicker section="lighting" value={draft} resetKey={blockId} onApply={applyText} />
+      <PresetSectionPicker section="portrait" value={draft} resetKey={blockId} onApply={applyText} />
+      {/* 动漫标签预设：唯一接入点（见 docs/NX9-DORMANT-PRESET-ENTRYPOINTS.md 的取舍说明） */}
+      <PresetSectionPicker section="anime" value={draft} resetKey={blockId} onApply={applyText} />
+      {/* 出图尺寸预设：写入既有 aspectRatio/width/height，与宽高比 chip 同源同字段 */}
+      <PictureSizePresetChip blockId={blockId} onPatch={handlePatch} />
     </div>
   );
 

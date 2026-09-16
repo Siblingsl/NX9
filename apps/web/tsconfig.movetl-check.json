@@ -1,0 +1,34 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "jsx": "react-jsx",
+    "strict": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "esModuleInterop": true,
+    "isolatedModules": true,
+    "allowImportingTsExtensions": true,
+    "baseUrl": ".",
+    "paths": {
+      "@nx9/shared": ["../../packages/shared/src/index.ts"],
+      "@nx9/director3d": ["../../packages/director3d/src/index.ts"],
+      "@/*": ["src/*"]
+    }
+  },
+  "include": [
+    "src/engine/stage-deck/chrome/attached-workspace/generation/CameraMoveTimelineEditor.tsx",
+    "src/engine/__tests__/camera-move-timeline.test.ts",
+    "src/engine/__tests__/director3d-move-timeline-keys.test.ts",
+    "src/engine/stage-deck/chrome/attached-workspace/generation/video/VideoWorkspace.tsx",
+    "src/engine/stage-deck/chrome/attached-workspace/generation/picture/PictureWorkspace.tsx",
+    "src/blocks/craft/storyboard-desk/shot-edit-modal.tsx",
+    "../../packages/shared/src/types/camera-move-timeline.ts",
+    "../../packages/shared/src/utils/camera-move-timeline.ts",
+    "../../packages/director3d/src/schema/cameraMoveTimelineKeys.ts",
+    "../../packages/director3d/src/store/moveTimelineStore.ts",
+    "../../packages/director3d/src/ui/CameraMoveTimelineRail.tsx"
+  ]
+}

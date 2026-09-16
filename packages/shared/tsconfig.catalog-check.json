@@ -1,0 +1,20 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "lib": ["ES2022"],
+    "strict": true,
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "noEmit": true,
+    "types": []
+  },
+  "include": [
+    "src/data/gen-models.ts",
+    "src/data/video-gen-models.ts",
+    "src/data/llm-models.ts",
+    "src/data/audio-models.ts",
+    "src/data/model-catalog.ts"
+  ]
+}

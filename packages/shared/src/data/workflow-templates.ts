@@ -70,10 +70,14 @@ export const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
     build() {
       const a = node('script-desk', 0, 0, { playbookStepId: 'script-desk' });
       const b = node('picture-gen', 1, 0);
-      const c = node('asset-import', 2, 0);
+      // 结果预览位：asset-import 不接任何口型（accepts=[]），改用活跃 kind 画布钉板承接出图
+      const c = node('media-pin', 2, 0, { pinKind: 'picture' });
       return {
         blocks: [a, b, c],
-        links: [edge(a.id, b.id), edge(b.id, c.id)],
+        links: [
+          edge(a.id, b.id),
+          edge(b.id, c.id, { sourceHandle: 'picture', targetHandle: 'picture' }),
+        ],
       };
     },
   },
@@ -86,8 +90,13 @@ export const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
     build() {
       const a = node('picture-gen', 0, 0, { content: 'cinematic portrait, soft lighting' });
       const b = node('picture-gen', 1, 0);
-      const c = node('asset-import', 2, 0);
-      return { blocks: [a, b, c], links: [edge(a.id, b.id), edge(b.id, c.id)] };
+      const c = node('media-pin', 2, 0, { pinKind: 'picture' });
+      return {
+        blocks: [a, b, c],
+        // F-013 把原「提示词」节点并入 picture-gen 后 a→b 成为同 kind 非法边，
+        // 提示词已随 content 落在 a 上，此处只保留「出图 → 结果预览」主干
+        links: [edge(b.id, c.id, { sourceHandle: 'picture', targetHandle: 'picture' })],
+      };
     },
   },
   {
@@ -100,10 +109,15 @@ export const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
       const a = node('asset-import', 0, 0, { mediaKind: 'picture' });
       const b = node('picture-gen', 0, 1, { studioTab: 'camera', selectedPresetIds: ['cam-dolly-in'] });
       const c = node('clip-gen', 1, 0);
-      const d = node('asset-import', 2, 0);
+      // 结果预览位：asset-import 不接任何口型（accepts=[]），改用活跃 kind 画布钉板承接成片
+      const d = node('media-pin', 2, 0, { pinKind: 'clip' });
       return {
         blocks: [a, b, c, d],
-        links: [edge(a.id, c.id), edge(b.id, c.id), edge(c.id, d.id)],
+        links: [
+          edge(a.id, c.id),
+          edge(b.id, c.id),
+          edge(c.id, d.id, { sourceHandle: 'clip', targetHandle: 'clip' }),
+        ],
       };
     },
   },
@@ -117,10 +131,15 @@ export const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
       const a = node('picture-gen', 0, 0, { studioTab: 'cinema' });
       const b = node('storyboard-desk', 1, 0, { rows: 3, cols: 3 });
       const c = node('grid-compose', 2, 0, { gridMode: 'split', rows: 3, cols: 3 });
-      const d = node('asset-import', 3, 0);
+      // 结果预览位：asset-import 不接任何口型（accepts=[]），改用活跃 kind 画布钉板承接切分结果
+      const d = node('media-pin', 3, 0, { pinKind: 'picture' });
       return {
         blocks: [a, b, c, d],
-        links: [edge(a.id, b.id), edge(b.id, c.id), edge(c.id, d.id)],
+        links: [
+          edge(a.id, b.id),
+          edge(b.id, c.id),
+          edge(c.id, d.id, { sourceHandle: 'picture', targetHandle: 'picture' }),
+        ],
       };
     },
   },
@@ -137,7 +156,9 @@ export const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
       const d = node('grid-compose', 3, 0, { gridMode: 'compose', direction: 'horizontal' });
       return {
         blocks: [a, b, c, d],
-        links: [edge(a.id, c.id), edge(b.id, c.id), edge(c.id, d.id)],
+        // F-013 把原「多角度提示」节点并入 picture-gen 后 b→c 成为同 kind 非法边；
+        // b 保留自身配置作为独立出图节点，参考板 → 出图 → 拼合主干不变
+        links: [edge(a.id, c.id), edge(c.id, d.id)],
       };
     },
   },
@@ -251,10 +272,15 @@ export const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
       const a = node('clip-editor', 0, 0);
       const b = node('caption-asr', 1, 0, { captionMode: 'burn' });
       const c = node('clip-editor', 2, 0, { editorMode: 'grade' });
-      const d = node('asset-import', 3, 0);
+      // 结果预览位：asset-import 不接任何口型（accepts=[]），改用活跃 kind 画布钉板承接调色结果
+      const d = node('media-pin', 3, 0, { pinKind: 'clip' });
       return {
         blocks: [a, b, c, d],
-        links: [edge(a.id, b.id), edge(b.id, c.id), edge(c.id, d.id)],
+        links: [
+          edge(a.id, b.id),
+          edge(b.id, c.id),
+          edge(c.id, d.id, { sourceHandle: 'clip', targetHandle: 'clip' }),
+        ],
       };
     },
   },
@@ -271,7 +297,9 @@ export const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
       const d = node('picture-gen', 3, 0);
       return {
         blocks: [a, b, c, d],
-        links: [edge(a.id, b.id), edge(b.id, c.id), edge(c.id, d.id)],
+        // 原 light-rig / depth-pass 已被 F-013 并入导演台，三台同 kind 无法相连；
+        // 三个导演台（场面调度 / 灯光 / 深度）各自保留模式配置，仅深度 → 生图 可连
+        links: [edge(c.id, d.id)],
       };
     },
   },
@@ -471,7 +499,12 @@ export const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
       const b = node('clip-gen', 1, 0, { videoMode: 'bridge', videoGenMode: 'bridge' });
       const c = node('clip-gen', 2, 0, { videoMode: 'single' });
       const d = node('director-desk', 3, 0, { studioTab: 'deliver' });
-      return { blocks: [a, b, c, d], links: [edge(a.id, b.id), edge(b.id, c.id), edge(c.id, d.id)] };
+      return {
+        blocks: [a, b, c, d],
+        // 原 bridge-clip 已被 F-013 并入 clip-gen（videoMode=bridge），三段视频生成同 kind 无法相连；
+        // 单镜 / 续拍 / 再单镜 三段保留各自配置，仅 再单镜 → 导演台批审 可连
+        links: [edge(c.id, d.id)],
+      };
     },
   },
   {
@@ -483,7 +516,9 @@ export const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
     build() {
       const a = node('export-pack', 0, 0);
       const b = node('export-pack', 1, 0);
-      return { blocks: [a, b], links: [edge(a.id, b.id)] };
+      // 原 thumbnail-maker（封面制作）已被 F-013 并入 export-pack，两段交付打包同 kind 无法相连；
+      // 保留两个节点作为封面 / 成片两条独立交付位，不再硬凑连线
+      return { blocks: [a, b], links: [] };
     },
   },
   {
@@ -714,6 +749,162 @@ export const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
           edge(soundCast.id, editor.id, { sourceHandle: 'sound', targetHandle: 'sound' }),
           edge(soundBgm.id, editor.id, { sourceHandle: 'sound', targetHandle: 'sound' }),
           edge(soundSfx.id, editor.id, { sourceHandle: 'sound', targetHandle: 'sound' }),
+          edge(editor.id, pack.id, { sourceHandle: 'clip', targetHandle: 'clip' }),
+        ],
+      };
+    },
+  },
+
+  /* ──────────────────────────────────────────────────────────────────────────
+   * 增量追加：多格推演（multi-grid）· 角色设定表（character-sheet-desk）·
+   * BGM 节拍运镜。以上能力见 docs/NX9-MULTI-GRID-DEDUCTION.md /
+   * docs/NX9-CHARACTER-SHEET.md / docs/NX9-CAMERA-MOVE-TIMELINE.md /
+   * docs/NX9-BEAT-GRID-IMPORT.md，入口索引见
+   * docs/NX9-NEW-CAPABILITY-ENTRYPOINTS.md。
+   * 既有 28 条模板原样保留（只做追加）。
+   * ────────────────────────────────────────────────────────────────────────── */
+
+  {
+    id: 'tpl-multigrid-multicam',
+    label: '多机位推演（9 宫格）',
+    description:
+      '关键帧 → 多格推演（3 方位 × 3 景别）→ 逐格图交视频生成，或拼成宫格联系板；模式可在工作区切到 25 宫格',
+    category: 'video',
+    status: 'ga',
+    build() {
+      const a = node('asset-import', 0, 0, { mediaKind: 'picture' });
+      const b = node('multi-grid', 1, 0, {
+        multiGridMode: 'multi-cam-9',
+        multiGridRows: 3,
+        multiGridCols: 3,
+        aspectRatio: '16:9',
+      });
+      const c = node('clip-gen', 2, 0, { videoMode: 'single' });
+      const d = node('grid-compose', 2, 1, { gridMode: 'split', rows: 3, cols: 3 });
+      return {
+        blocks: [a, b, c, d],
+        links: [
+          // 源图走左右数据口，避免落到多格推演的上下能力口
+          edge(a.id, b.id, { sourceHandle: 'picture', targetHandle: 'picture' }),
+          // 多格推演只发图片，视频生成吃 image → prompt 主口
+          edge(b.id, c.id, { sourceHandle: 'picture', targetHandle: 'prompt' }),
+          edge(b.id, d.id, { sourceHandle: 'picture', targetHandle: 'picture' }),
+        ],
+      };
+    },
+  },
+  {
+    id: 'tpl-multigrid-story',
+    label: '剧情推演四宫格',
+    description:
+      '分镜关键帧 + 剧情方向 → 多格推演四宫格（起因 / 冲突 / 转折 / 收束）→ 视频生成 → 交付打包',
+    category: 'story',
+    status: 'ga',
+    build() {
+      const a = node('storyboard-desk', 0, 0, { rows: 3, cols: 3 });
+      const b = node('multi-grid', 1, 0, {
+        multiGridMode: 'story-predict-4',
+        aspectRatio: '16:9',
+        // 节点文本即剧情方向：留空时由上游剧本 / 分镜文本自然驱动四宫格节拍
+        storyDirection: '主角在雨夜追查线索，中途被旧识截停',
+      });
+      const c = node('clip-gen', 2, 0, { videoMode: 'single' });
+      const d = node('export-pack', 3, 0);
+      return {
+        blocks: [a, b, c, d],
+        links: [
+          edge(a.id, b.id, { sourceHandle: 'prompt', targetHandle: 'prompt' }),
+          edge(b.id, c.id, { sourceHandle: 'picture', targetHandle: 'prompt' }),
+          edge(c.id, d.id, { sourceHandle: 'clip', targetHandle: 'clip' }),
+        ],
+      };
+    },
+  },
+  {
+    id: 'tpl-multigrid-frame',
+    label: '画面推演（N 秒前 / M 秒后）',
+    description:
+      '当前帧 → 多格推演画面推演（前置 / 当前 / 后续时间格，前后格互为收尾帧）→ 视频生成 → 交付打包',
+    category: 'video',
+    status: 'beta',
+    build() {
+      const a = node('asset-import', 0, 0, { mediaKind: 'picture' });
+      const b = node('multi-grid', 1, 0, {
+        multiGridMode: 'frame-predict',
+        aspectRatio: '16:9',
+        frameBeforeSec: 5,
+        frameAfterSec: 3,
+        frameMotion: '主体向画面右侧走出，镜头缓慢跟随',
+      });
+      const c = node('clip-gen', 2, 0, { videoMode: 'single' });
+      const d = node('export-pack', 3, 0);
+      return {
+        blocks: [a, b, c, d],
+        links: [
+          edge(a.id, b.id, { sourceHandle: 'picture', targetHandle: 'picture' }),
+          edge(b.id, c.id, { sourceHandle: 'picture', targetHandle: 'prompt' }),
+          edge(c.id, d.id, { sourceHandle: 'clip', targetHandle: 'clip' }),
+        ],
+      };
+    },
+  },
+  {
+    id: 'tpl-character-sheet-desk',
+    label: '角色设定表（三视图 / 表情 / 动作）',
+    description:
+      '角色参考图 + 风格约束 → 角色设定表（默认整套版面，可切三视图 / 表情表 / 动作表）→ 宫格拼合 → 交付打包',
+    category: 'story',
+    status: 'ga',
+    build() {
+      const ref = node('asset-import', 0, 0, { mediaKind: 'picture' });
+      const board = node('reference-board', 0, 1, { styleLabTab: 'style' });
+      const sheet = node('character-sheet-desk', 1, 0, {
+        characterSheetKind: 'full',
+        // 严格档 = 最贴参考图（图生图强度 0.58），角色一致性优先
+        consistency: 'strict',
+        aspectRatio: '3:4',
+      });
+      const grid = node('grid-compose', 2, 0, { gridMode: 'compose', direction: 'vertical' });
+      const pack = node('export-pack', 3, 0);
+      return {
+        blocks: [ref, board, sheet, grid, pack],
+        links: [
+          // 参考图优先：asset-import 先入边，会被解析为该节点的源参考图
+          edge(ref.id, sheet.id, { sourceHandle: 'picture', targetHandle: 'picture' }),
+          edge(board.id, sheet.id, { sourceHandle: 'prompt', targetHandle: 'prompt' }),
+          edge(sheet.id, grid.id, { sourceHandle: 'picture', targetHandle: 'picture' }),
+          edge(grid.id, pack.id, { sourceHandle: 'picture', targetHandle: 'picture' }),
+        ],
+      };
+    },
+  },
+  {
+    id: 'tpl-bgm-beat-camera',
+    label: 'BGM 节拍运镜成片（Beta）',
+    description:
+      'BGM → 关键帧 + 视频生成（在视频工作区的运镜时间轴里用大师运镜库编排片段、从 BGM 分析真实节拍并逐段对齐）→ 智能剪辑 → 成片导出',
+    category: 'video',
+    status: 'beta',
+    build() {
+      // 运镜时间轴 / 大师运镜库 / BGM 节拍网格都是工作区能力（编辑器状态为会话级），
+      // 不落节点字段；模板只负责把「BGM + 画面 + 剪辑 + 导出」这条链一次拉起。
+      const bgm = node('sound-gen', 0, 0, {
+        soundMode: 'music',
+        content: '低鼓点电子配乐，120 BPM，节奏清晰，适合快切',
+      });
+      const keyframe = node('picture-gen', 0, 1, { studioTab: 'camera', aspectRatio: '16:9' });
+      const video = node('clip-gen', 1, 0, {
+        videoMode: 'single',
+        content: '按运镜时间轴逐段推进：推近 → 环绕 → 拉远，段边界对齐 BGM 真实节拍',
+      });
+      const editor = node('clip-editor', 2, 0, { profile: 'drama' });
+      const pack = node('export-pack', 3, 0, { exportMode: 'remotion-episode' });
+      return {
+        blocks: [bgm, keyframe, video, editor, pack],
+        links: [
+          edge(keyframe.id, video.id, { sourceHandle: 'picture', targetHandle: 'prompt' }),
+          edge(video.id, editor.id, { sourceHandle: 'clip', targetHandle: 'clip' }),
+          edge(bgm.id, editor.id, { sourceHandle: 'sound', targetHandle: 'sound' }),
           edge(editor.id, pack.id, { sourceHandle: 'clip', targetHandle: 'clip' }),
         ],
       };

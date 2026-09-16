@@ -971,6 +971,22 @@ export function useStoryboardDesk(props: NodeProps) {
 
   const showShotNav = studioTab === 'grid' || studioTab === 'compose';
 
+  /**
+   * 3D 导演台通道：编本镜时把该镜的 `director3dGuide.cameraPrompt` 交给编辑弹窗，
+   * 只用于「运镜合流」只读呈现（不写回、不覆盖 videoPrompt）。
+   * 取值优先 chain 镜表（SSOT），回落本节点分镜预览帧。
+   */
+  const editingShotDirector3dPrompt = useMemo(() => {
+    if (!editingShotId) return null;
+    const chained = storyboardShots.find(
+      (shot: { id: string; director3dGuide?: { cameraPrompt?: string } | null }) => shot.id === editingShotId,
+    );
+    const fromChain = chained?.director3dGuide?.cameraPrompt?.trim();
+    if (fromChain) return fromChain;
+    const frame = previewFrames.find((item) => item.sourceShotId === editingShotId);
+    return frame?.director3dGuide?.cameraPrompt?.trim() ?? null;
+  }, [editingShotId, storyboardShots, previewFrames]);
+
   return (
     <div className="relative">
       <BlockShell {...props}>
@@ -1536,6 +1552,7 @@ export function useStoryboardDesk(props: NodeProps) {
         shotLexiconById={shotLexiconById}
         workspaceScenes={workspaceScenes}
         toggleDraftCharacter={toggleDraftCharacter}
+        director3dCameraPrompt={editingShotDirector3dPrompt}
       />
     </div>
   );

@@ -82,7 +82,13 @@ import { useAliasStore } from './stage-deck/stores/alias-store';
 import {
   importWorkflowZip as parseWorkflowZip,
   mergeImportedWorkflow,
+  exportWorkflowZip as buildWorkflowZip,
+  downloadBlob,
 } from './stage-deck/utils/workflow-zip';
+import {
+  buildWorkflowArchiveFileName,
+  workflowArchiveBlockReason,
+} from './workflow-archive';
 import {
   propagateStaleFlags,
   stampInputHashOnSuccess,
@@ -675,6 +681,64 @@ const FlowSurfaceInner = memo(function FlowSurfaceInner({
     ],
   );
   importWorkflowZipRef.current = importWorkflowZip;
+
+  const exportWorkflowZipRef = useRef<(selectionOnly?: boolean) => Promise<void>>(async () => {});
+
+  /**
+   * R2：工作流归档导出入口。
+   * `exportWorkflowZip` / `downloadBlob` 早已实现但全仓零调用方（有实现、没入口）；
+   * 此处把两者接到既有 runtime API，与上面的 `importWorkflowZip` 对称，
+   * 由既有 CommandPalette「命令」区触发。不新增持久化字段。
+   */
+  const exportWorkflowZip = useCallback(
+    async (selectionOnly = false) => {
+      const currentNodes = nodesRef.current;
+      const currentEdges = edgesRef.current;
+      const blockReason = workflowArchiveBlockReason(
+        {
+          nodeCount: currentNodes.length,
+          edgeCount: currentEdges.length,
+          selectionCount: currentNodes.filter((n) => n.selected).length,
+        },
+        selectionOnly,
+      );
+      if (blockReason) {
+        appendLog(`归档导出未通过：${blockReason}`);
+        toastError(blockReason);
+        throw new Error(blockReason);
+      }
+      try {
+        const blob = await buildWorkflowZip({
+          workspaceId,
+          nodes: currentNodes,
+          edges: currentEdges,
+          viewport: viewportRef.current,
+          nextBlockIndex: nextIndexRef.current,
+          selectionOnly,
+          ...(isStageDeck
+            ? {
+                v3Extras: {
+                  version: 3 as const,
+                  aliases: exportAliases(),
+                  viewMode: useViewMode.getState().mode,
+                  takes: useTakeStore.getState().takes,
+                },
+              }
+            : {}),
+        });
+        const fileName = buildWorkflowArchiveFileName(workspaceId, new Date());
+        downloadBlob(blob, fileName);
+        appendLog(`已导出工作流归档 ${fileName}（${selectionOnly ? '选区' : '全画布'}）`);
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        appendLog(`工作流归档导出失败：${msg}`);
+        toastError(`工作流归档导出失败：${msg}`);
+        throw e;
+      }
+    },
+    [workspaceId, isStageDeck, exportAliases, appendLog],
+  );
+  exportWorkflowZipRef.current = exportWorkflowZip;
 
   useEffect(() => {
     if (!ready || templateRequestId === 0) return;
@@ -1755,6 +1819,7 @@ const FlowSurfaceInner = memo(function FlowSurfaceInner({
         spawnBlockForShotRef.current(shotId, kind, extraData),
       loadWorkflowTemplate: (id, mode) => loadWorkflowTemplateRef.current(id, mode ?? 'merge'),
       importWorkflowZip: (file, mode) => importWorkflowZipRef.current(file, mode),
+      exportWorkflowZip: (selectionOnly) => exportWorkflowZipRef.current(selectionOnly),
       get selectedBlockId() {
         return selectedBlockIdRef.current;
       },
@@ -2189,9 +2254,9 @@ const FlowSurfaceInner = memo(function FlowSurfaceInner({
           toastError('本地投放全部失败，禁止空成功');
           return;
         }
-        const failedCount = files.length - uploadedItems.length;
+        const failedCount = localFiles.length - uploadedItems.length;
         if (failedCount > 0) {
-          toastError(`本地投放部分失败：${failedCount}/${files.length} 项未上传成功`);
+          toastError(`本地投放部分失败：${failedCount}/${localFiles.length} 项未上传成功`);
         }
         const primary = uploadedItems[0];
         const id = `blk-pin-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;

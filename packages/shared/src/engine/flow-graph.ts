@@ -489,6 +489,82 @@ export function gatherUpstream(
       const urls = (d.splitUrls as string[]) ?? (d.pictures as string[]);
       if (urls?.length) out.pictures.push(...urls);
     }
+    if (kind === 'multi-grid') {
+      // 多格推演：逐格图与逐格视频提示词同时交下游（clip-gen / grid-compose）
+      const cells =
+        (d.gridCells as { videoPrompt?: string; videoPromptZh?: string; imagePrompt?: string }[]) ??
+        [];
+      const urls = (d.splitUrls as string[]) ?? (d.pictures as string[]);
+      // 「送入视频生成」选中的格子：下游按单镜消费（该格提示词 + 该格图排首帧）
+      const rawIdx = Number(d.sendToVideoIndex);
+      const picked =
+        Number.isInteger(rawIdx) && rawIdx >= 0 && cells.length > 0 && rawIdx < cells.length
+          ? rawIdx
+          : -1;
+      if (picked >= 0) {
+        const chosen = cells[picked];
+        const text = chosen?.videoPrompt || chosen?.imagePrompt || chosen?.videoPromptZh || '';
+        if (text.trim()) out.prompts.push(text.trim());
+        if (urls?.length && picked < urls.length) {
+          out.pictures.push(urls[picked]!, ...urls.filter((_, i) => i !== picked));
+        } else if (urls?.length) {
+          out.pictures.push(...urls);
+        }
+        continue;
+      }
+      if (cells.length) {
+        out.prompts.push(...cells.map((c) => c.videoPrompt || c.imagePrompt || '').filter(Boolean));
+      }
+      if (urls?.length) {
+        out.pictures.push(...urls);
+      } else {
+        const url = d.previewUrl as string;
+        if (url) out.pictures.push(url);
+      }
+    }
+    if (kind === 'character-sheet-desk') {
+      // 角色设定表：逐格设定图交下游（grid-compose / clip-gen），逐格角色提示词同样交下游；
+      // 参考图 URL 由上游图片提供（消费侧），此处只暴露本节点产出，不额外塞入参考图。
+      const cells =
+        (d.gridCells as { imagePromptZh?: string; imagePrompt?: string }[]) ?? [];
+      const urls = (d.splitUrls as string[]) ?? (d.pictures as string[]);
+      if (urls?.length) {
+        out.pictures.push(...urls);
+      } else {
+        const url = d.previewUrl as string;
+        if (url) out.pictures.push(url);
+      }
+      if (cells.length) {
+        out.prompts.push(
+          ...cells.map((c) => c.imagePromptZh || c.imagePrompt || '').filter(Boolean),
+        );
+      }
+    }
+    if (kind === 'frame-study') {
+      // 逐帧拉片：逐帧参考图 + 逐帧反推提示词交下游（picture-gen / grid-compose / clip-gen 消费）；
+      // 参考视频由上游 clip 提供（消费侧），此处只暴露本节点产出，不重复塞入源视频。
+      const items = Array.isArray(d.frameStudyItems)
+        ? (d.frameStudyItems as { thumbnailUrl?: string; reversePromptZh?: string; reversePromptEn?: string }[])
+        : [];
+      if (items.length > 0) {
+        out.prompts.push(
+          ...items
+            .map((it) => `${it.reversePromptEn ?? ''}`.trim() || `${it.reversePromptZh ?? ''}`.trim())
+            .filter(Boolean),
+        );
+        for (const it of items) {
+          const url = typeof it.thumbnailUrl === 'string' ? it.thumbnailUrl.trim() : '';
+          if (url) out.pictures.push(url);
+        }
+      } else {
+        const urls = (d.frameStudyFrameUrls as string[]) ?? (d.pictures as string[]);
+        if (urls?.length) out.pictures.push(...urls.filter((u) => typeof u === 'string' && u.trim()));
+        else {
+          const url = d.previewUrl as string;
+          if (url) out.pictures.push(url);
+        }
+      }
+    }
     if (kind === 'photo-speak') {
       const url = (d.videoUrl as string) || (d.outputUrl as string);
       if (url) out.clips.push(url);

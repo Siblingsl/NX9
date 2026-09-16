@@ -1,0 +1,1789 @@
+{
+  "schemaVersion": 1,
+  "index": {
+    "path": "packages/shared/src/index.ts",
+    "bindingBlockCount": 192,
+    "relativeSpecifierCount": 160,
+    "missingSpecifiers": [
+      "./data/emotion-presets",
+      "./data/shot-move-families",
+      "./data/creative-asset-presets",
+      "./data/character-face-rig-presets",
+      "./data/playbook-definitions",
+      "./data/camera-presets",
+      "./data/shot-lexicon-taxonomy",
+      "./data/provider-registry"
+    ]
+  },
+  "modules": [
+    {
+      "slug": "emotion-presets",
+      "specifier": "./data/emotion-presets",
+      "modulePath": "packages/shared/src/data/emotion-presets.ts",
+      "exists": false,
+      "status": "missing",
+      "barrels": [
+        {
+          "line": 584,
+          "statement": "export",
+          "isTypeOnly": false
+        }
+      ],
+      "exports": [
+        {
+          "name": "BUILTIN_EMOTION_PRESETS",
+          "kind": "value",
+          "line": 584
+        },
+        {
+          "name": "EmotionPreset",
+          "kind": "type",
+          "line": 584
+        }
+      ],
+      "exportCount": 2,
+      "valueExportCount": 1,
+      "typeExportCount": 1,
+      "consumers": [
+        {
+          "file": "apps/web/src/panels/asset-library/AssetDetailFields.tsx",
+          "line": 3,
+          "specifier": "@nx9/shared",
+          "via": "barrel",
+          "name": "BUILTIN_EMOTION_PRESETS",
+          "kind": "value",
+          "local": "BUILTIN_EMOTION_PRESETS"
+        }
+      ],
+      "consumerFiles": [
+        "apps/web/src/panels/asset-library/AssetDetailFields.tsx"
+      ],
+      "consumerCount": 1,
+      "clues": [
+        {
+          "path": "apps/web/src/panels/asset-library/AssetDetailFields.tsx",
+          "note": "真实消费点：`BUILTIN_EMOTION_PRESETS.map((p) => …)` 读到 `p.id` / `p.label` / `p.promptEn`，写入 `emotionTags`。",
+          "exists": true
+        },
+        {
+          "path": "packages/shared/src/types/creative-asset-center.ts",
+          "note": "`ShotCreativeExtension.emotionTags` / `recommendedEmotion` 的语义注释（「表演/氛围标签」，不替代角色表情格）。",
+          "exists": true
+        },
+        {
+          "path": "packages/shared/src/utils/creative-asset-prompts.ts",
+          "note": "`buildEmotionPrompt` / `getEmotionCreative`：预设最终注入 Prompt 的形态。",
+          "exists": true
+        },
+        {
+          "path": "packages/shared/src/data/character-sheet-presets.ts",
+          "note": "同目录既有 `CHARACTER_EXPRESSION_PRESETS`：同类预设文件的字段风格参照（注意：那是**角色表情格**，与 BUILTIN_EMOTION_PRESETS 语义不同）。",
+          "exists": true
+        }
+      ],
+      "cluesMissing": []
+    },
+    {
+      "slug": "shot-move-families",
+      "specifier": "./data/shot-move-families",
+      "modulePath": "packages/shared/src/data/shot-move-families.ts",
+      "exists": false,
+      "status": "missing",
+      "barrels": [
+        {
+          "line": 618,
+          "statement": "export",
+          "isTypeOnly": false
+        }
+      ],
+      "exports": [
+        {
+          "name": "SHOT_MOVE_FAMILIES",
+          "kind": "value",
+          "line": 618
+        },
+        {
+          "name": "shotMoveFamilyLabel",
+          "kind": "value",
+          "line": 618
+        },
+        {
+          "name": "inferShotMoveFamilyFromGroup",
+          "kind": "value",
+          "line": 618
+        }
+      ],
+      "exportCount": 3,
+      "valueExportCount": 3,
+      "typeExportCount": 0,
+      "consumers": [
+        {
+          "file": "apps/web/src/panels/asset-library/AssetDetailFields.tsx",
+          "line": 3,
+          "specifier": "@nx9/shared",
+          "via": "barrel",
+          "name": "SHOT_MOVE_FAMILIES",
+          "kind": "value",
+          "local": "SHOT_MOVE_FAMILIES"
+        },
+        {
+          "file": "apps/web/src/panels/asset-library/modal/AssetLibraryStatusRail.tsx",
+          "line": 2,
+          "specifier": "@nx9/shared",
+          "via": "barrel",
+          "name": "SHOT_MOVE_FAMILIES",
+          "kind": "value",
+          "local": "SHOT_MOVE_FAMILIES"
+        },
+        {
+          "file": "apps/web/src/panels/asset-library/ShotCardGrid.tsx",
+          "line": 3,
+          "specifier": "@nx9/shared",
+          "via": "barrel",
+          "name": "shotMoveFamilyLabel",
+          "kind": "value",
+          "local": "shotMoveFamilyLabel"
+        }
+      ],
+      "consumerFiles": [
+        "apps/web/src/panels/asset-library/AssetDetailFields.tsx",
+        "apps/web/src/panels/asset-library/ShotCardGrid.tsx",
+        "apps/web/src/panels/asset-library/modal/AssetLibraryStatusRail.tsx"
+      ],
+      "consumerCount": 3,
+      "clues": [
+        {
+          "path": "packages/shared/src/types/creative-asset-center.ts",
+          "note": "`export type ShotMoveFamily = 'static' | 'dolly' | 'pan_tilt' | 'track' | 'crane' | 'orbit' | 'special'` —— 族 id 的**权威闭集**。",
+          "exists": true
+        },
+        {
+          "path": "packages/shared/src/data/shot-library-seeds.ts",
+          "note": "`ShotLibrarySeed.moveFamily: ShotMoveFamily` 117 条种子的族分布；可由 `moveFamily` 反查出现的族集合。",
+          "exists": true
+        },
+        {
+          "path": "docs/nx9-shot-seeds-neutral.json",
+          "note": "种子原始数据（`moveFamily` 字段）；`node scripts/promote-shot-library-seeds.mjs` 的输入。",
+          "exists": true
+        },
+        {
+          "path": "packages/shared/src/data/camera-move-library.ts",
+          "note": "`CameraMoveFamily` / `CAMERA_MOVE_FAMILY_LABELS` / `CAMERA_MOVE_FAMILY_ORDER`：运镜族的中英标签写法参照（游标不同：一个是镜头库族，一个是词典族）。",
+          "exists": true
+        },
+        {
+          "path": "apps/web/src/panels/asset-library/modal/AssetLibraryStatusRail.tsx",
+          "note": "真实消费点：`SHOT_MOVE_FAMILIES.map((fam) => … fam.id / fam.label)` 用于三级筛选条。",
+          "exists": true
+        }
+      ],
+      "cluesMissing": []
+    },
+    {
+      "slug": "creative-asset-presets",
+      "specifier": "./data/creative-asset-presets",
+      "modulePath": "packages/shared/src/data/creative-asset-presets.ts",
+      "exists": false,
+      "status": "missing",
+      "barrels": [
+        {
+          "line": 623,
+          "statement": "export",
+          "isTypeOnly": false
+        }
+      ],
+      "exports": [
+        {
+          "name": "CAC_EXPRESSION_PRESETS",
+          "kind": "value",
+          "line": 623
+        },
+        {
+          "name": "CAC_POSE_PRESETS",
+          "kind": "value",
+          "line": 623
+        },
+        {
+          "name": "CAC_ANGLE_PRESETS",
+          "kind": "value",
+          "line": 623
+        },
+        {
+          "name": "CAC_HOOK_TYPES",
+          "kind": "value",
+          "line": 623
+        },
+        {
+          "name": "CAC_SHOT_SIZES",
+          "kind": "value",
+          "line": 623
+        },
+        {
+          "name": "CAC_VOICE_GENDERS",
+          "kind": "value",
+          "line": 623
+        },
+        {
+          "name": "CAC_VOICE_EMOTIONS",
+          "kind": "value",
+          "line": 623
+        },
+        {
+          "name": "defaultCharacterVariants",
+          "kind": "value",
+          "line": 623
+        },
+        {
+          "name": "mergeVariantSlots",
+          "kind": "value",
+          "line": 623
+        },
+        {
+          "name": "CAC_SHEET_EXPRESSION_PRESETS",
+          "kind": "value",
+          "line": 623
+        },
+        {
+          "name": "CAC_MICRO_EXPRESSION_PRESETS",
+          "kind": "value",
+          "line": 623
+        },
+        {
+          "name": "CAC_SHEET_POSE_PRESETS",
+          "kind": "value",
+          "line": 623
+        },
+        {
+          "name": "CAC_SHEET_HEAD_ANGLE_PRESETS",
+          "kind": "value",
+          "line": 623
+        },
+        {
+          "name": "CAC_COSTUME_DETAIL_PRESETS",
+          "kind": "value",
+          "line": 623
+        },
+        {
+          "name": "CAC_HAND_REF_PRESETS",
+          "kind": "value",
+          "line": 623
+        },
+        {
+          "name": "CAC_COSTUME_VARIANT_PRESETS",
+          "kind": "value",
+          "line": 623
+        }
+      ],
+      "exportCount": 16,
+      "valueExportCount": 16,
+      "typeExportCount": 0,
+      "consumers": [
+        {
+          "file": "apps/web/src/panels/asset-library/AssetDetailFields.tsx",
+          "line": 3,
+          "specifier": "@nx9/shared",
+          "via": "barrel",
+          "name": "CAC_COSTUME_VARIANT_PRESETS",
+          "kind": "value",
+          "local": "CAC_COSTUME_VARIANT_PRESETS"
+        },
+        {
+          "file": "apps/web/src/panels/asset-library/AssetDetailFields.tsx",
+          "line": 3,
+          "specifier": "@nx9/shared",
+          "via": "barrel",
+          "name": "CAC_HOOK_TYPES",
+          "kind": "value",
+          "local": "CAC_HOOK_TYPES"
+        },
+        {
+          "file": "apps/web/src/panels/asset-library/AssetDetailFields.tsx",
+          "line": 3,
+          "specifier": "@nx9/shared",
+          "via": "barrel",
+          "name": "CAC_SHOT_SIZES",
+          "kind": "value",
+          "local": "CAC_SHOT_SIZES"
+        },
+        {
+          "file": "apps/web/src/panels/asset-library/AssetDetailFields.tsx",
+          "line": 3,
+          "specifier": "@nx9/shared",
+          "via": "barrel",
+          "name": "CAC_VOICE_EMOTIONS",
+          "kind": "value",
+          "local": "CAC_VOICE_EMOTIONS"
+        },
+        {
+          "file": "apps/web/src/panels/asset-library/AssetDetailFields.tsx",
+          "line": 3,
+          "specifier": "@nx9/shared",
+          "via": "barrel",
+          "name": "CAC_VOICE_GENDERS",
+          "kind": "value",
+          "local": "CAC_VOICE_GENDERS"
+        },
+        {
+          "file": "apps/web/src/panels/asset-library/modal/AssetDetailEntityView.tsx",
+          "line": 1,
+          "specifier": "@nx9/shared",
+          "via": "barrel",
+          "name": "CAC_COSTUME_VARIANT_PRESETS",
+          "kind": "value",
+          "local": "CAC_COSTUME_VARIANT_PRESETS"
+        },
+        {
+          "file": "apps/web/src/panels/asset-library/modal/AssetLibraryStatusRail.tsx",
+          "line": 2,
+          "specifier": "@nx9/shared",
+          "via": "barrel",
+          "name": "CAC_SHOT_SIZES",
+          "kind": "value",
+          "local": "CAC_SHOT_SIZES"
+        },
+        {
+          "file": "packages/shared/src/utils/creative-asset-factory.ts",
+          "line": 2,
+          "specifier": "../data/creative-asset-presets",
+          "via": "direct",
+          "name": "defaultCharacterVariants",
+          "kind": "value",
+          "local": "defaultCharacterVariants"
+        },
+        {
+          "file": "packages/shared/src/utils/creative-asset-factory.ts",
+          "line": 2,
+          "specifier": "../data/creative-asset-presets",
+          "via": "direct",
+          "name": "mergeVariantSlots",
+          "kind": "value",
+          "local": "mergeVariantSlots"
+        },
+        {
+          "file": "packages/shared/src/utils/creative-asset-prompts.ts",
+          "line": 26,
+          "specifier": "../data/creative-asset-presets",
+          "via": "direct",
+          "name": "CAC_COSTUME_VARIANT_PRESETS",
+          "kind": "value",
+          "local": "CAC_COSTUME_VARIANT_PRESETS"
+        },
+        {
+          "file": "packages/shared/src/utils/creative-asset-prompts.ts",
+          "line": 26,
+          "specifier": "../data/creative-asset-presets",
+          "via": "direct",
+          "name": "defaultCharacterVariants",
+          "kind": "value",
+          "local": "defaultCharacterVariants"
+        },
+        {
+          "file": "packages/shared/src/utils/creative-asset-prompts.ts",
+          "line": 26,
+          "specifier": "../data/creative-asset-presets",
+          "via": "direct",
+          "name": "mergeVariantSlots",
+          "kind": "value",
+          "local": "mergeVariantSlots"
+        }
+      ],
+      "consumerFiles": [
+        "apps/web/src/panels/asset-library/AssetDetailFields.tsx",
+        "apps/web/src/panels/asset-library/modal/AssetDetailEntityView.tsx",
+        "apps/web/src/panels/asset-library/modal/AssetLibraryStatusRail.tsx",
+        "packages/shared/src/utils/creative-asset-factory.ts",
+        "packages/shared/src/utils/creative-asset-prompts.ts"
+      ],
+      "consumerCount": 12,
+      "clues": [
+        {
+          "path": "packages/shared/src/utils/creative-asset-factory.ts",
+          "note": "**直连消费方**（`../data/creative-asset-presets`）：只用 `defaultCharacterVariants` 与 `mergeVariantSlots`。",
+          "exists": true
+        },
+        {
+          "path": "packages/shared/src/utils/creative-asset-prompts.ts",
+          "note": "**直连消费方**：`defaultCharacterVariants` / `mergeVariantSlots` / `CAC_COSTUME_VARIANT_PRESETS`。",
+          "exists": true
+        },
+        {
+          "path": "packages/shared/src/types/creative-asset-center.ts",
+          "note": "`CreativeVariantEntry` 形状 + `DEFAULT_SCENE_VARIANTS` / `DEFAULT_PROP_VARIANTS`（同族默认槽的既有写法）。",
+          "exists": true
+        },
+        {
+          "path": "packages/shared/src/utils/creative-asset-prompts.ts",
+          "note": "`CAC_*` 各词表在 Prompt 编译里的实际读取字段（id / label / prompt）。",
+          "exists": true
+        },
+        {
+          "path": "packages/shared/src/data/pose-presets.ts",
+          "note": "同目录既有预设文件的字段风格参照（POSE_PRESETS / buildPosePrompt）。",
+          "exists": true
+        },
+        {
+          "path": "docs/NX9-DORMANT-PRESET-ENTRYPOINTS.md",
+          "note": "既有「休眠预设接入」记录：说明了哪种预设是词表、哪种是提示词片段。",
+          "exists": true
+        }
+      ],
+      "cluesMissing": []
+    },
+    {
+      "slug": "character-face-rig-presets",
+      "specifier": "./data/character-face-rig-presets",
+      "modulePath": "packages/shared/src/data/character-face-rig-presets.ts",
+      "exists": false,
+      "status": "missing",
+      "barrels": [
+        {
+          "line": 641,
+          "statement": "export",
+          "isTypeOnly": false
+        }
+      ],
+      "exports": [
+        {
+          "name": "FACE_RIG_DEADZONE",
+          "kind": "value",
+          "line": 641
+        },
+        {
+          "name": "FACE_RIG_MIN",
+          "kind": "value",
+          "line": 641
+        },
+        {
+          "name": "FACE_RIG_MAX",
+          "kind": "value",
+          "line": 641
+        },
+        {
+          "name": "FACE_RIG_GROUPS",
+          "kind": "value",
+          "line": 641
+        },
+        {
+          "name": "FACE_RIG_PARAMS",
+          "kind": "value",
+          "line": 641
+        },
+        {
+          "name": "FACE_RIG_PARAMS_BY_ID",
+          "kind": "value",
+          "line": 641
+        },
+        {
+          "name": "CHARACTER_FACE_RIG_PRESETS",
+          "kind": "value",
+          "line": 641
+        },
+        {
+          "name": "FACE_RIG_PRESETS_BY_ID",
+          "kind": "value",
+          "line": 641
+        },
+        {
+          "name": "faceRigParamsOfGroup",
+          "kind": "value",
+          "line": 641
+        },
+        {
+          "name": "FaceRigGroupDef",
+          "kind": "type",
+          "line": 641
+        },
+        {
+          "name": "FaceRigDriver",
+          "kind": "type",
+          "line": 641
+        },
+        {
+          "name": "FaceRigParamDef",
+          "kind": "type",
+          "line": 641
+        },
+        {
+          "name": "FaceRigPreset",
+          "kind": "type",
+          "line": 641
+        }
+      ],
+      "exportCount": 13,
+      "valueExportCount": 9,
+      "typeExportCount": 4,
+      "consumers": [
+        {
+          "file": "apps/web/src/engine/__tests__/character-face-rig.test.ts",
+          "line": 3,
+          "specifier": "@nx9/shared",
+          "via": "barrel",
+          "name": "FACE_RIG_PARAMS",
+          "kind": "value",
+          "local": "FACE_RIG_PARAMS"
+        },
+        {
+          "file": "apps/web/src/panels/asset-library/CharacterFaceRigSection.tsx",
+          "line": 3,
+          "specifier": "@nx9/shared",
+          "via": "barrel",
+          "name": "CHARACTER_FACE_RIG_PRESETS",
+          "kind": "value",
+          "local": "CHARACTER_FACE_RIG_PRESETS"
+        },
+        {
+          "file": "apps/web/src/panels/asset-library/CharacterFaceRigSection.tsx",
+          "line": 3,
+          "specifier": "@nx9/shared",
+          "via": "barrel",
+          "name": "FACE_RIG_GROUPS",
+          "kind": "value",
+          "local": "FACE_RIG_GROUPS"
+        },
+        {
+          "file": "apps/web/src/panels/asset-library/CharacterFaceRigSection.tsx",
+          "line": 3,
+          "specifier": "@nx9/shared",
+          "via": "barrel",
+          "name": "FACE_RIG_PARAMS",
+          "kind": "value",
+          "local": "FACE_RIG_PARAMS"
+        },
+        {
+          "file": "apps/web/src/panels/asset-library/CharacterFaceRigSection.tsx",
+          "line": 3,
+          "specifier": "@nx9/shared",
+          "via": "barrel",
+          "name": "faceRigParamsOfGroup",
+          "kind": "value",
+          "local": "faceRigParamsOfGroup"
+        },
+        {
+          "file": "apps/web/src/panels/asset-library/face-sculpt/FaceSculptModal.tsx",
+          "line": 5,
+          "specifier": "@nx9/shared",
+          "via": "barrel",
+          "name": "FACE_RIG_GROUPS",
+          "kind": "value",
+          "local": "FACE_RIG_GROUPS"
+        },
+        {
+          "file": "apps/web/src/panels/asset-library/face-sculpt/FaceSculptModal.tsx",
+          "line": 5,
+          "specifier": "@nx9/shared",
+          "via": "barrel",
+          "name": "FACE_RIG_PARAMS",
+          "kind": "value",
+          "local": "FACE_RIG_PARAMS"
+        },
+        {
+          "file": "apps/web/src/panels/asset-library/face-sculpt/FaceSculptModal.tsx",
+          "line": 5,
+          "specifier": "@nx9/shared",
+          "via": "barrel",
+          "name": "FACE_RIG_PARAMS_BY_ID",
+          "kind": "value",
+          "local": "FACE_RIG_PARAMS_BY_ID"
+        },
+        {
+          "file": "apps/web/src/panels/asset-library/face-sculpt/FaceSculptModal.tsx",
+          "line": 5,
+          "specifier": "@nx9/shared",
+          "via": "barrel",
+          "name": "faceRigParamsOfGroup",
+          "kind": "value",
+          "local": "faceRigParamsOfGroup"
+        },
+        {
+          "file": "packages/director3d/src/sculpt/apply-face-rig.ts",
+          "line": 1,
+          "specifier": "@nx9/shared",
+          "via": "barrel",
+          "name": "FACE_RIG_PARAMS",
+          "kind": "value",
+          "local": "FACE_RIG_PARAMS"
+        },
+        {
+          "file": "packages/director3d/src/sculpt/apply-face-rig.ts",
+          "line": 1,
+          "specifier": "@nx9/shared",
+          "via": "barrel",
+          "name": "FACE_RIG_PARAMS_BY_ID",
+          "kind": "value",
+          "local": "FACE_RIG_PARAMS_BY_ID"
+        },
+        {
+          "file": "packages/director3d/src/sculpt/pack-mpfb-character-base.ts",
+          "line": 18,
+          "specifier": "@nx9/shared",
+          "via": "barrel",
+          "name": "FACE_RIG_PARAMS",
+          "kind": "value",
+          "local": "FACE_RIG_PARAMS"
+        },
+        {
+          "file": "packages/director3d/src/sculpt/procedural-base-model.ts",
+          "line": 17,
+          "specifier": "@nx9/shared",
+          "via": "barrel",
+          "name": "FACE_RIG_PARAMS",
+          "kind": "value",
+          "local": "FACE_RIG_PARAMS"
+        },
+        {
+          "file": "packages/director3d/src/sculpt/sculpt-contract.ts",
+          "line": 1,
+          "specifier": "@nx9/shared",
+          "via": "barrel",
+          "name": "FACE_RIG_PARAMS",
+          "kind": "value",
+          "local": "FACE_RIG_PARAMS"
+        },
+        {
+          "file": "packages/director3d/src/sculpt/sculpt-handles.ts",
+          "line": 2,
+          "specifier": "@nx9/shared",
+          "via": "barrel",
+          "name": "FACE_RIG_MAX",
+          "kind": "value",
+          "local": "FACE_RIG_MAX"
+        },
+        {
+          "file": "packages/director3d/src/sculpt/sculpt-handles.ts",
+          "line": 2,
+          "specifier": "@nx9/shared",
+          "via": "barrel",
+          "name": "FACE_RIG_MIN",
+          "kind": "value",
+          "local": "FACE_RIG_MIN"
+        },
+        {
+          "file": "packages/shared/src/utils/character-face-rig.ts",
+          "line": 1,
+          "specifier": "../data/character-face-rig-presets",
+          "via": "direct",
+          "name": "FACE_RIG_DEADZONE",
+          "kind": "value",
+          "local": "FACE_RIG_DEADZONE"
+        },
+        {
+          "file": "packages/shared/src/utils/character-face-rig.ts",
+          "line": 1,
+          "specifier": "../data/character-face-rig-presets",
+          "via": "direct",
+          "name": "FACE_RIG_GROUPS",
+          "kind": "value",
+          "local": "FACE_RIG_GROUPS"
+        },
+        {
+          "file": "packages/shared/src/utils/character-face-rig.ts",
+          "line": 1,
+          "specifier": "../data/character-face-rig-presets",
+          "via": "direct",
+          "name": "FACE_RIG_MAX",
+          "kind": "value",
+          "local": "FACE_RIG_MAX"
+        },
+        {
+          "file": "packages/shared/src/utils/character-face-rig.ts",
+          "line": 1,
+          "specifier": "../data/character-face-rig-presets",
+          "via": "direct",
+          "name": "FACE_RIG_MIN",
+          "kind": "value",
+          "local": "FACE_RIG_MIN"
+        },
+        {
+          "file": "packages/shared/src/utils/character-face-rig.ts",
+          "line": 1,
+          "specifier": "../data/character-face-rig-presets",
+          "via": "direct",
+          "name": "FACE_RIG_PARAMS",
+          "kind": "value",
+          "local": "FACE_RIG_PARAMS"
+        },
+        {
+          "file": "packages/shared/src/utils/character-face-rig.ts",
+          "line": 1,
+          "specifier": "../data/character-face-rig-presets",
+          "via": "direct",
+          "name": "FACE_RIG_PARAMS_BY_ID",
+          "kind": "value",
+          "local": "FACE_RIG_PARAMS_BY_ID"
+        },
+        {
+          "file": "packages/shared/src/utils/character-face-rig.ts",
+          "line": 1,
+          "specifier": "../data/character-face-rig-presets",
+          "via": "direct",
+          "name": "FACE_RIG_PRESETS_BY_ID",
+          "kind": "value",
+          "local": "FACE_RIG_PRESETS_BY_ID"
+        },
+        {
+          "file": "packages/shared/src/utils/character-face-rig.ts",
+          "line": 1,
+          "specifier": "../data/character-face-rig-presets",
+          "via": "direct",
+          "name": "FaceRigParamDef",
+          "kind": "type",
+          "local": "FaceRigParamDef"
+        }
+      ],
+      "consumerFiles": [
+        "apps/web/src/engine/__tests__/character-face-rig.test.ts",
+        "apps/web/src/panels/asset-library/CharacterFaceRigSection.tsx",
+        "apps/web/src/panels/asset-library/face-sculpt/FaceSculptModal.tsx",
+        "packages/director3d/src/sculpt/apply-face-rig.ts",
+        "packages/director3d/src/sculpt/pack-mpfb-character-base.ts",
+        "packages/director3d/src/sculpt/procedural-base-model.ts",
+        "packages/director3d/src/sculpt/sculpt-contract.ts",
+        "packages/director3d/src/sculpt/sculpt-handles.ts",
+        "packages/shared/src/utils/character-face-rig.ts"
+      ],
+      "consumerCount": 24,
+      "clues": [
+        {
+          "path": "packages/shared/src/utils/character-face-rig.ts",
+          "note": "**直连消费方**：`FACE_RIG_DEADZONE` / `FACE_RIG_GROUPS` / `FACE_RIG_MAX` / `FACE_RIG_MIN` / `FACE_RIG_PARAMS` / `FACE_RIG_PARAMS_BY_ID` / `FACE_RIG_PRESETS_BY_ID` / `FaceRigParamDef` 的**全部用法**（字段名与语义可从读取方式逐条反推）。",
+          "exists": true
+        },
+        {
+          "path": "apps/web/src/engine/__tests__/character-face-rig.test.ts",
+          "note": "契约钉子：`FACE_RIG_PARAMS.length === 45`、id 唯一、每项 `low` / `high` 非空、`heightFeel` 与 `shoulderWidth` 的 `driver === 'bone'`。",
+          "exists": true
+        },
+        {
+          "path": "docs/8.12/NX9-CHARACTER-FACE-SCULPT-2026-08-12.md",
+          "note": "「45 项字典 + `driver`」的锚点表与文件地图（P0 阶段交付记录）。",
+          "exists": true
+        },
+        {
+          "path": "packages/director3d/src/sculpt/sculpt-contract.ts",
+          "note": "`FACE_RIG_PARAMS` 的 `id` / `driver`（`morph` | `bone` | `material` | `prompt`）在 3D 侧的实际使用。",
+          "exists": true
+        },
+        {
+          "path": "packages/shared/src/types/creative-asset-center.ts",
+          "note": "`FaceRigGroupId` 闭集（shape/eyes/brows/nose/mouth/surface/body）与 `CharacterFaceRig.values` 结构。",
+          "exists": true
+        },
+        {
+          "path": "apps/web/src/panels/asset-library/CharacterFaceRigSection.tsx",
+          "note": "真实消费点：`p.quick` / `p.labelZh` / `p.low` / `p.high`、`group.labelZh`、`CHARACTER_FACE_RIG_PRESETS[].id/.label`。",
+          "exists": true
+        }
+      ],
+      "cluesMissing": []
+    },
+    {
+      "slug": "playbook-definitions",
+      "specifier": "./data/playbook-definitions",
+      "modulePath": "packages/shared/src/data/playbook-definitions.ts",
+      "exists": false,
+      "status": "missing",
+      "barrels": [
+        {
+          "line": 878,
+          "statement": "export",
+          "isTypeOnly": false
+        }
+      ],
+      "exports": [
+        {
+          "name": "PLAYBOOK_DEFINITIONS",
+          "kind": "value",
+          "line": 878
+        },
+        {
+          "name": "PlaybookId",
+          "kind": "type",
+          "line": 878
+        },
+        {
+          "name": "PlaybookStepAction",
+          "kind": "type",
+          "line": 878
+        },
+        {
+          "name": "PlaybookStepDef",
+          "kind": "type",
+          "line": 878
+        },
+        {
+          "name": "PlaybookDefinition",
+          "kind": "type",
+          "line": 878
+        }
+      ],
+      "exportCount": 5,
+      "valueExportCount": 1,
+      "typeExportCount": 4,
+      "consumers": [
+        {
+          "file": "apps/server/test/ai-short-film-workflow.test.ts",
+          "line": 2,
+          "specifier": "@nx9/shared",
+          "via": "barrel",
+          "name": "PLAYBOOK_DEFINITIONS",
+          "kind": "value",
+          "local": "PLAYBOOK_DEFINITIONS"
+        },
+        {
+          "file": "apps/server/test/f006-f008-acceptance.test.ts",
+          "line": 8,
+          "specifier": "@nx9/shared",
+          "via": "barrel",
+          "name": "PLAYBOOK_DEFINITIONS",
+          "kind": "value",
+          "local": "PLAYBOOK_DEFINITIONS"
+        },
+        {
+          "file": "apps/server/test/f030-acceptance.test.ts",
+          "line": 12,
+          "specifier": "@nx9/shared",
+          "via": "barrel",
+          "name": "PLAYBOOK_DEFINITIONS",
+          "kind": "value",
+          "local": "PLAYBOOK_DEFINITIONS"
+        },
+        {
+          "file": "apps/server/test/f030-acceptance.test.ts",
+          "line": 12,
+          "specifier": "@nx9/shared",
+          "via": "barrel",
+          "name": "PlaybookId",
+          "kind": "type",
+          "local": "PlaybookId"
+        },
+        {
+          "file": "apps/server/test/f030-acceptance.test.ts",
+          "line": 12,
+          "specifier": "@nx9/shared",
+          "via": "barrel",
+          "name": "PlaybookStepDef",
+          "kind": "type",
+          "local": "PlaybookStepDef"
+        },
+        {
+          "file": "apps/server/test/test-pipe.test.ts",
+          "line": 2,
+          "specifier": "@nx9/shared",
+          "via": "barrel",
+          "name": "PLAYBOOK_DEFINITIONS",
+          "kind": "value",
+          "local": "PLAYBOOK_DEFINITIONS"
+        },
+        {
+          "file": "apps/server/test/test-wf.test.ts",
+          "line": 2,
+          "specifier": "@nx9/shared",
+          "via": "barrel",
+          "name": "PLAYBOOK_DEFINITIONS",
+          "kind": "value",
+          "local": "PLAYBOOK_DEFINITIONS"
+        },
+        {
+          "file": "apps/server/test/test-wf.test.ts",
+          "line": 13,
+          "specifier": "@nx9/shared",
+          "via": "barrel",
+          "name": "PlaybookStepAction",
+          "kind": "type",
+          "local": "PlaybookStepAction"
+        },
+        {
+          "file": "apps/web/src/engine/FlowSurface.tsx",
+          "line": 47,
+          "specifier": "@nx9/shared",
+          "via": "barrel",
+          "name": "PLAYBOOK_DEFINITIONS",
+          "kind": "value",
+          "local": "PLAYBOOK_DEFINITIONS"
+        },
+        {
+          "file": "apps/web/src/engine/FlowSurface.tsx",
+          "line": 47,
+          "specifier": "@nx9/shared",
+          "via": "barrel",
+          "name": "PlaybookId",
+          "kind": "type",
+          "local": "PlaybookId"
+        },
+        {
+          "file": "apps/web/src/engine/one-click-agent.ts",
+          "line": 1,
+          "specifier": "@nx9/shared",
+          "via": "barrel",
+          "name": "PLAYBOOK_DEFINITIONS",
+          "kind": "value",
+          "local": "PLAYBOOK_DEFINITIONS"
+        },
+        {
+          "file": "apps/web/src/engine/one-click-agent.ts",
+          "line": 1,
+          "specifier": "@nx9/shared",
+          "via": "barrel",
+          "name": "PlaybookId",
+          "kind": "type",
+          "local": "PlaybookId"
+        },
+        {
+          "file": "apps/web/src/engine/playbook-focus.ts",
+          "line": 1,
+          "specifier": "@nx9/shared",
+          "via": "barrel",
+          "name": "PlaybookStepDef",
+          "kind": "type",
+          "local": "PlaybookStepDef"
+        },
+        {
+          "file": "apps/web/src/engine/playbook-runner.ts",
+          "line": 1,
+          "specifier": "@nx9/shared",
+          "via": "barrel",
+          "name": "PlaybookDefinition",
+          "kind": "type",
+          "local": "PlaybookDefinition"
+        },
+        {
+          "file": "apps/web/src/engine/playbook-runner.ts",
+          "line": 1,
+          "specifier": "@nx9/shared",
+          "via": "barrel",
+          "name": "PlaybookStepAction",
+          "kind": "type",
+          "local": "PlaybookStepAction"
+        },
+        {
+          "file": "apps/web/src/engine/playbook-runner.ts",
+          "line": 1,
+          "specifier": "@nx9/shared",
+          "via": "barrel",
+          "name": "PlaybookStepDef",
+          "kind": "type",
+          "local": "PlaybookStepDef"
+        },
+        {
+          "file": "apps/web/src/engine/stage-deck/canvas/LensMenu.tsx",
+          "line": 3,
+          "specifier": "@nx9/shared",
+          "via": "barrel",
+          "name": "PLAYBOOK_DEFINITIONS",
+          "kind": "value",
+          "local": "PLAYBOOK_DEFINITIONS"
+        },
+        {
+          "file": "apps/web/src/engine/stage-deck/chrome/CanvasFlowRail.tsx",
+          "line": 3,
+          "specifier": "@nx9/shared",
+          "via": "barrel",
+          "name": "PLAYBOOK_DEFINITIONS",
+          "kind": "value",
+          "local": "PLAYBOOK_DEFINITIONS"
+        },
+        {
+          "file": "apps/web/src/engine/stage-deck/chrome/CommandPalette.tsx",
+          "line": 3,
+          "specifier": "@nx9/shared",
+          "via": "barrel",
+          "name": "PLAYBOOK_DEFINITIONS",
+          "kind": "value",
+          "local": "PLAYBOOK_DEFINITIONS"
+        },
+        {
+          "file": "apps/web/src/engine/stage-deck/chrome/PlaybookLauncherOverlay.tsx",
+          "line": 2,
+          "specifier": "@nx9/shared",
+          "via": "barrel",
+          "name": "PLAYBOOK_DEFINITIONS",
+          "kind": "value",
+          "local": "PLAYBOOK_DEFINITIONS"
+        },
+        {
+          "file": "apps/web/src/engine/stage-deck/chrome/PlaybookLauncherOverlay.tsx",
+          "line": 2,
+          "specifier": "@nx9/shared",
+          "via": "barrel",
+          "name": "PlaybookDefinition",
+          "kind": "type",
+          "local": "PlaybookDefinition"
+        },
+        {
+          "file": "apps/web/src/engine/stage-deck/chrome/PlaybookLauncherOverlay.tsx",
+          "line": 2,
+          "specifier": "@nx9/shared",
+          "via": "barrel",
+          "name": "PlaybookId",
+          "kind": "type",
+          "local": "PlaybookId"
+        },
+        {
+          "file": "apps/web/src/hooks/use-playbook-auto-advance.ts",
+          "line": 2,
+          "specifier": "@nx9/shared",
+          "via": "barrel",
+          "name": "PLAYBOOK_DEFINITIONS",
+          "kind": "value",
+          "local": "PLAYBOOK_DEFINITIONS"
+        },
+        {
+          "file": "apps/web/src/stores/flow-commands.ts",
+          "line": 2,
+          "specifier": "@nx9/shared",
+          "via": "barrel",
+          "name": "PlaybookId",
+          "kind": "type",
+          "local": "PlaybookId"
+        },
+        {
+          "file": "apps/web/src/stores/workspace-document.ts",
+          "line": 3,
+          "specifier": "@nx9/shared",
+          "via": "barrel",
+          "name": "PlaybookId",
+          "kind": "type",
+          "local": "PlaybookId"
+        },
+        {
+          "file": "apps/web/src/stores/workspace-document.ts",
+          "line": 30,
+          "specifier": "@nx9/shared",
+          "via": "barrel",
+          "name": "PLAYBOOK_DEFINITIONS",
+          "kind": "value",
+          "local": "PLAYBOOK_DEFINITIONS"
+        },
+        {
+          "file": "packages/shared/src/schema/convert-def-to-schema.ts",
+          "line": 1,
+          "specifier": "../data/playbook-definitions",
+          "via": "direct",
+          "name": "PlaybookDefinition",
+          "kind": "type",
+          "local": "PlaybookDefinition"
+        },
+        {
+          "file": "packages/shared/src/types/workspace.ts",
+          "line": 9,
+          "specifier": "../data/playbook-definitions",
+          "via": "direct",
+          "name": "PlaybookId",
+          "kind": "type",
+          "local": "PlaybookId"
+        },
+        {
+          "file": "packages/shared/src/utils/playbook-episode-progress.ts",
+          "line": 1,
+          "specifier": "../data/playbook-definitions",
+          "via": "direct",
+          "name": "PlaybookDefinition",
+          "kind": "type",
+          "local": "PlaybookDefinition"
+        },
+        {
+          "file": "packages/shared/src/utils/playbook-readiness.ts",
+          "line": 1,
+          "specifier": "../data/playbook-definitions",
+          "via": "direct",
+          "name": "PlaybookDefinition",
+          "kind": "type",
+          "local": "PlaybookDefinition"
+        },
+        {
+          "file": "packages/shared/src/utils/playbook-readiness.ts",
+          "line": 1,
+          "specifier": "../data/playbook-definitions",
+          "via": "direct",
+          "name": "PlaybookStepDef",
+          "kind": "type",
+          "local": "PlaybookStepDef"
+        },
+        {
+          "file": "packages/shared/src/utils/playbook-step-visual.ts",
+          "line": 1,
+          "specifier": "../data/playbook-definitions",
+          "via": "direct",
+          "name": "PlaybookStepDef",
+          "kind": "type",
+          "local": "PlaybookStepDef"
+        },
+        {
+          "file": "packages/shared/src/utils/playbook-step-visual.ts",
+          "line": 2,
+          "specifier": "../data/playbook-definitions",
+          "via": "direct",
+          "name": "PLAYBOOK_DEFINITIONS",
+          "kind": "value",
+          "local": "PLAYBOOK_DEFINITIONS"
+        }
+      ],
+      "consumerFiles": [
+        "apps/server/test/ai-short-film-workflow.test.ts",
+        "apps/server/test/f006-f008-acceptance.test.ts",
+        "apps/server/test/f030-acceptance.test.ts",
+        "apps/server/test/test-pipe.test.ts",
+        "apps/server/test/test-wf.test.ts",
+        "apps/web/src/engine/FlowSurface.tsx",
+        "apps/web/src/engine/one-click-agent.ts",
+        "apps/web/src/engine/playbook-focus.ts",
+        "apps/web/src/engine/playbook-runner.ts",
+        "apps/web/src/engine/stage-deck/canvas/LensMenu.tsx",
+        "apps/web/src/engine/stage-deck/chrome/CanvasFlowRail.tsx",
+        "apps/web/src/engine/stage-deck/chrome/CommandPalette.tsx",
+        "apps/web/src/engine/stage-deck/chrome/PlaybookLauncherOverlay.tsx",
+        "apps/web/src/hooks/use-playbook-auto-advance.ts",
+        "apps/web/src/stores/flow-commands.ts",
+        "apps/web/src/stores/workspace-document.ts",
+        "packages/shared/src/schema/convert-def-to-schema.ts",
+        "packages/shared/src/types/workspace.ts",
+        "packages/shared/src/utils/playbook-episode-progress.ts",
+        "packages/shared/src/utils/playbook-readiness.ts",
+        "packages/shared/src/utils/playbook-step-visual.ts"
+      ],
+      "consumerCount": 33,
+      "clues": [
+        {
+          "path": "packages/shared/src/utils/playbook-readiness.ts",
+          "note": "**直连消费方**：`PlaybookStepDef.readinessKey` 的取值范围由 `readinessRegistry` 的键给出（该文件末尾即注册表）。",
+          "exists": true
+        },
+        {
+          "path": "packages/shared/src/schema/convert-def-to-schema.ts",
+          "note": "**直连消费方**：逐字段读取 `PlaybookDefinition.id` / `.steps`；`PlaybookStepDef.id` / `.shortLabel` / `.label` / `.optional` / `.canvasNodeKinds` / `.stepIndex` / `.readinessKey`。",
+          "exists": true
+        },
+        {
+          "path": "packages/shared/src/utils/playbook-step-visual.ts",
+          "note": "**直连消费方**：`PLAYBOOK_DEFINITIONS.find(p => p.id === session.playbookId)`、`playbook.steps.map(...)`。",
+          "exists": true
+        },
+        {
+          "path": "packages/shared/src/utils/playbook-episode-progress.ts",
+          "note": "**直连消费方**：`PlaybookDefinition` 在逐步迁移逻辑里的使用。",
+          "exists": true
+        },
+        {
+          "path": "packages/shared/src/types/workspace.ts",
+          "note": "**直连消费方**：`import type { PlaybookId }`（`PlaybookSession.playbookId` 的类型来源）。",
+          "exists": true
+        },
+        {
+          "path": "apps/server/test/f030-acceptance.test.ts",
+          "note": "验收钉子：`pb-viral-short` 必须存在且含 `id: 'smart-edit'` 步骤、含 `kind: 'clip-editor'`、注释含 `F-030`；并断言 `evaluateStepVisualState` 的行为。",
+          "exists": true
+        },
+        {
+          "path": "packages/shared/src/utils/playbook-export.ts",
+          "note": "会话导出：`exportPlaybookSessionJson` 对 playbook 结构的读取口径。",
+          "exists": true
+        },
+        {
+          "path": "docs/NX9-AI-SHORT-FILM-WORKFLOW-GAP-ANALYSIS.md",
+          "note": "记录了 `pb-ai-short-film` 等 playbook id 的产品来源与新增理由。",
+          "exists": true
+        }
+      ],
+      "cluesMissing": []
+    },
+    {
+      "slug": "camera-presets",
+      "specifier": "./data/camera-presets",
+      "modulePath": "packages/shared/src/data/camera-presets.ts",
+      "exists": false,
+      "status": "missing",
+      "barrels": [
+        {
+          "line": 1032,
+          "statement": "export",
+          "isTypeOnly": false
+        }
+      ],
+      "exports": [
+        {
+          "name": "CAMERA_PRESETS",
+          "kind": "value",
+          "line": 1032
+        },
+        {
+          "name": "lookupCameraPreset",
+          "kind": "value",
+          "line": 1032
+        },
+        {
+          "name": "CameraPreset",
+          "kind": "type",
+          "line": 1032
+        }
+      ],
+      "exportCount": 3,
+      "valueExportCount": 2,
+      "typeExportCount": 1,
+      "consumers": [
+        {
+          "file": "apps/server/test/f018-acceptance.test.ts",
+          "line": 13,
+          "specifier": "@nx9/shared",
+          "via": "barrel",
+          "name": "CAMERA_PRESETS",
+          "kind": "value",
+          "local": "CAMERA_PRESETS"
+        },
+        {
+          "file": "apps/server/test/f018-acceptance.test.ts",
+          "line": 13,
+          "specifier": "@nx9/shared",
+          "via": "barrel",
+          "name": "lookupCameraPreset",
+          "kind": "value",
+          "local": "lookupCameraPreset"
+        }
+      ],
+      "consumerFiles": [
+        "apps/server/test/f018-acceptance.test.ts"
+      ],
+      "consumerCount": 2,
+      "clues": [
+        {
+          "path": "apps/server/test/f018-acceptance.test.ts",
+          "note": "验收钉子：`CAMERA_PRESETS.length >= 6`、每项有 `id` / `label` / `position[3]` / `target[3]` / `fov`；label 必含「过肩」「低机位」「特写」「全景」「荷兰角」；`lookupCameraPreset('dutch').label === '荷兰角'`；未知 id 返回 `undefined`。",
+          "exists": true
+        },
+        {
+          "path": "packages/director3d/src/ui/CameraPresetBar.tsx",
+          "note": "director3d 内的**同源内联副本**（注释写明「与 @nx9/shared CAMERA_PRESETS 对齐」）：8 条 id/name/position/target/fov 直接可对齐。",
+          "exists": true
+        },
+        {
+          "path": "packages/shared/src/data/camera-move-library.ts",
+          "note": "`LEGACY_CAMERA_PRESET_TO_MOVE` / `cameraMoveFromLegacyPresetId`：既有「旧机位预设 id → 运镜词条 id」的升级映射表，可反查合法的旧预设 id。",
+          "exists": true
+        },
+        {
+          "path": "apps/web/src/engine/__tests__/director3d-camera-move-library-panel.test.tsx",
+          "note": "导演台运镜面板的既有回归，涉及机位/运镜映射的实际用法。",
+          "exists": true
+        }
+      ],
+      "cluesMissing": []
+    },
+    {
+      "slug": "shot-lexicon-taxonomy",
+      "specifier": "./data/shot-lexicon-taxonomy",
+      "modulePath": "packages/shared/src/data/shot-lexicon-taxonomy.ts",
+      "exists": false,
+      "status": "missing",
+      "barrels": [
+        {
+          "line": 1148,
+          "statement": "export",
+          "isTypeOnly": false
+        }
+      ],
+      "exports": [
+        {
+          "name": "SHOT_LEXICON_SYSTEMS",
+          "kind": "value",
+          "line": 1148
+        },
+        {
+          "name": "shotLexiconSystemLabel",
+          "kind": "value",
+          "line": 1148
+        },
+        {
+          "name": "listShotLexiconCategories",
+          "kind": "value",
+          "line": 1148
+        },
+        {
+          "name": "shortenShotLexiconCategory",
+          "kind": "value",
+          "line": 1148
+        },
+        {
+          "name": "ShotLexiconSystem",
+          "kind": "type",
+          "line": 1148
+        }
+      ],
+      "exportCount": 5,
+      "valueExportCount": 4,
+      "typeExportCount": 1,
+      "consumers": [
+        {
+          "file": "apps/web/src/panels/asset-library/AssetDetailFields.tsx",
+          "line": 3,
+          "specifier": "@nx9/shared",
+          "via": "barrel",
+          "name": "listShotLexiconCategories",
+          "kind": "value",
+          "local": "listShotLexiconCategories"
+        },
+        {
+          "file": "apps/web/src/panels/asset-library/AssetDetailFields.tsx",
+          "line": 3,
+          "specifier": "@nx9/shared",
+          "via": "barrel",
+          "name": "shortenShotLexiconCategory",
+          "kind": "value",
+          "local": "shortenShotLexiconCategory"
+        },
+        {
+          "file": "apps/web/src/panels/asset-library/AssetDetailFields.tsx",
+          "line": 3,
+          "specifier": "@nx9/shared",
+          "via": "barrel",
+          "name": "SHOT_LEXICON_SYSTEMS",
+          "kind": "value",
+          "local": "SHOT_LEXICON_SYSTEMS"
+        },
+        {
+          "file": "apps/web/src/panels/asset-library/modal/AssetLibraryStatusRail.tsx",
+          "line": 2,
+          "specifier": "@nx9/shared",
+          "via": "barrel",
+          "name": "shortenShotLexiconCategory",
+          "kind": "value",
+          "local": "shortenShotLexiconCategory"
+        },
+        {
+          "file": "apps/web/src/panels/asset-library/modal/AssetLibraryStatusRail.tsx",
+          "line": 2,
+          "specifier": "@nx9/shared",
+          "via": "barrel",
+          "name": "SHOT_LEXICON_SYSTEMS",
+          "kind": "value",
+          "local": "SHOT_LEXICON_SYSTEMS"
+        },
+        {
+          "file": "apps/web/src/panels/asset-library/modal/use-asset-library-catalog.ts",
+          "line": 15,
+          "specifier": "@nx9/shared",
+          "via": "barrel",
+          "name": "listShotLexiconCategories",
+          "kind": "value",
+          "local": "listShotLexiconCategories"
+        },
+        {
+          "file": "apps/web/src/panels/asset-library/ShotCardGrid.tsx",
+          "line": 3,
+          "specifier": "@nx9/shared",
+          "via": "barrel",
+          "name": "shortenShotLexiconCategory",
+          "kind": "value",
+          "local": "shortenShotLexiconCategory"
+        },
+        {
+          "file": "apps/web/src/panels/asset-library/ShotCardGrid.tsx",
+          "line": 3,
+          "specifier": "@nx9/shared",
+          "via": "barrel",
+          "name": "shotLexiconSystemLabel",
+          "kind": "value",
+          "local": "shotLexiconSystemLabel"
+        }
+      ],
+      "consumerFiles": [
+        "apps/web/src/panels/asset-library/AssetDetailFields.tsx",
+        "apps/web/src/panels/asset-library/ShotCardGrid.tsx",
+        "apps/web/src/panels/asset-library/modal/AssetLibraryStatusRail.tsx",
+        "apps/web/src/panels/asset-library/modal/use-asset-library-catalog.ts"
+      ],
+      "consumerCount": 8,
+      "clues": [
+        {
+          "path": "docs/nx9-shot-seeds-neutral.json",
+          "note": "**权威来源**：117 条种子的 `systemId` / `system` / `category` 三元组可直接推出体系表与各体系分类表（`systemId: system1|system2…`）。",
+          "exists": true
+        },
+        {
+          "path": "packages/shared/src/data/shot-library-seeds.ts",
+          "note": "同一份数据的已入库 TS 版本（`SHOT_LIBRARY_SEEDS`），字段与 JSON 一致且**已在仓库内**。",
+          "exists": true
+        },
+        {
+          "path": "packages/shared/src/types/creative-asset-center.ts",
+          "note": "`ShotCreativeExtension.lexiconSystemId` 注释：`system1` 实拍 / `system2` AI·CG；`lexiconSystem` 为体系全称；`lexiconCategory` 形如「基础推拉变焦运镜」。",
+          "exists": true
+        },
+        {
+          "path": "apps/web/src/panels/asset-library/AssetDetailFields.tsx",
+          "note": "真实消费点：`SHOT_LEXICON_SYSTEMS.map(sys => sys.id / sys.fullName / sys.label)`；`listShotLexiconCategories(systemId | 'all')` 返回**分类全名字符串数组**；`shortenShotLexiconCategory(cat)` 返回展示用短名。",
+          "exists": true
+        },
+        {
+          "path": "apps/web/src/panels/asset-library/modal/use-asset-library-catalog.ts",
+          "note": "真实消费点：`listShotLexiconCategories(shotSystemId)`（含默认 `'all'` 分支）。",
+          "exists": true
+        },
+        {
+          "path": "apps/web/src/engine/__tests__/asset-library-modal-split-guard.test.ts",
+          "note": "既有回归对 `SHOT_LEXICON_SYSTEMS` 的断言口径。",
+          "exists": true
+        }
+      ],
+      "cluesMissing": []
+    },
+    {
+      "slug": "provider-registry",
+      "specifier": "./data/provider-registry",
+      "modulePath": "packages/shared/src/data/provider-registry.ts",
+      "exists": false,
+      "status": "missing",
+      "barrels": [
+        {
+          "line": 1363,
+          "statement": "export",
+          "isTypeOnly": false
+        }
+      ],
+      "exports": [
+        {
+          "name": "PROVIDER_REGISTRY",
+          "kind": "value",
+          "line": 1363
+        },
+        {
+          "name": "resolveDefaultModel",
+          "kind": "value",
+          "line": 1363
+        },
+        {
+          "name": "DEFAULT_PICTURE_MODEL",
+          "kind": "value",
+          "line": 1363
+        },
+        {
+          "name": "DEFAULT_VIDEO_MODEL",
+          "kind": "value",
+          "line": 1363
+        },
+        {
+          "name": "DEFAULT_TTS_MODEL",
+          "kind": "value",
+          "line": 1363
+        },
+        {
+          "name": "ProviderDef",
+          "kind": "type",
+          "line": 1363
+        },
+        {
+          "name": "VIDEO_EDIT_PROVIDERS",
+          "kind": "value",
+          "line": 1363
+        },
+        {
+          "name": "DEFAULT_VIDEO_EDIT_PROVIDER",
+          "kind": "value",
+          "line": 1363
+        },
+        {
+          "name": "resolveVideoEditProvider",
+          "kind": "value",
+          "line": 1363
+        },
+        {
+          "name": "VideoEditProviderDef",
+          "kind": "type",
+          "line": 1363
+        },
+        {
+          "name": "VIDEO_TRACE_PROVIDERS",
+          "kind": "value",
+          "line": 1363
+        },
+        {
+          "name": "DEFAULT_VIDEO_TRACE_PROVIDER",
+          "kind": "value",
+          "line": 1363
+        },
+        {
+          "name": "resolveVideoTraceProvider",
+          "kind": "value",
+          "line": 1363
+        },
+        {
+          "name": "VideoTraceProviderDef",
+          "kind": "type",
+          "line": 1363
+        }
+      ],
+      "exportCount": 14,
+      "valueExportCount": 11,
+      "typeExportCount": 3,
+      "consumers": [
+        {
+          "file": "apps/server/src/modules/montage/video-edit.service.ts",
+          "line": 17,
+          "specifier": "@nx9/shared",
+          "via": "barrel",
+          "name": "resolveVideoEditProvider",
+          "kind": "value",
+          "local": "resolveVideoEditProvider"
+        },
+        {
+          "file": "apps/server/src/modules/montage/video-edit.service.ts",
+          "line": 17,
+          "specifier": "@nx9/shared",
+          "via": "barrel",
+          "name": "resolveVideoTraceProvider",
+          "kind": "value",
+          "local": "resolveVideoTraceProvider"
+        },
+        {
+          "file": "apps/server/src/modules/montage/video-edit.service.ts",
+          "line": 17,
+          "specifier": "@nx9/shared",
+          "via": "barrel",
+          "name": "VIDEO_EDIT_PROVIDERS",
+          "kind": "value",
+          "local": "VIDEO_EDIT_PROVIDERS"
+        },
+        {
+          "file": "apps/web/src/blocks/core/clip-editor/SmartReplacePanel.tsx",
+          "line": 3,
+          "specifier": "@nx9/shared",
+          "via": "barrel",
+          "name": "DEFAULT_VIDEO_EDIT_PROVIDER",
+          "kind": "value",
+          "local": "DEFAULT_VIDEO_EDIT_PROVIDER"
+        },
+        {
+          "file": "apps/web/src/blocks/core/clip-editor/SmartReplacePanel.tsx",
+          "line": 3,
+          "specifier": "@nx9/shared",
+          "via": "barrel",
+          "name": "VIDEO_EDIT_PROVIDERS",
+          "kind": "value",
+          "local": "VIDEO_EDIT_PROVIDERS"
+        },
+        {
+          "file": "apps/web/src/engine/__tests__/video-edit-provider-registry.test.ts",
+          "line": 5,
+          "specifier": "@nx9/shared",
+          "via": "barrel",
+          "name": "DEFAULT_VIDEO_EDIT_PROVIDER",
+          "kind": "value",
+          "local": "DEFAULT_VIDEO_EDIT_PROVIDER"
+        },
+        {
+          "file": "apps/web/src/engine/__tests__/video-edit-provider-registry.test.ts",
+          "line": 5,
+          "specifier": "@nx9/shared",
+          "via": "barrel",
+          "name": "DEFAULT_VIDEO_TRACE_PROVIDER",
+          "kind": "value",
+          "local": "DEFAULT_VIDEO_TRACE_PROVIDER"
+        },
+        {
+          "file": "apps/web/src/engine/__tests__/video-edit-provider-registry.test.ts",
+          "line": 5,
+          "specifier": "@nx9/shared",
+          "via": "barrel",
+          "name": "resolveVideoEditProvider",
+          "kind": "value",
+          "local": "resolveVideoEditProvider"
+        },
+        {
+          "file": "apps/web/src/engine/__tests__/video-edit-provider-registry.test.ts",
+          "line": 5,
+          "specifier": "@nx9/shared",
+          "via": "barrel",
+          "name": "resolveVideoTraceProvider",
+          "kind": "value",
+          "local": "resolveVideoTraceProvider"
+        },
+        {
+          "file": "apps/web/src/engine/__tests__/video-edit-provider-registry.test.ts",
+          "line": 5,
+          "specifier": "@nx9/shared",
+          "via": "barrel",
+          "name": "VIDEO_EDIT_PROVIDERS",
+          "kind": "value",
+          "local": "VIDEO_EDIT_PROVIDERS"
+        },
+        {
+          "file": "apps/web/src/engine/__tests__/video-edit-provider-registry.test.ts",
+          "line": 5,
+          "specifier": "@nx9/shared",
+          "via": "barrel",
+          "name": "VIDEO_TRACE_PROVIDERS",
+          "kind": "value",
+          "local": "VIDEO_TRACE_PROVIDERS"
+        },
+        {
+          "file": "apps/web/src/hooks/use-auto-configure.ts",
+          "line": 2,
+          "specifier": "@nx9/shared",
+          "via": "barrel",
+          "name": "resolveDefaultModel",
+          "kind": "value",
+          "local": "resolveDefaultModel"
+        }
+      ],
+      "consumerFiles": [
+        "apps/server/src/modules/montage/video-edit.service.ts",
+        "apps/web/src/blocks/core/clip-editor/SmartReplacePanel.tsx",
+        "apps/web/src/engine/__tests__/video-edit-provider-registry.test.ts",
+        "apps/web/src/hooks/use-auto-configure.ts"
+      ],
+      "consumerCount": 12,
+      "clues": [
+        {
+          "path": "apps/web/src/engine/__tests__/video-edit-provider-registry.test.ts",
+          "note": "**契约钉子**：`VIDEO_EDIT_PROVIDERS[].supportsFrameTracking: boolean`、`inputKeys.video` / `inputKeys.prompt` 非空、`inputKeys.maskVideo` 存在；`resolveVideoEditProvider(未知 id)` 必须回落到已注册供应商；`VIDEO_TRACE_PROVIDERS[].inputKeys.mask` 非空。",
+          "exists": true
+        },
+        {
+          "path": "packages/shared/src/types/settings.ts",
+          "note": "`BUILTIN_CONNECTION_PRESETS`（provider / baseUrl / model / kind 的既有真源）与 `ModelConnection.kind` 闭集：`PROVIDER_REGISTRY` / `DEFAULT_*_MODEL` 必须与之自洽。",
+          "exists": true
+        },
+        {
+          "path": "packages/shared/src/data/gen-models.ts",
+          "note": "`DEFAULT_PICTURE_GEN_MODEL_ID` / `PICTURE_GEN_MODELS`：`DEFAULT_PICTURE_MODEL` 的取值来源。",
+          "exists": true
+        },
+        {
+          "path": "packages/shared/src/data/video-gen-models.ts",
+          "note": "`DEFAULT_BUILTIN_VIDEO_MODEL_ID` / `VIDEO_GEN_MODELS`：`DEFAULT_VIDEO_MODEL` 的取值来源。",
+          "exists": true
+        },
+        {
+          "path": "packages/shared/src/data/audio-models.ts",
+          "note": "`DEFAULT_AUDIO_VOICE_ID` / `AUDIO_MODELS`：`DEFAULT_TTS_MODEL` 的取值来源。",
+          "exists": true
+        },
+        {
+          "path": "packages/shared/src/data/model-catalog.ts",
+          "note": "内置模型分组与连接合并口径；`resolveDefaultModel` 必须与 `listBuiltin*Options` 一致。",
+          "exists": true
+        },
+        {
+          "path": "apps/web/src/hooks/use-auto-configure.ts",
+          "note": "真实消费点：`resolveDefaultModel(kind: 'picture' | 'video' | 'tts')`。",
+          "exists": true
+        },
+        {
+          "path": "apps/server/src/modules/montage/video-edit.service.ts",
+          "note": "服务端同源消费：`VIDEO_EDIT_PROVIDERS.some(...)` / `resolveVideoTraceProvider` / 未知供应商拒绝文案。",
+          "exists": true
+        },
+        {
+          "path": "apps/web/src/engine/__tests__/se-deep-honesty.test.ts",
+          "note": "源码门禁：要求 `provider-registry.ts` 文本含 `supportsFrameTracking: boolean`、`supportsFrameTracking: true`、`maskVideo`、`fal-ai/sam2/video`、`id: 'wan-vace'`。",
+          "exists": true
+        },
+        {
+          "path": "docs/8.12/NX9-SMART-EDIT-OPEN-LOOPS-IMPLEMENTATION-LOG-2026-08-12.md",
+          "note": "记录「`provider-registry.ts` 仍只有 `wan-vace`；没有产品/供应商选型依据，不能臆造第二家模型」。",
+          "exists": true
+        }
+      ],
+      "cluesMissing": []
+    }
+  ],
+  "untrackedExistingModules": [
+    {
+      "specifier": "./data/audio-models",
+      "path": "packages/shared/src/data/audio-models.ts"
+    },
+    {
+      "specifier": "./data/camera-move-library",
+      "path": "packages/shared/src/data/camera-move-library.ts"
+    },
+    {
+      "specifier": "./data/llm-models",
+      "path": "packages/shared/src/data/llm-models.ts"
+    },
+    {
+      "specifier": "./data/model-catalog",
+      "path": "packages/shared/src/data/model-catalog.ts"
+    },
+    {
+      "specifier": "./data/shot-library-seeds",
+      "path": "packages/shared/src/data/shot-library-seeds.ts"
+    },
+    {
+      "specifier": "./data/video-gen-models",
+      "path": "packages/shared/src/data/video-gen-models.ts"
+    },
+    {
+      "specifier": "./types/camera-move-timeline",
+      "path": "packages/shared/src/types/camera-move-timeline.ts"
+    },
+    {
+      "specifier": "./types/character-sheet",
+      "path": "packages/shared/src/types/character-sheet.ts"
+    },
+    {
+      "specifier": "./types/multi-grid",
+      "path": "packages/shared/src/types/multi-grid.ts"
+    },
+    {
+      "specifier": "./utils/beat-grid-plan",
+      "path": "packages/shared/src/utils/beat-grid-plan.ts"
+    },
+    {
+      "specifier": "./utils/blocking-layout",
+      "path": "packages/shared/src/utils/blocking-layout.ts"
+    },
+    {
+      "specifier": "./utils/camera-move-merge",
+      "path": "packages/shared/src/utils/camera-move-merge.ts"
+    },
+    {
+      "specifier": "./utils/camera-move-parse",
+      "path": "packages/shared/src/utils/camera-move-parse.ts"
+    },
+    {
+      "specifier": "./utils/camera-move-timeline",
+      "path": "packages/shared/src/utils/camera-move-timeline.ts"
+    },
+    {
+      "specifier": "./utils/capability-selfcheck",
+      "path": "packages/shared/src/utils/capability-selfcheck.ts"
+    },
+    {
+      "specifier": "./utils/character-sheet-plan",
+      "path": "packages/shared/src/utils/character-sheet-plan.ts"
+    },
+    {
+      "specifier": "./utils/consistency-report",
+      "path": "packages/shared/src/utils/consistency-report.ts"
+    },
+    {
+      "specifier": "./utils/multi-grid-plan",
+      "path": "packages/shared/src/utils/multi-grid-plan.ts"
+    },
+    {
+      "specifier": "./utils/multi-grid-to-shots",
+      "path": "packages/shared/src/utils/multi-grid-to-shots.ts"
+    },
+    {
+      "specifier": "./utils/preset-entrypoints",
+      "path": "packages/shared/src/utils/preset-entrypoints.ts"
+    }
+  ],
+  "totals": {
+    "moduleCount": 8,
+    "missingModuleCount": 8,
+    "presentModuleCount": 0,
+    "exportCount": 61,
+    "valueExportCount": 47,
+    "typeExportCount": 14,
+    "consumerCount": 95,
+    "consumerFileCount": 42,
+    "modulesWithoutConsumer": [],
+    "clueCount": 49,
+    "clueMissingCount": 0,
+    "untrackedExistingCount": 20,
+    "scannedFileCount": 1076
+  },
+  "duplicateExportNames": [],
+  "unreadableFiles": [],
+  "notes": []
+}

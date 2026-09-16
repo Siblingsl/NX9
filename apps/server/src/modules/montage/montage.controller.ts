@@ -140,6 +140,12 @@ export class MontageController {
     return this.montage.speedPitch(body);
   }
 
+  /** 音频降噪：afftdn / anlmdn，输出新素材地址 */
+  @Post('audio-denoise')
+  audioDenoise(@Body() body: { audioUrl: string; strength?: number; mode?: 'afftdn' | 'anlmdn' }) {
+    return this.montage.audioDenoise(body);
+  }
+
   @Post('probe-duration')
   probeDuration(@Body() body: { sourceUrl: string }) {
     return this.montage.probeDuration(body.sourceUrl ?? '');

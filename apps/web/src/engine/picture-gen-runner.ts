@@ -201,6 +201,12 @@ export async function pollClipTask(taskId: string): Promise<string | undefined> 
 export interface PendingImageTask {
   taskId: string;
   prompt?: string;
+  /**
+   * 多格推演追加：该后台任务对应的格号。
+   * 续查（resumePendingImageTasks）原样回传本字段，调用方据此把取回的图写回对应格；
+   * 图像节点不写本字段，行为不变。
+   */
+  cellIndex?: number;
 }
 
 /**

@@ -25,6 +25,8 @@ export interface FlowRuntimeApi {
   spawnBlockForShot: (shotId: string, kind: string, extraData?: Record<string, unknown>) => void;
   loadWorkflowTemplate: (templateId: string, mode?: 'merge' | 'replace') => void | Promise<void>;
   importWorkflowZip: (file: File, mode?: 'merge' | 'replace') => Promise<void>;
+  /** R2：画布工作流归档导出（`workflow-zip.exportWorkflowZip` + `downloadBlob` 的入口） */
+  exportWorkflowZip: (selectionOnly?: boolean) => Promise<void>;
   selectedBlockId: string | null;
 }
 

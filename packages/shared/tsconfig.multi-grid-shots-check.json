@@ -1,0 +1,24 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "lib": ["ES2022"],
+    "strict": true,
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "noEmit": true,
+    "types": []
+  },
+  "include": [
+    "src/types/storyboard-guide.ts",
+    "src/types/storyboard.ts",
+    "src/types/script-breakdown.ts",
+    "src/types/grid-prompts.ts",
+    "src/types/multi-grid.ts",
+    "src/data/prompt-presets.ts",
+    "src/data/camera-move-library.ts",
+    "src/utils/multi-grid-plan.ts",
+    "src/utils/multi-grid-to-shots.ts"
+  ]
+}

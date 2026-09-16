@@ -577,6 +577,47 @@
 .nx9-stage-mobile-dock { display: none; }
 .nx9-stage-mobile-only { display: none !important; }
 
+/* Stage Composer v2 · 灯光面板 */
+.nx9-stage-light-row {
+  display: grid;
+  grid-template-columns: 34px repeat(8, 1fr);
+  gap: 3px;
+  align-items: center;
+  margin-bottom: 3px;
+}
+.nx9-stage-light-row__label {
+  font-size: 10px;
+  color: var(--stage-muted);
+}
+.nx9-stage-light-cell {
+  border: 1px solid var(--stage-line);
+  background: var(--desk-panel, #fff);
+  border-radius: 6px;
+  padding: 4px 0;
+  font-size: 10px;
+  line-height: 1.2;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.nx9-stage-light-cell.is-on {
+  background: var(--desk-accent-soft, rgb(94 77 138 / 0.14));
+  border-color: var(--desk-accent-line, rgb(94 77 138 / 0.4));
+  color: var(--stage-accent);
+  font-weight: 600;
+}
+.nx9-stage-light-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 4px;
+}
+.nx9-stage-light-editor {
+  display: grid;
+  gap: 8px;
+  border: 1px solid var(--stage-line);
+  border-radius: 10px;
+  padding: 8px;
+}
+
 @media (max-width: 900px) {
   .nx9-stage-v2 .nx9-stage-desk-only { display: none !important; }
   .nx9-stage-v2 .nx9-stage-mobile-only { display: inline-flex !important; }
@@ -665,4 +706,116 @@
     top: auto;
     max-height: 50%;
   }
+}
+/* ── 运镜时间轴交接轨（增量新增） ── */
+.nx9-stage-movetl-strip {
+  position: relative;
+  height: 26px;
+  border-radius: 8px;
+  background: var(--desk-bg-2, #f7f7f5);
+  border: 1px solid var(--stage-line);
+  overflow: hidden;
+}
+
+.nx9-stage-movetl-seg {
+  position: absolute;
+  top: 4px;
+  bottom: 4px;
+  border-radius: 4px;
+  background: var(--desk-accent-soft, rgb(94 77 138 / 0.28));
+  border: 1px solid var(--desk-accent-line, rgb(94 77 138 / 0.4));
+  box-sizing: border-box;
+}
+
+.nx9-stage-movetl-seg.is-on {
+  background: var(--stage-accent, #5e4d8a);
+  border-color: var(--stage-accent, #5e4d8a);
+}
+
+.nx9-stage-movetl-cursor {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  margin-left: -1px;
+  background: var(--stage-brand, #e0457b);
+  pointer-events: none;
+}
+
+/* ── 大师运镜库面板（增量新增） ── */
+.nx9-stage-move-lib .nx9-stage-drawer-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.nx9-stage-move-families {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.nx9-stage-move-list {
+  flex: 1;
+  min-height: 120px;
+  max-height: 34vh;
+  overflow-y: auto;
+  border: 1px solid var(--stage-line);
+  border-radius: 10px;
+  padding: 6px;
+}
+
+.nx9-stage-move-family {
+  padding: 4px 6px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--stage-muted);
+}
+
+.nx9-stage-move-item {
+  font-size: 12px;
+}
+
+.nx9-stage-move-item.is-on {
+  border-color: var(--desk-accent-line, rgb(94 77 138 / 0.4));
+  background: var(--desk-accent-soft, rgb(94 77 138 / 0.12));
+}
+
+.nx9-stage-move-plan {
+  border: 1px solid var(--stage-line);
+  border-radius: 10px;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.nx9-stage-move-plan-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  font-size: 13px;
+}
+
+.nx9-stage-move-proxy {
+  margin: 0;
+  padding: 6px 8px;
+  border-radius: 8px;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--desk-warn, #92400e);
+  background: var(--desk-warn-soft, #fffbeb);
+  border: 1px solid var(--desk-warn-line, rgb(180 83 9 / 0.25));
+}
+
+/* 场面调度预设面板：套用结果提示（增量，追加在既有规则之后） */
+.nx9-stage-blocking-note {
+  flex-shrink: 0;
+  max-width: 340px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  color: var(--stage-muted);
 }

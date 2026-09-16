@@ -1,0 +1,21 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "jsx": "react-jsx",
+    "strict": true,
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "noEmit": true,
+    "types": [],
+    "baseUrl": ".",
+    "paths": {
+      "@nx9/shared": ["../../packages/shared/src/data/camera-move-library"]
+    }
+  },
+  "include": [
+    "src/engine/stage-deck/chrome/attached-workspace/generation/CameraMovePicker.tsx"
+  ]
+}

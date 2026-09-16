@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import {
   getDockBlocks,
@@ -19,6 +19,13 @@ import {
   filterPlaybooksForFirstLane,
   filterTemplatesForFirstLane,
 } from '../../first-lane';
+import {
+  formatCapabilitySelfcheckReport,
+  runCapabilitySelfcheck,
+  type CapabilitySelfcheckReport,
+} from '../../capability-selfcheck';
+import { toastError, toastSuccess } from '../../../stores/toast';
+import { CapabilitySelfcheckPanel } from './CapabilitySelfcheckPanel';
 
 type CommandSection = 'playbook' | 'recipe' | 'dock' | 'advanced' | 'action';
 
@@ -95,15 +102,57 @@ function groupFiltered(items: CommandItem[]): { section: CommandSection; items: 
   })).filter((g) => g.items.length > 0);
 }
 
+/**
+ * R2：工作流归档导入的文件选择（命令面板无内联表单，用一次性 input 触发）。
+ * 只接受归档扩展名；取消选择不抛错。
+ */
+function pickWorkflowArchive(onPick: (file: File) => void): void {
+  if (typeof document === 'undefined') return;
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = '.nx9zip,.zip,application/zip';
+  input.style.display = 'none';
+  input.addEventListener('change', () => {
+    const file = input.files?.[0];
+    if (file) onPick(file);
+    input.remove();
+  });
+  document.body.appendChild(input);
+  input.click();
+}
+
 export function CommandPalette({ open, onClose, onAlign }: CommandPaletteProps) {
   const [query, setQuery] = useState('');
   const [index, setIndex] = useState(0);
+  const [selfcheckReport, setSelfcheckReport] = useState<CapabilitySelfcheckReport | null>(null);
+  const [selfcheckBusy, setSelfcheckBusy] = useState(false);
   const requestSpawn = useFlowCommands((s) => s.requestSpawn);
   const requestLoadTemplate = useFlowCommands((s) => s.requestLoadTemplate);
   const runtime = useFlowRuntime((s) => s.runtime);
   const setMode = useViewMode((s) => s.setMode);
   const openSettingsTo = useCredentialVault((s) => s.openSettingsTo);
   const openAssetTrash = useAssetTrashModalUi((s) => s.setOpen);
+
+  /** 能力自检：只读源码 + 纯函数判定，结果进面板 + toast 摘要；不在服务端 / 无 DOM 环境执行。 */
+  const runSelfcheck = useCallback(async () => {
+    if (typeof document === 'undefined') return;
+    setSelfcheckBusy(true);
+    try {
+      const report = await runCapabilitySelfcheck();
+      setSelfcheckReport(report);
+      const summary = report.summaryZh;
+      if (report.counts.error > 0) toastError(summary);
+      else toastSuccess(summary);
+      if (report.counts.error > 0 || report.counts.warn > 0) {
+        console.info('[能力自检]\n' + formatCapabilitySelfcheckReport(report));
+      }
+    } catch (error) {
+      // 自检自身失败也要如实说，不静默
+      toastError(`能力自检运行失败：${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      setSelfcheckBusy(false);
+    }
+  }, []);
 
   const commands = useMemo<CommandItem[]>(() => {
     const dockKinds = new Set(getDockBlocks().map((b) => b.kind));
@@ -232,6 +281,50 @@ export function CommandPalette({ open, onClose, onAlign }: CommandPaletteProps) 
         section: 'action',
         run: () => openAssetTrash(true),
       },
+      {
+        id: 'export-workflow-zip',
+        label: '导出 · 工作流归档',
+        keywords: ['export', '导出', '归档', 'zip', 'nx9zip', '备份', '工作流'],
+        section: 'action',
+        // R2：接 `workflow-zip.exportWorkflowZip` + `downloadBlob`（此前有实现、零入口）
+        run: () => void runtime?.exportWorkflowZip(false),
+      },
+      {
+        id: 'export-workflow-zip-selection',
+        label: '导出 · 工作流归档（仅选区）',
+        keywords: ['export', '导出', '选区', '归档', 'zip', 'nx9zip', '备份'],
+        section: 'action',
+        run: () => void runtime?.exportWorkflowZip(true),
+      },
+      {
+        id: 'import-workflow-zip',
+        label: '导入 · 工作流归档',
+        keywords: ['import', '导入', '归档', 'zip', 'nx9zip', '恢复', '工作流'],
+        section: 'action',
+        // R2：`importWorkflowZip` 此前只注册进 runtime，没有任何 UI 触发
+        run: () => pickWorkflowArchive((file) => runtime?.importWorkflowZip(file, 'merge')),
+      },
+      {
+        id: 'run-capability-selfcheck',
+        label: '运行能力自检',
+        keywords: [
+          'selfcheck',
+          'self-check',
+          'capability',
+          '自检',
+          '能力',
+          '接线',
+          '诊断',
+          'loading',
+          'wiring',
+          '体检',
+        ],
+        section: 'action',
+        // 只读源码 + 纯函数判定：核对目录项 / 前端 loader / socket / 跟随工作区 / 模板引用的 kind
+        run: () => {
+          void runSelfcheck();
+        },
+      },
     ];
 
     return [...playbookCommands, ...recipeCommands, ...moduleCommands, ...alignCommands, ...actionCommands].filter(
@@ -250,6 +343,7 @@ export function CommandPalette({ open, onClose, onAlign }: CommandPaletteProps) 
     onAlign,
     openSettingsTo,
     openAssetTrash,
+    runSelfcheck,
   ]);
 
   const filtered = useMemo(() => {
@@ -301,12 +395,14 @@ export function CommandPalette({ open, onClose, onAlign }: CommandPaletteProps) 
     return () => window.removeEventListener('keydown', onKey);
   }, [open, filtered, flatIndex, onClose]);
 
-  if (!open) return null;
+  // 自检报告面板独立于命令面板的开关状态：命令面板执行后会立即 onClose，
+  // 报告必须留在屏幕上（否则结果一闪即逝）。
+  if (!open && !selfcheckReport) return null;
 
   const grouped = groupFiltered(filtered);
   let runningIndex = 0;
 
-  return createPortal(
+  const palette = createPortal(
     <div className="fixed inset-0 z-[100] flex items-start justify-center pt-[12vh] bg-ink/20 backdrop-blur-[2px]">
       <button type="button" className="absolute inset-0" aria-label="关闭" onClick={onClose} />
       <div className="nx9-command-palette relative w-full max-w-xl rounded-2xl border border-line bg-surface shadow-panel overflow-hidden">
@@ -368,6 +464,22 @@ export function CommandPalette({ open, onClose, onAlign }: CommandPaletteProps) 
       </div>
     </div>,
     document.body,
+  );
+
+  // 自检报告面板独立于命令面板的开关状态：命令执行后面板会 onClose，
+  // 报告必须留在屏幕上（否则结果一闪即逝）。
+  return (
+    <>
+      {selfcheckReport && (
+        <CapabilitySelfcheckPanel
+          report={selfcheckReport}
+          busy={selfcheckBusy}
+          onClose={() => setSelfcheckReport(null)}
+          onRerun={() => void runSelfcheck()}
+        />
+      )}
+      {open ? palette : null}
+    </>
   );
 }
 

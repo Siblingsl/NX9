@@ -394,6 +394,69 @@ export function listConnectedVideoModels(
   return out;
 }
 
+export interface ConnectedAudioModelOption {
+  /** 上游 API 模型名（TTS 引擎，如 tts-1） */
+  id: string;
+  label: string;
+  connectionId: string;
+  connectionModel: string;
+  connectionLabel: string;
+}
+
+type AudioConnectionLike = {
+  id: string;
+  kind: string;
+  model?: string;
+  label?: string;
+  provider?: string;
+  apiKey?: string;
+  baseUrl?: string;
+  isActive?: boolean;
+  availableModels?: string[];
+};
+
+/**
+ * 从设置里的音频连接推导 TTS 可选模型：
+ * 优先展开连接上已获取的 availableModels；否则回退到默认 model。
+ * 注意：连接里存的是 **引擎模型**（tts-1），不是音色（alloy）——勿混用。
+ */
+export function listConnectedAudioModels(
+  connections: AudioConnectionLike[] | undefined | null,
+): ConnectedAudioModelOption[] {
+  const audioConns = (connections ?? []).filter((c) => c.kind === 'audio');
+  const out: ConnectedAudioModelOption[] = [];
+  const seen = new Set<string>();
+
+  const pushModel = (c: AudioConnectionLike, rawModel: string) => {
+    const raw = rawModel.trim();
+    if (!raw || seen.has(raw)) return;
+    seen.add(raw);
+    const connLabel = (c.label ?? '').trim() || '音频连接';
+    out.push({
+      id: raw,
+      label: `${connLabel} · ${raw}`,
+      connectionId: c.id,
+      connectionModel: raw,
+      connectionLabel: connLabel,
+    });
+  };
+
+  const pushConn = (c: AudioConnectionLike) => {
+    const cached = (c.availableModels ?? []).map((m) => m.trim()).filter(Boolean);
+    if (cached.length > 0) {
+      for (const m of cached) pushModel(c, m);
+      const fallback = (c.model ?? '').trim();
+      if (fallback && !cached.includes(fallback)) pushModel(c, fallback);
+      return;
+    }
+    pushModel(c, c.model ?? '');
+  };
+
+  for (const c of audioConns.filter((x) => x.isActive)) pushConn(c);
+  for (const c of audioConns.filter((x) => !x.isActive)) pushConn(c);
+  return out;
+}
+
 export interface VideoGenModelOption {
   id: string;
   label: string;

@@ -14,11 +14,16 @@ export type {
   DirectorCameraShot,
   DirectorCameraCapture,
   DirectorTransform,
+  DirectorLight,
+  DirectorLightRole,
+  DirectorLightType,
+  SceneSettings,
   CharacterBodyType,
   ViewportAspectRatio,
   ViewMode,
   Director3dCandidate,
   Director3dCandidateStatus,
+  Director3dCameraKey,
   Director3dCommittedSceneSnapshot,
   Director3dCommitPayload,
   Director3dSceneTemplate,
@@ -38,16 +43,126 @@ export {
   projectFromShotState,
   sceneTemplateFromProject,
   shotStateFromProject,
+  syncShotStateWithProject,
+  coerceDirectorLights,
+  cameraKeysFromProject,
+  cameraKeysFromCameras,
+  directorCamerasFromCameraKeys,
+  coerceCameraKeys,
+  shotCameraEquals,
+  createDefaultSceneLights,
+  createDefaultScene,
+  resolveAmbientIntensity,
+  DEFAULT_SCENE,
+  DEFAULT_SCENE_LIGHTS,
+  DEFAULT_AMBIENT_INTENSITY,
+  DEFAULT_EXPOSURE,
+  PANORAMA_AMBIENT_INTENSITY,
+  DIRECTOR_LIGHT_TYPES,
 } from './schema/directorProject';
 export { buildCameraPrompt, describeCameraShot, getOrbit, setOrbit, angleLabel, shotLabel, focalLengthMm, fovFromFocalMm, applyOrbitToCamera, interpolateCamera, viewLabel, DEFAULT_PROMPT_DETAILS, PROMPT_DETAIL_LABELS } from './schema/cameraGeometry';
 export type { CameraMoveId, CameraOrbit, BuildCameraPromptOptions, PromptDetailFlags } from './schema/cameraGeometry';
 export { skinCameraPrompt, PROMPT_PLATFORMS } from './schema/promptSkin';
 export type { PromptPlatformId } from './schema/promptSkin';
 export { buildTimelineKeys, sampleTimeline } from './ui/ShotPreviewTimeline';
+export {
+  MOVE_TIMELINE_CAMERA_PREFIX,
+  buildCameraMoveKeyframes,
+  describeMoveTimelinePlan,
+  moveTimelineToDirectorCameras,
+  sampleCameraMoveTimeline,
+} from './schema/cameraMoveTimelineKeys';
+export type {
+  CameraMoveDelta,
+  CameraMoveKeyframe,
+  CameraMoveKeyframeScale,
+  CameraMoveTimelineSampleResult,
+} from './schema/cameraMoveTimelineKeys';
+export { useMoveTimelineStore } from './store/moveTimelineStore';
+export type { MoveTimelineStoreState } from './store/moveTimelineStore';
+export {
+  MOTION_CAMERA_PREFIX,
+  MOTION_FOV_MAX,
+  MOTION_FOV_MIN,
+  MOTION_FRAMES_MAX,
+  MOTION_FRAMES_MIN,
+  MOTION_AMPLITUDE_MAX,
+  MOTION_AMPLITUDE_MIN,
+  applyMotionToShotState,
+  buildMotionCameraKeys,
+  buildMotionCameraPrompt,
+  buildMotionKeyframes,
+  buildMotionPreview,
+  countMotionCameras,
+  describeMotionPlan,
+  isMotionlessSpec,
+  isProxyMotion,
+  motionDeltaPhrases,
+  motionJitterSample,
+  motionKeysToMoveKeyframes,
+  motionProxyNote,
+  motionToCameraMoveTimeline,
+  resolveMotionSpec,
+} from './schema/cameraMoveMotion';
+export type {
+  BuildMotionKeyframesOptions,
+  CameraMoveMotionPlan,
+  CameraMoveMotionPreview,
+  CameraMoveMotionSpec,
+  MotionChannelDelta,
+  MotionJitterAmplitude,
+  MotionRepresentation,
+  ResolveMotionSpecOptions,
+} from './schema/cameraMoveMotion';
+export { CameraMoveLibraryPanel, groupCameraMovesByFamily, resolveMoveLibraryScope } from './ui/CameraMoveLibraryPanel';
 export { listQuadPanes } from './canvas/DirectorCanvas';
 export type { StageQuadPane, StageMobileSheet, StageInteractionMode, StageViewportLayout } from './store/directorStore';
 export { POSE_PRESETS, BODY_TYPES, lookupPose, lookupBody, mergePose, setJointAxis, POSE_JOINT_SLIDERS } from './presets/characterPresets';
 export type { PosePreset, PoseJointKey, PoseJointOverride } from './presets/characterPresets';
+export {
+  KEY_LIGHT_PRESETS,
+  KEY_LIGHT_AZIMUTHS,
+  KEY_LIGHT_ELEVATIONS,
+  RIM_LIGHT_PRESETS,
+  AMBIENT_PRESETS,
+  LIGHTING_RIG_PRESETS,
+  lookupKeyLightPreset,
+  lookupRimLightPreset,
+  lookupLightingRigPreset,
+  keyLightPresetAt,
+  resolveRigLights,
+  lightFromPreset,
+  lightPosition,
+  azimuthLabel,
+  describeDirectorLight,
+  buildLightingPromptFragment,
+  buildSceneLightingPrompt,
+  defaultLightingFallback,
+} from './presets/lightingPresets';
+export type {
+  DirectorLightPreset,
+  LightingRigPreset,
+  LightingRigLightRef,
+  LightingPromptOptions,
+  SceneLightingSlice,
+} from './presets/lightingPresets';
+export {
+  BUILTIN_ASSETS,
+  BUILTIN_ASSET_CATEGORIES,
+  builtinAssetsByCategory,
+  lookupBuiltinAsset,
+  resolvePartArgs,
+} from './presets/builtinAssets';
+export type {
+  BuiltinAssetDef,
+  BuiltinAssetPart,
+  BuiltinAssetCategory,
+  BuiltinPartGeometry,
+} from './presets/builtinAssets';
+export { BUILTIN_SCENES, applyBuiltinScene, lookupBuiltinScene } from './presets/builtinScenes';
+export type { BuiltinSceneDef, BuiltinSceneObjectSpec, ApplyBuiltinSceneOptions } from './presets/builtinScenes';
+export { BuiltinPropMesh, BuiltinAssetMesh } from './runtime/BuiltinPropMesh';
+export { LightingPanel } from './panels/LightingPanel';
 export { Director3dShell, Director3dViewport } from './app/Director3dShell';
 export { DirectorCanvas } from './canvas/DirectorCanvas';
 export { useDirectorStore } from './store/directorStore';
@@ -119,3 +234,4 @@ export {
 /** @deprecated use DirectorProject */
 export type Director3dScene = DirectorProject;
 export { emptyDirectorProject as emptyDirector3dScene } from './schema/directorProject';
+export { BlockingPresetPanel } from './ui/BlockingPresetPanel';

@@ -9,12 +9,14 @@ import {
   restoreCommittedSnapshot,
   applyCandidateUploadResult,
   shotStateFromProject,
+  syncShotStateWithProject,
   type Director3dCandidate,
   type Director3dShotState,
 } from '../schema/directorProject';
 import { useDirectorStore } from '../store/directorStore';
 import { StageHeader } from './StageHeader';
 import { CameraPresetBar } from './CameraPresetBar';
+import { BlockingPresetPanel } from './BlockingPresetPanel';
 import { StageRail } from './StageRail';
 import { TransformRail } from './TransformRail';
 import { AspectGuide } from './AspectGuide';
@@ -23,9 +25,11 @@ import { Filmstrip } from './Filmstrip';
 import { CameraRigPanel } from './CameraRigPanel';
 import { DollyTimeline } from './DollyTimeline';
 import { ShotPreviewTimeline } from './ShotPreviewTimeline';
+import { CameraMoveTimelineRail } from './CameraMoveTimelineRail';
 import { StageMobileDock } from './StageMobileDock';
 import '../styles/stage-deck.css';
-import { buildCameraPrompt } from '../schema/cameraGeometry';
+import { buildMotionCameraPrompt } from '../schema/cameraMoveMotion';
+import { buildSceneLightingPrompt } from '../presets/lightingPresets';
 import { skinCameraPrompt } from '../schema/promptSkin';
 import { isWebGLAvailable } from '../util/webgl';
 
@@ -140,27 +144,17 @@ export function StageDeckShell({ options }: { options: Director3dHostOptions }) 
   }, [glEpoch]);
 
   useEffect(() => {
-    const flush = debounce((project: ReturnType<typeof useDirectorStore.getState>['project']) => {
+    const flush = debounce(() => {
       const current = useDirectorStore.getState().project;
-      const next: Director3dShotState = {
-        ...activeState,
-        objects: structuredClone(project.objects),
-        camera: {
-          ...activeState.camera,
-          position: structuredClone(project.cameras[0]?.transform.position ?? activeState.camera.position),
-          rotation: structuredClone(project.cameras[0]?.transform.rotation ?? activeState.camera.rotation),
-          target: structuredClone(project.cameras[0]?.target ?? activeState.camera.target),
-          fov: project.cameras[0]?.fov ?? activeState.camera.fov,
-          aspectRatio: project.viewportAspectRatio,
-        },
+      // 环境 / 物体 / 当前机位 / 一镜多机位关键帧一起同步进镜头态（映射集中在 schema 里，可单测）。
+      emitState({
+        ...syncShotStateWithProject(activeState, current),
         dirty: true,
-        updatedAt: new Date().toISOString(),
-      };
-      emitState(next);
+      });
       options.onProjectChange?.(current);
     }, 300);
     return useDirectorStore.subscribe((state, prev) => {
-      if (state.project !== prev.project) flush(state.project);
+      if (state.project !== prev.project) flush();
     });
   }, [activeState, emitState, options.onProjectChange]);
 
@@ -173,18 +167,25 @@ export function StageDeckShell({ options }: { options: Director3dHostOptions }) 
       void (async () => {
         const dataUrl = fn();
         const project = useDirectorStore.getState().project;
-        const camera = project.cameras[0];
+        // 截图取的是视口当前机位（activeCameraId），候选帧机位必须与之一致；
+        // 单机位时两者等价，多机位时旧写法（cameras[0]）会记错姿态。
+        const camera = project.cameras.find((item) => item.id === project.activeCameraId) ?? project.cameras[0];
         if (!camera) throw new Error('当前镜头没有相机');
         const cameraMove = useDirectorStore.getState().cameraMove;
+        const cameraMoveLibraryId = useDirectorStore.getState().cameraMoveLibraryId;
         const promptPlatform = useDirectorStore.getState().promptPlatform;
         const promptDetails = useDirectorStore.getState().promptDetails;
         const subject = project.objects.find((o) => o.kind === 'character' && o.visible);
+        // 与 store.addCapture 同一口径：套用大师运镜时把短语并入 `camera movement:` 槽位，
+        // 未套用时（moveId=null）输出与改动前逐字符一致。
         const prompt = skinCameraPrompt(
-          buildCameraPrompt(camera, {
+          buildMotionCameraPrompt(camera, {
             roll: camera.transform.rotation[2],
             subjectYawDeg: subject?.transform.rotation[1] ?? 0,
-            move: cameraMove,
+            moveId: cameraMoveLibraryId,
+            fallbackMove: cameraMove,
             details: promptDetails,
+            lightingPrompt: buildSceneLightingPrompt(project.scene),
           }),
           promptPlatform,
           cameraMove,
@@ -393,6 +394,9 @@ export function StageDeckShell({ options }: { options: Director3dHostOptions }) 
           environment: structuredClone(activeState.environment),
           objects: structuredClone(activeState.objects),
           camera: structuredClone(activeState.camera),
+          // 机位序列一并快照：恢复已提交版本时环境 / 物体 / 机位一起回滚。
+          cameraKeys: structuredClone(activeState.cameraKeys ?? []),
+          activeCameraKeyId: activeState.activeCameraKeyId ?? null,
           committedAt,
         },
         candidates: activeState.candidates.map((item) =>
@@ -477,6 +481,8 @@ export function StageDeckShell({ options }: { options: Director3dHostOptions }) 
         onViewModeChange={(mode) => setViewMode(mode === 'camera' ? 'camera' : 'composition')}
       />
       <CameraPresetBar />
+      {/* 场面调度预设：机位与走位布局（写回同一份 project.cameras / objects，不另起机位来源） */}
+      <BlockingPresetPanel />
       {options.shotContext?.sourceStale && (
         <div className="nx9-stage-switch-warning">
           <span>上游镜头内容已变化，提交前请重新对齐当前镜头版本。</span>
@@ -516,6 +522,7 @@ export function StageDeckShell({ options }: { options: Director3dHostOptions }) 
           </div>
           <DollyTimeline />
           <ShotPreviewTimeline />
+          <CameraMoveTimelineRail shotId={activeState.shotId} />
         </aside>
         <StageRail
           onUploadFile={options.onUploadFile}
